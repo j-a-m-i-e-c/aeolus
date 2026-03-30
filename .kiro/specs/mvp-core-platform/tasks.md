@@ -70,8 +70,8 @@ Incremental implementation of the Aeolus local-first IoT automation platform. Ea
 - [ ] 4. Checkpoint — Verify project builds
   - Ensure `tsc --noEmit` passes for backend, all config files are valid. Ask the user if questions arise.
 
-- [ ] 5. MQTT ingestion service
-  - [ ] 5.1 Create src/mqtt/topic-parser.ts
+- [x] 5. MQTT ingestion service
+  - [x] 5.1 Create src/mqtt/topic-parser.ts
     - Parse topic strings following `{type}/{location}` or `{type}/{location}/{metric}` convention
     - Extract device type and construct deterministic device ID
     - _Requirements: 2.2_
@@ -80,7 +80,7 @@ Incremental implementation of the Aeolus local-first IoT automation platform. Ea
     - **Property 2: Topic Parsing Extracts Device Type and Identifier**
     - **Validates: Requirements 2.2**
 
-  - [ ] 5.3 Create src/mqtt/mqtt-service.ts
+  - [x] 5.3 Create src/mqtt/mqtt-service.ts
     - Connect to Mosquitto using mqtt.js with configurable broker URL and topics
     - Implement exponential backoff retry (max 5 attempts, baseDelay * 2^(n-1))
     - Subscribe to configured topic patterns on connect
