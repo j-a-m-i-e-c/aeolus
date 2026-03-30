@@ -112,6 +112,7 @@ export class MqttService {
   private setupMessageHandler(): void {
     if (!this.client) return;
     this.client.on("message", (topic: string, payload: Buffer) => {
+      logger.debug({ topic, payloadLength: payload.length }, "MQTT message received");
       this.handleMessage(topic, payload);
     });
   }
