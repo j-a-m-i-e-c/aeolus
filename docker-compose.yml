@@ -1,0 +1,62 @@
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: aeolus-mosquitto
+    ports:
+      - "${MQTT_PORT:-1883}:1883"
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_log:/mosquitto/log
+    healthcheck:
+      test: ["CMD-SHELL", "mosquitto_sub -t '$$SYS/#' -C 1 -W 3 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - aeolus
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: aeolus-backend
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: ${API_PORT:-3001}
+      MQTT_BROKER_URL: mqtt://mosquitto:1883
+      MQTT_TOPICS: ${MQTT_TOPICS:-sensor/#,switch/#,motion/#,light/#}
+      HUE_BRIDGE_IP: ${HUE_BRIDGE_IP:-}
+      HUE_API_KEY: ${HUE_API_KEY:-}
+      DB_PATH: /app/data/aeolus.db
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      - "${API_PORT:-3001}:${API_PORT:-3001}"
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+    volumes:
+      - backend_data:/app/data
+    networks:
+      - aeolus
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: aeolus-frontend
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
+    depends_on:
+      - backend
+    networks:
+      - aeolus
+
+volumes:
+  mosquitto_data:
+  mosquitto_log:
+  backend_data:
+
+networks:
+  aeolus:
+    driver: bridge
