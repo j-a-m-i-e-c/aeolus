@@ -112,24 +112,24 @@ Incremental implementation of the Aeolus local-first IoT automation platform. Ea
     - **Property 21: Malformed JSON Deserialization Safety**
     - **Validates: Requirements 13.4**
 
-- [ ] 7. Automation engine and DSL
-  - [ ] 7.1 Create src/automations/dsl.ts with the when/if/then builder
+- [x] 7. Automation engine and DSL
+  - [x] 7.1 Create src/automations/dsl.ts with the when/if/then builder
     - `when(topic)` returns a RuleBuilder with `.if(condition)` and `.then(action)` methods
     - `.then(action)` returns a fully formed Rule with a unique ID
     - _Requirements: 4.1, 4.2_
 
-  - [ ] 7.2 Create src/automations/rule-registry.ts
+  - [x] 7.2 Create src/automations/rule-registry.ts
     - In-memory store for Rules with register, unregister, listRules, getRule methods
     - _Requirements: 4.3_
 
-  - [ ] 7.3 Create src/automations/automation-engine.ts
+  - [x] 7.3 Create src/automations/automation-engine.ts
     - Listen to "device:state-change" on event bus
     - Evaluate matching rules: topic match → condition check → action execution
     - Fault isolation: if one rule action throws, log error and continue with remaining rules
     - Load rules from directory (automations/) on startup, skip files with syntax errors
     - _Requirements: 4.4, 4.5, 5.1, 5.2, 5.3, 5.4, 5.5_
 
-  - [ ] 7.4 Create automations/example.ts as a sample rule file
+  - [x] 7.4 Create automations/example.ts as a sample rule file
     - Demonstrate the when/if/then DSL with a simple example rule
     - _Requirements: 4.1_
 
