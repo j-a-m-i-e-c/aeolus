@@ -222,31 +222,31 @@ Incremental implementation of the Aeolus local-first IoT automation platform. Ea
 - [ ] 12. Checkpoint — Verify full backend
   - Ensure all tests pass, backend starts and connects to MQTT. Ask the user if questions arise.
 
-- [ ] 13. Frontend scaffolding and dashboard
-  - [ ] 13.1 Create frontend/src/store/device-store.ts with Zustand
+- [-] 13. Frontend scaffolding and dashboard
+  - [x] 13.1 Create frontend/src/store/device-store.ts with Zustand
     - Flat state: devices (Record<string, Device>), health, wsConnected
     - Action setters: setDevices, updateDevice, setHealth, setWsConnected
     - _Requirements: 8.5_
 
-  - [ ] 13.2 Create frontend/src/lib/api-client.ts
+  - [x] 13.2 Create frontend/src/lib/api-client.ts
     - Functions: fetchDevices, fetchDevice, fetchState, fetchHealth, sendAction
     - Base URL from VITE_API_URL env var
     - _Requirements: 8.1, 8.4, 9.4_
 
-  - [ ] 13.3 Create frontend/src/lib/ws-client.ts
+  - [x] 13.3 Create frontend/src/lib/ws-client.ts
     - Connect to WebSocket at VITE_WS_URL
     - Handle "snapshot" and "state-change" message types
     - Auto-reconnect on disconnect
     - Dispatch updates to Zustand store
     - _Requirements: 7.2, 7.3, 8.5_
 
-  - [ ] 13.4 Create frontend/src/components/Layout.tsx and frontend/src/components/Sidebar.tsx
+  - [x] 13.4 Create frontend/src/components/Layout.tsx and frontend/src/components/Sidebar.tsx
     - Left sidebar with Aeolus logo (use existing AeolusLogo component), navigation, and system health indicator
     - Main content area
     - Apply Aeolus design system: Deep Void background, Inter font, Lucide icons
     - _Requirements: 8.6_
 
-  - [ ] 13.5 Create frontend/src/components/DeviceGrid.tsx and frontend/src/components/DeviceCard.tsx
+  - [x] 13.5 Create frontend/src/components/DeviceGrid.tsx and frontend/src/components/DeviceCard.tsx
     - DeviceGrid renders a responsive grid of DeviceCard components
     - DeviceCard shows device name, type-appropriate Lucide icon, current state values
     - Render toggle control for "light" and "switch" types; no toggle for "sensor" and "climate"
@@ -254,17 +254,17 @@ Incremental implementation of the Aeolus local-first IoT automation platform. Ea
     - Cards use Graphite surface, 12-16px border radius, framer-motion hover effects
     - _Requirements: 8.1, 8.2, 8.3, 8.4_
 
-  - [ ] 13.6 Create frontend/src/components/SensorPanel.tsx
+  - [x] 13.6 Create frontend/src/components/SensorPanel.tsx
     - Display devices of type "sensor" with most recent values and timestamps
     - Monospace font for values (JetBrains Mono)
     - _Requirements: 8.7_
 
-  - [ ] 13.7 Create frontend/src/components/SystemHealth.tsx
+  - [x] 13.7 Create frontend/src/components/SystemHealth.tsx
     - Display MQTT connection status, device count, rule count, uptime
     - Poll GET /api/health every 30 seconds
     - _Requirements: 9.1, 9.2, 9.3, 9.4_
 
-  - [ ] 13.8 Create frontend/src/App.tsx wiring all components together
+  - [x] 13.8 Create frontend/src/App.tsx wiring all components together
     - Initialize WebSocket client on mount
     - Fetch initial devices and health data
     - Render Layout with DeviceGrid, SensorPanel, SystemHealth
