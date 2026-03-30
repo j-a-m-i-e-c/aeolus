@@ -215,7 +215,7 @@ Incremental implementation of the Aeolus local-first IoT automation platform. Ea
     - Graceful shutdown: dispose integrations, disconnect MQTT, close DB, close server
     - _Requirements: 1.1, 3.5, 4.4, 11.3, 11.4, 12.2_
 
-  - [ ] 11.2 Create backend Dockerfile
+  - [x] 11.2 Create backend Dockerfile
     - Multi-stage build: install deps, build TypeScript, run with Node.js
     - _Requirements: 12.2_
 
@@ -278,16 +278,16 @@ Incremental implementation of the Aeolus local-first IoT automation platform. Ea
     - **Property 16: Sensor Panel Filtering**
     - **Validates: Requirements 8.7**
 
-  - [ ] 13.10 Create frontend Dockerfile
+  - [x] 13.10 Create frontend Dockerfile
     - Build Vite app, serve with nginx or lightweight static server
     - _Requirements: 12.3_
 
-- [ ] 14. Docker Compose and Mosquitto configuration
-  - [ ] 14.1 Create mosquitto/mosquitto.conf
+- [x] 14. Docker Compose and Mosquitto configuration
+  - [x] 14.1 Create mosquitto/mosquitto.conf
     - Configure listener on port 1883, allow anonymous connections for local dev
     - _Requirements: 12.1_
 
-  - [ ] 14.2 Create docker-compose.yml
+  - [x] 14.2 Create docker-compose.yml
     - Define mosquitto, backend, and frontend services
     - Configure healthcheck for mosquitto, depends_on with condition for backend
     - Environment variables for all configurable values
