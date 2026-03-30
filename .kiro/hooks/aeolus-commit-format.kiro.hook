@@ -6,11 +6,11 @@
   "when": {
     "type": "preToolUse",
     "toolTypes": [
-      "shell"
+      ".*git commit.*"
     ]
   },
   "then": {
     "type": "askAgent",
-    "prompt": "If this is a shell command that includes 'git commit' and the working directory is in the aeolus folder, verify the commit message follows Conventional Commits format: type(scope): description. Valid types: feat, fix, refactor, docs, style, test, chore, perf, ci. Valid scopes: mqtt, devices, automations, api, dashboard, hue, docker, deps. Use imperative mood, keep subject under 72 chars, reference spec task IDs in the body when applicable. Each commit should be a single logical change."
+    "prompt": "Verify the commit message follows Conventional Commits format: type(scope): description. Valid types: feat, fix, refactor, docs, style, test, chore, perf, ci. Valid scopes: mqtt, devices, automations, api, dashboard, hue, docker, deps. Use imperative mood, keep subject under 72 chars, reference spec task IDs in the body when applicable. Each commit should be a single logical change. Also check if docs/COMPREHENSIVE_DOCUMENTATION.md needs updating."
   }
 }

@@ -1,21 +1,14 @@
 // src/core/device-registry.ts — In-memory device cache backed by SQLite
 
-import type Database from "better-sqlite3";
+import type { Database } from "sql.js";
 import type { EventEmitter } from "node:events";
 import type { Device, NormalizedEvent } from "./types.js";
 import { WS_STATE_CHANGE } from "./event-bus.js";
 import logger from "../logger.js";
+import { persistDatabase } from "../db/database.js";
 
-/** Serialize a Device to JSON-safe row for SQLite */
-export function serializeDevice(device: Device): {
-  id: string;
-  name: string;
-  type: string;
-  capabilities: string;
-  state: string;
-  integration: string;
-  last_seen: number;
-} {
+/** Serialize a Device to JSON-safe values for SQLite */
+export function serializeDevice(device: Device): Record<string, unknown> {
   return {
     id: device.id,
     name: device.name,
@@ -50,61 +43,45 @@ export function deserializeDevice(row: Record<string, unknown>): Device | null {
 
 export class DeviceRegistry {
   private devices = new Map<string, Device>();
-  private db: Database.Database;
+  private db: Database;
   private eventBus: EventEmitter;
 
-  private insertStmt: Database.Statement;
-  private updateStmt: Database.Statement;
-  private deleteStmt: Database.Statement;
-
-  constructor(db: Database.Database, eventBus: EventEmitter) {
+  constructor(db: Database, eventBus: EventEmitter) {
     this.db = db;
     this.eventBus = eventBus;
-
-    this.insertStmt = db.prepare(`
-      INSERT INTO devices (id, name, type, capabilities, state, integration, last_seen)
-      VALUES (@id, @name, @type, @capabilities, @state, @integration, @last_seen)
-    `);
-
-    this.updateStmt = db.prepare(`
-      UPDATE devices SET name = @name, type = @type, capabilities = @capabilities,
-        state = @state, integration = @integration, last_seen = @last_seen
-      WHERE id = @id
-    `);
-
-    this.deleteStmt = db.prepare(`DELETE FROM devices WHERE id = @id`);
   }
 
   /** Load all persisted devices into memory on startup */
   loadFromDb(): void {
-    const rows = this.db.prepare("SELECT * FROM devices").all() as Record<string, unknown>[];
+    const results = this.db.exec("SELECT * FROM devices");
     let loaded = 0;
-    for (const row of rows) {
-      const device = deserializeDevice(row);
-      if (device) {
-        this.devices.set(device.id, device);
-        loaded++;
+    if (results.length > 0) {
+      const columns = results[0].columns;
+      for (const values of results[0].values) {
+        const row: Record<string, unknown> = {};
+        columns.forEach((col: string, i: number) => { row[col] = values[i]; });
+        const device = deserializeDevice(row);
+        if (device) {
+          this.devices.set(device.id, device);
+          loaded++;
+        }
       }
     }
-    logger.info({ loaded, total: rows.length }, "Loaded devices from database");
+    logger.info({ loaded }, "Loaded devices from database");
   }
 
-  /** Get all devices */
   getAll(): Device[] {
     return Array.from(this.devices.values());
   }
 
-  /** Get a device by ID */
   getById(id: string): Device | undefined {
     return this.devices.get(id);
   }
 
-  /** Get device count */
   get size(): number {
     return this.devices.size;
   }
 
-  /** Create or update a device from a normalized MQTT event */
   upsert(event: NormalizedEvent): Device {
     const existing = this.devices.get(event.deviceId);
 
@@ -127,7 +104,6 @@ export class DeviceRegistry {
     this.devices.set(device.id, device);
     this.persistDevice(device, !!existing);
 
-    // Emit state change for WebSocket broadcast
     this.eventBus.emit(WS_STATE_CHANGE, {
       deviceId: device.id,
       state: device.state,
@@ -137,29 +113,35 @@ export class DeviceRegistry {
     return device;
   }
 
-  /** Remove a device */
   remove(id: string): boolean {
     const existed = this.devices.delete(id);
     if (existed) {
-      this.deleteStmt.run({ id });
+      this.db.run("DELETE FROM devices WHERE id = ?", [id]);
+      persistDatabase();
     }
     return existed;
   }
 
-  /** Register a device directly (e.g. from an integration) */
   registerDevice(device: Device): void {
     this.devices.set(device.id, device);
-    this.persistDevice(device, this.devices.has(device.id));
+    this.persistDevice(device, false);
   }
 
   private persistDevice(device: Device, isUpdate: boolean): void {
     try {
-      const row = serializeDevice(device);
+      const s = serializeDevice(device);
       if (isUpdate) {
-        this.updateStmt.run(row);
+        this.db.run(
+          "UPDATE devices SET name=?, type=?, capabilities=?, state=?, integration=?, last_seen=? WHERE id=?",
+          [s.name, s.type, s.capabilities, s.state, s.integration, s.last_seen, s.id]
+        );
       } else {
-        this.insertStmt.run(row);
+        this.db.run(
+          "INSERT OR REPLACE INTO devices (id, name, type, capabilities, state, integration, last_seen) VALUES (?, ?, ?, ?, ?, ?, ?)",
+          [s.id, s.name, s.type, s.capabilities, s.state, s.integration, s.last_seen]
+        );
       }
+      persistDatabase();
     } catch (err) {
       logger.error({ deviceId: device.id, error: (err as Error).message }, "Failed to persist device");
     }

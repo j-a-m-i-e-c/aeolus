@@ -1,13 +1,15 @@
-import Database from "better-sqlite3";
+// src/db/database.ts — SQLite database using sql.js (pure JS, no native deps)
+
+import initSqlJs, { type Database } from "sql.js";
 import fs from "node:fs";
 import path from "node:path";
 import { config } from "../config.js";
 import logger from "../logger.js";
 
-let db: Database.Database | null = null;
+let db: Database | null = null;
 
-function initSchema(database: Database.Database): void {
-  database.exec(`
+function initSchema(database: Database): void {
+  database.run(`
     CREATE TABLE IF NOT EXISTS devices (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -20,16 +22,35 @@ function initSchema(database: Database.Database): void {
   `);
 }
 
-export function getDatabase(): Database.Database {
+function saveToFile(database: Database): void {
+  const data = database.export();
+  const buffer = Buffer.from(data);
+  fs.writeFileSync(config.dbPath, buffer);
+}
+
+export async function getDatabase(): Promise<Database> {
   if (db) return db;
 
   const dir = path.dirname(config.dbPath);
   fs.mkdirSync(dir, { recursive: true });
 
-  logger.info({ dbPath: config.dbPath }, "Opening SQLite database");
-  db = new Database(config.dbPath);
-  db.pragma("journal_mode = WAL");
+  const SQL = await initSqlJs();
+
+  if (fs.existsSync(config.dbPath)) {
+    const fileBuffer = fs.readFileSync(config.dbPath);
+    db = new SQL.Database(fileBuffer);
+    logger.info({ dbPath: config.dbPath }, "Loaded existing SQLite database");
+  } else {
+    db = new SQL.Database();
+    logger.info({ dbPath: config.dbPath }, "Created new SQLite database");
+  }
 
   initSchema(db);
+  saveToFile(db);
   return db;
+}
+
+/** Save current database state to disk */
+export function persistDatabase(): void {
+  if (db) saveToFile(db);
 }
