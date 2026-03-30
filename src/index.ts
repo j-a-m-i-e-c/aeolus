@@ -6,7 +6,7 @@ import { createServer } from "node:http";
 import path from "node:path";
 import { config } from "./config.js";
 import logger from "./logger.js";
-import { getDatabase } from "./db/database.js";
+import { getDatabase, persistDatabase } from "./db/database.js";
 import { eventBus, DEVICE_STATE_CHANGE } from "./core/event-bus.js";
 import { DeviceRegistry } from "./core/device-registry.js";
 import { MqttService } from "./mqtt/mqtt-service.js";
@@ -26,7 +26,7 @@ async function main(): Promise<void> {
   logger.info("Starting Aeolus...");
 
   // 1. Database
-  const db = getDatabase();
+  const db = await getDatabase();
 
   // 2. Device Registry
   const registry = new DeviceRegistry(db, eventBus);
@@ -99,7 +99,7 @@ async function main(): Promise<void> {
     logger.info("Shutting down Aeolus...");
     await integrationManager.disposeAll();
     await mqttService.disconnect();
-    db.close();
+    persistDatabase();
     server.close();
     process.exit(0);
   };
