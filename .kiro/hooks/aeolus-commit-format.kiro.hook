@@ -1,0 +1,16 @@
+{
+  "enabled": true,
+  "name": "Aeolus Commit Format",
+  "description": "Reminds the agent to follow conventional commit format and reference spec task IDs when committing code changes for the Aeolus project",
+  "version": "1",
+  "when": {
+    "type": "preToolUse",
+    "toolTypes": [
+      "shell"
+    ]
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "If this is a shell command that includes 'git commit' and the working directory is in the aeolus folder, verify the commit message follows Conventional Commits format: type(scope): description. Valid types: feat, fix, refactor, docs, style, test, chore, perf, ci. Valid scopes: mqtt, devices, automations, api, dashboard, hue, docker, deps. Use imperative mood, keep subject under 72 chars, reference spec task IDs in the body when applicable. Each commit should be a single logical change."
+  }
+}
