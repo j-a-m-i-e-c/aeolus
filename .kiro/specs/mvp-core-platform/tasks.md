@@ -45,25 +45,25 @@ Incremental implementation of the Aeolus local-first IoT automation platform. Ea
     - Export a typed EventEmitter instance used as the internal pub/sub bus
     - _Requirements: 2.5, 3.6_
 
-- [ ] 3. Backend infrastructure — logger, database, error handling
-  - [ ] 3.1 Create src/logger.ts using pino
+- [x] 3. Backend infrastructure — logger, database, error handling
+  - [x] 3.1 Create src/logger.ts using pino
     - Configure pino with pino-pretty in development, structured JSON in production
     - Log level from config, ISO timestamps
     - _Requirements: 1.2, 2.4_
 
-  - [ ] 3.2 Create src/db/database.ts with better-sqlite3 setup and schema migration
+  - [x] 3.2 Create src/db/database.ts with better-sqlite3 setup and schema migration
     - Create `devices` table with id, name, type, capabilities (JSON), state (JSON), integration, last_seen
     - Export `getDatabase()` function that initializes and returns the Database instance
     - _Requirements: 3.4, 3.5_
 
-  - [ ] 3.3 Create src/api/middleware/error-handler.ts with AppError, NotFoundError, BadRequestError classes and global error handler middleware
+  - [x] 3.3 Create src/api/middleware/error-handler.ts with AppError, NotFoundError, BadRequestError classes and global error handler middleware
     - Follow lol-main error handling pattern
     - _Requirements: 6.3, 6.5, 6.6_
 
-  - [ ] 3.4 Create src/api/middleware/request-logger.ts using pino for HTTP request logging
+  - [x] 3.4 Create src/api/middleware/request-logger.ts using pino for HTTP request logging
     - _Requirements: 6.1_
 
-  - [ ] 3.5 Create src/api/middleware/validators.ts for action payload validation
+  - [x] 3.5 Create src/api/middleware/validators.ts for action payload validation
     - Validate that action type is present and non-empty on POST /api/devices/:id/action
     - _Requirements: 6.6_
 
