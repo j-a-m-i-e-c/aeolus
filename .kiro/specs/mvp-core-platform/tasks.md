@@ -182,13 +182,13 @@ Incremental implementation of the Aeolus local-first IoT automation platform. Ea
     - **Property 17: Health Endpoint Response Completeness**
     - **Validates: Requirements 9.1**
 
-- [ ] 10. Integration manager and Hue integration
+- [x] 10. Integration manager and Hue integration
   - [x] 10.1 Create src/integrations/integration-manager.ts
     - Register integrations, connectAll, discoverAll, execute action routing, disposeAll
     - Fault tolerance: if one integration's connect() throws, log and continue with remaining
     - _Requirements: 11.1, 11.3, 11.4, 11.5_
 
-  - [ ] 10.2 Create src/integrations/hue/hue-integration.ts
+  - [x] 10.2 Create src/integrations/hue/hue-integration.ts
     - Implement Integration interface for Philips Hue bridge
     - Connect using configured bridge IP and API key
     - discoverDevices: query Hue bridge API, return Device[] of type "light" with on/off + brightness capabilities
@@ -203,7 +203,7 @@ Incremental implementation of the Aeolus local-first IoT automation platform. Ea
     - **Validates: Requirements 11.5**
 
 - [ ] 11. Backend entry point — wire everything together
-  - [ ] 11.1 Create src/index.ts
+  - [x] 11.1 Create src/index.ts
     - Initialize config, logger, database, event bus
     - Create DeviceRegistry, load from DB
     - Create MqttService, connect
