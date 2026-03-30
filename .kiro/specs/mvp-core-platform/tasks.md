@@ -148,22 +148,22 @@ Incremental implementation of the Aeolus local-first IoT automation platform. Ea
 - [ ] 8. Checkpoint — Verify core backend modules
   - Ensure all tests pass, ask the user if questions arise.
 
-- [ ] 9. REST API and WebSocket server
-  - [ ] 9.1 Create src/api/routes/device.routes.ts
+- [x] 9. REST API and WebSocket server
+  - [x] 9.1 Create src/api/routes/device.routes.ts
     - GET /api/devices — return all devices from registry
     - GET /api/devices/:id — return single device or 404
     - POST /api/devices/:id/action — validate payload, forward to integration manager, return result or 400/404
     - _Requirements: 6.1, 6.2, 6.3, 6.4, 6.5, 6.6_
 
-  - [ ] 9.2 Create src/api/routes/state.routes.ts
+  - [x] 9.2 Create src/api/routes/state.routes.ts
     - GET /api/state — return all devices keyed by ID
     - _Requirements: 6.7_
 
-  - [ ] 9.3 Create src/api/routes/health.routes.ts
+  - [x] 9.3 Create src/api/routes/health.routes.ts
     - GET /api/health — return HealthStatus with mqtt status, deviceCount, ruleCount, uptime, timestamp
     - _Requirements: 9.1_
 
-  - [ ] 9.4 Create src/websocket/ws-server.ts
+  - [x] 9.4 Create src/websocket/ws-server.ts
     - Attach ws WebSocket server to the Express HTTP server on /ws path
     - Send snapshot of all devices on client connect
     - Listen for "ws:state-change" on event bus and broadcast to all connected clients
@@ -183,7 +183,7 @@ Incremental implementation of the Aeolus local-first IoT automation platform. Ea
     - **Validates: Requirements 9.1**
 
 - [ ] 10. Integration manager and Hue integration
-  - [ ] 10.1 Create src/integrations/integration-manager.ts
+  - [x] 10.1 Create src/integrations/integration-manager.ts
     - Register integrations, connectAll, discoverAll, execute action routing, disposeAll
     - Fault tolerance: if one integration's connect() throws, log and continue with remaining
     - _Requirements: 11.1, 11.3, 11.4, 11.5_
