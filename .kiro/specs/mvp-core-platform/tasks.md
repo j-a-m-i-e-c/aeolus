@@ -31,17 +31,17 @@ Incremental implementation of the Aeolus local-first IoT automation platform. Ea
     - `config.ts` exports a typed config object with defaults
     - _Requirements: 12.5_
 
-- [ ] 2. Core types and shared interfaces
-  - [ ] 2.1 Create src/core/types.ts with all shared TypeScript interfaces
+- [x] 2. Core types and shared interfaces
+  - [x] 2.1 Create src/core/types.ts with all shared TypeScript interfaces
     - Define Device, NormalizedEvent, Rule, EventContext, Action, ActionRequest, HealthStatus, ApiError, WsMessage types
     - Device type union: `"light" | "sensor" | "switch" | "climate"`
     - _Requirements: 3.1, 11.1_
 
-  - [ ] 2.2 Create src/integrations/integration.interface.ts
+  - [x] 2.2 Create src/integrations/integration.interface.ts
     - Define the Integration interface with name, connect, discoverDevices, execute, dispose
     - _Requirements: 11.1, 11.2_
 
-  - [ ] 2.3 Create src/core/event-bus.ts
+  - [x] 2.3 Create src/core/event-bus.ts
     - Export a typed EventEmitter instance used as the internal pub/sub bus
     - _Requirements: 2.5, 3.6_
 
