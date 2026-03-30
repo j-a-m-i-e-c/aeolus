@@ -94,8 +94,8 @@ Incremental implementation of the Aeolus local-first IoT automation platform. Ea
     - **Property 3: Message Normalization Correctness**
     - **Validates: Requirements 2.3, 2.4, 2.5**
 
-- [ ] 6. Device registry
-  - [ ] 6.1 Create src/core/device-registry.ts
+- [x] 6. Device registry
+  - [x] 6.1 Create src/core/device-registry.ts
     - In-memory cache backed by SQLite via better-sqlite3
     - Implement getAll, getById, upsert, remove, loadFromDb methods
     - Upsert creates new device if ID not found, updates state if ID exists
