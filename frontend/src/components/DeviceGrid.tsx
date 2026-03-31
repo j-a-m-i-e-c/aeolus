@@ -3,7 +3,11 @@
 import { useDeviceStore } from "../store/device-store";
 import { DeviceCard } from "./DeviceCard";
 
-export function DeviceGrid() {
+interface DeviceGridProps {
+  onSelectDevice?: (deviceId: string) => void;
+}
+
+export function DeviceGrid({ onSelectDevice }: DeviceGridProps) {
   const devices = useDeviceStore((s) => s.devices);
   const deviceList = Object.values(devices);
 
@@ -19,7 +23,7 @@ export function DeviceGrid() {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
       {deviceList.map((device) => (
-        <DeviceCard key={device.id} device={device} />
+        <DeviceCard key={device.id} device={device} onClick={() => onSelectDevice?.(device.id)} />
       ))}
     </div>
   );

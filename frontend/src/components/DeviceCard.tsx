@@ -14,9 +14,10 @@ const TYPE_ICONS = {
 
 interface DeviceCardProps {
   device: Device;
+  onClick?: () => void;
 }
 
-export function DeviceCard({ device }: DeviceCardProps) {
+export function DeviceCard({ device, onClick }: DeviceCardProps) {
   const Icon = TYPE_ICONS[device.type] || ToggleLeft;
   const isOn = device.state.on === true;
   const showToggle = device.type === "light" || device.type === "switch";
@@ -31,9 +32,10 @@ export function DeviceCard({ device }: DeviceCardProps) {
 
   return (
     <motion.div
-      className="bg-surface border border-[#2A3441] rounded-xl p-4 flex flex-col gap-3"
+      className="bg-surface border border-[#2A3441] rounded-xl p-4 flex flex-col gap-3 cursor-pointer"
       whileHover={{ y: -2, boxShadow: "0 4px 20px rgba(59, 164, 255, 0.08)" }}
       transition={{ duration: 0.2, ease: "easeOut" }}
+      onClick={onClick}
     >
       {/* Header */}
       <div className="flex items-center justify-between">
@@ -62,7 +64,7 @@ export function DeviceCard({ device }: DeviceCardProps) {
       {/* Toggle control */}
       {showToggle && (
         <button
-          onClick={handleToggle}
+          onClick={(e) => { e.stopPropagation(); handleToggle(); }}
           className={`mt-auto self-start px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 ${
             isOn
               ? "bg-primary/20 text-primary border border-primary/30"
