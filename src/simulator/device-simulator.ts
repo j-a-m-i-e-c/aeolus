@@ -144,4 +144,8 @@ export class DeviceSimulator {
     this.timers = [];
     logger.info("Device simulator stopped");
   }
+
+  isRunning(): boolean {
+    return this.timers.length > 0;
+  }
 }
