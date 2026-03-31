@@ -22,6 +22,7 @@ import { createAutomationRoutes } from "./api/routes/automation.routes.js";
 import { requestLogger } from "./api/middleware/request-logger.js";
 import { errorHandler } from "./api/middleware/error-handler.js";
 import { DeviceSimulator } from "./simulator/device-simulator.js";
+import { createSimulatorRoutes } from "./api/routes/simulator.routes.js";
 
 const startTime = Date.now();
 
@@ -65,13 +66,15 @@ async function main(): Promise<void> {
     registry.upsert(event);
   });
 
-  // 7. Connect MQTT or start simulator
-  let simulator: DeviceSimulator | null = null;
+  // 7. Simulator (always available, auto-starts if SIMULATOR=true)
+  const simulator = new DeviceSimulator(eventBus);
 
   if (config.simulator) {
-    simulator = new DeviceSimulator(eventBus);
     simulator.start();
-  } else {
+  }
+
+  // 8. Connect MQTT (skip if simulator is running)
+  if (!config.simulator) {
     try {
       await mqttService.connect();
     } catch (err) {
@@ -91,6 +94,7 @@ async function main(): Promise<void> {
   app.use("/api/health", createHealthRoutes(mqttService, registry, engine, startTime));
   app.use("/api/mqtt", createMqttRoutes(mqttService));
   app.use("/api/automations", createAutomationRoutes(engine));
+  app.use("/api/simulator", createSimulatorRoutes(simulator));
 
   // Error handler (must be last)
   app.use(errorHandler);
@@ -109,7 +113,7 @@ async function main(): Promise<void> {
   // 10. Graceful shutdown
   const shutdown = async () => {
     logger.info("Shutting down Aeolus...");
-    simulator?.stop();
+    simulator.stop();
     await integrationManager.disposeAll();
     await mqttService.disconnect();
     persistDatabase();

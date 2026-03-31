@@ -2,11 +2,33 @@
 
 import { AeolusLogo } from "./AeolusLogo";
 import { useDeviceStore } from "../store/device-store";
-import { Cpu, Wifi, WifiOff } from "lucide-react";
+import { Cpu, Wifi, WifiOff, Play, Square } from "lucide-react";
+import { useState, useEffect } from "react";
+import { fetchSimulatorStatus, startSimulator, stopSimulator } from "../lib/api-client";
 
 export function Sidebar() {
   const wsConnected = useDeviceStore((s) => s.wsConnected);
   const health = useDeviceStore((s) => s.health);
+  const [simRunning, setSimRunning] = useState(false);
+  const [simLoading, setSimLoading] = useState(false);
+
+  useEffect(() => {
+    fetchSimulatorStatus().then((s) => setSimRunning(s.running)).catch(() => {});
+  }, []);
+
+  const toggleSimulator = async () => {
+    setSimLoading(true);
+    try {
+      if (simRunning) {
+        await stopSimulator();
+        setSimRunning(false);
+      } else {
+        await startSimulator();
+        setSimRunning(true);
+      }
+    } catch {}
+    setSimLoading(false);
+  };
 
   return (
     <aside className="w-64 min-h-screen bg-surface border-r border-[#2A3441] flex flex-col p-4 gap-6">
@@ -23,6 +45,22 @@ export function Sidebar() {
           Dashboard
         </a>
       </nav>
+
+      {/* Simulator toggle */}
+      <div className="px-2">
+        <button
+          onClick={toggleSimulator}
+          disabled={simLoading}
+          className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all duration-200 ${
+            simRunning
+              ? "bg-accent/15 text-accent border border-accent/30"
+              : "bg-elevated text-[#6B7785] border border-[#2A3441] hover:text-[#9AA6B2]"
+          }`}
+        >
+          {simRunning ? <Square size={12} /> : <Play size={12} />}
+          {simLoading ? "..." : simRunning ? "Stop Simulator" : "Start Simulator"}
+        </button>
+      </div>
 
       {/* System status */}
       <div className="mt-auto px-2 space-y-2">
