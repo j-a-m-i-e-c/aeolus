@@ -4,7 +4,7 @@ import type { EventEmitter } from "node:events";
 import { pathToFileURL } from "node:url";
 import fs from "node:fs";
 import path from "node:path";
-import { DEVICE_STATE_CHANGE } from "../core/event-bus.js";
+import { DEVICE_STATE_CHANGE, AUTOMATION_FIRED } from "../core/event-bus.js";
 import type { NormalizedEvent, EventContext, Rule } from "../core/types.js";
 import { RuleRegistry } from "./rule-registry.js";
 import logger from "../logger.js";
@@ -102,6 +102,16 @@ export class AutomationEngine {
         if (rule.condition && !rule.condition(ctx)) continue;
 
         const result = rule.action(ctx);
+
+        // Emit automation fired event for the event log
+        this.eventBus.emit(AUTOMATION_FIRED, {
+          ruleId: rule.id,
+          ruleName: rule.name || "Unnamed Rule",
+          topic: event.topic,
+          deviceId: event.deviceId,
+          timestamp: Date.now(),
+        });
+
         if (result instanceof Promise) {
           result.catch((err) => {
             logger.error({ ruleId: rule.id, error: (err as Error).message }, "Async rule action failed");

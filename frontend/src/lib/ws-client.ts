@@ -27,6 +27,8 @@ export function connectWebSocket(): void {
         useDeviceStore.getState().updateDevice(msg.data.deviceId, msg.data.state);
       } else if (msg.type === "mqtt-message") {
         useDeviceStore.getState().addMqttMessage(msg.data);
+      } else if (msg.type === "automation-fired") {
+        useDeviceStore.getState().addAutomationEvent(msg.data);
       }
     } catch {
       // Ignore malformed messages

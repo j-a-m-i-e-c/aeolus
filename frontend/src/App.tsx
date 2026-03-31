@@ -8,6 +8,8 @@ import { SystemHealth } from "./components/SystemHealth";
 import { MqttInspector } from "./components/MqttInspector";
 import { AutomationsPanel } from "./components/AutomationsPanel";
 import { DeviceDetail } from "./components/DeviceDetail";
+import { EventLog } from "./components/EventLog";
+import { TopicTree } from "./components/TopicTree";
 import { AnimatePresence } from "framer-motion";
 import { connectWebSocket, disconnectWebSocket } from "./lib/ws-client";
 import { fetchDevices } from "./lib/api-client";
@@ -41,7 +43,11 @@ export default function App() {
         <AutomationsPanel />
         <SensorPanel />
         <DeviceGrid onSelectDevice={setSelectedDeviceId} />
-        <MqttInspector />
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <MqttInspector />
+          <TopicTree />
+        </div>
+        <EventLog />
       </div>
 
       <AnimatePresence>

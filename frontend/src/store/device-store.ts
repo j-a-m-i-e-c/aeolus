@@ -26,17 +26,28 @@ export interface MqttMessage {
   timestamp: number;
 }
 
+export interface AutomationEvent {
+  ruleId: string;
+  ruleName: string;
+  topic: string;
+  deviceId: string;
+  timestamp: number;
+}
+
 interface DeviceState {
   devices: Record<string, Device>;
   health: HealthStatus | null;
   wsConnected: boolean;
   mqttMessages: MqttMessage[];
+  automationEvents: AutomationEvent[];
   setDevices: (devices: Record<string, Device>) => void;
   updateDevice: (deviceId: string, state: Record<string, unknown>) => void;
   setHealth: (health: HealthStatus) => void;
   setWsConnected: (connected: boolean) => void;
   addMqttMessage: (msg: MqttMessage) => void;
   clearMqttMessages: () => void;
+  addAutomationEvent: (event: AutomationEvent) => void;
+  clearAutomationEvents: () => void;
 }
 
 export const useDeviceStore = create<DeviceState>((set) => ({
@@ -44,6 +55,7 @@ export const useDeviceStore = create<DeviceState>((set) => ({
   health: null,
   wsConnected: false,
   mqttMessages: [],
+  automationEvents: [],
   setDevices: (devices) => set({ devices }),
   updateDevice: (deviceId, state) =>
     set((prev) => {
@@ -63,4 +75,9 @@ export const useDeviceStore = create<DeviceState>((set) => ({
       mqttMessages: [msg, ...prev.mqttMessages].slice(0, 50), // Keep last 50
     })),
   clearMqttMessages: () => set({ mqttMessages: [] }),
+  addAutomationEvent: (event) =>
+    set((prev) => ({
+      automationEvents: [event, ...prev.automationEvents].slice(0, 50),
+    })),
+  clearAutomationEvents: () => set({ automationEvents: [] }),
 }));
