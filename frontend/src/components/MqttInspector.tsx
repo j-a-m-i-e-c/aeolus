@@ -2,18 +2,35 @@
 
 import { useState } from "react";
 import { useDeviceStore } from "../store/device-store";
-import { Radio, Trash2, ChevronDown, ChevronUp } from "lucide-react";
+import { Radio, Trash2, ChevronDown, ChevronUp, Send } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { publishMqtt } from "../lib/api-client";
 
 export function MqttInspector() {
   const messages = useDeviceStore((s) => s.mqttMessages);
   const clearMessages = useDeviceStore((s) => s.clearMqttMessages);
   const [expanded, setExpanded] = useState(true);
   const [filter, setFilter] = useState("");
+  const [pubTopic, setPubTopic] = useState("");
+  const [pubPayload, setPubPayload] = useState("");
+  const [publishing, setPublishing] = useState(false);
 
   const filtered = filter
     ? messages.filter((m) => m.topic.toLowerCase().includes(filter.toLowerCase()))
     : messages;
+
+  const handlePublish = async () => {
+    if (!pubTopic.trim()) return;
+    setPublishing(true);
+    try {
+      await publishMqtt(pubTopic.trim(), pubPayload);
+      setPubPayload("");
+    } catch (err) {
+      console.error("Publish failed:", err);
+    } finally {
+      setPublishing(false);
+    }
+  };
 
   return (
     <div className="bg-surface border border-[#2A3441] rounded-xl overflow-hidden">
@@ -51,6 +68,39 @@ export function MqttInspector() {
           </button>
         </div>
       </div>
+
+      {/* Publish form */}
+      {expanded && (
+        <div className="px-4 py-2 border-b border-[#2A3441] flex items-center gap-2">
+          <input
+            type="text"
+            placeholder="Topic (e.g. sensor/kitchen/temp)"
+            value={pubTopic}
+            onChange={(e) => setPubTopic(e.target.value)}
+            className="flex-1 text-xs bg-background border border-[#2A3441] rounded px-2 py-1.5 text-[#E6EDF3] placeholder-[#6B7785] font-mono focus:outline-none focus:border-primary"
+          />
+          <input
+            type="text"
+            placeholder="Payload (e.g. 22.5)"
+            value={pubPayload}
+            onChange={(e) => setPubPayload(e.target.value)}
+            className="w-40 text-xs bg-background border border-[#2A3441] rounded px-2 py-1.5 text-[#E6EDF3] placeholder-[#6B7785] font-mono focus:outline-none focus:border-primary"
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && pubTopic.trim()) {
+                handlePublish();
+              }
+            }}
+          />
+          <button
+            onClick={handlePublish}
+            disabled={!pubTopic.trim() || publishing}
+            className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded bg-primary/20 text-primary border border-primary/30 hover:bg-primary/30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <Send size={12} />
+            Publish
+          </button>
+        </div>
+      )}
 
       {/* Message feed */}
       {expanded && (

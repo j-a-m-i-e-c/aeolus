@@ -194,6 +194,20 @@ export class MqttService {
     return this.connected;
   }
 
+  /** Publish a message to the MQTT broker */
+  publish(topic: string, payload: string): void {
+    if (!this.client || !this.connected) {
+      throw new Error("MQTT client not connected");
+    }
+    this.client.publish(topic, payload, (err) => {
+      if (err) {
+        logger.error({ topic, error: err.message }, "Failed to publish MQTT message");
+      } else {
+        logger.debug({ topic, payloadLength: payload.length }, "MQTT message published");
+      }
+    });
+  }
+
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }

@@ -36,3 +36,10 @@ export async function sendAction(deviceId: string, type: string, params?: Record
     body: JSON.stringify({ type, params }),
   });
 }
+
+export async function publishMqtt(topic: string, payload: string) {
+  return request<{ success: boolean }>("/api/mqtt/publish", {
+    method: "POST",
+    body: JSON.stringify({ topic, payload }),
+  });
+}
