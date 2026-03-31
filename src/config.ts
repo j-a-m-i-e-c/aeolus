@@ -11,6 +11,7 @@ export interface Config {
   dbPath: string;
   logLevel: string;
   nodeEnv: string;
+  simulator: boolean;
 }
 
 export const config: Config = {
@@ -24,4 +25,5 @@ export const config: Config = {
   dbPath: process.env.DB_PATH || "./data/aeolus.db",
   logLevel: process.env.LOG_LEVEL || "debug",
   nodeEnv: process.env.NODE_ENV || "development",
+  simulator: process.env.SIMULATOR === "true",
 };
