@@ -5,7 +5,7 @@ import type { Server } from "node:http";
 import type { EventEmitter } from "node:events";
 import type { DeviceRegistry } from "../core/device-registry.js";
 import type { Device } from "../core/types.js";
-import { WS_STATE_CHANGE, MQTT_RAW_MESSAGE } from "../core/event-bus.js";
+import { WS_STATE_CHANGE, MQTT_RAW_MESSAGE, AUTOMATION_FIRED } from "../core/event-bus.js";
 import logger from "../logger.js";
 
 export class WsServer {
@@ -46,6 +46,11 @@ export class WsServer {
     // Broadcast raw MQTT messages for inspector
     eventBus.on(MQTT_RAW_MESSAGE, (data: { topic: string; payload: string; timestamp: number }) => {
       this.broadcast({ type: "mqtt-message", data });
+    });
+
+    // Broadcast automation fired events
+    eventBus.on(AUTOMATION_FIRED, (data: { ruleId: string; ruleName: string; topic: string; deviceId: string; timestamp: number }) => {
+      this.broadcast({ type: "automation-fired", data });
     });
   }
 
