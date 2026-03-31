@@ -206,6 +206,16 @@ Connect to `ws://localhost:3001/ws`
 { "type": "state-change", "data": { "deviceId": "sensor-kitchen-temp", "state": { "value": 22.5 }, "timestamp": 1711806244000 } }
 ```
 
+**Server → Client: Raw MQTT message (for inspector)**
+```json
+{ "type": "mqtt-message", "data": { "topic": "sensor/kitchen/temp", "payload": "22.5", "timestamp": 1711806244000 } }
+```
+
+**Server → Client: Automation fired**
+```json
+{ "type": "automation-fired", "data": { "ruleId": "...", "ruleName": "Night motion → light on", "topic": "motion/living-room", "deviceId": "motion-living-room", "timestamp": 1711806244000 } }
+```
+
 ## Data Models
 
 ### Device
@@ -246,6 +256,7 @@ CREATE TABLE devices (
 | DB_PATH | ./data/aeolus.db | SQLite database file path |
 | LOG_LEVEL | debug | pino log level |
 | NODE_ENV | development | Environment |
+| SIMULATOR | false | Enable device simulator (generates fake data without MQTT) |
 
 **Note:** MQTT_TOPICS must be quoted in `.env` files because `#` is treated as a comment character by dotenv.
 
@@ -282,8 +293,51 @@ Backend waits for Mosquitto healthcheck before starting. Named volumes persist b
 - **Zustand over Redux:** Lightweight, minimal boilerplate, matches the "clarity over decoration" design principle.
 - **Express over Fastify:** Broader ecosystem familiarity, easier WebSocket integration via ws library.
 
+## Dashboard Features
+
+The React dashboard provides a comprehensive developer-focused interface:
+
+- **Device Grid** — Cards grouped by room (parsed from MQTT topic), collapsible sections, click to open detail modal
+- **Device Detail Modal** — Full state view, capabilities, toggle/brightness controls, last seen timestamp
+- **Sensor Panel** — Live sensor values with sparkline SVG charts showing last 20 readings
+- **System Health** — MQTT connection status, device count, rule count, uptime (polls every 30s)
+- **Automations Panel** — Lists active rules with topic, name, and conditional/active badges
+- **MQTT Inspector** — Real-time message feed with topic filter, clear button, and inline publish form
+- **MQTT Topic Tree** — Hierarchical tree view of all topics seen, expandable with last payload values
+- **Event Log** — Automation rule fire events with rule name, trigger topic, and device ID
+- **Toast Notifications** — Animated alerts in bottom-right when automations fire (auto-dismiss 4s)
+- **Command Palette** — Ctrl+K to search devices or publish MQTT messages via keyboard
+- **Simulator Toggle** — Start/stop device simulator from the sidebar without restarting backend
+- **Animated Logo** — SVG Aeolus logo with framer-motion wind swirl animation
+
+## Additional API Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/automations` | List active automation rules |
+| POST | `/api/mqtt/publish` | Publish MQTT message `{ topic, payload }` |
+| GET | `/api/simulator` | Simulator running status |
+| POST | `/api/simulator/start` | Start device simulator |
+| POST | `/api/simulator/stop` | Stop device simulator |
+
+## Device Simulator
+
+Built-in simulator generates realistic fake data for 7 devices without requiring an MQTT broker:
+
+| Device | Topic | Type | Interval | Behavior |
+|--------|-------|------|----------|----------|
+| Kitchen Temp | sensor/kitchen/temp | sensor | 5s | Drifts 18-28°C |
+| Bathroom Humidity | sensor/bathroom/humidity | sensor | 7s | Drifts 40-90% |
+| Living Room Temp | sensor/living-room/temp | sensor | 6s | Drifts 19-26°C |
+| Outdoor Temp | sensor/outdoor/temp | sensor | 10s | Drifts 5-35°C |
+| Bedroom Light | light/bedroom | light | 15s | Random brightness |
+| Desk Switch | switch/desk | switch | 20s | Random on/off |
+| Hallway Motion | motion/hallway | sensor | 8s | 30% chance true |
+
+Enable via `SIMULATOR=true` env var (auto-starts on boot) or toggle from the sidebar at runtime.
+
 ---
 
-**Last Updated:** March 30, 2026
-**Version:** 0.1.0
+**Last Updated:** March 31, 2026
+**Version:** 0.2.0
 **Status:** MVP Development

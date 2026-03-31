@@ -126,6 +126,11 @@ aeolus/
 | POST | `/api/devices/:id/action` | Execute action on device |
 | GET | `/api/state` | All devices keyed by ID |
 | GET | `/api/health` | System health status |
+| GET | `/api/automations` | List active automation rules |
+| POST | `/api/mqtt/publish` | Publish MQTT message `{ topic, payload }` |
+| GET | `/api/simulator` | Simulator running status |
+| POST | `/api/simulator/start` | Start device simulator |
+| POST | `/api/simulator/stop` | Stop device simulator |
 | WS | `/ws` | Real-time state updates |
 
 ## Automation DSL
