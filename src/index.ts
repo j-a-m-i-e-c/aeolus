@@ -18,6 +18,7 @@ import { createDeviceRoutes } from "./api/routes/device.routes.js";
 import { createStateRoutes } from "./api/routes/state.routes.js";
 import { createHealthRoutes } from "./api/routes/health.routes.js";
 import { createMqttRoutes } from "./api/routes/mqtt.routes.js";
+import { createAutomationRoutes } from "./api/routes/automation.routes.js";
 import { requestLogger } from "./api/middleware/request-logger.js";
 import { errorHandler } from "./api/middleware/error-handler.js";
 
@@ -81,6 +82,7 @@ async function main(): Promise<void> {
   app.use("/api/state", createStateRoutes(registry));
   app.use("/api/health", createHealthRoutes(mqttService, registry, engine, startTime));
   app.use("/api/mqtt", createMqttRoutes(mqttService));
+  app.use("/api/automations", createAutomationRoutes(engine));
 
   // Error handler (must be last)
   app.use(errorHandler);

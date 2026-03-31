@@ -6,6 +6,7 @@ import { DeviceGrid } from "./components/DeviceGrid";
 import { SensorPanel } from "./components/SensorPanel";
 import { SystemHealth } from "./components/SystemHealth";
 import { MqttInspector } from "./components/MqttInspector";
+import { AutomationsPanel } from "./components/AutomationsPanel";
 import { connectWebSocket, disconnectWebSocket } from "./lib/ws-client";
 import { fetchDevices } from "./lib/api-client";
 import { useDeviceStore } from "./store/device-store";
@@ -41,6 +42,7 @@ export default function App() {
       <div className="space-y-6">
         <h1 className="text-2xl font-bold text-[#E6EDF3]">Dashboard</h1>
         <SystemHealth />
+        <AutomationsPanel />
         <SensorPanel />
         <DeviceGrid />
         <MqttInspector />
