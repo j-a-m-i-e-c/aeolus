@@ -40,6 +40,7 @@ interface DeviceState {
   wsConnected: boolean;
   mqttMessages: MqttMessage[];
   automationEvents: AutomationEvent[];
+  deviceHistory: Record<string, number[]>; // deviceId → last N values
   setDevices: (devices: Record<string, Device>) => void;
   updateDevice: (deviceId: string, state: Record<string, unknown>) => void;
   setHealth: (health: HealthStatus) => void;
@@ -48,6 +49,7 @@ interface DeviceState {
   clearMqttMessages: () => void;
   addAutomationEvent: (event: AutomationEvent) => void;
   clearAutomationEvents: () => void;
+  addDeviceValue: (deviceId: string, value: number) => void;
 }
 
 export const useDeviceStore = create<DeviceState>((set) => ({
@@ -56,6 +58,7 @@ export const useDeviceStore = create<DeviceState>((set) => ({
   wsConnected: false,
   mqttMessages: [],
   automationEvents: [],
+  deviceHistory: {},
   setDevices: (devices) => set({ devices }),
   updateDevice: (deviceId, state) =>
     set((prev) => {
@@ -80,4 +83,11 @@ export const useDeviceStore = create<DeviceState>((set) => ({
       automationEvents: [event, ...prev.automationEvents].slice(0, 50),
     })),
   clearAutomationEvents: () => set({ automationEvents: [] }),
+  addDeviceValue: (deviceId, value) =>
+    set((prev) => ({
+      deviceHistory: {
+        ...prev.deviceHistory,
+        [deviceId]: [...(prev.deviceHistory[deviceId] || []), value].slice(-20),
+      },
+    })),
 }));

@@ -25,6 +25,11 @@ export function connectWebSocket(): void {
         useDeviceStore.getState().setDevices(msg.data);
       } else if (msg.type === "state-change") {
         useDeviceStore.getState().updateDevice(msg.data.deviceId, msg.data.state);
+        // Track numeric values for sparklines
+        const val = msg.data.state?.value;
+        if (typeof val === "number") {
+          useDeviceStore.getState().addDeviceValue(msg.data.deviceId, val);
+        }
       } else if (msg.type === "mqtt-message") {
         useDeviceStore.getState().addMqttMessage(msg.data);
       } else if (msg.type === "automation-fired") {

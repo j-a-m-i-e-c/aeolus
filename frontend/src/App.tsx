@@ -10,6 +10,7 @@ import { AutomationsPanel } from "./components/AutomationsPanel";
 import { DeviceDetail } from "./components/DeviceDetail";
 import { EventLog } from "./components/EventLog";
 import { TopicTree } from "./components/TopicTree";
+import { ToastContainer } from "./components/ToastContainer";
 import { AnimatePresence } from "framer-motion";
 import { connectWebSocket, disconnectWebSocket } from "./lib/ws-client";
 import { fetchDevices } from "./lib/api-client";
@@ -58,6 +59,8 @@ export default function App() {
           />
         )}
       </AnimatePresence>
+
+      <ToastContainer />
     </Layout>
   );
 }
