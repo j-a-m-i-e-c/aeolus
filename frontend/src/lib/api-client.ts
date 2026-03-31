@@ -43,3 +43,14 @@ export async function publishMqtt(topic: string, payload: string) {
     body: JSON.stringify({ topic, payload }),
   });
 }
+
+export interface AutomationRule {
+  id: string;
+  topic: string;
+  name: string | null;
+  hasCondition: boolean;
+}
+
+export async function fetchAutomations() {
+  return request<AutomationRule[]>("/api/automations");
+}
