@@ -21,6 +21,7 @@ import { createMqttRoutes } from "./api/routes/mqtt.routes.js";
 import { createAutomationRoutes } from "./api/routes/automation.routes.js";
 import { requestLogger } from "./api/middleware/request-logger.js";
 import { errorHandler } from "./api/middleware/error-handler.js";
+import { DeviceSimulator } from "./simulator/device-simulator.js";
 
 const startTime = Date.now();
 
@@ -64,11 +65,18 @@ async function main(): Promise<void> {
     registry.upsert(event);
   });
 
-  // 7. Connect MQTT
-  try {
-    await mqttService.connect();
-  } catch (err) {
-    logger.error({ error: (err as Error).message }, "MQTT connection failed — running without MQTT");
+  // 7. Connect MQTT or start simulator
+  let simulator: DeviceSimulator | null = null;
+
+  if (config.simulator) {
+    simulator = new DeviceSimulator(eventBus);
+    simulator.start();
+  } else {
+    try {
+      await mqttService.connect();
+    } catch (err) {
+      logger.error({ error: (err as Error).message }, "MQTT connection failed — running without MQTT");
+    }
   }
 
   // 8. Express app
@@ -101,6 +109,7 @@ async function main(): Promise<void> {
   // 10. Graceful shutdown
   const shutdown = async () => {
     logger.info("Shutting down Aeolus...");
+    simulator?.stop();
     await integrationManager.disposeAll();
     await mqttService.disconnect();
     persistDatabase();
