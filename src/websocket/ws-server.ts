@@ -5,7 +5,7 @@ import type { Server } from "node:http";
 import type { EventEmitter } from "node:events";
 import type { DeviceRegistry } from "../core/device-registry.js";
 import type { Device } from "../core/types.js";
-import { WS_STATE_CHANGE } from "../core/event-bus.js";
+import { WS_STATE_CHANGE, MQTT_RAW_MESSAGE } from "../core/event-bus.js";
 import logger from "../logger.js";
 
 export class WsServer {
@@ -41,6 +41,11 @@ export class WsServer {
     // Broadcast state changes
     eventBus.on(WS_STATE_CHANGE, (data: { deviceId: string; state: Record<string, unknown>; timestamp: number }) => {
       this.broadcast({ type: "state-change", data });
+    });
+
+    // Broadcast raw MQTT messages for inspector
+    eventBus.on(MQTT_RAW_MESSAGE, (data: { topic: string; payload: string; timestamp: number }) => {
+      this.broadcast({ type: "mqtt-message", data });
     });
   }
 

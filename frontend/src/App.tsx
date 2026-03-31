@@ -5,6 +5,7 @@ import { Layout } from "./components/Layout";
 import { DeviceGrid } from "./components/DeviceGrid";
 import { SensorPanel } from "./components/SensorPanel";
 import { SystemHealth } from "./components/SystemHealth";
+import { MqttInspector } from "./components/MqttInspector";
 import { connectWebSocket, disconnectWebSocket } from "./lib/ws-client";
 import { fetchDevices } from "./lib/api-client";
 import { useDeviceStore } from "./store/device-store";
@@ -42,6 +43,7 @@ export default function App() {
         <SystemHealth />
         <SensorPanel />
         <DeviceGrid />
+        <MqttInspector />
       </div>
     </Layout>
   );

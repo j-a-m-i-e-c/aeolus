@@ -25,6 +25,8 @@ export function connectWebSocket(): void {
         useDeviceStore.getState().setDevices(msg.data);
       } else if (msg.type === "state-change") {
         useDeviceStore.getState().updateDevice(msg.data.deviceId, msg.data.state);
+      } else if (msg.type === "mqtt-message") {
+        useDeviceStore.getState().addMqttMessage(msg.data);
       }
     } catch {
       // Ignore malformed messages

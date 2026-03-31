@@ -20,20 +20,30 @@ export interface HealthStatus {
   timestamp: string;
 }
 
+export interface MqttMessage {
+  topic: string;
+  payload: string;
+  timestamp: number;
+}
+
 interface DeviceState {
   devices: Record<string, Device>;
   health: HealthStatus | null;
   wsConnected: boolean;
+  mqttMessages: MqttMessage[];
   setDevices: (devices: Record<string, Device>) => void;
   updateDevice: (deviceId: string, state: Record<string, unknown>) => void;
   setHealth: (health: HealthStatus) => void;
   setWsConnected: (connected: boolean) => void;
+  addMqttMessage: (msg: MqttMessage) => void;
+  clearMqttMessages: () => void;
 }
 
 export const useDeviceStore = create<DeviceState>((set) => ({
   devices: {},
   health: null,
   wsConnected: false,
+  mqttMessages: [],
   setDevices: (devices) => set({ devices }),
   updateDevice: (deviceId, state) =>
     set((prev) => {
@@ -48,4 +58,9 @@ export const useDeviceStore = create<DeviceState>((set) => ({
     }),
   setHealth: (health) => set({ health }),
   setWsConnected: (wsConnected) => set({ wsConnected }),
+  addMqttMessage: (msg) =>
+    set((prev) => ({
+      mqttMessages: [msg, ...prev.mqttMessages].slice(0, 50), // Keep last 50
+    })),
+  clearMqttMessages: () => set({ mqttMessages: [] }),
 }));
