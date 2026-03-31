@@ -1,12 +1,14 @@
 // frontend/src/App.tsx — Main application component
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Layout } from "./components/Layout";
 import { DeviceGrid } from "./components/DeviceGrid";
 import { SensorPanel } from "./components/SensorPanel";
 import { SystemHealth } from "./components/SystemHealth";
 import { MqttInspector } from "./components/MqttInspector";
 import { AutomationsPanel } from "./components/AutomationsPanel";
+import { DeviceDetail } from "./components/DeviceDetail";
+import { AnimatePresence } from "framer-motion";
 import { connectWebSocket, disconnectWebSocket } from "./lib/ws-client";
 import { fetchDevices } from "./lib/api-client";
 import { useDeviceStore } from "./store/device-store";
@@ -14,9 +16,9 @@ import type { Device } from "./store/device-store";
 
 export default function App() {
   const setDevices = useDeviceStore((s) => s.setDevices);
+  const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
 
   useEffect(() => {
-    // Fetch initial device list via REST
     fetchDevices()
       .then((data) => {
         const devices: Record<string, Device> = {};
@@ -25,16 +27,10 @@ export default function App() {
         }
         setDevices(devices);
       })
-      .catch(() => {
-        // Will be populated by WebSocket snapshot
-      });
+      .catch(() => {});
 
-    // Connect WebSocket for real-time updates
     connectWebSocket();
-
-    return () => {
-      disconnectWebSocket();
-    };
+    return () => { disconnectWebSocket(); };
   }, [setDevices]);
 
   return (
@@ -44,9 +40,18 @@ export default function App() {
         <SystemHealth />
         <AutomationsPanel />
         <SensorPanel />
-        <DeviceGrid />
+        <DeviceGrid onSelectDevice={setSelectedDeviceId} />
         <MqttInspector />
       </div>
+
+      <AnimatePresence>
+        {selectedDeviceId && (
+          <DeviceDetail
+            deviceId={selectedDeviceId}
+            onClose={() => setSelectedDeviceId(null)}
+          />
+        )}
+      </AnimatePresence>
     </Layout>
   );
 }

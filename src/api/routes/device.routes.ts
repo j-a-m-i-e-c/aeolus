@@ -20,9 +20,10 @@ export function createDeviceRoutes(
 
   /** GET /api/devices/:id — get single device */
   router.get("/:id", (req, res, next) => {
-    const device = registry.getById(req.params.id);
+    const id = req.params.id as string;
+    const device = registry.getById(id);
     if (!device) {
-      return next(new NotFoundError(`Device not found: ${req.params.id}`));
+      return next(new NotFoundError(`Device not found: ${id}`));
     }
     res.json(device);
   });
@@ -30,19 +31,20 @@ export function createDeviceRoutes(
   /** POST /api/devices/:id/action — execute action on device */
   router.post("/:id/action", validateAction, async (req, res, next) => {
     try {
-      const device = registry.getById(req.params.id);
+      const id = req.params.id as string;
+      const device = registry.getById(id);
       if (!device) {
-        return next(new NotFoundError(`Device not found: ${req.params.id}`));
+        return next(new NotFoundError(`Device not found: ${id}`));
       }
 
-      await integrationManager.execute(req.params.id, {
+      await integrationManager.execute(id, {
         type: req.body.type,
-        deviceId: req.params.id,
+        deviceId: id,
         params: req.body.params || {},
       });
 
-      logger.info({ deviceId: req.params.id, action: req.body.type }, "Action executed");
-      res.json({ success: true, deviceId: req.params.id });
+      logger.info({ deviceId: id, action: req.body.type }, "Action executed");
+      res.json({ success: true, deviceId: id });
     } catch (err) {
       next(err);
     }
