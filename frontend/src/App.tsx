@@ -11,6 +11,7 @@ import { DeviceDetail } from "./components/DeviceDetail";
 import { EventLog } from "./components/EventLog";
 import { TopicTree } from "./components/TopicTree";
 import { ToastContainer } from "./components/ToastContainer";
+import { CommandPalette } from "./components/CommandPalette";
 import { AnimatePresence } from "framer-motion";
 import { connectWebSocket, disconnectWebSocket } from "./lib/ws-client";
 import { fetchDevices } from "./lib/api-client";
@@ -61,6 +62,7 @@ export default function App() {
       </AnimatePresence>
 
       <ToastContainer />
+      <CommandPalette onSelectDevice={setSelectedDeviceId} />
     </Layout>
   );
 }
