@@ -3,7 +3,7 @@
 import mqtt, { type MqttClient } from "mqtt";
 import type { EventEmitter } from "node:events";
 import { parseTopic } from "./topic-parser.js";
-import { DEVICE_STATE_CHANGE } from "../core/event-bus.js";
+import { DEVICE_STATE_CHANGE, MQTT_RAW_MESSAGE } from "../core/event-bus.js";
 import type { NormalizedEvent } from "../core/types.js";
 import logger from "../logger.js";
 
@@ -131,13 +131,17 @@ export class MqttService {
   }
 
   private handleMessage(topic: string, payload: Buffer): void {
+    const raw = payload.toString();
+
+    // Emit raw message for MQTT inspector
+    this.eventBus.emit(MQTT_RAW_MESSAGE, { topic, payload: raw, timestamp: Date.now() });
+
     const parsed = parseTopic(topic);
     if (!parsed) {
       logger.warn({ topic }, "Received message on unparseable topic");
       return;
     }
 
-    const raw = payload.toString();
     let state: Record<string, unknown>;
 
     try {
