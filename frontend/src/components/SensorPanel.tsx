@@ -1,9 +1,11 @@
 // frontend/src/components/SensorPanel.tsx — Live sensor data display
 
 import { useDeviceStore } from "../store/device-store";
+import { Sparkline } from "./Sparkline";
 
 export function SensorPanel() {
   const devices = useDeviceStore((s) => s.devices);
+  const deviceHistory = useDeviceStore((s) => s.deviceHistory);
   const sensors = Object.values(devices).filter((d) => d.type === "sensor");
 
   if (sensors.length === 0) return null;
@@ -18,6 +20,7 @@ export function SensorPanel() {
           <div key={sensor.id} className="flex items-center justify-between py-1.5 border-b border-[#2A3441] last:border-0">
             <span className="text-sm text-[#E6EDF3]">{sensor.name}</span>
             <div className="flex items-center gap-3">
+              <Sparkline values={deviceHistory[sensor.id] || []} />
               {Object.entries(sensor.state).map(([key, value]) => (
                 <span key={key} className="font-mono text-sm text-accent">
                   {String(value)}
