@@ -23,6 +23,7 @@ import { requestLogger } from "./api/middleware/request-logger.js";
 import { errorHandler } from "./api/middleware/error-handler.js";
 import { DeviceSimulator } from "./simulator/device-simulator.js";
 import { createSimulatorRoutes } from "./api/routes/simulator.routes.js";
+import { createHueRoutes } from "./api/routes/hue.routes.js";
 
 const startTime = Date.now();
 
@@ -95,6 +96,7 @@ async function main(): Promise<void> {
   app.use("/api/mqtt", createMqttRoutes(mqttService));
   app.use("/api/automations", createAutomationRoutes(engine));
   app.use("/api/simulator", createSimulatorRoutes(simulator));
+  app.use("/api/hue", createHueRoutes());
 
   // Error handler (must be last)
   app.use(errorHandler);
