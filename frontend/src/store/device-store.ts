@@ -50,6 +50,8 @@ interface DeviceState {
   addAutomationEvent: (event: AutomationEvent) => void;
   clearAutomationEvents: () => void;
   addDeviceValue: (deviceId: string, value: number) => void;
+  currentPage: "dashboard" | "lighting";
+  setCurrentPage: (page: "dashboard" | "lighting") => void;
 }
 
 export const useDeviceStore = create<DeviceState>((set) => ({
@@ -59,6 +61,7 @@ export const useDeviceStore = create<DeviceState>((set) => ({
   mqttMessages: [],
   automationEvents: [],
   deviceHistory: {},
+  currentPage: "dashboard",
   setDevices: (devices) => set({ devices }),
   updateDevice: (deviceId, state) =>
     set((prev) => {
@@ -90,4 +93,5 @@ export const useDeviceStore = create<DeviceState>((set) => ({
         [deviceId]: [...(prev.deviceHistory[deviceId] || []), value].slice(-20),
       },
     })),
+  setCurrentPage: (currentPage) => set({ currentPage }),
 }));

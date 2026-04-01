@@ -2,7 +2,7 @@
 
 import { AeolusLogo } from "./AeolusLogo";
 import { useDeviceStore } from "../store/device-store";
-import { Cpu, Wifi, WifiOff, Play, Square } from "lucide-react";
+import { Cpu, Wifi, WifiOff, Play, Square, Lightbulb } from "lucide-react";
 import { useState, useEffect } from "react";
 import { fetchSimulatorStatus, startSimulator, stopSimulator } from "../lib/api-client";
 
@@ -11,6 +11,8 @@ export function Sidebar() {
   const health = useDeviceStore((s) => s.health);
   const [simRunning, setSimRunning] = useState(false);
   const [simLoading, setSimLoading] = useState(false);
+  const currentPage = useDeviceStore((s) => s.currentPage);
+  const setCurrentPage = useDeviceStore((s) => s.setCurrentPage);
 
   useEffect(() => {
     fetchSimulatorStatus().then((s) => setSimRunning(s.running)).catch(() => {});
@@ -40,10 +42,24 @@ export function Sidebar() {
 
       {/* Navigation */}
       <nav className="flex flex-col gap-1">
-        <a href="#" className="flex items-center gap-2 px-3 py-2 rounded-lg bg-elevated text-[#E6EDF3] text-sm font-medium">
+        <button
+          onClick={() => setCurrentPage("dashboard")}
+          className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+            currentPage === "dashboard" ? "bg-elevated text-[#E6EDF3]" : "text-[#6B7785] hover:text-[#9AA6B2] hover:bg-elevated/50"
+          }`}
+        >
           <Cpu size={16} />
           Dashboard
-        </a>
+        </button>
+        <button
+          onClick={() => setCurrentPage("lighting")}
+          className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+            currentPage === "lighting" ? "bg-elevated text-[#E6EDF3]" : "text-[#6B7785] hover:text-[#9AA6B2] hover:bg-elevated/50"
+          }`}
+        >
+          <Lightbulb size={16} />
+          Lighting
+        </button>
       </nav>
 
       {/* Simulator toggle */}

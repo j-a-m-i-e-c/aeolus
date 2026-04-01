@@ -17,9 +17,11 @@ import { connectWebSocket, disconnectWebSocket } from "./lib/ws-client";
 import { fetchDevices } from "./lib/api-client";
 import { useDeviceStore } from "./store/device-store";
 import type { Device } from "./store/device-store";
+import { LightingPage } from "./components/LightingPage";
 
 export default function App() {
   const setDevices = useDeviceStore((s) => s.setDevices);
+  const currentPage = useDeviceStore((s) => s.currentPage);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -39,18 +41,22 @@ export default function App() {
 
   return (
     <Layout>
-      <div className="space-y-6">
-        <h1 className="text-2xl font-bold text-[#E6EDF3]">Dashboard</h1>
-        <SystemHealth />
-        <AutomationsPanel />
-        <SensorPanel />
-        <DeviceGrid onSelectDevice={setSelectedDeviceId} />
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <MqttInspector />
-          <TopicTree />
+      {currentPage === "lighting" ? (
+        <LightingPage />
+      ) : (
+        <div className="space-y-6">
+          <h1 className="text-2xl font-bold text-[#E6EDF3]">Dashboard</h1>
+          <SystemHealth />
+          <AutomationsPanel />
+          <SensorPanel />
+          <DeviceGrid onSelectDevice={setSelectedDeviceId} />
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <MqttInspector />
+            <TopicTree />
+          </div>
+          <EventLog />
         </div>
-        <EventLog />
-      </div>
+      )}
 
       <AnimatePresence>
         {selectedDeviceId && (
