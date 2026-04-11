@@ -167,6 +167,60 @@ Lights are discovered automatically and appear on the dashboard with toggle and 
 npm test
 ```
 
+## Raspberry Pi Deployment
+
+### One-Line Install
+
+SSH into your Pi and run:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/j-a-m-i-e-c/aeolus/main/scripts/setup-pi.sh | bash
+```
+
+This installs Docker, clones Aeolus, builds the containers, and starts everything. Aeolus auto-starts on boot via Docker's `restart: unless-stopped` policy.
+
+### Manual Setup
+
+```bash
+# 1. Install Docker
+curl -fsSL https://get.docker.com | sh
+sudo usermod -aG docker $USER
+sudo systemctl enable docker
+
+# 2. Clone and configure
+git clone https://github.com/j-a-m-i-e-c/aeolus.git
+cd aeolus
+cp .env.example .env
+# Edit .env for your setup (Hue bridge IP, etc.)
+
+# 3. Build and start
+docker compose build
+docker compose up -d
+```
+
+### Access the Dashboard
+
+Once running, open a browser on any device on the same network:
+
+```
+http://<pi-ip-address>:3000
+```
+
+Find your Pi's IP with `hostname -I` on the Pi.
+
+### Management Commands
+
+```bash
+docker compose logs -f        # View live logs
+docker compose restart        # Restart all services
+docker compose down           # Stop everything
+docker compose up -d --build  # Rebuild and restart after updates
+```
+
+### Auto-Start on Boot
+
+Docker is enabled as a systemd service during setup. All containers use `restart: unless-stopped`, so they automatically restart when the Pi boots or if a container crashes.
+
 ## License
 
 MIT

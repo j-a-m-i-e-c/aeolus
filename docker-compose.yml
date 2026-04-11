@@ -2,6 +2,7 @@ services:
   mosquitto:
     image: eclipse-mosquitto:2
     container_name: aeolus-mosquitto
+    restart: unless-stopped
     ports:
       - "${MQTT_PORT:-1883}:1883"
     volumes:
@@ -21,6 +22,7 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: aeolus-backend
+    restart: unless-stopped
     environment:
       NODE_ENV: ${NODE_ENV:-development}
       PORT: ${API_PORT:-3001}
@@ -45,6 +47,7 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     container_name: aeolus-frontend
+    restart: unless-stopped
     ports:
       - "${FRONTEND_PORT:-3000}:80"
     depends_on:
