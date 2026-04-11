@@ -7,7 +7,8 @@ import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
 import { useDashboardStore } from "../store/dashboard-store";
 import { getPaneEntry } from "../lib/pane-registry";
-import { Settings, X } from "lucide-react";
+import { Settings, X, Plus } from "lucide-react";
+import { PanePicker } from "./PanePicker";
 
 interface TabLayoutProps {
   tabId: string;
@@ -18,6 +19,9 @@ export function TabLayout({ tabId }: TabLayoutProps) {
   const updatePanePosition = useDashboardStore((s) => s.updatePanePosition);
   const updatePaneSize = useDashboardStore((s) => s.updatePaneSize);
   const removePane = useDashboardStore((s) => s.removePane);
+
+  // PanePicker visibility
+  const [showPicker, setShowPicker] = useState(false);
 
   // Track container width for ResponsiveGridLayout
   const containerRef = useRef<HTMLDivElement>(null);
@@ -72,6 +76,22 @@ export function TabLayout({ tabId }: TabLayoutProps) {
 
   return (
     <div ref={containerRef} className="w-full">
+      {/* Header area with Add Pane button */}
+      <div className="flex items-center justify-end px-4 py-2">
+        <button
+          onClick={() => setShowPicker(true)}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-[#9AA6B2] hover:text-[#E6EDF3] hover:bg-elevated/50 border border-[#2A3441] transition-colors"
+        >
+          <Plus size={14} />
+          Add Pane
+        </button>
+      </div>
+
+      {/* PanePicker modal */}
+      {showPicker && (
+        <PanePicker tabId={tabId} onClose={() => setShowPicker(false)} />
+      )}
+
       <ResponsiveGridLayout
         className="layout"
         width={containerWidth}
