@@ -1,7 +1,7 @@
 // frontend/src/components/LightingPage.tsx — Hue lighting management
 
-import { useState, useEffect, useCallback } from "react";
-import { motion } from "framer-motion";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import { Lightbulb, Search, Link2, Unlink, RefreshCw, Sun, Palette, Info, Plus, Loader2, Trash2, GripVertical } from "lucide-react";
 
 const API_URL = (import.meta as any).env?.VITE_API_URL || `http://${window.location.hostname}:3001`;
@@ -39,6 +39,34 @@ interface BridgeInfo {
   } | null;
 }
 
+// Hue uses hue: 0-65535, sat: 0-254, bri: 1-254
+// Convert to CSS hsl for preview
+function hueToHsl(h: number, s: number, b: number): string {
+  const hDeg = Math.round((h / 65535) * 360);
+  const sPct = Math.round((s / 254) * 100);
+  const lPct = Math.round((b / 254) * 50);
+  return `hsl(${hDeg}, ${sPct}%, ${Math.max(lPct, 10)}%)`;
+}
+
+// Predefined colour swatches (hue value 0-65535)
+const COLOR_SWATCHES = [
+  { label: "Red", hue: 0, sat: 254 },
+  { label: "Orange", hue: 5000, sat: 254 },
+  { label: "Yellow", hue: 10000, sat: 254 },
+  { label: "Green", hue: 21845, sat: 254 },
+  { label: "Cyan", hue: 32768, sat: 254 },
+  { label: "Blue", hue: 43690, sat: 254 },
+  { label: "Purple", hue: 49000, sat: 254 },
+  { label: "Pink", hue: 56000, sat: 200 },
+  { label: "Warm White", hue: 8000, sat: 120 },
+  { label: "Cool White", hue: 34000, sat: 50 },
+];
+
+function isColorLight(type: string): boolean {
+  const t = type.toLowerCase();
+  return t.includes("color") || t.includes("extended");
+}
+
 export function LightingPage() {
   const [status, setStatus] = useState<{ configured: boolean; bridgeIp: string | null }>({ configured: false, bridgeIp: null });
   const [lights, setLights] = useState<HueLight[]>([]);
@@ -51,6 +79,8 @@ export function LightingPage() {
   const [scanning, setScanning] = useState(false);
   const [scanResult, setScanResult] = useState<{ lights: { id: string; name: string }[]; lastscan: string } | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
+  const [colorPickerOpen, setColorPickerOpen] = useState<string | null>(null);
+  const [localBri, setLocalBri] = useState<Record<string, number>>({});
 
   const fetchBridgeInfo = async () => {
     try {
@@ -451,21 +481,74 @@ export function LightingPage() {
                 {light.on ? "Turn Off" : "Turn On"}
               </button>
 
-              {/* Brightness */}
+              {/* Brightness — local tracking, send on release */}
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-[10px] text-[#6B7785] flex items-center gap-1"><Sun size={10} /> Brightness</span>
-                  <span className="text-[10px] text-[#9AA6B2] font-mono">{Math.round((light.brightness / 254) * 100)}%</span>
+                  <span className="text-[10px] text-[#9AA6B2] font-mono">{Math.round(((localBri[light.id] ?? light.brightness) / 254) * 100)}%</span>
                 </div>
                 <input
                   type="range"
                   min="1"
                   max="254"
-                  value={light.brightness}
-                  onChange={(e) => setLightState(light.id, { bri: Number(e.target.value) })}
+                  value={localBri[light.id] ?? light.brightness}
+                  onChange={(e) => setLocalBri((prev) => ({ ...prev, [light.id]: Number(e.target.value) }))}
+                  onMouseUp={(e) => {
+                    const val = Number((e.target as HTMLInputElement).value);
+                    setLightState(light.id, { bri: val });
+                    setLocalBri((prev) => { const n = { ...prev }; delete n[light.id]; return n; });
+                  }}
+                  onTouchEnd={(e) => {
+                    const val = Number((e.target as HTMLInputElement).value);
+                    setLightState(light.id, { bri: val });
+                    setLocalBri((prev) => { const n = { ...prev }; delete n[light.id]; return n; });
+                  }}
                   className="w-full accent-[#F59E0B] h-1"
                 />
               </div>
+
+              {/* Colour picker for color-capable lights */}
+              {isColorLight(light.type) && (
+                <div className="relative">
+                  <button
+                    onClick={() => setColorPickerOpen(colorPickerOpen === light.id ? null : light.id)}
+                    className="flex items-center gap-1.5 text-[10px] text-[#6B7785] hover:text-[#9AA6B2] transition-colors"
+                  >
+                    <div
+                      className="w-3 h-3 rounded-full border border-[#2A3441]"
+                      style={{ backgroundColor: hueToHsl(light.hue ?? 0, light.saturation ?? 0, light.brightness) }}
+                    />
+                    <Palette size={10} />
+                    Colour
+                  </button>
+                  <AnimatePresence>
+                    {colorPickerOpen === light.id && (
+                      <motion.div
+                        initial={{ opacity: 0, y: -4 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -4 }}
+                        className="absolute z-10 mt-1 left-0 bg-elevated border border-[#2A3441] rounded-lg p-2 shadow-lg"
+                      >
+                        <div className="grid grid-cols-5 gap-1.5">
+                          {COLOR_SWATCHES.map((swatch) => (
+                            <button
+                              key={swatch.label}
+                              onClick={() => {
+                                setLightState(light.id, { hue: swatch.hue, sat: swatch.sat });
+                                setLights((prev) => prev.map((l) => l.id === light.id ? { ...l, hue: swatch.hue, saturation: swatch.sat } : l));
+                                setColorPickerOpen(null);
+                              }}
+                              className="w-7 h-7 rounded-full border border-[#2A3441] hover:scale-110 transition-transform"
+                              style={{ backgroundColor: hueToHsl(swatch.hue, swatch.sat, 200) }}
+                              title={swatch.label}
+                            />
+                          ))}
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              )}
 
               <div className="text-[10px] text-[#6B7785] font-mono">{light.type}</div>
             </motion.div>
