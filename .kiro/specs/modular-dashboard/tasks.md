@@ -111,7 +111,7 @@ Replace Aeolus's hardcoded four-page navigation with a user-defined tab system. 
 - [x] 6. Checkpoint — Store and registry
   - Ensure all tests pass, ask the user if questions arise.
 
-- [ ] 7. Frontend: UI components
+- [x] 7. Frontend: UI components
   - [x] 7.1 Update Sidebar to render dynamic tabs from Dashboard_Store
     - Render 3 pinned system tabs (Dashboard, Automations, System) at top in a fixed section
     - Render a visual separator line below pinned tabs
@@ -125,7 +125,7 @@ Replace Aeolus's hardcoded four-page navigation with a user-defined tab system. 
     - Keep simulator toggle, MQTT status, WebSocket status at the bottom
     - _Requirements: 1.1, 1.3, 1.5, 1.6, 1.8, 1.9, 7.1, 7.2, 7.3, 7.4, 7.5_
 
-  - [~] 7.2 Create TabLayout component with react-grid-layout
+  - [x] 7.2 Create TabLayout component with react-grid-layout
     - Create `frontend/src/components/TabLayout.tsx`
     - Read panes for active tabId from Dashboard_Store
     - Map each pane through Pane_Registry to resolve component
@@ -135,14 +135,14 @@ Replace Aeolus's hardcoded four-page navigation with a user-defined tab system. 
     - Responsive grid adapts to viewport width
     - _Requirements: 2.3, 2.4, 2.6, 2.7, 4.3, 4.4_
 
-  - [~] 7.3 Create PanePicker component
+  - [x] 7.3 Create PanePicker component
     - Create `frontend/src/components/PanePicker.tsx`
     - List all PANE_REGISTRY entries with displayName + icon
     - On select: call Dashboard_Store.addPane(tabId, paneType)
     - Add "Add Pane" button to TabLayout toolbar
     - _Requirements: 2.1, 2.2_
 
-  - [~] 7.4 Create PaneConfigPanel component
+  - [x] 7.4 Create PaneConfigPanel component
     - Create `frontend/src/components/PaneConfigPanel.tsx`
     - Render form fields based on paneType (room filter for device-grid, topic pattern for mqtt-inspector, show/hide sections for system-stats)
     - Settings gear icon on each pane opens the config panel
@@ -150,30 +150,30 @@ Replace Aeolus's hardcoded four-page navigation with a user-defined tab system. 
     - Clearing all filters shows unfiltered data
     - _Requirements: 3.1, 3.2, 3.3, 3.5_
 
-  - [~] 7.5 Add remove action to panes
+  - [x] 7.5 Add remove action to panes
     - Add close/remove icon to each pane header
     - On click: call Dashboard_Store.removePane(paneId)
     - _Requirements: 2.5_
 
-- [ ] 8. Frontend: Wire everything together in App.tsx
-  - [~] 8.1 Update App.tsx to use Dashboard_Store and TabLayout
+- [x] 8. Frontend: Wire everything together in App.tsx
+  - [x] 8.1 Update App.tsx to use Dashboard_Store and TabLayout
     - Call Dashboard_Store.initialize() on mount
     - Replace currentPage routing with TabLayout rendering for the active tab
     - Keep global overlays: ToastContainer, CommandPalette, DeviceDetail modal
     - _Requirements: 6.4, 7.3_
 
-  - [~] 8.2 Remove currentPage from device-store
+  - [x] 8.2 Remove currentPage from device-store
     - Remove `currentPage` field and `setCurrentPage` action from `device-store.ts`
     - Remove all imports/references to currentPage/setCurrentPage from components
     - Navigation now driven entirely by Dashboard_Store.activeTabId
     - _Requirements: 7.1, 7.3_
 
-  - [~] 8.3 Install react-grid-layout dependency
+  - [x] 8.3 Install react-grid-layout dependency
     - Add react-grid-layout and @types/react-grid-layout to frontend dependencies
     - Import required CSS for react-grid-layout
     - _Requirements: 2.6_
 
-- [ ] 9. Final checkpoint — Full integration
+- [x] 9. Final checkpoint — Full integration
   - Ensure all tests pass, ask the user if questions arise.
 
 ## Notes
