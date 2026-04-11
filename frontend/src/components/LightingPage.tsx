@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
-import { Lightbulb, Search, Link2, Unlink, RefreshCw, Sun, Palette, Info } from "lucide-react";
+import { Lightbulb, Search, Link2, Unlink, RefreshCw, Sun, Palette, Info, Plus, Loader2 } from "lucide-react";
 
 const API_URL = (import.meta as any).env?.VITE_API_URL || `http://${window.location.hostname}:3001`;
 
@@ -48,6 +48,8 @@ export function LightingPage() {
   const [pairingIp, setPairingIp] = useState("");
   const [pairingMsg, setPairingMsg] = useState("");
   const [loading, setLoading] = useState(true);
+  const [scanning, setScanning] = useState(false);
+  const [scanResult, setScanResult] = useState<{ lights: { id: string; name: string }[]; lastscan: string } | null>(null);
 
   const fetchBridgeInfo = async () => {
     try {
@@ -133,6 +135,27 @@ export function LightingPage() {
         prev.map((l) => (l.id === lightId ? { ...l, ...state, on: state.on !== undefined ? Boolean(state.on) : l.on, brightness: state.bri !== undefined ? Number(state.bri) : l.brightness } : l))
       );
     } catch {}
+  };
+
+  const searchForLights = async () => {
+    setScanning(true);
+    setScanResult(null);
+    try {
+      await fetch(`${API_URL}/api/hue/lights/search`, { method: "POST" });
+      // Bridge scans for ~40s. Poll for new lights after a delay.
+      setTimeout(async () => {
+        try {
+          const res = await fetch(`${API_URL}/api/hue/lights/new`);
+          const data = await res.json();
+          setScanResult(data);
+          // Refresh the full lights list
+          fetchLights();
+        } catch {}
+        setScanning(false);
+      }, 45000);
+    } catch {
+      setScanning(false);
+    }
   };
 
   useEffect(() => { fetchStatus(); }, [fetchStatus]);
@@ -241,6 +264,15 @@ export function LightingPage() {
         <h1 className="text-2xl font-bold text-[#E6EDF3]">Lighting</h1>
         <div className="flex items-center gap-2">
           <span className="text-xs text-[#6B7785] font-mono">{status.bridgeIp}</span>
+          <button
+            onClick={searchForLights}
+            disabled={scanning}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg bg-primary/20 text-primary border border-primary/30 hover:bg-primary/30 transition-colors disabled:opacity-50"
+            title="Search for new Zigbee lights"
+          >
+            {scanning ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />}
+            {scanning ? "Scanning..." : "Add Lights"}
+          </button>
           <button onClick={fetchLights} className="text-[#6B7785] hover:text-primary transition-colors" title="Refresh">
             <RefreshCw size={14} />
           </button>
@@ -299,6 +331,41 @@ export function LightingPage() {
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Scan status / results */}
+      {scanning && (
+        <div className="bg-primary/10 border border-primary/20 rounded-xl p-4 flex items-center gap-3">
+          <Loader2 size={16} className="text-primary animate-spin" />
+          <div>
+            <div className="text-sm text-[#E6EDF3]">Scanning for new lights...</div>
+            <div className="text-[10px] text-[#6B7785]">The bridge is searching for unpaired Zigbee devices. This takes about 40 seconds.</div>
+          </div>
+        </div>
+      )}
+      {scanResult && !scanning && (
+        <div className="bg-surface border border-[#2A3441] rounded-xl p-4">
+          <div className="text-sm text-[#E6EDF3] mb-1">
+            {scanResult.lights.length > 0
+              ? `Found ${scanResult.lights.length} new light${scanResult.lights.length !== 1 ? "s" : ""}:`
+              : "No new lights found"}
+          </div>
+          {scanResult.lights.length > 0 && (
+            <div className="space-y-1">
+              {scanResult.lights.map((l) => (
+                <div key={l.id} className="text-xs text-[#9AA6B2] font-mono">
+                  #{l.id} — {l.name}
+                </div>
+              ))}
+            </div>
+          )}
+          <button
+            onClick={() => setScanResult(null)}
+            className="mt-2 text-[10px] text-[#6B7785] hover:text-[#9AA6B2] transition-colors"
+          >
+            Dismiss
+          </button>
         </div>
       )}
 

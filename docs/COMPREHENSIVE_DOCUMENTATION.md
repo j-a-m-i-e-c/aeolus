@@ -167,6 +167,7 @@ Self-service Hue setup from the dashboard — no config files needed.
 - Button-press pairing flow (physical security)
 - Credential persistence to JSON file in data directory
 - Light listing and state control (on/off, brightness, hue, saturation)
+- Zigbee light search — triggers bridge scan for new unpaired bulbs, polls results after ~40s
 - Bridge info endpoint exposing firmware version, Zigbee channel, and update status
 - Unpair endpoint to remove stored credentials
 
@@ -336,6 +337,8 @@ The React dashboard provides a comprehensive developer-focused interface:
 | GET | `/api/hue/bridge` | Bridge firmware, model, Zigbee channel, update status |
 | GET | `/api/hue/discover` | Discover Hue bridges on the network |
 | POST | `/api/hue/pair` | Pair with a Hue bridge `{ bridgeIp }` |
+| POST | `/api/hue/lights/search` | Start Zigbee scan for new unpaired lights |
+| GET | `/api/hue/lights/new` | Get lights found during last search |
 | GET | `/api/hue/lights` | List all Hue lights |
 | POST | `/api/hue/lights/:id/state` | Control a light `{ on, bri, hue, sat }` |
 | DELETE | `/api/hue/unpair` | Remove stored Hue credentials |

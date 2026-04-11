@@ -166,6 +166,44 @@ export function createHueRoutes(): Router {
     }
   });
 
+  /** POST /api/hue/lights/search — tell bridge to scan for new Zigbee lights */
+  router.post("/lights/search", async (_req, res, next) => {
+    try {
+      const creds = loadCredentials();
+      if (!creds) throw new BadRequestError("Hue bridge not configured");
+
+      const response = await fetch(`http://${creds.bridgeIp}/api/${creds.apiKey}/lights`, {
+        method: "POST",
+      });
+      const result = await response.json();
+      logger.info("Hue light search initiated");
+      res.json({ success: true, result });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  /** GET /api/hue/lights/new — get lights found during last search */
+  router.get("/lights/new", async (_req, res, next) => {
+    try {
+      const creds = loadCredentials();
+      if (!creds) throw new BadRequestError("Hue bridge not configured");
+
+      const response = await fetch(`http://${creds.bridgeIp}/api/${creds.apiKey}/lights/new`);
+      if (!response.ok) throw new Error(`Bridge returned ${response.status}`);
+      const result = await response.json() as Record<string, unknown>;
+      // result has light IDs as keys + "lastscan" field
+      const { lastscan, ...newLights } = result;
+      const lights = Object.entries(newLights).map(([id, light]) => ({
+        id,
+        name: (light as { name: string }).name,
+      }));
+      res.json({ lights, lastscan });
+    } catch (err) {
+      next(err);
+    }
+  });
+
   /** POST /api/hue/lights/:id/state — control a light */
   router.post("/lights/:id/state", async (req, res, next) => {
     try {
