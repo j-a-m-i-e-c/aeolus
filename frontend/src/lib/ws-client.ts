@@ -2,7 +2,7 @@
 
 import { useDeviceStore } from "../store/device-store";
 
-const WS_URL = import.meta.env.VITE_WS_URL || "ws://localhost:3001/ws";
+const WS_URL = import.meta.env.VITE_WS_URL || `ws://${window.location.hostname}:3001/ws`;
 const RECONNECT_DELAY = 3000;
 
 let ws: WebSocket | null = null;
