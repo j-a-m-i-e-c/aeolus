@@ -112,7 +112,7 @@ Replace Aeolus's hardcoded four-page navigation with a user-defined tab system. 
   - Ensure all tests pass, ask the user if questions arise.
 
 - [ ] 7. Frontend: UI components
-  - [-] 7.1 Update Sidebar to render dynamic tabs from Dashboard_Store
+  - [x] 7.1 Update Sidebar to render dynamic tabs from Dashboard_Store
     - Render 3 pinned system tabs (Dashboard, Automations, System) at top in a fixed section
     - Render a visual separator line below pinned tabs
     - Render custom (non-pinned) tabs below the separator
