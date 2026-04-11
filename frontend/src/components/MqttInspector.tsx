@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { useDeviceStore } from "../store/device-store";
 import { Radio, Trash2, ChevronDown, ChevronUp, Send } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
 import { publishMqtt } from "../lib/api-client";
 
 export function MqttInspector() {
@@ -113,28 +112,22 @@ export function MqttInspector() {
             </div>
           ) : (
             <div className="divide-y divide-[#2A3441]">
-              <AnimatePresence initial={false}>
-                {filtered.map((msg, i) => (
-                  <motion.div
-                    key={`${msg.timestamp}-${i}`}
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: "auto" }}
-                    exit={{ opacity: 0, height: 0 }}
-                    transition={{ duration: 0.15 }}
-                    className="px-4 py-2 flex items-start gap-4 text-xs hover:bg-elevated/50"
-                  >
-                    <span className="text-[#6B7785] font-mono shrink-0 w-16">
-                      {new Date(msg.timestamp).toLocaleTimeString()}
-                    </span>
-                    <span className="text-primary font-mono shrink-0 min-w-0 truncate max-w-[200px]" title={msg.topic}>
-                      {msg.topic}
-                    </span>
-                    <span className="text-accent font-mono truncate" title={msg.payload}>
-                      {msg.payload}
-                    </span>
-                  </motion.div>
-                ))}
-              </AnimatePresence>
+              {filtered.map((msg, i) => (
+                <div
+                  key={`${msg.timestamp}-${i}`}
+                  className="px-4 py-2 flex items-start gap-4 text-xs hover:bg-elevated/50"
+                >
+                  <span className="text-[#6B7785] font-mono shrink-0 w-16">
+                    {new Date(msg.timestamp).toLocaleTimeString()}
+                  </span>
+                  <span className="text-primary font-mono shrink-0 min-w-0 truncate max-w-[200px]" title={msg.topic}>
+                    {msg.topic}
+                  </span>
+                  <span className="text-accent font-mono truncate" title={msg.payload}>
+                    {msg.payload}
+                  </span>
+                </div>
+              ))}
             </div>
           )}
         </div>

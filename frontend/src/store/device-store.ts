@@ -78,12 +78,12 @@ export const useDeviceStore = create<DeviceState>((set) => ({
   setWsConnected: (wsConnected) => set({ wsConnected }),
   addMqttMessage: (msg) =>
     set((prev) => ({
-      mqttMessages: [msg, ...prev.mqttMessages].slice(0, 50), // Keep last 50
+      mqttMessages: [msg, ...prev.mqttMessages].slice(0, 30), // Keep last 30 (reduced from 50)
     })),
   clearMqttMessages: () => set({ mqttMessages: [] }),
   addAutomationEvent: (event) =>
     set((prev) => ({
-      automationEvents: [event, ...prev.automationEvents].slice(0, 50),
+      automationEvents: [event, ...prev.automationEvents].slice(0, 20),
     })),
   clearAutomationEvents: () => set({ automationEvents: [] }),
   addDeviceValue: (deviceId, value) =>

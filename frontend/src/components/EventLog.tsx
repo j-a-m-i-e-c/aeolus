@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { useDeviceStore } from "../store/device-store";
 import { Zap, Trash2, ChevronDown, ChevronUp } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
 
 export function EventLog() {
   const events = useDeviceStore((s) => s.automationEvents);
@@ -43,30 +42,24 @@ export function EventLog() {
             </div>
           ) : (
             <div className="divide-y divide-[#2A3441]">
-              <AnimatePresence initial={false}>
-                {events.map((event, i) => (
-                  <motion.div
-                    key={`${event.timestamp}-${i}`}
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: "auto" }}
-                    exit={{ opacity: 0, height: 0 }}
-                    transition={{ duration: 0.15 }}
-                    className="px-4 py-2 flex items-start gap-3 text-xs hover:bg-elevated/50"
-                  >
-                    <span className="text-[#6B7785] font-mono shrink-0 w-16">
-                      {new Date(event.timestamp).toLocaleTimeString()}
-                    </span>
-                    <Zap size={10} className="text-accent shrink-0 mt-0.5" />
-                    <div className="min-w-0">
-                      <span className="text-accent font-medium">{event.ruleName}</span>
-                      <span className="text-[#6B7785] mx-1">triggered by</span>
-                      <span className="text-primary font-mono">{event.topic}</span>
-                      <span className="text-[#6B7785] mx-1">→</span>
-                      <span className="text-[#9AA6B2] font-mono">{event.deviceId}</span>
-                    </div>
-                  </motion.div>
-                ))}
-              </AnimatePresence>
+              {events.map((event, i) => (
+                <div
+                  key={`${event.timestamp}-${i}`}
+                  className="px-4 py-2 flex items-start gap-3 text-xs hover:bg-elevated/50"
+                >
+                  <span className="text-[#6B7785] font-mono shrink-0 w-16">
+                    {new Date(event.timestamp).toLocaleTimeString()}
+                  </span>
+                  <Zap size={10} className="text-accent shrink-0 mt-0.5" />
+                  <div className="min-w-0">
+                    <span className="text-accent font-medium">{event.ruleName}</span>
+                    <span className="text-[#6B7785] mx-1">triggered by</span>
+                    <span className="text-primary font-mono">{event.topic}</span>
+                    <span className="text-[#6B7785] mx-1">→</span>
+                    <span className="text-[#9AA6B2] font-mono">{event.deviceId}</span>
+                  </div>
+                </div>
+              ))}
             </div>
           )}
         </div>
