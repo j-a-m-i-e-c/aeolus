@@ -2,30 +2,30 @@
 
 import { useEffect, useState } from "react";
 import { Layout } from "./components/Layout";
-import { DeviceGrid } from "./components/DeviceGrid";
-import { SensorPanel } from "./components/SensorPanel";
-import { SystemHealth } from "./components/SystemHealth";
-import { MqttInspector } from "./components/MqttInspector";
-import { AutomationsPanel } from "./components/AutomationsPanel";
 import { DeviceDetail } from "./components/DeviceDetail";
-import { EventLog } from "./components/EventLog";
-import { TopicTree } from "./components/TopicTree";
 import { ToastContainer } from "./components/ToastContainer";
 import { CommandPalette } from "./components/CommandPalette";
+import { TabLayout } from "./components/TabLayout";
 import { AnimatePresence } from "framer-motion";
 import { connectWebSocket, disconnectWebSocket } from "./lib/ws-client";
 import { fetchDevices } from "./lib/api-client";
 import { useDeviceStore } from "./store/device-store";
+import { useDashboardStore } from "./store/dashboard-store";
 import type { Device } from "./store/device-store";
-import { LightingPage } from "./components/LightingPage";
-import { AutomationsPage } from "./components/AutomationsPage";
-import { SystemPage } from "./components/SystemPage";
 
 export default function App() {
   const setDevices = useDeviceStore((s) => s.setDevices);
-  const currentPage = useDeviceStore((s) => s.currentPage);
+  const activeTabId = useDashboardStore((s) => s.activeTabId);
+  const initialized = useDashboardStore((s) => s.initialized);
+  const initialize = useDashboardStore((s) => s.initialize);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
 
+  // Initialize Dashboard_Store on mount
+  useEffect(() => {
+    initialize();
+  }, [initialize]);
+
+  // Fetch devices and connect WebSocket
   useEffect(() => {
     fetchDevices()
       .then((data) => {
@@ -41,26 +41,24 @@ export default function App() {
     return () => { disconnectWebSocket(); };
   }, [setDevices]);
 
+  // Show loading state while Dashboard_Store is initializing
+  if (!initialized) {
+    return (
+      <Layout>
+        <div className="flex items-center justify-center h-full min-h-[60vh]">
+          <div className="text-[#6B7785] text-sm animate-pulse">Loading dashboard…</div>
+        </div>
+      </Layout>
+    );
+  }
+
   return (
     <Layout>
-      {currentPage === "lighting" ? (
-        <LightingPage />
-      ) : currentPage === "automations" ? (
-        <AutomationsPage />
-      ) : currentPage === "system" ? (
-        <SystemPage />
+      {activeTabId ? (
+        <TabLayout tabId={activeTabId} />
       ) : (
-        <div className="space-y-6">
-          <h1 className="text-2xl font-bold text-[#E6EDF3]">Dashboard</h1>
-          <SystemHealth />
-          <AutomationsPanel />
-          <SensorPanel />
-          <DeviceGrid onSelectDevice={setSelectedDeviceId} />
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <MqttInspector />
-            <TopicTree />
-          </div>
-          <EventLog />
+        <div className="flex items-center justify-center h-full min-h-[60vh]">
+          <div className="text-[#6B7785] text-sm">No tab selected</div>
         </div>
       )}
 
