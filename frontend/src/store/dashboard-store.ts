@@ -2,7 +2,9 @@
 
 import { create } from "zustand";
 import type { Tab, Pane, PaneConfig } from "../types/dashboard";
+import { DEFAULT_TABS, DEFAULT_PANES } from "../types/dashboard";
 import { PANE_REGISTRY } from "../lib/pane-registry";
+import { fetchLayout, saveLayout } from "../lib/api-client";
 
 interface DashboardState {
   tabs: Tab[];
@@ -175,11 +177,30 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
   // ---- Persistence (API integration added in task 5.2) ----
 
   initialize: async () => {
-    // Stub — task 5.2 will implement GET /api/layout + default layout seeding
-    set({ initialized: true });
+    try {
+      const layout = await fetchLayout();
+      if (!layout.tabs || layout.tabs.length === 0) {
+        // No saved layout — seed with defaults
+        set({ tabs: DEFAULT_TABS, panes: DEFAULT_PANES, activeTabId: DEFAULT_TABS[0]?.id ?? null, initialized: true });
+        try {
+          await saveLayout({ tabs: DEFAULT_TABS, panes: DEFAULT_PANES });
+        } catch (err) {
+          console.warn("[dashboard-store] Failed to persist default layout:", err);
+        }
+      } else {
+        // Populate state from saved layout
+        set({ tabs: layout.tabs, panes: layout.panes, activeTabId: layout.tabs[0]?.id ?? null, initialized: true });
+      }
+    } catch (err) {
+      console.warn("[dashboard-store] Failed to fetch layout, using defaults:", err);
+      set({ tabs: DEFAULT_TABS, panes: DEFAULT_PANES, activeTabId: DEFAULT_TABS[0]?.id ?? null, initialized: true });
+    }
   },
 
   persistLayout: () => {
-    // Stub — task 5.2 will implement PUT /api/layout
+    const { tabs, panes } = get();
+    saveLayout({ tabs, panes }).catch((err) => {
+      console.warn("[dashboard-store] Failed to persist layout:", err);
+    });
   },
 }));

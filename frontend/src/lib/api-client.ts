@@ -66,3 +66,18 @@ export async function startSimulator() {
 export async function stopSimulator() {
   return request<{ running: boolean }>("/api/simulator/stop", { method: "POST" });
 }
+
+// ---- Layout persistence ----
+
+import type { LayoutPayload } from "../types/dashboard";
+
+export async function fetchLayout(): Promise<LayoutPayload> {
+  return request<LayoutPayload>("/api/layout");
+}
+
+export async function saveLayout(payload: LayoutPayload): Promise<{ success: boolean }> {
+  return request<{ success: boolean }>("/api/layout", {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
