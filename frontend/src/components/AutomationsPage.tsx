@@ -23,6 +23,7 @@ interface AutomationRule {
 export function AutomationsPage() {
   const [rules, setRules] = useState<AutomationRule[]>([]);
   const [showForm, setShowForm] = useState(false);
+  const [showFileRules, setShowFileRules] = useState(true);
   const [form, setForm] = useState({
     name: "", triggerTopic: "", conditionType: "", conditionValue: "",
     actionType: "log", actionTarget: "", actionMessage: "",
@@ -77,13 +78,24 @@ export function AutomationsPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-[#E6EDF3]">Automations</h1>
-        <button
-          onClick={() => setShowForm(!showForm)}
-          className="flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-lg bg-primary/20 text-primary border border-primary/30 hover:bg-primary/30 transition-colors"
-        >
-          <Plus size={14} />
-          New Rule
-        </button>
+        <div className="flex items-center gap-3">
+          <label className="flex items-center gap-2 text-xs text-[#6B7785] cursor-pointer">
+            <input
+              type="checkbox"
+              checked={showFileRules}
+              onChange={(e) => setShowFileRules(e.target.checked)}
+              className="accent-primary"
+            />
+            Show code rules
+          </label>
+          <button
+            onClick={() => setShowForm(!showForm)}
+            className="flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-lg bg-primary/20 text-primary border border-primary/30 hover:bg-primary/30 transition-colors"
+          >
+            <Plus size={14} />
+            New Rule
+          </button>
+        </div>
       </div>
 
       {/* Create form */}
@@ -199,14 +211,17 @@ export function AutomationsPage() {
       </AnimatePresence>
 
       {/* Rules list */}
+      {(() => {
+        const filtered = showFileRules ? rules : rules.filter((r) => r.source === "ui");
+        return (
       <div className="space-y-2">
-        {rules.length === 0 ? (
+        {filtered.length === 0 ? (
           <div className="text-center py-12 text-[#6B7785]">
             <p className="text-lg">No automation rules</p>
             <p className="text-sm mt-1">Create your first rule to get started</p>
           </div>
         ) : (
-          rules.map((rule) => (
+          filtered.map((rule) => (
             <div
               key={rule.id}
               className={`flex items-center justify-between px-4 py-3 rounded-xl border transition-colors ${
@@ -255,6 +270,8 @@ export function AutomationsPage() {
           ))
         )}
       </div>
+        );
+      })()}
     </div>
   );
 }
