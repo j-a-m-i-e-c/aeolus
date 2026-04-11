@@ -233,6 +233,24 @@ export function createHueRoutes(): Router {
     }
   });
 
+  /** DELETE /api/hue/lights/:id — remove a light from the bridge */
+  router.delete("/lights/:id", async (req, res, next) => {
+    try {
+      const creds = loadCredentials();
+      if (!creds) throw new BadRequestError("Hue bridge not configured");
+
+      const lightId = req.params.id as string;
+      const response = await fetch(`http://${creds.bridgeIp}/api/${creds.apiKey}/lights/${lightId}`, {
+        method: "DELETE",
+      });
+      const result = await response.json();
+      logger.info({ lightId }, "Hue light deleted");
+      res.json({ success: true, result });
+    } catch (err) {
+      next(err);
+    }
+  });
+
   /** DELETE /api/hue/unpair — remove stored credentials */
   router.delete("/unpair", (_req, res) => {
     try {

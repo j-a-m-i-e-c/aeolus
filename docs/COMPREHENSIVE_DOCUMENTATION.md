@@ -340,6 +340,7 @@ The React dashboard provides a comprehensive developer-focused interface:
 | POST | `/api/hue/lights/search` | Start Zigbee scan for new unpaired lights |
 | GET | `/api/hue/lights/new` | Get lights found during last search |
 | GET | `/api/hue/lights` | List all Hue lights |
+| DELETE | `/api/hue/lights/:id` | Remove a light from the bridge |
 | POST | `/api/hue/lights/:id/state` | Control a light `{ on, bri, hue, sat }` |
 | DELETE | `/api/hue/unpair` | Remove stored Hue credentials |
 | GET | `/api/system` | Host system diagnostics (CPU, memory, disk, temp) |

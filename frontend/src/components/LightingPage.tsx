@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
-import { Lightbulb, Search, Link2, Unlink, RefreshCw, Sun, Palette, Info, Plus, Loader2 } from "lucide-react";
+import { Lightbulb, Search, Link2, Unlink, RefreshCw, Sun, Palette, Info, Plus, Loader2, Trash2, GripVertical } from "lucide-react";
 
 const API_URL = (import.meta as any).env?.VITE_API_URL || `http://${window.location.hostname}:3001`;
 
@@ -50,6 +50,7 @@ export function LightingPage() {
   const [loading, setLoading] = useState(true);
   const [scanning, setScanning] = useState(false);
   const [scanResult, setScanResult] = useState<{ lights: { id: string; name: string }[]; lastscan: string } | null>(null);
+  const [dragId, setDragId] = useState<string | null>(null);
 
   const fetchBridgeInfo = async () => {
     try {
@@ -157,6 +158,30 @@ export function LightingPage() {
       setScanning(false);
     }
   };
+
+  const deleteLight = async (lightId: string, lightName: string) => {
+    if (!confirm(`Remove "${lightName}" from the bridge? The bulb will need to be re-paired to use again.`)) return;
+    try {
+      await fetch(`${API_URL}/api/hue/lights/${lightId}`, { method: "DELETE" });
+      setLights((prev) => prev.filter((l) => l.id !== lightId));
+    } catch {}
+  };
+
+  const handleDragStart = (id: string) => setDragId(id);
+  const handleDragOver = (e: React.DragEvent, targetId: string) => {
+    e.preventDefault();
+    if (!dragId || dragId === targetId) return;
+    setLights((prev) => {
+      const fromIdx = prev.findIndex((l) => l.id === dragId);
+      const toIdx = prev.findIndex((l) => l.id === targetId);
+      if (fromIdx === -1 || toIdx === -1) return prev;
+      const next = [...prev];
+      const [moved] = next.splice(fromIdx, 1);
+      next.splice(toIdx, 0, moved);
+      return next;
+    });
+  };
+  const handleDragEnd = () => setDragId(null);
 
   useEffect(() => { fetchStatus(); }, [fetchStatus]);
 
@@ -318,14 +343,19 @@ export function LightingPage() {
               <div className="text-[10px] text-[#6B7785] uppercase">Firmware Update</div>
               <div className="flex items-center gap-2">
                 <span className={`text-xs font-mono ${
-                  bridgeInfo.update?.state === "noupdates" ? "text-[#22C55E]" : "text-[#F59E0B]"
+                  bridgeInfo.update?.state === "noupdates" ? "text-[#22C55E]" :
+                  bridgeInfo.update?.state === "transferring" ? "text-primary" :
+                  bridgeInfo.update?.state === "installing" ? "text-primary" :
+                  "text-[#F59E0B]"
                 }`}>
                   {bridgeInfo.update?.state === "noupdates" ? "Up to date" :
-                   bridgeInfo.update?.state === "allreadytoinstall" ? "Update available" :
-                   bridgeInfo.update?.state === "anyreadytoinstall" ? "Update available" :
+                   bridgeInfo.update?.state === "transferring" ? "Downloading update..." :
+                   bridgeInfo.update?.state === "installing" ? "Installing..." :
+                   bridgeInfo.update?.state === "allreadytoinstall" ? "Update ready" :
+                   bridgeInfo.update?.state === "anyreadytoinstall" ? "Update ready" :
                    bridgeInfo.update?.state || "Unknown"}
                 </span>
-                {bridgeInfo.update?.state !== "noupdates" && (
+                {bridgeInfo.update?.state && !["noupdates", "transferring", "installing"].includes(bridgeInfo.update.state) && (
                   <span className="text-[10px] text-[#6B7785]">Use the Hue app to install</span>
                 )}
               </div>
@@ -379,18 +409,34 @@ export function LightingPage() {
           {lights.map((light) => (
             <motion.div
               key={light.id}
-              className="bg-surface border border-[#2A3441] rounded-xl p-4 space-y-3"
+              draggable
+              onDragStart={() => handleDragStart(light.id)}
+              onDragOver={(e) => handleDragOver(e as unknown as React.DragEvent, light.id)}
+              onDragEnd={handleDragEnd}
+              className={`bg-surface border rounded-xl p-4 space-y-3 cursor-grab active:cursor-grabbing ${
+                dragId === light.id ? "border-primary/50 opacity-50" : "border-[#2A3441]"
+              }`}
               whileHover={{ y: -2, boxShadow: "0 4px 20px rgba(59, 164, 255, 0.08)" }}
               transition={{ duration: 0.2 }}
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
+                  <GripVertical size={12} className="text-[#6B7785]/50 flex-shrink-0" />
                   <Lightbulb size={16} className={light.on ? "text-[#F59E0B]" : "text-[#6B7785]"} />
                   <span className="text-sm font-medium text-[#E6EDF3]">{light.name}</span>
                 </div>
-                <span className={`text-[10px] px-1.5 py-0.5 rounded ${light.reachable ? "bg-[#22C55E]/20 text-[#22C55E]" : "bg-[#EF4444]/20 text-[#EF4444]"}`}>
-                  {light.reachable ? "online" : "offline"}
-                </span>
+                <div className="flex items-center gap-1.5">
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded ${light.reachable ? "bg-[#22C55E]/20 text-[#22C55E]" : "bg-[#EF4444]/20 text-[#EF4444]"}`}>
+                    {light.reachable ? "online" : "offline"}
+                  </span>
+                  <button
+                    onClick={() => deleteLight(light.id, light.name)}
+                    className="p-1 text-[#6B7785]/40 hover:text-[#EF4444] transition-colors"
+                    title="Remove light"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </div>
               </div>
 
               {/* Toggle */}
