@@ -9,6 +9,7 @@ import logger from "../logger.js";
 let db: Database | null = null;
 
 function initSchema(database: Database): void {
+  database.run("PRAGMA foreign_keys = ON;");
   database.run(`
     CREATE TABLE IF NOT EXISTS devices (
       id TEXT PRIMARY KEY,
@@ -31,6 +32,29 @@ function initSchema(database: Database): void {
       action_target TEXT NOT NULL,
       action_params TEXT NOT NULL DEFAULT '{}',
       enabled INTEGER NOT NULL DEFAULT 1,
+      created_at INTEGER NOT NULL
+    );
+  `);
+  database.run(`
+    CREATE TABLE IF NOT EXISTS tabs (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      icon TEXT NOT NULL DEFAULT 'layout',
+      "order" INTEGER NOT NULL,
+      pinned INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL
+    );
+  `);
+  database.run(`
+    CREATE TABLE IF NOT EXISTS panes (
+      id TEXT PRIMARY KEY,
+      tab_id TEXT NOT NULL REFERENCES tabs(id) ON DELETE CASCADE,
+      pane_type TEXT NOT NULL,
+      config TEXT NOT NULL DEFAULT '{}',
+      x INTEGER NOT NULL DEFAULT 0,
+      y INTEGER NOT NULL DEFAULT 0,
+      w INTEGER NOT NULL DEFAULT 6,
+      h INTEGER NOT NULL DEFAULT 4,
       created_at INTEGER NOT NULL
     );
   `);
