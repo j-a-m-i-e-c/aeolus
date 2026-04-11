@@ -18,7 +18,7 @@ import { createDeviceRoutes } from "./api/routes/device.routes.js";
 import { createStateRoutes } from "./api/routes/state.routes.js";
 import { createHealthRoutes } from "./api/routes/health.routes.js";
 import { createMqttRoutes } from "./api/routes/mqtt.routes.js";
-import { createAutomationRoutes } from "./api/routes/automation.routes.js";
+import { createAutomationRoutes, loadUiRules } from "./api/routes/automation.routes.js";
 import { requestLogger } from "./api/middleware/request-logger.js";
 import { errorHandler } from "./api/middleware/error-handler.js";
 import { DeviceSimulator } from "./simulator/device-simulator.js";
@@ -47,6 +47,9 @@ async function main(): Promise<void> {
   const engine = new AutomationEngine(eventBus);
   const automationsDir = path.resolve(process.cwd(), "automations");
   await engine.loadRulesFromDirectory(automationsDir);
+
+  // Load UI-created rules from database
+  loadUiRules(engine, db, registry);
 
   // 5. Integration Manager
   const integrationManager = new IntegrationManager(registry);
@@ -94,7 +97,7 @@ async function main(): Promise<void> {
   app.use("/api/state", createStateRoutes(registry));
   app.use("/api/health", createHealthRoutes(mqttService, registry, engine, startTime));
   app.use("/api/mqtt", createMqttRoutes(mqttService));
-  app.use("/api/automations", createAutomationRoutes(engine));
+  app.use("/api/automations", createAutomationRoutes(engine, db, registry));
   app.use("/api/simulator", createSimulatorRoutes(simulator));
   app.use("/api/hue", createHueRoutes());
 

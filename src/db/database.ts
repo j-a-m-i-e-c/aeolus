@@ -20,6 +20,20 @@ function initSchema(database: Database): void {
       last_seen INTEGER NOT NULL
     );
   `);
+  database.run(`
+    CREATE TABLE IF NOT EXISTS automation_rules (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      trigger_topic TEXT NOT NULL,
+      condition_type TEXT DEFAULT NULL,
+      condition_value TEXT DEFAULT NULL,
+      action_type TEXT NOT NULL,
+      action_target TEXT NOT NULL,
+      action_params TEXT NOT NULL DEFAULT '{}',
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at INTEGER NOT NULL
+    );
+  `);
 }
 
 function saveToFile(database: Database): void {

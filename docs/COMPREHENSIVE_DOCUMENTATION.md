@@ -341,3 +341,12 @@ Enable via `SIMULATOR=true` env var (auto-starts on boot) or toggle from the sid
 **Last Updated:** March 31, 2026
 **Version:** 0.2.0
 **Status:** MVP Development
+
+## Future Enhancements
+
+- **Visual Flow Editor** — Drag-and-drop canvas for building automations visually (Node-RED style). Nodes for triggers, conditions, and actions connected by wires. Would generate the same underlying rule structure as the form-based editor and TypeScript DSL.
+- **State History & Charts** — Store last N values per device in SQLite, display trend charts in the device detail modal.
+- **Device Offline Detection** — Mark devices as offline if no message received within a configurable timeout.
+- **Multi-Node Clustering** — Run Aeolus across multiple Raspberry Pis with shared state.
+- **Mobile App** — React Native companion app for quick device control.
+- **Plugin Marketplace** — Community-contributed integrations installable from the dashboard.

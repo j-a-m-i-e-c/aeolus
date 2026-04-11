@@ -18,6 +18,7 @@ import { fetchDevices } from "./lib/api-client";
 import { useDeviceStore } from "./store/device-store";
 import type { Device } from "./store/device-store";
 import { LightingPage } from "./components/LightingPage";
+import { AutomationsPage } from "./components/AutomationsPage";
 
 export default function App() {
   const setDevices = useDeviceStore((s) => s.setDevices);
@@ -43,6 +44,8 @@ export default function App() {
     <Layout>
       {currentPage === "lighting" ? (
         <LightingPage />
+      ) : currentPage === "automations" ? (
+        <AutomationsPage />
       ) : (
         <div className="space-y-6">
           <h1 className="text-2xl font-bold text-[#E6EDF3]">Dashboard</h1>
