@@ -42,6 +42,41 @@ export function createHueRoutes(): Router {
     });
   });
 
+  /** GET /api/hue/bridge — bridge firmware and update info */
+  router.get("/bridge", async (_req, res, next) => {
+    try {
+      const creds = loadCredentials();
+      if (!creds) {
+        res.json({ configured: false });
+        return;
+      }
+
+      const response = await fetch(`http://${creds.bridgeIp}/api/${creds.apiKey}/config`);
+      if (!response.ok) throw new Error(`Bridge returned ${response.status}`);
+      const cfg = await response.json() as Record<string, unknown>;
+
+      const swupdate2 = cfg.swupdate2 as Record<string, unknown> | undefined;
+
+      res.json({
+        configured: true,
+        name: cfg.name,
+        modelid: cfg.modelid,
+        bridgeid: cfg.bridgeid,
+        apiversion: cfg.apiversion,
+        swversion: cfg.swversion,
+        mac: cfg.mac,
+        zigbeechannel: cfg.zigbeechannel,
+        update: swupdate2 ? {
+          state: swupdate2.state,           // "noupdates" | "allreadytoinstall" | "anyreadytoinstall"
+          lastchange: swupdate2.lastchange,
+          autoinstall: (swupdate2.autoinstall as Record<string, unknown>)?.on ?? false,
+        } : null,
+      });
+    } catch (err) {
+      next(err);
+    }
+  });
+
   /** GET /api/hue/discover — find Hue bridges on the network */
   router.get("/discover", async (_req, res, next) => {
     try {

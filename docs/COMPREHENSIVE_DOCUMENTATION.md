@@ -159,6 +159,19 @@ Reference implementation of the Integration interface.
 - Supports toggle and brightness actions
 - Requires pre-configured bridge IP and API key
 
+### Hue Bridge Management (`src/api/routes/hue.routes.ts`)
+
+Self-service Hue setup from the dashboard — no config files needed.
+
+- Bridge discovery via meethue.com cloud endpoint
+- Button-press pairing flow (physical security)
+- Credential persistence to JSON file in data directory
+- Light listing and state control (on/off, brightness, hue, saturation)
+- Bridge info endpoint exposing firmware version, Zigbee channel, and update status
+- Unpair endpoint to remove stored credentials
+
+**Firmware Updates:** Aeolus displays the bridge firmware version and update availability on the Lighting page but does not trigger firmware updates. Bridge and bulb firmware updates should be performed through the official Philips Hue app, which handles rollback and recovery if an update fails. The bridge API's `swupdate2` object is read-only in Aeolus — we surface the status but leave the update lifecycle to Philips.
+
 ## API Reference
 
 ### REST Endpoints
@@ -319,6 +332,14 @@ The React dashboard provides a comprehensive developer-focused interface:
 | GET | `/api/simulator` | Simulator running status |
 | POST | `/api/simulator/start` | Start device simulator |
 | POST | `/api/simulator/stop` | Stop device simulator |
+| GET | `/api/hue/status` | Hue bridge configuration status |
+| GET | `/api/hue/bridge` | Bridge firmware, model, Zigbee channel, update status |
+| GET | `/api/hue/discover` | Discover Hue bridges on the network |
+| POST | `/api/hue/pair` | Pair with a Hue bridge `{ bridgeIp }` |
+| GET | `/api/hue/lights` | List all Hue lights |
+| POST | `/api/hue/lights/:id/state` | Control a light `{ on, bri, hue, sat }` |
+| DELETE | `/api/hue/unpair` | Remove stored Hue credentials |
+| GET | `/api/system` | Host system diagnostics (CPU, memory, disk, temp) |
 
 ## Device Simulator
 

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
-import { Lightbulb, Search, Link2, Unlink, RefreshCw, Sun, Palette } from "lucide-react";
+import { Lightbulb, Search, Link2, Unlink, RefreshCw, Sun, Palette, Info } from "lucide-react";
 
 const API_URL = (import.meta as any).env?.VITE_API_URL || `http://${window.location.hostname}:3001`;
 
@@ -23,21 +23,49 @@ interface Bridge {
   port: number;
 }
 
+interface BridgeInfo {
+  configured: boolean;
+  name?: string;
+  modelid?: string;
+  bridgeid?: string;
+  apiversion?: string;
+  swversion?: string;
+  mac?: string;
+  zigbeechannel?: number;
+  update?: {
+    state: string;
+    lastchange: string;
+    autoinstall: boolean;
+  } | null;
+}
+
 export function LightingPage() {
   const [status, setStatus] = useState<{ configured: boolean; bridgeIp: string | null }>({ configured: false, bridgeIp: null });
   const [lights, setLights] = useState<HueLight[]>([]);
   const [bridges, setBridges] = useState<Bridge[]>([]);
+  const [bridgeInfo, setBridgeInfo] = useState<BridgeInfo | null>(null);
   const [pairing, setPairing] = useState(false);
   const [pairingIp, setPairingIp] = useState("");
   const [pairingMsg, setPairingMsg] = useState("");
   const [loading, setLoading] = useState(true);
+
+  const fetchBridgeInfo = async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/hue/bridge`);
+      const data = await res.json();
+      if (data.configured) setBridgeInfo(data);
+    } catch {}
+  };
 
   const fetchStatus = useCallback(async () => {
     try {
       const res = await fetch(`${API_URL}/api/hue/status`);
       const data = await res.json();
       setStatus(data);
-      if (data.configured) fetchLights();
+      if (data.configured) {
+        fetchLights();
+        fetchBridgeInfo();
+      }
     } catch {}
     setLoading(false);
   }, []);
@@ -221,6 +249,58 @@ export function LightingPage() {
           </button>
         </div>
       </div>
+
+      {/* Bridge info card */}
+      {bridgeInfo && (
+        <div className="bg-surface border border-[#2A3441] rounded-xl p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <Info size={14} className="text-primary" />
+            <span className="text-sm font-semibold text-[#9AA6B2] uppercase tracking-wider">Bridge</span>
+          </div>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
+            <div>
+              <div className="text-[10px] text-[#6B7785] uppercase">Name</div>
+              <div className="text-[#E6EDF3] font-mono text-xs">{bridgeInfo.name || "—"}</div>
+            </div>
+            <div>
+              <div className="text-[10px] text-[#6B7785] uppercase">Model</div>
+              <div className="text-[#E6EDF3] font-mono text-xs">{bridgeInfo.modelid || "—"}</div>
+            </div>
+            <div>
+              <div className="text-[10px] text-[#6B7785] uppercase">Firmware</div>
+              <div className="text-[#E6EDF3] font-mono text-xs">{bridgeInfo.swversion || "—"}</div>
+            </div>
+            <div>
+              <div className="text-[10px] text-[#6B7785] uppercase">API Version</div>
+              <div className="text-[#E6EDF3] font-mono text-xs">{bridgeInfo.apiversion || "—"}</div>
+            </div>
+            <div>
+              <div className="text-[10px] text-[#6B7785] uppercase">Zigbee Channel</div>
+              <div className="text-[#E6EDF3] font-mono text-xs">{bridgeInfo.zigbeechannel ?? "—"}</div>
+            </div>
+            <div>
+              <div className="text-[10px] text-[#6B7785] uppercase">MAC</div>
+              <div className="text-[#E6EDF3] font-mono text-xs">{bridgeInfo.mac || "—"}</div>
+            </div>
+            <div className="col-span-2">
+              <div className="text-[10px] text-[#6B7785] uppercase">Firmware Update</div>
+              <div className="flex items-center gap-2">
+                <span className={`text-xs font-mono ${
+                  bridgeInfo.update?.state === "noupdates" ? "text-[#22C55E]" : "text-[#F59E0B]"
+                }`}>
+                  {bridgeInfo.update?.state === "noupdates" ? "Up to date" :
+                   bridgeInfo.update?.state === "allreadytoinstall" ? "Update available" :
+                   bridgeInfo.update?.state === "anyreadytoinstall" ? "Update available" :
+                   bridgeInfo.update?.state || "Unknown"}
+                </span>
+                {bridgeInfo.update?.state !== "noupdates" && (
+                  <span className="text-[10px] text-[#6B7785]">Use the Hue app to install</span>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {lights.length === 0 ? (
         <div className="text-center py-12 text-[#6B7785]">
