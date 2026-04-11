@@ -60,7 +60,12 @@ aeolus/
 │   │   ├── routes/
 │   │   │   ├── device.routes.ts      # GET /api/devices, POST action
 │   │   │   ├── state.routes.ts       # GET /api/state
-│   │   │   └── health.routes.ts      # GET /api/health
+│   │   │   ├── health.routes.ts      # GET /api/health
+│   │   │   ├── mqtt.routes.ts        # POST /api/mqtt/publish
+│   │   │   ├── automation.routes.ts  # CRUD for UI-created automation rules
+│   │   │   ├── simulator.routes.ts   # Start/stop device simulator
+│   │   │   ├── hue.routes.ts         # Hue bridge management + light control
+│   │   │   └── system.routes.ts      # Host system diagnostics (CPU, mem, disk, temp)
 │   │   └── middleware/
 │   │       ├── error-handler.ts      # AppError hierarchy + global handler
 │   │       ├── request-logger.ts     # pino HTTP request logging
@@ -82,10 +87,12 @@ aeolus/
 │   │   ├── integration-manager.ts    # Lifecycle management
 │   │   └── hue/
 │   │       └── hue-integration.ts    # Philips Hue bridge integration
+│   ├── simulator/
+│   │   └── device-simulator.ts       # Fake device data generator (7 devices)
 │   ├── websocket/
 │   │   └── ws-server.ts              # WebSocket server
 │   ├── db/
-│   │   └── database.ts              # sql.js setup + schema
+│   │   └── database.ts              # sql.js setup + schema (devices + automation_rules)
 │   ├── types/
 │   │   └── sql.js.d.ts              # Type declarations for sql.js
 │   ├── config.ts                     # Environment variable loading
@@ -96,20 +103,34 @@ aeolus/
 │       ├── components/
 │       │   ├── AeolusLogo.tsx        # Animated SVG logo
 │       │   ├── Layout.tsx            # Sidebar + main content
-│       │   ├── Sidebar.tsx           # Navigation + system status
+│       │   ├── Sidebar.tsx           # Navigation + system status + simulator toggle
 │       │   ├── DeviceGrid.tsx        # Responsive device card grid
 │       │   ├── DeviceCard.tsx        # Individual device with controls
+│       │   ├── DeviceDetail.tsx      # Device detail modal with full state view
 │       │   ├── SensorPanel.tsx       # Live sensor data display
-│       │   └── SystemHealth.tsx      # Health status display
+│       │   ├── Sparkline.tsx         # SVG sparkline chart component
+│       │   ├── SystemHealth.tsx      # Health status display
+│       │   ├── MqttInspector.tsx     # Real-time MQTT message feed + publish form
+│       │   ├── TopicTree.tsx         # Hierarchical MQTT topic tree
+│       │   ├── EventLog.tsx          # Automation fire event log
+│       │   ├── AutomationsPanel.tsx  # Dashboard automations summary
+│       │   ├── AutomationsPage.tsx   # Full automation rule editor (CRUD)
+│       │   ├── LightingPage.tsx      # Hue bridge setup + light control + colour picker
+│       │   ├── SystemPage.tsx        # Host diagnostics (CPU, memory, disk, temp, network)
+│       │   ├── CommandPalette.tsx    # Ctrl+K command palette
+│       │   └── ToastContainer.tsx    # Animated toast notifications
 │       ├── store/
-│       │   └── device-store.ts       # Zustand device state
+│       │   └── device-store.ts       # Zustand device state + page routing
 │       └── lib/
-│           ├── api-client.ts         # REST API client
-│           └── ws-client.ts          # WebSocket client
+│           ├── api-client.ts         # REST API client (dynamic hostname)
+│           └── ws-client.ts          # WebSocket client with auto-reconnect
 ├── automations/                      # User-defined rule files
 │   └── example.ts                    # Sample automation
 ├── mosquitto/
 │   └── mosquitto.conf                # Broker configuration
+├── scripts/
+│   ├── setup-pi.sh                   # One-line Raspberry Pi install script
+│   └── deploy-pi.sh                  # Pull + rebuild deploy script
 ├── docker-compose.yml
 ├── Dockerfile                        # Backend multi-stage build
 └── frontend/Dockerfile               # Frontend build + nginx
@@ -157,7 +178,7 @@ Reference implementation of the Integration interface.
 
 - Discovers lights via local Hue bridge API
 - Supports toggle and brightness actions
-- Requires pre-configured bridge IP and API key
+- Used when bridge credentials are provided via environment variables (legacy path)
 
 ### Hue Bridge Management (`src/api/routes/hue.routes.ts`)
 
@@ -256,6 +277,19 @@ CREATE TABLE devices (
   integration TEXT NOT NULL DEFAULT 'mqtt',
   last_seen INTEGER NOT NULL
 );
+
+CREATE TABLE automation_rules (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  trigger_topic TEXT NOT NULL,
+  condition_type TEXT,
+  condition_value TEXT,
+  action_type TEXT NOT NULL,
+  action_target TEXT,
+  action_params TEXT NOT NULL DEFAULT '{}',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at INTEGER NOT NULL
+);
 ```
 
 ## Environment Variables
@@ -265,8 +299,6 @@ CREATE TABLE devices (
 | MQTT_BROKER_URL | mqtt://localhost:1883 | Mosquitto broker URL |
 | MQTT_TOPICS | sensor/#,switch/#,motion/#,light/# | Comma-separated topic patterns (quote in .env) |
 | PORT | 3001 | Backend API port |
-| HUE_BRIDGE_IP | (empty) | Philips Hue bridge IP |
-| HUE_API_KEY | (empty) | Hue bridge API key |
 | DB_PATH | ./data/aeolus.db | SQLite database file path |
 | LOG_LEVEL | debug | pino log level |
 | NODE_ENV | development | Environment |
@@ -309,8 +341,9 @@ Backend waits for Mosquitto healthcheck before starting. Named volumes persist b
 
 ## Dashboard Features
 
-The React dashboard provides a comprehensive developer-focused interface:
+The React dashboard provides a comprehensive developer-focused interface with page-based navigation via the sidebar.
 
+### Dashboard Page
 - **Device Grid** — Cards grouped by room (parsed from MQTT topic), collapsible sections, click to open detail modal
 - **Device Detail Modal** — Full state view, capabilities, toggle/brightness controls, last seen timestamp
 - **Sensor Panel** — Live sensor values with sparkline SVG charts showing last 20 readings
@@ -319,9 +352,35 @@ The React dashboard provides a comprehensive developer-focused interface:
 - **MQTT Inspector** — Real-time message feed with topic filter, clear button, and inline publish form
 - **MQTT Topic Tree** — Hierarchical tree view of all topics seen, expandable with last payload values
 - **Event Log** — Automation rule fire events with rule name, trigger topic, and device ID
+
+### Lighting Page
+- **Bridge Setup Wizard** — Auto-discover bridges via meethue.com or enter IP manually, button-press pairing flow
+- **Bridge Info Card** — Firmware version, model, API version, Zigbee channel, MAC address, update status
+- **Light Grid** — Cards with toggle, brightness slider (debounced — sends on release only), and online/offline status
+- **Colour Picker** — Palette icon on colour-capable lights opens a swatch picker with 10 preset colours (HSV mapped to Hue API)
+- **Add Lights** — Triggers Zigbee scan for new unpaired bulbs, shows results after ~40s
+- **Delete Lights** — Remove individual lights from the bridge with confirmation
+- **Drag-to-Reorder** — Rearrange light cards via HTML5 drag-and-drop
+
+### Automations Page
+- **Rule Editor** — Create automation rules with when/if/then form (trigger topic, condition, action)
+- **Live DSL Preview** — Shows the equivalent TypeScript DSL as you build the rule
+- **Rule Listing** — Enable/disable/delete UI-created rules, source badges (file vs ui)
+- **Code Rules Toggle** — Checkbox to show/hide rules loaded from TypeScript files
+
+### System Page
+- **Host Info** — Hostname, platform, architecture, Node.js version, uptime
+- **CPU** — Model, core count, 1m/5m/15m load averages
+- **Temperature** — CPU temperature with colour-coded status (Pi thermal zone)
+- **Memory** — Used/total with percentage bar and colour coding
+- **Disk** — Used/total with percentage bar
+- **Network** — Interface names and IP addresses
+
+### Global Features
 - **Toast Notifications** — Animated alerts in bottom-right when automations fire (auto-dismiss 4s)
 - **Command Palette** — Ctrl+K to search devices or publish MQTT messages via keyboard
 - **Simulator Toggle** — Start/stop device simulator from the sidebar without restarting backend
+- **Dynamic API URLs** — Frontend uses `window.location.hostname` so the dashboard works from any browser on the network
 - **Animated Logo** — SVG Aeolus logo with framer-motion wind swirl animation
 
 ## Additional API Endpoints
@@ -363,8 +422,8 @@ Enable via `SIMULATOR=true` env var (auto-starts on boot) or toggle from the sid
 
 ---
 
-**Last Updated:** March 31, 2026
-**Version:** 0.2.0
+**Last Updated:** April 11, 2026
+**Version:** 0.3.0
 **Status:** MVP Development
 
 ## Future Enhancements

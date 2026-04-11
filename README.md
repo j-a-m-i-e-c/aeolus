@@ -152,14 +152,14 @@ Place rule files in the `automations/` directory. They're loaded automatically o
 
 ## Philips Hue Integration
 
-Set your bridge IP and API key in `.env`:
+Connect your Hue bridge directly from the dashboard — no config files needed.
 
-```bash
-HUE_BRIDGE_IP=192.168.1.100
-HUE_API_KEY=your-hue-api-key
-```
+1. Go to the **Lighting** tab in the sidebar
+2. Click **Discover Bridges** (or enter the bridge IP manually)
+3. Press the physical button on your Hue bridge
+4. Click **Pair**
 
-Lights are discovered automatically and appear on the dashboard with toggle and brightness controls.
+Lights appear automatically with toggle, brightness, and colour controls. Bridge firmware version and update status are shown in an info card. Credentials are stored in the data directory and persist across restarts.
 
 ## Running Tests
 
@@ -191,7 +191,7 @@ sudo systemctl enable docker
 git clone https://github.com/j-a-m-i-e-c/aeolus.git
 cd aeolus
 cp .env.example .env
-# Edit .env for your setup (Hue bridge IP, etc.)
+# Edit .env if needed (MQTT topics, log level, etc.)
 
 # 3. Build and start
 docker compose build
