@@ -25,6 +25,7 @@ import { DeviceSimulator } from "./simulator/device-simulator.js";
 import { createSimulatorRoutes } from "./api/routes/simulator.routes.js";
 import { createHueRoutes } from "./api/routes/hue.routes.js";
 import { createSystemRoutes } from "./api/routes/system.routes.js";
+import { createLayoutRoutes } from "./api/routes/layout.routes.js";
 
 const startTime = Date.now();
 
@@ -100,6 +101,7 @@ async function main(): Promise<void> {
   app.use("/api/simulator", createSimulatorRoutes(simulator));
   app.use("/api/hue", createHueRoutes());
   app.use("/api/system", createSystemRoutes());
+  app.use("/api/layout", createLayoutRoutes(db));
 
   // Error handler (must be last)
   app.use(errorHandler);
