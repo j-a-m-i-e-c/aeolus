@@ -7,11 +7,13 @@ A local-first, developer-centric IoT automation platform. Aeolus unifies communi
 ## What It Does
 
 - Ingests MQTT messages from IoT devices and sensors
-- Maintains a persistent device registry with real-time state
-- Executes code-driven automations using a TypeScript DSL (`when/if/then`)
+- Maintains a persistent device registry with real-time state (SQLite)
+- Executes automations using a TypeScript DSL (`when/if/then`) or the dashboard editor
 - Exposes a REST API and WebSocket server for device control
-- Provides a React dashboard for monitoring and control
-- Integrates with Philips Hue lights via the local bridge API
+- Provides a React dashboard with device monitoring, MQTT inspector, automation editor, and system diagnostics
+- Integrates with Philips Hue lights — self-service bridge pairing from the dashboard
+- Runs on Raspberry Pi with one-line Docker install and auto-start on boot
+- Built-in device simulator for development without hardware
 
 ## Tech Stack
 
@@ -41,81 +43,57 @@ cd frontend && npm install && cd ..
 
 ```bash
 cp .env.example .env
-# Edit .env if needed (defaults work for local dev)
+# Defaults work for local dev — edit if needed
 ```
 
-### 3. Start Mosquitto broker
+### 3. Start with Docker Compose (recommended)
 
 ```bash
+docker compose up
+```
+
+This starts Mosquitto (port 1883), the backend (port 3001), and the frontend (port 3000).
+
+### 4. Or start services individually
+
+```bash
+# Start Mosquitto
 docker run -d --name aeolus-mosquitto -p 1883:1883 \
   -v "$(pwd)/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf" \
   eclipse-mosquitto:2
-```
 
-### 4. Start the backend
-
-```bash
+# Start backend
 npx tsx src/index.ts
+
+# Start frontend
+cd frontend && npm run dev
 ```
 
-### 5. Start the frontend
-
-```bash
-cd frontend
-npm run dev
-```
-
-### 6. Open the dashboard
+### 5. Open the dashboard
 
 Visit http://localhost:3000
 
-### 7. Test with MQTT messages
+### 6. Test with MQTT messages
 
 ```bash
-# Publish a sensor reading
 docker exec aeolus-mosquitto mosquitto_pub -t "sensor/kitchen/temp" -m "22.5"
-
-# Publish a switch state
 docker exec aeolus-mosquitto mosquitto_pub -t "switch/bedroom" -m '{"on":true}'
-
-# Publish a light state
 docker exec aeolus-mosquitto mosquitto_pub -t "light/living-room" -m '{"on":true,"brightness":200}'
 ```
 
-Devices appear on the dashboard in real-time via WebSocket.
+Or use the built-in simulator — toggle it from the sidebar or set `SIMULATOR=true` in `.env`.
 
-## Docker Compose (Full Stack)
+## Dashboard
 
-```bash
-docker-compose up
-```
+The dashboard has four pages accessible from the sidebar:
 
-Starts Mosquitto (port 1883), backend (port 3001), and frontend (port 3000).
+**Dashboard** — Device grid grouped by room, sensor panel with sparkline charts, MQTT inspector with publish form, topic tree, event log, system health, and command palette (Ctrl+K).
 
-## Project Structure
+**Lighting** — Philips Hue bridge setup wizard, light grid with toggle/brightness/colour controls, bridge info card with firmware status, add/delete/reorder lights.
 
-```
-aeolus/
-├── src/                          # Backend
-│   ├── api/routes/               # REST endpoints
-│   ├── api/middleware/            # Error handling, logging, validation
-│   ├── core/                     # Device registry, types, event bus
-│   ├── mqtt/                     # MQTT connection and topic parsing
-│   ├── automations/              # DSL and rule engine
-│   ├── integrations/             # Plugin interface + Hue integration
-│   ├── websocket/                # WebSocket server
-│   ├── db/                       # SQLite database
-│   └── index.ts                  # Entry point
-├── frontend/                     # React + Vite dashboard
-│   └── src/
-│       ├── components/           # UI components
-│       ├── store/                # Zustand state
-│       └── lib/                  # API client, WebSocket client
-├── automations/                  # User-defined automation rules
-├── mosquitto/                    # Broker configuration
-├── docker-compose.yml
-└── docs/
-```
+**Automations** — Create automation rules with a when/if/then form editor, live DSL preview, enable/disable/delete rules, toggle visibility of code-based rules.
+
+**System** — Host diagnostics including CPU load, temperature, memory, disk, and network interfaces. Designed for Raspberry Pi monitoring.
 
 ## API Endpoints
 
@@ -126,11 +104,25 @@ aeolus/
 | POST | `/api/devices/:id/action` | Execute action on device |
 | GET | `/api/state` | All devices keyed by ID |
 | GET | `/api/health` | System health status |
-| GET | `/api/automations` | List active automation rules |
-| POST | `/api/mqtt/publish` | Publish MQTT message `{ topic, payload }` |
-| GET | `/api/simulator` | Simulator running status |
-| POST | `/api/simulator/start` | Start device simulator |
-| POST | `/api/simulator/stop` | Stop device simulator |
+| GET | `/api/automations` | List automation rules |
+| POST | `/api/automations` | Create a UI automation rule |
+| DELETE | `/api/automations/:id` | Delete a UI automation rule |
+| PATCH | `/api/automations/:id/toggle` | Enable/disable a rule |
+| POST | `/api/mqtt/publish` | Publish MQTT message |
+| GET | `/api/simulator` | Simulator status |
+| POST | `/api/simulator/start` | Start simulator |
+| POST | `/api/simulator/stop` | Stop simulator |
+| GET | `/api/hue/status` | Hue bridge config status |
+| GET | `/api/hue/bridge` | Bridge firmware and info |
+| GET | `/api/hue/discover` | Discover bridges on network |
+| POST | `/api/hue/pair` | Pair with a bridge |
+| GET | `/api/hue/lights` | List all Hue lights |
+| POST | `/api/hue/lights/search` | Scan for new Zigbee lights |
+| GET | `/api/hue/lights/new` | Get newly found lights |
+| POST | `/api/hue/lights/:id/state` | Control a light |
+| DELETE | `/api/hue/lights/:id` | Remove a light |
+| DELETE | `/api/hue/unpair` | Disconnect bridge |
+| GET | `/api/system` | Host system diagnostics |
 | WS | `/ws` | Real-time state updates |
 
 ## Automation DSL
@@ -148,24 +140,18 @@ export default when("motion/living-room")
   }, "Night motion → light on");
 ```
 
-Place rule files in the `automations/` directory. They're loaded automatically on startup.
+Place rule files in the `automations/` directory. They're loaded automatically on startup. Rules can also be created from the Automations page in the dashboard.
 
 ## Philips Hue Integration
 
 Connect your Hue bridge directly from the dashboard — no config files needed.
 
-1. Go to the **Lighting** tab in the sidebar
-2. Click **Discover Bridges** (or enter the bridge IP manually)
+1. Go to the Lighting tab in the sidebar
+2. Click Discover Bridges (or enter the bridge IP manually)
 3. Press the physical button on your Hue bridge
-4. Click **Pair**
+4. Click Pair
 
-Lights appear automatically with toggle, brightness, and colour controls. Bridge firmware version and update status are shown in an info card. Credentials are stored in the data directory and persist across restarts.
-
-## Running Tests
-
-```bash
-npm test
-```
+Lights appear with toggle, brightness slider, and colour picker (for colour-capable bulbs). Bridge firmware version and update status are shown in an info card. You can add new lights via Zigbee scan, delete lights, and drag to reorder.
 
 ## Raspberry Pi Deployment
 
@@ -182,44 +168,47 @@ This installs Docker, clones Aeolus, builds the containers, and starts everythin
 ### Manual Setup
 
 ```bash
-# 1. Install Docker
+# Install Docker
 curl -fsSL https://get.docker.com | sh
 sudo usermod -aG docker $USER
 sudo systemctl enable docker
 
-# 2. Clone and configure
+# Clone and configure
 git clone https://github.com/j-a-m-i-e-c/aeolus.git
 cd aeolus
 cp .env.example .env
-# Edit .env if needed (MQTT topics, log level, etc.)
 
-# 3. Build and start
+# Build and start
 docker compose build
 docker compose up -d
 ```
 
 ### Access the Dashboard
 
-Once running, open a browser on any device on the same network:
+Open a browser on any device on the same network:
 
 ```
 http://<pi-ip-address>:3000
 ```
 
-Find your Pi's IP with `hostname -I` on the Pi.
-
-### Management Commands
+### Management
 
 ```bash
 docker compose logs -f        # View live logs
 docker compose restart        # Restart all services
 docker compose down           # Stop everything
-docker compose up -d --build  # Rebuild and restart after updates
+docker compose up -d --build  # Rebuild after updates
 ```
 
-### Auto-Start on Boot
+## Running Tests
 
-Docker is enabled as a systemd service during setup. All containers use `restart: unless-stopped`, so they automatically restart when the Pi boots or if a container crashes.
+```bash
+npm test
+```
+
+## Documentation
+
+See `docs/COMPREHENSIVE_DOCUMENTATION.md` for full technical documentation including architecture, data models, WebSocket protocol, error handling, and design decisions.
 
 ## License
 
