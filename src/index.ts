@@ -78,13 +78,11 @@ async function main(): Promise<void> {
     simulator.start();
   }
 
-  // 8. Connect MQTT (skip if simulator is running)
-  if (!config.simulator) {
-    try {
-      await mqttService.connect();
-    } catch (err) {
-      logger.error({ error: (err as Error).message }, "MQTT connection failed — running without MQTT");
-    }
+  // 8. Connect MQTT (always attempt — works alongside simulator)
+  try {
+    await mqttService.connect();
+  } catch (err) {
+    logger.error({ error: (err as Error).message }, "MQTT connection failed — running without MQTT");
   }
 
   // 8. Express app
