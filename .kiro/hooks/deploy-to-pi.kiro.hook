@@ -1,0 +1,16 @@
+{
+  "enabled": true,
+  "name": "Deploy to Pi",
+  "description": "After a git push to the aeolus repo, SSH into the Raspberry Pi and run the deploy script to pull and rebuild",
+  "version": "1",
+  "when": {
+    "type": "postToolUse",
+    "toolTypes": [
+      "shell"
+    ]
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "If this was a successful git push command in the aeolus folder, ask the user if they want to deploy to the Raspberry Pi. If they say yes, run: ssh aeolus@raspberrypi1 '~/aeolus/scripts/deploy-pi.sh' — Note: this requires SSH key auth to be set up (ssh-copy-id aeolus@raspberrypi1)."
+  }
+}

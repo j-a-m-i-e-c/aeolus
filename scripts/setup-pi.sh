@@ -24,6 +24,14 @@ sudo systemctl enable docker
 sudo systemctl start docker
 echo "✓ Docker enabled on boot"
 
+# 2b. Stop native Mosquitto if running (Docker will provide its own)
+if systemctl is-active --quiet mosquitto 2>/dev/null; then
+  echo "⚙️  Stopping native Mosquitto (Docker will provide MQTT broker)..."
+  sudo systemctl stop mosquitto
+  sudo systemctl disable mosquitto
+  echo "✓ Native Mosquitto stopped and disabled"
+fi
+
 # 3. Install Docker Compose plugin if not present
 if ! docker compose version &> /dev/null; then
   echo "📦 Installing Docker Compose..."
