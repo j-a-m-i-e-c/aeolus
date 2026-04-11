@@ -9,6 +9,7 @@ import { useDashboardStore } from "../store/dashboard-store";
 import { getPaneEntry } from "../lib/pane-registry";
 import { Settings, X, Plus } from "lucide-react";
 import { PanePicker } from "./PanePicker";
+import { PaneConfigPanel } from "./PaneConfigPanel";
 
 interface TabLayoutProps {
   tabId: string;
@@ -22,6 +23,9 @@ export function TabLayout({ tabId }: TabLayoutProps) {
 
   // PanePicker visibility
   const [showPicker, setShowPicker] = useState(false);
+
+  // PaneConfigPanel state — tracks which pane is being configured
+  const [configPaneId, setConfigPaneId] = useState<string | null>(null);
 
   // Track container width for ResponsiveGridLayout
   const containerRef = useRef<HTMLDivElement>(null);
@@ -74,6 +78,8 @@ export function TabLayout({ tabId }: TabLayoutProps) {
     [tabPanes, updatePanePosition, updatePaneSize],
   );
 
+  const configPane = configPaneId ? tabPanes.find((p) => p.id === configPaneId) : null;
+
   return (
     <div ref={containerRef} className="w-full">
       {/* Header area with Add Pane button */}
@@ -122,6 +128,7 @@ export function TabLayout({ tabId }: TabLayoutProps) {
                     className="p-1 rounded text-[#6B7785] hover:text-[#9AA6B2] hover:bg-elevated transition-colors"
                     title="Pane settings"
                     onMouseDown={(e) => e.stopPropagation()}
+                    onClick={() => setConfigPaneId(pane.id)}
                   >
                     <Settings size={13} />
                   </button>
@@ -150,6 +157,16 @@ export function TabLayout({ tabId }: TabLayoutProps) {
           );
         })}
       </ResponsiveGridLayout>
+
+      {/* PaneConfigPanel slide-out */}
+      {configPane && (
+        <PaneConfigPanel
+          paneId={configPane.id}
+          paneType={configPane.paneType}
+          config={configPane.config}
+          onClose={() => setConfigPaneId(null)}
+        />
+      )}
     </div>
   );
 }
