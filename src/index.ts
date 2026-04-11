@@ -24,6 +24,7 @@ import { errorHandler } from "./api/middleware/error-handler.js";
 import { DeviceSimulator } from "./simulator/device-simulator.js";
 import { createSimulatorRoutes } from "./api/routes/simulator.routes.js";
 import { createHueRoutes } from "./api/routes/hue.routes.js";
+import { createSystemRoutes } from "./api/routes/system.routes.js";
 
 const startTime = Date.now();
 
@@ -100,6 +101,7 @@ async function main(): Promise<void> {
   app.use("/api/automations", createAutomationRoutes(engine, db, registry));
   app.use("/api/simulator", createSimulatorRoutes(simulator));
   app.use("/api/hue", createHueRoutes());
+  app.use("/api/system", createSystemRoutes());
 
   // Error handler (must be last)
   app.use(errorHandler);

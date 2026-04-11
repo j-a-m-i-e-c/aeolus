@@ -19,6 +19,7 @@ import { useDeviceStore } from "./store/device-store";
 import type { Device } from "./store/device-store";
 import { LightingPage } from "./components/LightingPage";
 import { AutomationsPage } from "./components/AutomationsPage";
+import { SystemPage } from "./components/SystemPage";
 
 export default function App() {
   const setDevices = useDeviceStore((s) => s.setDevices);
@@ -46,6 +47,8 @@ export default function App() {
         <LightingPage />
       ) : currentPage === "automations" ? (
         <AutomationsPage />
+      ) : currentPage === "system" ? (
+        <SystemPage />
       ) : (
         <div className="space-y-6">
           <h1 className="text-2xl font-bold text-[#E6EDF3]">Dashboard</h1>

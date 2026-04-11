@@ -2,7 +2,7 @@
 
 import { AeolusLogo } from "./AeolusLogo";
 import { useDeviceStore } from "../store/device-store";
-import { Cpu, Wifi, WifiOff, Play, Square, Lightbulb, Zap } from "lucide-react";
+import { Cpu, Wifi, WifiOff, Play, Square, Lightbulb, Zap, Server } from "lucide-react";
 import { useState, useEffect } from "react";
 import { fetchSimulatorStatus, startSimulator, stopSimulator } from "../lib/api-client";
 
@@ -68,6 +68,15 @@ export function Sidebar() {
         >
           <Zap size={16} />
           Automations
+        </button>
+        <button
+          onClick={() => setCurrentPage("system")}
+          className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+            currentPage === "system" ? "bg-elevated text-[#E6EDF3]" : "text-[#6B7785] hover:text-[#9AA6B2] hover:bg-elevated/50"
+          }`}
+        >
+          <Server size={16} />
+          System
         </button>
       </nav>
 

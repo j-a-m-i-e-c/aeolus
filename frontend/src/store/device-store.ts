@@ -50,8 +50,8 @@ interface DeviceState {
   addAutomationEvent: (event: AutomationEvent) => void;
   clearAutomationEvents: () => void;
   addDeviceValue: (deviceId: string, value: number) => void;
-  currentPage: "dashboard" | "lighting" | "automations";
-  setCurrentPage: (page: "dashboard" | "lighting" | "automations") => void;
+  currentPage: "dashboard" | "lighting" | "automations" | "system";
+  setCurrentPage: (page: "dashboard" | "lighting" | "automations" | "system") => void;
 }
 
 export const useDeviceStore = create<DeviceState>((set) => ({
