@@ -153,6 +153,7 @@ export class DeviceRegistry {
       case "switch": return ["on/off"];
       case "sensor": return ["temperature"];
       case "climate": return ["temperature", "humidity"];
+      case "plug": return ["on/off", "energy-monitoring"];
       default: return [];
     }
   }

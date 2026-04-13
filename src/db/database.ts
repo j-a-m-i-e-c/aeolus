@@ -14,7 +14,7 @@ function initSchema(database: Database): void {
     CREATE TABLE IF NOT EXISTS devices (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
-      type TEXT NOT NULL CHECK(type IN ('light', 'sensor', 'switch', 'climate')),
+      type TEXT NOT NULL CHECK(type IN ('light', 'sensor', 'switch', 'climate', 'plug')),
       capabilities TEXT NOT NULL DEFAULT '[]',
       state TEXT NOT NULL DEFAULT '{}',
       integration TEXT NOT NULL DEFAULT 'mqtt',
