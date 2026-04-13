@@ -81,3 +81,43 @@ export async function saveLayout(payload: LayoutPayload): Promise<{ success: boo
     body: JSON.stringify(payload),
   });
 }
+
+// ---- Connector management ----
+
+export async function fetchAvailableConnectors() {
+  return request<Record<string, unknown>[]>("/api/connectors/available");
+}
+
+export async function fetchEnabledConnectors() {
+  return request<Record<string, unknown>[]>("/api/connectors");
+}
+
+export async function enableConnector(connectorType: string, config: Record<string, unknown>) {
+  return request<{ success: boolean; id: string }>("/api/connectors", {
+    method: "POST",
+    body: JSON.stringify({ connector_type: connectorType, config }),
+  });
+}
+
+export async function disableConnector(id: string) {
+  return request<{ success: boolean }>(`/api/connectors/${id}`, {
+    method: "DELETE",
+  });
+}
+
+export async function retryConnector(id: string) {
+  return request<{ success: boolean }>(`/api/connectors/${id}/retry`, {
+    method: "POST",
+  });
+}
+
+export async function executeConnectorSetupStep(
+  id: string,
+  stepId: string,
+  params: Record<string, unknown>,
+) {
+  return request<Record<string, unknown>>(`/api/connectors/${id}/setup/${stepId}`, {
+    method: "POST",
+    body: JSON.stringify(params),
+  });
+}

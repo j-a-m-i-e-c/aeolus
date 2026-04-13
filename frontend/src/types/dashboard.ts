@@ -44,12 +44,13 @@ export interface LayoutPayload {
 
 const NOW = Date.now();
 
-/** Default tabs: 3 pinned system tabs + 1 custom tab */
+/** Default tabs: 4 pinned system tabs + 1 custom tab */
 export const DEFAULT_TABS: Tab[] = [
   { id: "default-dashboard",   name: "Dashboard",   icon: "cpu",       order: 0, pinned: true,  createdAt: NOW },
   { id: "default-automations", name: "Automations", icon: "zap",       order: 1, pinned: true,  createdAt: NOW },
-  { id: "default-system",      name: "System",      icon: "server",    order: 2, pinned: true,  createdAt: NOW },
-  { id: "default-lighting",    name: "Lighting",    icon: "lightbulb", order: 3, pinned: false, createdAt: NOW },
+  { id: "default-connectors",  name: "Connectors",  icon: "plug",      order: 2, pinned: true,  createdAt: NOW },
+  { id: "default-system",      name: "System",      icon: "server",    order: 3, pinned: true,  createdAt: NOW },
+  { id: "default-lighting",    name: "Lighting",    icon: "lightbulb", order: 4, pinned: false, createdAt: NOW },
 ];
 
 /** Default panes arranged across the four default tabs */
@@ -63,6 +64,8 @@ export const DEFAULT_PANES: Pane[] = [
   { id: "dp-event-log",      tabId: "default-dashboard",   paneType: "event-log",        config: {},                                                                      x: 0,  y: 17, w: 12, h: 4, createdAt: NOW },
   // Automations tab
   { id: "dp-auto-rules",     tabId: "default-automations", paneType: "automation-rules", config: {},                                                                      x: 0,  y: 0,  w: 12, h: 8, createdAt: NOW },
+  // Connectors tab
+  { id: "dp-connectors",     tabId: "default-connectors",  paneType: "connectors-page", config: {},                                                                      x: 0,  y: 0,  w: 12, h: 8, createdAt: NOW },
   // System tab
   { id: "dp-sys-diag",       tabId: "default-system",      paneType: "system-stats",     config: { showSections: ["host", "cpu", "temperature", "memory", "disk", "network"] }, x: 0, y: 0, w: 12, h: 8, createdAt: NOW },
   // Lighting tab (custom, not pinned)

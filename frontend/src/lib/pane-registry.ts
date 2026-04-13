@@ -10,6 +10,7 @@ import { AutomationRulesPane } from "../components/panes/AutomationRulesPane";
 import { SystemStatsPane } from "../components/panes/SystemStatsPane";
 import { TopicTreePane } from "../components/panes/TopicTreePane";
 import { EventLogPane } from "../components/panes/EventLogPane";
+import { ConnectorsPane } from "../components/panes/ConnectorsPane";
 
 export interface PaneRegistryEntry {
   component: ComponentType<{ config: PaneConfig }>;
@@ -75,6 +76,13 @@ export const PANE_REGISTRY: Record<string, PaneRegistryEntry> = {
     defaultIcon: "scroll-text",
     defaultConfig: {},
     defaultSize: { w: 12, h: 4 },
+  },
+  "connectors-page": {
+    component: ConnectorsPane,
+    displayName: "Connectors",
+    defaultIcon: "plug",
+    defaultConfig: {},
+    defaultSize: { w: 12, h: 8 },
   },
 };
 
