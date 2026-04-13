@@ -2,14 +2,14 @@
 
 import { Router } from "express";
 import type { DeviceRegistry } from "../../core/device-registry.js";
-import type { IntegrationManager } from "../../integrations/integration-manager.js";
+import type { ConnectorManager } from "../../connectors/connector-manager.js";
 import { NotFoundError } from "../middleware/error-handler.js";
 import { validateAction } from "../middleware/validators.js";
 import logger from "../../logger.js";
 
 export function createDeviceRoutes(
   registry: DeviceRegistry,
-  integrationManager: IntegrationManager
+  connectorManager: ConnectorManager
 ): Router {
   const router = Router();
 
@@ -37,7 +37,7 @@ export function createDeviceRoutes(
         return next(new NotFoundError(`Device not found: ${id}`));
       }
 
-      await integrationManager.execute(id, {
+      await connectorManager.executeAction(id, {
         type: req.body.type,
         deviceId: id,
         params: req.body.params || {},
