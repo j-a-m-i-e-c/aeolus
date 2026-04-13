@@ -127,15 +127,19 @@ aeolus/
 │   ├── core/          # Core engine (device registry, state management)
 │   ├── mqtt/          # MQTT connection and message handling
 │   ├── automations/   # Automation engine and DSL
-│   ├── integrations/  # Integration interface and implementations
-│   │   └── hue/      # Philips Hue integration
+│   ├── connectors/    # Pluggable connector framework
+│   │   ├── hue/      # Philips Hue connector
+│   │   ├── kasa/     # TP-Link Kasa connector
+│   │   └── _template/ # Skeleton for new connectors
 │   ├── websocket/     # WebSocket server
 │   └── index.ts       # Entry point
 ├── frontend/          # React + Vite dashboard
 │   ├── src/
 │   │   ├── components/
-│   │   ├── store/     # Zustand stores
-│   │   ├── lib/       # Utilities
+│   │   │   └── panes/ # Pane wrapper components
+│   │   ├── store/     # Zustand stores (device-store, dashboard-store)
+│   │   ├── lib/       # Utilities + pane registry
+│   │   ├── types/     # Dashboard types
 │   │   └── App.tsx
 │   └── index.html
 ├── automations/       # User-defined automation rule files

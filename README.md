@@ -10,8 +10,8 @@ A local-first, developer-centric IoT automation platform. Aeolus unifies communi
 - Maintains a persistent device registry with real-time state (SQLite)
 - Executes automations using a TypeScript DSL (`when/if/then`) or the dashboard editor
 - Exposes a REST API and WebSocket server for device control
-- Provides a React dashboard with device monitoring, MQTT inspector, automation editor, and system diagnostics
-- Integrates with Philips Hue lights — self-service bridge pairing from the dashboard
+- Provides a modular React dashboard with dynamic tabs, configurable panes, device monitoring, MQTT inspector, automation editor, and system diagnostics
+- Pluggable connector framework — add new device integrations (Philips Hue, TP-Link Kasa, etc.) without modifying core code
 - Runs on Raspberry Pi with one-line Docker install and auto-start on boot
 - Built-in device simulator for development without hardware
 
@@ -85,15 +85,17 @@ Or use the built-in simulator — toggle it from the sidebar or set `SIMULATOR=t
 
 ## Dashboard
 
-The dashboard has four pages accessible from the sidebar:
+The dashboard uses a modular tab-and-pane layout. The sidebar shows pinned system tabs plus user-created custom tabs. Each tab contains configurable panes that can be added, removed, and rearranged. Layout is persisted to SQLite automatically.
 
 **Dashboard** — Device grid grouped by room, sensor panel with sparkline charts, MQTT inspector with publish form, topic tree, event log, system health, and command palette (Ctrl+K).
 
-**Lighting** — Philips Hue bridge setup wizard, light grid with toggle/brightness/colour controls, bridge info card with firmware status, add/delete/reorder lights.
-
 **Automations** — Create automation rules with a when/if/then form editor, live DSL preview, enable/disable/delete rules, toggle visibility of code-based rules.
 
+**Connectors** — Manage device integrations from the dashboard. View available connector types, enable/disable connectors with dynamic config forms, monitor health status (connected/degraded/disconnected), and run guided setup wizards for connectors that require pairing (e.g. Hue bridge).
+
 **System** — Host diagnostics including CPU load, temperature, memory, disk, and network interfaces. Designed for Raspberry Pi monitoring.
+
+**Custom Tabs** — Create your own tabs with a name and icon, then add any combination of panes (device grid, sensor panel, MQTT inspector, etc.).
 
 ## API Endpoints
 
@@ -112,16 +114,16 @@ The dashboard has four pages accessible from the sidebar:
 | GET | `/api/simulator` | Simulator status |
 | POST | `/api/simulator/start` | Start simulator |
 | POST | `/api/simulator/stop` | Stop simulator |
-| GET | `/api/hue/status` | Hue bridge config status |
-| GET | `/api/hue/bridge` | Bridge firmware and info |
-| GET | `/api/hue/discover` | Discover bridges on network |
-| POST | `/api/hue/pair` | Pair with a bridge |
-| GET | `/api/hue/lights` | List all Hue lights |
-| POST | `/api/hue/lights/search` | Scan for new Zigbee lights |
-| GET | `/api/hue/lights/new` | Get newly found lights |
-| POST | `/api/hue/lights/:id/state` | Control a light |
-| DELETE | `/api/hue/lights/:id` | Remove a light |
-| DELETE | `/api/hue/unpair` | Disconnect bridge |
+| GET | `/api/connectors/available` | List discovered connector types |
+| GET | `/api/connectors` | List enabled connector instances |
+| POST | `/api/connectors` | Enable a connector |
+| PATCH | `/api/connectors/:id` | Update connector config |
+| DELETE | `/api/connectors/:id` | Disable a connector |
+| GET | `/api/connectors/:id/status` | Connector health status |
+| POST | `/api/connectors/:id/setup/:stepId` | Execute setup wizard step |
+| POST | `/api/connectors/:id/retry` | Retry connector connection |
+| GET | `/api/layout` | Get dashboard layout |
+| PUT | `/api/layout` | Save dashboard layout |
 | GET | `/api/system` | Host system diagnostics |
 | WS | `/ws` | Real-time state updates |
 
@@ -142,16 +144,28 @@ export default when("motion/living-room")
 
 Place rule files in the `automations/` directory. They're loaded automatically on startup. Rules can also be created from the Automations page in the dashboard.
 
+## Connector Framework
+
+Aeolus uses a pluggable connector architecture for device integrations. Built-in connectors include Philips Hue (smart lighting) and TP-Link Kasa (smart plugs/switches). Connectors are managed entirely from the Connectors page in the dashboard — enable, configure, monitor health, and run setup wizards without editing config files.
+
+### Adding a New Connector
+
+1. Copy `src/connectors/_template/` to `src/connectors/your-connector/`
+2. Implement the `Connector` interface and export `metadata`, `configSchema`, and `createConnector` from `index.ts`
+3. Register in `src/index.ts` or let auto-discovery find it
+
+See `src/connectors/README.md` for the full developer guide.
+
 ## Philips Hue Integration
 
-Connect your Hue bridge directly from the dashboard — no config files needed.
+Hue lights are managed through the Connectors page in the dashboard.
 
-1. Go to the Lighting tab in the sidebar
-2. Click Discover Bridges (or enter the bridge IP manually)
-3. Press the physical button on your Hue bridge
-4. Click Pair
+1. Go to the Connectors tab in the sidebar
+2. Find "Philips Hue" in Available Connectors and click Enable
+3. Enter the bridge IP (or use the setup wizard to discover bridges)
+4. Press the physical button on your Hue bridge and complete pairing
 
-Lights appear with toggle, brightness slider, and colour picker (for colour-capable bulbs). Bridge firmware version and update status are shown in an info card. You can add new lights via Zigbee scan, delete lights, and drag to reorder.
+Once connected, Hue lights appear in the device grid. A dedicated Lighting tab (custom, not pinned) provides the full light control experience with toggle, brightness slider, colour picker, Zigbee scan, and drag-to-reorder.
 
 ## Raspberry Pi Deployment
 
