@@ -1,6 +1,7 @@
 // src/connectors/kasa/kasa-connector.ts — TP-Link Kasa connector implementation
 
-import { Client } from "tplink-smarthome-api";
+import pkg from "tplink-smarthome-api";
+const { Client } = pkg;
 import type {
   Connector,
   ConnectorHealthStatus,
@@ -15,7 +16,7 @@ import logger from "../../logger.js";
  * devices on the local network via UDP broadcast and TCP commands.
  */
 export class KasaConnector implements Connector {
-  private client: Client | null = null;
+  private client: InstanceType<typeof Client> | null = null;
   private broadcastAddress: string;
   private discoveryTimeout: number;
   private discoveredDevices = new Map<string, unknown>();
