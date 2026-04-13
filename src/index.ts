@@ -1,4 +1,4 @@
-// src/index.ts — Aeolus backend entry point
+﻿// src/index.ts — Aeolus backend entry point
 
 import express from "express";
 import cors from "cors";
@@ -11,19 +11,23 @@ import { eventBus, DEVICE_STATE_CHANGE } from "./core/event-bus.js";
 import { DeviceRegistry } from "./core/device-registry.js";
 import { MqttService } from "./mqtt/mqtt-service.js";
 import { AutomationEngine } from "./automations/automation-engine.js";
-import { IntegrationManager } from "./integrations/integration-manager.js";
-import { HueIntegration } from "./integrations/hue/hue-integration.js";
+import { ConnectorRegistry } from "./connectors/connector-registry.js";
+import { ConnectorManager } from "./connectors/connector-manager.js";
+import { ConnectorStore } from "./connectors/connector-store.js";
+import * as hueModule from "./connectors/hue/index.js";
+import * as kasaModule from "./connectors/kasa/index.js";
+import { migrateLegacyHueCredentials } from "./connectors/migrate-legacy-hue.js";
 import { WsServer } from "./websocket/ws-server.js";
 import { createDeviceRoutes } from "./api/routes/device.routes.js";
 import { createStateRoutes } from "./api/routes/state.routes.js";
 import { createHealthRoutes } from "./api/routes/health.routes.js";
 import { createMqttRoutes } from "./api/routes/mqtt.routes.js";
 import { createAutomationRoutes, loadUiRules } from "./api/routes/automation.routes.js";
+import { createConnectorRoutes } from "./api/routes/connector.routes.js";
 import { requestLogger } from "./api/middleware/request-logger.js";
 import { errorHandler } from "./api/middleware/error-handler.js";
 import { DeviceSimulator } from "./simulator/device-simulator.js";
 import { createSimulatorRoutes } from "./api/routes/simulator.routes.js";
-import { createHueRoutes } from "./api/routes/hue.routes.js";
 import { createSystemRoutes } from "./api/routes/system.routes.js";
 import { createLayoutRoutes } from "./api/routes/layout.routes.js";
 
@@ -49,23 +53,18 @@ async function main(): Promise<void> {
   const engine = new AutomationEngine(eventBus);
   const automationsDir = path.resolve(process.cwd(), "automations");
   await engine.loadRulesFromDirectory(automationsDir);
-
-  // Load UI-created rules from database
   loadUiRules(engine, db, registry);
 
-  // 5. Integration Manager
-  const integrationManager = new IntegrationManager(registry);
+  // 5. Connector Framework
+  const connectorStore = new ConnectorStore(db);
+  const connectorRegistry = new ConnectorRegistry();
+  const connectorManager = new ConnectorManager(connectorRegistry, connectorStore, registry, eventBus);
 
-  if (config.hueBridgeIp && config.hueApiKey) {
-    const hue = new HueIntegration({
-      bridgeIp: config.hueBridgeIp,
-      apiKey: config.hueApiKey,
-    });
-    integrationManager.register(hue);
-  }
+  connectorRegistry.register(hueModule);
+  connectorRegistry.register(kasaModule);
 
-  await integrationManager.connectAll();
-  await integrationManager.discoverAll();
+  migrateLegacyHueCredentials(connectorStore);
+  await connectorManager.restoreFromStore();
 
   // 6. Wire MQTT events to device registry
   eventBus.on(DEVICE_STATE_CHANGE, (event) => {
@@ -74,7 +73,6 @@ async function main(): Promise<void> {
 
   // 7. Simulator (always available, auto-starts if SIMULATOR=true)
   const simulator = new DeviceSimulator(eventBus);
-
   if (config.simulator) {
     simulator.start();
   }
@@ -86,27 +84,25 @@ async function main(): Promise<void> {
     logger.error({ error: (err as Error).message }, "MQTT connection failed — running without MQTT");
   }
 
-  // 8. Express app
+  // 9. Express app
   const app = express();
   app.use(cors());
   app.use(express.json());
   app.use(requestLogger);
 
-  // Routes
-  app.use("/api/devices", createDeviceRoutes(registry, integrationManager));
+  app.use("/api/devices", createDeviceRoutes(registry, connectorManager));
   app.use("/api/state", createStateRoutes(registry));
   app.use("/api/health", createHealthRoutes(mqttService, registry, engine, startTime));
   app.use("/api/mqtt", createMqttRoutes(mqttService));
   app.use("/api/automations", createAutomationRoutes(engine, db, registry));
   app.use("/api/simulator", createSimulatorRoutes(simulator));
-  app.use("/api/hue", createHueRoutes());
+  app.use("/api/connectors", createConnectorRoutes(connectorManager, connectorRegistry));
   app.use("/api/system", createSystemRoutes());
   app.use("/api/layout", createLayoutRoutes(db));
 
-  // Error handler (must be last)
   app.use(errorHandler);
 
-  // 9. HTTP + WebSocket server
+  // 10. HTTP + WebSocket server
   const server = createServer(app);
   const wsServer = new WsServer(server, registry, eventBus);
 
@@ -117,11 +113,11 @@ async function main(): Promise<void> {
     );
   });
 
-  // 10. Graceful shutdown
+  // 11. Graceful shutdown
   const shutdown = async () => {
     logger.info("Shutting down Aeolus...");
     simulator.stop();
-    await integrationManager.disposeAll();
+    await connectorManager.disposeAll();
     await mqttService.disconnect();
     persistDatabase();
     server.close();
