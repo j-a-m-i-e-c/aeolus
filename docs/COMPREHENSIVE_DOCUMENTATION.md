@@ -101,6 +101,8 @@ aeolus/
 │   │   └── README.md                 # Developer guide for creating new connectors
 │   ├── simulator/
 │   │   └── device-simulator.ts       # Fake device data generator (7 devices)
+│   ├── services/                     # External API integrations (weather, river height, etc.)
+│   │   └── README.md                 # Developer guide for creating services
 │   ├── websocket/
 │   │   └── ws-server.ts              # WebSocket server
 │   ├── db/
