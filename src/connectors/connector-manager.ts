@@ -3,7 +3,8 @@
 import crypto from "node:crypto";
 import type { EventEmitter } from "node:events";
 import type { DeviceRegistry } from "../core/device-registry.js";
-import type { Device, Action } from "../core/types.js";
+import type { Device, Action, NormalizedEvent } from "../core/types.js";
+import { DEVICE_STATE_CHANGE } from "../core/event-bus.js";
 import type {
   Connector,
   ConnectorInstanceInfo,
@@ -89,7 +90,7 @@ export class ConnectorManager {
     try {
       const discovered = await connector.discoverDevices();
       for (const device of discovered) {
-        this.deviceRegistry.registerDevice(device);
+        this.emitDeviceEvent(device);
         devices.add(device.id);
       }
     } catch (err) {
@@ -208,7 +209,7 @@ export class ConnectorManager {
     try {
       const discovered = await instance.connector.discoverDevices();
       for (const device of discovered) {
-        this.deviceRegistry.registerDevice(device);
+        this.emitDeviceEvent(device);
         instance.devices.add(device.id);
       }
     } catch (err) {
@@ -352,7 +353,7 @@ export class ConnectorManager {
       try {
         const discovered = await connector.discoverDevices();
         for (const device of discovered) {
-          this.deviceRegistry.registerDevice(device);
+          this.emitDeviceEvent(device);
           devices.add(device.id);
         }
       } catch (err) {
@@ -415,7 +416,7 @@ export class ConnectorManager {
       try {
         const discovered = await connector.discoverDevices();
         for (const device of discovered) {
-          this.deviceRegistry.registerDevice(device);
+          this.emitDeviceEvent(device);
           devices.add(device.id);
         }
       } catch (err) {
@@ -425,5 +426,26 @@ export class ConnectorManager {
         );
       }
     }, DEFAULT_POLL_INTERVAL_MS);
+  }
+
+  /**
+   * Emit a DEVICE_STATE_CHANGE event for a connector-discovered device.
+   *
+   * This feeds the device through the same pipeline as MQTT devices:
+   * EventBus → DeviceRegistry.upsert() → SQLite persist → WS broadcast → Automations
+   *
+   * Uses a synthetic topic `connector/{integration}/{deviceId}` so automations
+   * can match on connector device events using the standard topic pattern system.
+   */
+  private emitDeviceEvent(device: Device): void {
+    const event: NormalizedEvent = {
+      deviceId: device.id,
+      deviceType: device.type,
+      state: device.state,
+      topic: `connector/${device.integration}/${device.id}`,
+      timestamp: device.lastSeen || Date.now(),
+      integration: device.integration,
+    };
+    this.eventBus.emit(DEVICE_STATE_CHANGE, event);
   }
 }

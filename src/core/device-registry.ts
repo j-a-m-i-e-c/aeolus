@@ -97,7 +97,7 @@ export class DeviceRegistry {
           type: event.deviceType,
           capabilities: this.inferCapabilities(event.deviceType),
           state: event.state,
-          integration: "mqtt",
+          integration: event.integration || "mqtt",
           lastSeen: event.timestamp,
         };
 

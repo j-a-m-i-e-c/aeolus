@@ -21,6 +21,8 @@ export interface NormalizedEvent {
   state: Record<string, unknown>;
   topic: string;
   timestamp: number;
+  /** Source integration identifier. Defaults to "mqtt" if not provided. */
+  integration?: string;
 }
 
 /** Automation rule registered in the Rule Registry */
