@@ -121,3 +121,14 @@ export async function executeConnectorSetupStep(
     body: JSON.stringify(params),
   });
 }
+
+export async function fetchSetupSteps(connectorId: string) {
+  return request<Record<string, unknown>[]>(`/api/connectors/${connectorId}/setup-steps`);
+}
+
+export async function patchConnectorConfig(connectorId: string, config: Record<string, unknown>) {
+  return request<{ success: boolean }>(`/api/connectors/${connectorId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ config }),
+  });
+}
