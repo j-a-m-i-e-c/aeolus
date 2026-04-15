@@ -11,6 +11,8 @@ import {
   disableConnector,
   retryConnector,
   executeConnectorSetupStep,
+  fetchSetupSteps,
+  patchConnectorConfig,
 } from "../lib/api-client";
 
 // ---------------------------------------------------------------------------
@@ -168,7 +170,7 @@ function SetupWizard({
   const [stepParams, setStepParams] = useState<Record<string, unknown>>({});
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
-  const [stepData, setStepData] = useState<Record<string, unknown>>({});
+  const [accumulatedConfig, setAccumulatedConfig] = useState<Record<string, unknown>>({});
 
   const currentStep = steps[currentStepIdx];
 
@@ -177,11 +179,23 @@ function SetupWizard({
     setLoading(true);
     setMessage("");
     try {
-      const result = await executeConnectorSetupStep(connectorId, currentStep.id, { ...stepParams, ...stepData });
+      const result = await executeConnectorSetupStep(connectorId, currentStep.id, { ...stepParams, ...accumulatedConfig });
       setMessage(String(result.message || ""));
-      if (result.data) setStepData((prev) => ({ ...prev, ...(result.data as Record<string, unknown>) }));
+
+      if (result.data) {
+        setAccumulatedConfig((prev) => ({ ...prev, ...(result.data as Record<string, unknown>) }));
+      }
 
       if (result.complete) {
+        // Patch connector config with accumulated data before completing
+        const finalConfig = result.data
+          ? { ...accumulatedConfig, ...(result.data as Record<string, unknown>) }
+          : accumulatedConfig;
+        try {
+          await patchConnectorConfig(connectorId, finalConfig);
+        } catch {
+          // Best-effort patch — wizard still closes
+        }
         onComplete();
       } else if (result.success && currentStepIdx < steps.length - 1) {
         setCurrentStepIdx((i) => i + 1);
@@ -293,13 +307,16 @@ export function ConnectorsPage() {
       // Check if this connector requires setup
       const connType = available.find((a) => a.metadata.id === configuringType);
       if (connType?.metadata.requiresSetup && result.id) {
-        // Fetch setup steps from the enabled connector instance
-        // The connector's getSetupSteps() is exposed through the instance
-        // For now, we'll use a known pattern for setup steps
-        setSetupConnectorId(result.id);
-        // Try to get setup steps from the connector type metadata
-        // Setup steps are fetched when the wizard renders
-        setSetupSteps(getSetupStepsForType(configuringType));
+        // Fetch setup steps from the backend
+        try {
+          const steps = await fetchSetupSteps(result.id) as unknown as SetupStep[];
+          if (steps.length > 0) {
+            setSetupConnectorId(result.id);
+            setSetupSteps(steps);
+          }
+        } catch {
+          // If fetching steps fails, connector is still enabled
+        }
       }
 
       setConfiguringType(null);
@@ -509,29 +526,4 @@ export function ConnectorsPage() {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Helper: known setup steps for connector types that require setup
-// In a full implementation, these would be fetched from the backend.
-// For now, we define the known Hue setup steps client-side.
-// ---------------------------------------------------------------------------
-
-function getSetupStepsForType(connectorType: string): SetupStep[] {
-  if (connectorType === "hue") {
-    return [
-      {
-        id: "discover-bridges",
-        title: "Discover Bridges",
-        description: "Search for Hue bridges on your local network.",
-      },
-      {
-        id: "press-button",
-        title: "Press Link Button",
-        description: "Press the link button on your Hue bridge, then click Continue to pair.",
-        fields: [
-          { id: "bridgeIp", label: "Bridge IP", type: "text", required: true, placeholder: "192.168.1.x" },
-        ],
-      },
-    ];
-  }
-  return [];
-}
+// End of ConnectorsPage
