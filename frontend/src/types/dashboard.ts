@@ -53,21 +53,8 @@ export const DEFAULT_TABS: Tab[] = [
   { id: "default-lighting",    name: "Lighting",    icon: "lightbulb", order: 4, pinned: false, createdAt: NOW },
 ];
 
-/** Default panes arranged across the four default tabs */
+/** Default panes — only for custom (unpinned) tabs. Pinned tabs render dedicated components. */
 export const DEFAULT_PANES: Pane[] = [
-  // Dashboard tab
-  { id: "dp-system-stats",   tabId: "default-dashboard",   paneType: "system-stats",     config: {},                                                                      x: 0,  y: 0,  w: 12, h: 3, createdAt: NOW },
-  { id: "dp-sensor-panel",   tabId: "default-dashboard",   paneType: "sensor-panel",     config: {},                                                                      x: 0,  y: 3,  w: 12, h: 4, createdAt: NOW },
-  { id: "dp-device-grid",    tabId: "default-dashboard",   paneType: "device-grid",      config: {},                                                                      x: 0,  y: 7,  w: 12, h: 5, createdAt: NOW },
-  { id: "dp-mqtt-inspector", tabId: "default-dashboard",   paneType: "mqtt-inspector",   config: {},                                                                      x: 0,  y: 12, w: 6,  h: 5, createdAt: NOW },
-  { id: "dp-topic-tree",     tabId: "default-dashboard",   paneType: "topic-tree",       config: {},                                                                      x: 6,  y: 12, w: 6,  h: 5, createdAt: NOW },
-  { id: "dp-event-log",      tabId: "default-dashboard",   paneType: "event-log",        config: {},                                                                      x: 0,  y: 17, w: 12, h: 4, createdAt: NOW },
-  // Automations tab
-  { id: "dp-auto-rules",     tabId: "default-automations", paneType: "automation-rules", config: {},                                                                      x: 0,  y: 0,  w: 12, h: 8, createdAt: NOW },
-  // Connectors tab
-  { id: "dp-connectors",     tabId: "default-connectors",  paneType: "connectors-page", config: {},                                                                      x: 0,  y: 0,  w: 12, h: 8, createdAt: NOW },
-  // System tab
-  { id: "dp-sys-diag",       tabId: "default-system",      paneType: "system-stats",     config: { showSections: ["host", "cpu", "temperature", "memory", "disk", "network"] }, x: 0, y: 0, w: 12, h: 8, createdAt: NOW },
   // Lighting tab (custom, not pinned)
   { id: "dp-hue-lights",     tabId: "default-lighting",    paneType: "hue-lights",       config: {},                                                                      x: 0,  y: 0,  w: 12, h: 8, createdAt: NOW },
 ];
