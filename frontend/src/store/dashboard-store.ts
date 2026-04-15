@@ -68,7 +68,7 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
       pinned: false,
       createdAt: Date.now(),
     };
-    set({ tabs: [...state.tabs, newTab] });
+    set({ tabs: [...state.tabs, newTab], activeTabId: newTab.id });
     debouncedPersist(get);
   },
 
