@@ -1,7 +1,7 @@
 // frontend/src/components/SystemPage.tsx — Host system diagnostics
 
 import { useState, useEffect, useCallback } from "react";
-import { Cpu, HardDrive, MemoryStick, Thermometer, Wifi, Server, RefreshCw } from "lucide-react";
+import { Cpu, HardDrive, MemoryStick, Thermometer, Wifi, Server, RefreshCw, ScrollText, ChevronDown } from "lucide-react";
 
 const API_URL = (import.meta as any).env?.VITE_API_URL || `http://${window.location.hostname}:3001`;
 
@@ -195,6 +195,143 @@ export function SystemPage() {
             </div>
           ))}
         </div>
+      </div>
+
+      {/* Application Logs */}
+      <LogViewer />
+    </div>
+  );
+}
+
+
+// ---------------------------------------------------------------------------
+// Log Viewer
+// ---------------------------------------------------------------------------
+
+interface LogEntry {
+  level: number;
+  levelLabel: string;
+  msg: string;
+  time: string;
+  [key: string]: unknown;
+}
+
+const LEVEL_COLORS: Record<string, string> = {
+  trace: "text-[#6B7785]",
+  debug: "text-[#6B7785]",
+  info: "text-[#3BA4FF]",
+  warn: "text-[#F59E0B]",
+  error: "text-[#EF4444]",
+  fatal: "text-[#EF4444]",
+};
+
+const LEVEL_BG: Record<string, string> = {
+  warn: "bg-[#F59E0B]/5",
+  error: "bg-[#EF4444]/5",
+  fatal: "bg-[#EF4444]/10",
+};
+
+function LogViewer() {
+  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [filter, setFilter] = useState<string>("all");
+  const [autoRefresh, setAutoRefresh] = useState(true);
+
+  const fetchLogs = useCallback(async () => {
+    try {
+      const url = filter === "all"
+        ? `${API_URL}/api/system/logs?count=100`
+        : `${API_URL}/api/system/logs?count=100&level=${filter}`;
+      const res = await fetch(url);
+      setLogs(await res.json());
+    } catch {}
+  }, [filter]);
+
+  useEffect(() => {
+    fetchLogs();
+    if (!autoRefresh) return;
+    const interval = setInterval(fetchLogs, 3000);
+    return () => clearInterval(interval);
+  }, [fetchLogs, autoRefresh]);
+
+  const formatTime = (iso: string) => {
+    try {
+      return new Date(iso).toLocaleTimeString();
+    } catch {
+      return iso;
+    }
+  };
+
+  // Extract extra context fields (not level/msg/time/levelLabel)
+  const getContext = (entry: LogEntry): string => {
+    const skip = new Set(["level", "levelLabel", "msg", "time", "v"]);
+    const ctx: string[] = [];
+    for (const [k, v] of Object.entries(entry)) {
+      if (!skip.has(k) && v !== undefined) {
+        ctx.push(`${k}=${typeof v === "object" ? JSON.stringify(v) : v}`);
+      }
+    }
+    return ctx.join(" ");
+  };
+
+  return (
+    <div className="bg-surface border border-[#2A3441] rounded-xl p-4">
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <ScrollText size={14} className="text-primary" />
+          <span className="text-sm font-semibold text-[#9AA6B2] uppercase tracking-wider">Application Logs</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <select
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            className="text-[10px] bg-background border border-[#2A3441] rounded px-2 py-1 text-[#E6EDF3] focus:outline-none focus:border-primary"
+          >
+            <option value="all">All levels</option>
+            <option value="error">Error</option>
+            <option value="warn">Warn</option>
+            <option value="info">Info</option>
+            <option value="debug">Debug</option>
+          </select>
+          <label className="flex items-center gap-1 text-[10px] text-[#6B7785] cursor-pointer">
+            <input
+              type="checkbox"
+              checked={autoRefresh}
+              onChange={(e) => setAutoRefresh(e.target.checked)}
+              className="accent-primary"
+            />
+            Auto
+          </label>
+          <button onClick={fetchLogs} className="text-[#6B7785] hover:text-primary transition-colors" title="Refresh">
+            <RefreshCw size={12} />
+          </button>
+        </div>
+      </div>
+
+      <div className="max-h-80 overflow-auto rounded-lg bg-background border border-[#2A3441]">
+        {logs.length === 0 ? (
+          <div className="text-center py-6 text-[#6B7785] text-xs">No logs</div>
+        ) : (
+          <div className="divide-y divide-[#2A3441]/50">
+            {logs.map((entry, i) => {
+              const ctx = getContext(entry);
+              return (
+                <div
+                  key={`${entry.time}-${i}`}
+                  className={`px-3 py-1.5 text-[11px] font-mono flex gap-3 ${LEVEL_BG[entry.levelLabel] || ""}`}
+                >
+                  <span className="text-[#6B7785] shrink-0 w-16">{formatTime(entry.time)}</span>
+                  <span className={`shrink-0 w-10 uppercase font-semibold ${LEVEL_COLORS[entry.levelLabel] || "text-[#6B7785]"}`}>
+                    {entry.levelLabel}
+                  </span>
+                  <span className="text-[#E6EDF3] flex-1 break-all">
+                    {entry.msg}
+                    {ctx && <span className="text-[#6B7785] ml-2">{ctx}</span>}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );

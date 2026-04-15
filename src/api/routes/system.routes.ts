@@ -4,6 +4,7 @@ import { Router } from "express";
 import os from "node:os";
 import fs from "node:fs";
 import { execSync } from "node:child_process";
+import { getRecentLogs } from "../../log-buffer.js";
 
 function getCpuTemp(): number | null {
   try {
@@ -83,6 +84,17 @@ export function createSystemRoutes(): Router {
       network: ips,
       uptime: os.uptime(),
     });
+  });
+
+  /** GET /api/system/logs — recent application logs */
+  router.get("/logs", (req, res) => {
+    const count = Math.min(Number(req.query.count) || 100, 200);
+    const level = req.query.level as string | undefined;
+    let logs = getRecentLogs(count);
+    if (level) {
+      logs = logs.filter((l) => l.levelLabel === level);
+    }
+    res.json(logs);
   });
 
   return router;
