@@ -87,6 +87,18 @@ export function createConnectorRoutes(
     }
   });
 
+  /** GET /api/connectors/:id/setup-steps — get setup step descriptors for a connector instance */
+  router.get("/:id/setup-steps", (req, res) => {
+    const { id } = req.params;
+    const instance = connectorManager.getStatus(id);
+    if (!instance) {
+      res.status(404).json({ error: `Connector instance '${id}' not found` });
+      return;
+    }
+    const steps = connectorManager.getSetupSteps(id);
+    res.json(steps);
+  });
+
   /** GET /api/connectors/:id/status — get connector health status */
   router.get("/:id/status", (req, res) => {
     const { id } = req.params;

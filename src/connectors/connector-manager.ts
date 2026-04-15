@@ -10,6 +10,7 @@ import type {
   ConnectorInstanceInfo,
   ConnectorRecord,
   ConnectorHealthStatus,
+  SetupStepDescriptor,
   SetupStepResult,
 } from "./connector.interface.js";
 import type { ConnectorRegistry } from "./connector-registry.js";
@@ -242,6 +243,18 @@ export class ConnectorManager {
     }
 
     return instance.connector.executeSetupStep(stepId, params);
+  }
+
+  /**
+   * Return the setup step descriptors for a managed connector instance.
+   * Returns `[]` if the connector doesn't implement `getSetupSteps()`.
+   */
+  getSetupSteps(instanceId: string): SetupStepDescriptor[] {
+    const instance = this.instances.get(instanceId);
+    if (!instance) {
+      throw new Error(`Connector instance '${instanceId}' not found`);
+    }
+    return instance.connector.getSetupSteps?.() ?? [];
   }
 
   /**
