@@ -3,8 +3,9 @@
 import { Router } from "express";
 import os from "node:os";
 import fs from "node:fs";
-import { execSync } from "node:child_process";
+import { execSync, spawn } from "node:child_process";
 import { getRecentLogs } from "../../log-buffer.js";
+import logger from "../../logger.js";
 
 function getCpuTemp(): number | null {
   try {
@@ -95,6 +96,27 @@ export function createSystemRoutes(): Router {
       logs = logs.filter((l) => l.levelLabel === level);
     }
     res.json(logs);
+  });
+
+  /** POST /api/system/update — pull latest code and rebuild containers */
+  router.post("/update", (_req, res) => {
+    const projectDir = process.env.AEOLUS_PROJECT_DIR || "/aeolus-host";
+
+    if (!fs.existsSync(projectDir)) {
+      res.status(400).json({ error: "Project directory not mounted — self-update only works on deployed Pi" });
+      return;
+    }
+
+    logger.info("Self-update triggered from dashboard");
+    res.json({ success: true, message: "Update started — the system will restart shortly" });
+
+    // Run git pull + docker compose rebuild in the background
+    // This is fire-and-forget — the container will be replaced during rebuild
+    const child = spawn("sh", ["-c", `cd ${projectDir} && git pull && docker compose up -d --build`], {
+      detached: true,
+      stdio: "ignore",
+    });
+    child.unref();
   });
 
   return router;

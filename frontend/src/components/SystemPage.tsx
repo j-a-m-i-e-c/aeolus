@@ -1,7 +1,7 @@
 // frontend/src/components/SystemPage.tsx — Host system diagnostics
 
 import { useState, useEffect, useCallback } from "react";
-import { Cpu, HardDrive, MemoryStick, Thermometer, Wifi, Server, RefreshCw, ScrollText, ChevronDown } from "lucide-react";
+import { Cpu, HardDrive, MemoryStick, Thermometer, Wifi, Server, RefreshCw, ScrollText, ChevronDown, Download, Loader2 } from "lucide-react";
 
 const API_URL = (import.meta as any).env?.VITE_API_URL || `http://${window.location.hostname}:3001`;
 
@@ -47,6 +47,8 @@ function UsageBar({ percent, color = "#3BA4FF" }: { percent: number; color?: str
 export function SystemPage() {
   const [info, setInfo] = useState<SystemInfo | null>(null);
   const [loading, setLoading] = useState(true);
+  const [updating, setUpdating] = useState(false);
+  const [updateMsg, setUpdateMsg] = useState("");
 
   const fetchInfo = useCallback(async () => {
     try {
@@ -62,6 +64,20 @@ export function SystemPage() {
     return () => clearInterval(interval);
   }, [fetchInfo]);
 
+  const triggerUpdate = async () => {
+    if (!confirm("Pull latest code and rebuild? The system will restart and you'll need to refresh the page.")) return;
+    setUpdating(true);
+    setUpdateMsg("");
+    try {
+      const res = await fetch(`${API_URL}/api/system/update`, { method: "POST" });
+      const data = await res.json();
+      setUpdateMsg(data.message || "Update started");
+    } catch (err) {
+      setUpdateMsg("Failed to trigger update");
+      setUpdating(false);
+    }
+  };
+
   if (loading || !info) {
     return <div className="text-center py-12 text-[#6B7785]">Loading system info...</div>;
   }
@@ -74,10 +90,28 @@ export function SystemPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-[#E6EDF3]">System</h1>
-        <button onClick={fetchInfo} className="text-[#6B7785] hover:text-primary transition-colors" title="Refresh">
-          <RefreshCw size={16} />
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={triggerUpdate}
+            disabled={updating}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-primary/20 text-primary border border-primary/30 hover:bg-primary/30 transition-colors disabled:opacity-50"
+            title="Pull latest code and rebuild"
+          >
+            {updating ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
+            {updating ? "Updating..." : "Update & Restart"}
+          </button>
+          <button onClick={fetchInfo} className="text-[#6B7785] hover:text-primary transition-colors" title="Refresh">
+            <RefreshCw size={16} />
+          </button>
+        </div>
       </div>
+
+      {updateMsg && (
+        <div className="bg-primary/10 border border-primary/20 rounded-xl px-4 py-3 text-sm text-primary">
+          {updateMsg}
+          {updating && <span className="text-[10px] text-[#6B7785] ml-2">Refresh the page in ~60 seconds</span>}
+        </div>
+      )}
 
       {/* Host info */}
       <div className="bg-surface border border-[#2A3441] rounded-xl p-4">

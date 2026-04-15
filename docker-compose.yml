@@ -33,11 +33,14 @@ services:
       MQTT_TOPICS: ${MQTT_TOPICS:-sensor/#,switch/#,motion/#,light/#}
       DB_PATH: /app/data/aeolus.db
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      AEOLUS_PROJECT_DIR: /aeolus-host
     depends_on:
       mosquitto:
         condition: service_healthy
     volumes:
       - backend_data:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock
+      - .:/aeolus-host
 
   frontend:
     build:
