@@ -6,13 +6,13 @@ Replace the hardcoded connector setup and standalone LightingPage with a fully g
 
 ## Tasks
 
-- [ ] 1. Add backend setup-steps endpoint and ConnectorManager method
-  - [-] 1.1 Add `getSetupSteps()` method to ConnectorManager
+- [x] 1. Add backend setup-steps endpoint and ConnectorManager method
+  - [x] 1.1 Add `getSetupSteps()` method to ConnectorManager
     - Add method that takes an `instanceId`, looks up the managed instance, and returns `instance.connector.getSetupSteps?.() ?? []`
     - Throw if instance not found
     - _Requirements: 1.1, 1.2_
 
-  - [~] 1.2 Add `GET /api/connectors/:id/setup-steps` route to `connector.routes.ts`
+  - [x] 1.2 Add `GET /api/connectors/:id/setup-steps` route to `connector.routes.ts`
     - Delegate to `connectorManager.getSetupSteps(id)`
     - Return 404 with descriptive message if instance not found
     - Return `[]` if connector doesn't implement `getSetupSteps()`
@@ -29,20 +29,20 @@ Replace the hardcoded connector setup and standalone LightingPage with a fully g
     - Generate random `SetupStepDescriptor[]` arrays, mock a connector returning them, call the route, assert response matches
     - **Validates: Requirements 1.1, 1.2, 1.4**
 
-- [ ] 2. Add frontend API client functions
-  - [~] 2.1 Add `fetchSetupSteps()` and `patchConnectorConfig()` to `api-client.ts`
+- [x] 2. Add frontend API client functions
+  - [x] 2.1 Add `fetchSetupSteps()` and `patchConnectorConfig()` to `api-client.ts`
     - `fetchSetupSteps(connectorId)` → `GET /api/connectors/${connectorId}/setup-steps`
     - `patchConnectorConfig(connectorId, config)` → `PATCH /api/connectors/${connectorId}` with `{ config }`
     - _Requirements: 2.1, 3.1_
 
-- [ ] 3. Refactor ConnectorsPage and SetupWizard to be fully generic
-  - [~] 3.1 Remove `getSetupStepsForType()` from ConnectorsPage and fetch steps from backend
+- [x] 3. Refactor ConnectorsPage and SetupWizard to be fully generic
+  - [x] 3.1 Remove `getSetupStepsForType()` from ConnectorsPage and fetch steps from backend
     - Delete the `getSetupStepsForType()` helper function at the bottom of `ConnectorsPage.tsx`
     - In `handleEnableSubmit`, after enabling a connector with `requiresSetup: true`, call `fetchSetupSteps(result.id)` to get steps from the backend
     - Pass fetched steps to `SetupWizard`
     - _Requirements: 2.1, 2.7_
 
-  - [~] 3.2 Add accumulated data propagation and config patching to SetupWizard
+  - [x] 3.2 Add accumulated data propagation and config patching to SetupWizard
     - Merge each step's `result.data` into a running `accumulatedConfig` object
     - Pass accumulated data as params to subsequent step executions
     - On `complete: true`, call `patchConnectorConfig(connectorId, accumulatedConfig)` before calling `onComplete()`
@@ -54,11 +54,11 @@ Replace the hardcoded connector setup and standalone LightingPage with a fully g
     - Generate random sequences of `SetupStepResult` objects with `data` fields, simulate wizard step execution, assert accumulated params contain all prior data keys
     - **Validates: Requirements 3.2**
 
-- [ ] 4. Checkpoint — Ensure all tests pass
+- [x] 4. Checkpoint — Ensure all tests pass
   - Ensure all tests pass, ask the user if questions arise.
 
-- [ ] 5. Implement HueControlPane component
-  - [~] 5.1 Create `HueControlPane.tsx` in `frontend/src/components/panes/`
+- [x] 5. Implement HueControlPane component
+  - [x] 5.1 Create `HueControlPane.tsx` in `frontend/src/components/panes/`
     - Read devices from `useDeviceStore` filtering `integration === "hue"` and `type === "light"`
     - Render responsive grid of light cards with: name, on/off toggle, online/offline badge, brightness slider, colour picker for color-capable lights
     - Toggle sends `POST /api/devices/:id/action` with `{ type: "toggle" }` and optimistically flips `state.on`
@@ -78,8 +78,8 @@ Replace the hardcoded connector setup and standalone LightingPage with a fully g
     - Generate random device type strings, apply the `isColorLight()` function, assert it returns true iff the string contains "color" or "extended" (case-insensitive)
     - **Validates: Requirements 4.5**
 
-- [ ] 6. Implement KasaControlPane component
-  - [~] 6.1 Create `KasaControlPane.tsx` in `frontend/src/components/panes/`
+- [x] 6. Implement KasaControlPane component
+  - [x] 6.1 Create `KasaControlPane.tsx` in `frontend/src/components/panes/`
     - Read devices from `useDeviceStore` filtering `integration === "kasa"`
     - Render responsive grid of device cards with: name, on/off toggle, online badge, device type badge (plug/light/switch)
     - Toggle sends `POST /api/devices/:id/action` with `{ type: "toggle" }` and optimistically flips `state.on`
@@ -97,17 +97,17 @@ Replace the hardcoded connector setup and standalone LightingPage with a fully g
     - Generate random Kasa device states with/without energy fields, render card, assert energy stats section presence matches field presence
     - **Validates: Requirements 5.4**
 
-- [ ] 7. Checkpoint — Ensure all tests pass
+- [x] 7. Checkpoint — Ensure all tests pass
   - Ensure all tests pass, ask the user if questions arise.
 
-- [ ] 8. Update pane registry and clean default layout
-  - [~] 8.1 Update pane registry: replace `hue-lights` with `hue-control`, add `kasa-control`
+- [x] 8. Update pane registry and clean default layout
+  - [x] 8.1 Update pane registry: replace `hue-lights` with `hue-control`, add `kasa-control`
     - Remove the `"hue-lights"` entry and its `HueLightsPane` import from `pane-registry.ts`
     - Add `"hue-control"` entry: component `HueControlPane`, displayName `"Hue Lights"`, icon `"lightbulb"`, defaultSize `{ w: 12, h: 6 }`
     - Add `"kasa-control"` entry: component `KasaControlPane`, displayName `"Kasa Devices"`, icon `"plug"`, defaultSize `{ w: 12, h: 6 }`
     - _Requirements: 4.6, 5.5, 7.1, 7.2_
 
-  - [~] 8.2 Clean default layout in `dashboard.ts`
+  - [x] 8.2 Clean default layout in `dashboard.ts`
     - Remove the `"default-lighting"` tab from `DEFAULT_TABS` (keep only 4 pinned tabs)
     - Set `DEFAULT_PANES` to an empty array `[]`
     - _Requirements: 6.1, 6.2, 6.3_
@@ -117,14 +117,14 @@ Replace the hardcoded connector setup and standalone LightingPage with a fully g
     - Generate random pane type selections from PANE_REGISTRY keys, call `addPane()`, assert resulting pane dimensions match registry defaults
     - **Validates: Requirements 7.3**
 
-- [ ] 9. Remove legacy LightingPage and HueLightsPane
-  - [~] 9.1 Delete `LightingPage.tsx` and `HueLightsPane.tsx`
+- [x] 9. Remove legacy LightingPage and HueLightsPane
+  - [x] 9.1 Delete `LightingPage.tsx` and `HueLightsPane.tsx`
     - Delete `frontend/src/components/LightingPage.tsx`
     - Delete `frontend/src/components/panes/HueLightsPane.tsx`
     - Remove any remaining imports of `LightingPage` or `HueLightsPane` from other files (verify `App.tsx`, `pane-registry.ts`)
     - _Requirements: 6.5_
 
-- [ ] 10. Final checkpoint — Ensure all tests pass
+- [x] 10. Final checkpoint — Ensure all tests pass
   - Ensure all tests pass, ask the user if questions arise.
 
 ## Notes

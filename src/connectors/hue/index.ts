@@ -21,16 +21,16 @@ export const configSchema: ConnectorConfigSchema = [
     id: "bridgeIp",
     label: "Bridge IP",
     type: "text",
-    required: true,
+    required: false,
     placeholder: "192.168.1.100",
-    helpText: "IP address of your Hue bridge",
+    helpText: "IP address of your Hue bridge (discovered during setup)",
   },
   {
     id: "apiKey",
     label: "API Key",
     type: "password",
-    required: true,
-    helpText: "API key obtained during bridge pairing",
+    required: false,
+    helpText: "API key obtained during bridge pairing (generated during setup)",
   },
 ];
 

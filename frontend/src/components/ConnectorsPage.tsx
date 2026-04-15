@@ -289,6 +289,12 @@ export function ConnectorsPage() {
 
   // ---- Enable flow ----
   const handleEnableClick = (connType: ConnectorType) => {
+    // For connectors that require setup, skip the config form and enable immediately
+    // The setup wizard will collect the necessary configuration
+    if (connType.metadata.requiresSetup) {
+      handleEnableWithSetup(connType.metadata.id);
+      return;
+    }
     setConfiguringType(connType.metadata.id);
     // Pre-fill defaults
     const defaults: Record<string, unknown> = {};
@@ -296,6 +302,24 @@ export function ConnectorsPage() {
       if (field.default !== undefined) defaults[field.id] = field.default;
     }
     setConfigValues(defaults);
+  };
+
+  const handleEnableWithSetup = async (connectorTypeId: string) => {
+    setActionLoading(connectorTypeId);
+    try {
+      const result = await enableConnector(connectorTypeId, {});
+      if (result.id) {
+        try {
+          const steps = await fetchSetupSteps(result.id) as unknown as SetupStep[];
+          if (steps.length > 0) {
+            setSetupConnectorId(result.id);
+            setSetupSteps(steps);
+          }
+        } catch {}
+      }
+      await refresh();
+    } catch {}
+    setActionLoading(null);
   };
 
   const handleEnableSubmit = async () => {
