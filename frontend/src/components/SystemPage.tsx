@@ -58,7 +58,7 @@ export function SystemPage() {
 
   useEffect(() => {
     fetchInfo();
-    const interval = setInterval(fetchInfo, 10000); // Refresh every 10s
+    const interval = setInterval(fetchInfo, 30000); // Refresh every 30s
     return () => clearInterval(interval);
   }, [fetchInfo]);
 
@@ -235,6 +235,7 @@ function LogViewer() {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [filter, setFilter] = useState<string>("all");
   const [autoRefresh, setAutoRefresh] = useState(true);
+  const [expanded, setExpanded] = useState(false);
 
   const fetchLogs = useCallback(async () => {
     try {
@@ -246,12 +247,14 @@ function LogViewer() {
     } catch {}
   }, [filter]);
 
+  // Only poll when expanded
   useEffect(() => {
+    if (!expanded) return;
     fetchLogs();
     if (!autoRefresh) return;
-    const interval = setInterval(fetchLogs, 3000);
+    const interval = setInterval(fetchLogs, 10000); // 10s refresh
     return () => clearInterval(interval);
-  }, [fetchLogs, autoRefresh]);
+  }, [fetchLogs, autoRefresh, expanded]);
 
   const formatTime = (iso: string) => {
     try {
@@ -275,39 +278,46 @@ function LogViewer() {
 
   return (
     <div className="bg-surface border border-[#2A3441] rounded-xl p-4">
-      <div className="flex items-center justify-between mb-3">
+      <div
+        className="flex items-center justify-between cursor-pointer"
+        onClick={() => setExpanded(!expanded)}
+      >
         <div className="flex items-center gap-2">
           <ScrollText size={14} className="text-primary" />
           <span className="text-sm font-semibold text-[#9AA6B2] uppercase tracking-wider">Application Logs</span>
+          <ChevronDown size={14} className={`text-[#6B7785] transition-transform ${expanded ? "rotate-180" : ""}`} />
         </div>
-        <div className="flex items-center gap-2">
-          <select
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            className="text-[10px] bg-background border border-[#2A3441] rounded px-2 py-1 text-[#E6EDF3] focus:outline-none focus:border-primary"
-          >
-            <option value="all">All levels</option>
-            <option value="error">Error</option>
-            <option value="warn">Warn</option>
-            <option value="info">Info</option>
-            <option value="debug">Debug</option>
-          </select>
-          <label className="flex items-center gap-1 text-[10px] text-[#6B7785] cursor-pointer">
-            <input
-              type="checkbox"
-              checked={autoRefresh}
-              onChange={(e) => setAutoRefresh(e.target.checked)}
-              className="accent-primary"
-            />
-            Auto
-          </label>
-          <button onClick={fetchLogs} className="text-[#6B7785] hover:text-primary transition-colors" title="Refresh">
-            <RefreshCw size={12} />
-          </button>
-        </div>
+        {expanded && (
+          <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+            <select
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              className="text-[10px] bg-background border border-[#2A3441] rounded px-2 py-1 text-[#E6EDF3] focus:outline-none focus:border-primary"
+            >
+              <option value="all">All levels</option>
+              <option value="error">Error</option>
+              <option value="warn">Warn</option>
+              <option value="info">Info</option>
+              <option value="debug">Debug</option>
+            </select>
+            <label className="flex items-center gap-1 text-[10px] text-[#6B7785] cursor-pointer">
+              <input
+                type="checkbox"
+                checked={autoRefresh}
+                onChange={(e) => setAutoRefresh(e.target.checked)}
+                className="accent-primary"
+              />
+              Auto
+            </label>
+            <button onClick={fetchLogs} className="text-[#6B7785] hover:text-primary transition-colors" title="Refresh">
+              <RefreshCw size={12} />
+            </button>
+          </div>
+        )}
       </div>
 
-      <div className="max-h-80 overflow-auto rounded-lg bg-background border border-[#2A3441]">
+      {expanded && (
+        <div className="max-h-80 overflow-auto rounded-lg bg-background border border-[#2A3441] mt-3">
         {logs.length === 0 ? (
           <div className="text-center py-6 text-[#6B7785] text-xs">No logs</div>
         ) : (
@@ -333,6 +343,7 @@ function LogViewer() {
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }
