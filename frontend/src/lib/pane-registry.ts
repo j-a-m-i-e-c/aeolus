@@ -5,7 +5,8 @@ import type { PaneConfig } from "../types/dashboard";
 import { DeviceGridPane } from "../components/panes/DeviceGridPane";
 import { SensorPanelPane } from "../components/panes/SensorPanelPane";
 import { MqttInspectorPane } from "../components/panes/MqttInspectorPane";
-import { HueLightsPane } from "../components/panes/HueLightsPane";
+import { HueControlPane } from "../components/panes/HueControlPane";
+import { KasaControlPane } from "../components/panes/KasaControlPane";
 import { AutomationRulesPane } from "../components/panes/AutomationRulesPane";
 import { SystemStatsPane } from "../components/panes/SystemStatsPane";
 import { TopicTreePane } from "../components/panes/TopicTreePane";
@@ -42,12 +43,19 @@ export const PANE_REGISTRY: Record<string, PaneRegistryEntry> = {
     defaultConfig: {},
     defaultSize: { w: 6, h: 5 },
   },
-  "hue-lights": {
-    component: HueLightsPane,
+  "hue-control": {
+    component: HueControlPane,
     displayName: "Hue Lights",
     defaultIcon: "lightbulb",
     defaultConfig: {},
-    defaultSize: { w: 12, h: 8 },
+    defaultSize: { w: 12, h: 6 },
+  },
+  "kasa-control": {
+    component: KasaControlPane,
+    displayName: "Kasa Devices",
+    defaultIcon: "plug",
+    defaultConfig: {},
+    defaultSize: { w: 12, h: 6 },
   },
   "automation-rules": {
     component: AutomationRulesPane,
