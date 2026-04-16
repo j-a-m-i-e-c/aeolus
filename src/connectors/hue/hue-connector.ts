@@ -186,7 +186,7 @@ export class HueConnector implements Connector {
         id: "press-button",
         title: "Press Link Button",
         description:
-          "Press the link button on your Hue bridge, then click Continue to complete pairing.",
+          "Press the large link button on top of your Hue bridge, then click Continue to pair.",
         fields: [
           {
             id: "bridgeIp",
@@ -194,7 +194,7 @@ export class HueConnector implements Connector {
             type: "text",
             required: true,
             placeholder: "192.168.1.100",
-            helpText: "IP address of the Hue bridge to pair with",
+            helpText: "Auto-filled from discovery. Change only if you have multiple bridges.",
           },
         ],
       },
@@ -227,15 +227,28 @@ export class HueConnector implements Connector {
           message: `Bridge discovery failed: HTTP ${res.status}`,
         };
       }
-      const bridges = await res.json();
+      const bridges = (await res.json()) as Array<{ id: string; internalipaddress: string }>;
       logger.info(
-        { count: (bridges as unknown[]).length },
+        { count: bridges.length },
         "Hue bridges discovered",
       );
+
+      if (bridges.length === 0) {
+        return {
+          success: false,
+          message: "No Hue bridges found on your network. Make sure the bridge is powered on and connected.",
+        };
+      }
+
+      // Auto-select the first bridge IP so step 2 is pre-filled
+      const firstBridgeIp = bridges[0].internalipaddress;
+
       return {
         success: true,
-        message: `Found ${(bridges as unknown[]).length} bridge(s)`,
-        data: { bridges },
+        message: bridges.length === 1
+          ? `Found bridge at ${firstBridgeIp}`
+          : `Found ${bridges.length} bridge(s). Using ${firstBridgeIp} — change the IP in the next step if needed.`,
+        data: { bridges, bridgeIp: firstBridgeIp },
       };
     } catch (err) {
       return {
