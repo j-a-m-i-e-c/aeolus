@@ -486,6 +486,77 @@ interface LogEntry {
 }
 ```
 
+### ConnectorMetadata
+```typescript
+interface ConnectorMetadata {
+  id: string;                        // Unique connector type identifier (e.g. "hue", "kasa")
+  displayName: string;               // Human-readable name for dashboard cards
+  icon: string;                      // Lucide icon name
+  description: string;               // Short description of the connector
+  supportedDeviceTypes: DeviceType[];// Device types this connector can produce
+  requiresSetup: boolean;            // Whether a multi-step setup wizard is needed
+}
+```
+
+### ConfigFieldDescriptor
+```typescript
+interface ConfigFieldDescriptor {
+  id: string;          // Field key in the config object
+  label: string;       // Human-readable label
+  type: "text" | "number" | "password" | "boolean" | "select";
+  required: boolean;
+  default?: string | number | boolean;
+  placeholder?: string;
+  helpText?: string;
+  options?: Array<{ label: string; value: string }>;
+}
+
+type ConnectorConfigSchema = ConfigFieldDescriptor[];
+```
+
+### SetupStepDescriptor
+```typescript
+interface SetupStepDescriptor {
+  id: string;          // Step identifier used in API path (e.g. "discover-bridges")
+  title: string;       // Step heading in the wizard
+  description: string; // Instructions shown to the user
+  fields?: ConfigFieldDescriptor[]; // Input fields for this step, if any
+}
+```
+
+### SetupStepResult
+```typescript
+interface SetupStepResult {
+  success: boolean;                  // Whether the step completed successfully
+  message: string;                   // User-facing message (confirmation or error)
+  data?: Record<string, unknown>;    // Data produced by this step (e.g. apiKey, bridges)
+  complete?: boolean;                // When true, setup flow is finished
+}
+```
+
+### ConnectorHealthStatus
+```typescript
+interface ConnectorHealthStatus {
+  status: "connected" | "degraded" | "disconnected";
+  lastSeen: number;          // Unix timestamp ms of last successful communication
+  errorMessage?: string;     // Present when status is degraded or disconnected
+}
+```
+
+### ConnectorInstanceInfo
+```typescript
+interface ConnectorInstanceInfo {
+  id: string;                        // UUID instance identifier
+  connectorType: string;             // Matches ConnectorMetadata.id
+  displayName: string;               // From metadata
+  icon: string;                      // From metadata
+  config: Record<string, unknown>;   // Current config (passwords redacted in API responses)
+  health: ConnectorHealthStatus;     // Live health status
+  deviceCount: number;               // Devices discovered by this instance
+  enabled: boolean;                  // Whether the instance is active
+}
+```
+
 ### SQLite Schema
 ```sql
 CREATE TABLE devices (
@@ -612,6 +683,7 @@ The Dockerfile installs `git`, `docker-cli`, and `docker-cli-compose` in the pro
 - **Pluggable connector architecture over hardcoded integrations:** Each connector is a self-contained module with metadata, config schema, and factory function. The ConnectorRegistry discovers modules at startup, the ConnectorManager handles lifecycle (enable/disable/poll/action routing), and the ConnectorStore persists state to SQLite. This replaces the previous `src/integrations/` approach where each integration required its own route file and manual wiring. New connectors can be added by creating a directory in `src/connectors/` with the standard module exports — no changes to core code required. A `_template/` skeleton is provided for developers.
 - **Host networking for LAN device discovery:** The backend container uses `network_mode: host` instead of the shared bridge network. This is required for Kasa's UDP broadcast discovery (which doesn't work across Docker bridge networks) and for direct LAN access to Hue bridges. The trade-off is that the backend port is exposed directly on the host rather than through Docker port mapping, and the MQTT broker URL must use `localhost` instead of the Docker service name.
 - **Pinned tabs render dedicated components:** Pinned system tabs (Dashboard, Automations, Connectors, System) render their own full-page components directly via a `PINNED_PAGES` map in `App.tsx`, bypassing the modular pane grid. This gives each system page full control over its layout and styling. Custom (unpinned) tabs use the `TabLayout` component with the pane grid system. This separation keeps system pages polished while maintaining flexibility for user-created tabs.
+- **Generic backend-driven setup wizard:** The ConnectorsPage setup wizard is fully generic — it fetches step descriptors from `GET /api/connectors/:id/setup-steps` and renders them dynamically. No connector-specific UI code exists in the frontend. Each step can include input fields, and the wizard accumulates data across steps, passing it to subsequent step executions and patching the connector config on completion. This means adding a new connector with a multi-step setup flow requires zero frontend changes.
 
 
 ## Dashboard Features
@@ -671,6 +743,34 @@ The React dashboard provides a comprehensive developer-focused interface with a 
 - **Application Logs** — Collapsible log viewer section with level filter dropdown (all/error/warn/info/debug), auto-refresh toggle (10-second interval), colour-coded entries by level, and manual refresh button. Fetches from `GET /api/system/logs`
 - **Self-Update Button** — "Update & Restart" button that triggers `POST /api/system/update` with a confirmation dialog. Shows status message and instructs user to refresh after ~60 seconds
 
+### Custom Tabs (unpinned)
+Custom tabs use the modular pane grid powered by `react-grid-layout`. Users create tabs from the sidebar, then add any combination of panes via the PanePicker.
+
+#### Hue Control Pane (`hue-control`)
+- Filters devices from the store where `integration === "hue"` and `type === "light"`
+- Responsive grid of light cards with name, online/offline badge, and toggle button
+- Debounced brightness slider — tracks local value during drag, sends `{ type: "brightness", params: { brightness } }` on mouse/touch release only (no intermediate API calls)
+- Colour picker for color-capable lights (detected by device type containing "color" or "extended", case-insensitive) — 10 preset swatches (red, orange, yellow, green, cyan, blue, purple, pink, warm white, cool white) that send `{ type: "color", params: { hue, saturation } }`
+- Optimistic UI updates — toggle flips state immediately, reverts on API failure
+- Empty state message directing users to enable the Hue connector
+
+#### Kasa Control Pane (`kasa-control`)
+- Filters devices from the store where `integration === "kasa"`
+- Responsive grid of device cards with name, device type badge (plug/light/switch), online badge, and toggle button
+- Energy monitoring section — conditionally displayed when device state contains `voltage`, `current`, `power`, or `totalConsumption` fields
+- Optimistic UI updates — toggle flips state immediately, reverts on API failure
+- Empty state message directing users to enable the Kasa connector
+
+#### Other Pane Types
+- **Device Grid** (`device-grid`) — Same device card grid as the Dashboard tab
+- **Sensor Panel** (`sensor-panel`) — Live sensor values with sparkline charts
+- **MQTT Inspector** (`mqtt-inspector`) — Real-time message feed with publish form
+- **Automation Rules** (`automation-rules`) — Rule listing from the Automations page
+- **System Stats** (`system-stats`) — Host diagnostics summary
+- **Topic Tree** (`topic-tree`) — Hierarchical MQTT topic tree
+- **Event Log** (`event-log`) — Automation fire event log
+- **Connectors** (`connectors-page`) — Connector management page as a pane
+
 ### Global Features
 - **Toast Notifications** — Animated alerts in bottom-right when automations fire (auto-dismiss 4s)
 - **Command Palette** — Ctrl+K to search devices or publish MQTT messages via keyboard
@@ -725,7 +825,7 @@ Enable via `SIMULATOR=true` env var (auto-starts on boot) or toggle from the sid
 ---
 
 **Last Updated:** April 16, 2026
-**Version:** 0.5.0
+**Version:** 0.6.0
 **Status:** MVP Development
 
 ## Future Enhancements

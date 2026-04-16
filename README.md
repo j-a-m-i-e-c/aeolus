@@ -96,7 +96,7 @@ The dashboard uses a modular tab-and-pane layout. On a fresh install, the sideba
 
 **System** — Host diagnostics including CPU load, temperature, memory, disk, and network interfaces. Collapsible application log viewer with level filtering and auto-refresh. One-click "Update & Restart" button for self-update via git pull + Docker rebuild.
 
-**Custom Tabs** — Create your own tabs with a name and icon, then add any combination of panes (device grid, sensor panel, MQTT inspector, Hue control, Kasa control, etc.).
+**Custom Tabs** — Create your own tabs with a name and icon, then add any combination of panes: device grid, sensor panel, MQTT inspector, Hue light control (toggle, brightness slider, colour picker with 10 presets), Kasa device control (toggle, energy monitoring stats), automation rules, system stats, topic tree, event log, or connectors.
 
 ## API Endpoints
 

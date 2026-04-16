@@ -7,10 +7,10 @@ Future development plans for the Aeolus platform, organised by category.
 ## Infrastructure
 
 ### Cloudflare Tunnel for HTTPS
-Expose the Aeolus dashboard securely over the internet via a Cloudflare Tunnel, enabling HTTPS access without port forwarding or self-signed certificates. This also unlocks `crypto.randomUUID()` in the browser (requires secure context) and enables push notifications.
+Expose the Aeolus dashboard securely over the internet via a Cloudflare Tunnel, enabling HTTPS access without port forwarding or self-signed certificates. This also unlocks `crypto.randomUUID()` in the browser (requires secure context) and enables push notifications. Currently the dashboard is served over plain HTTP on the LAN, which is fine for local use but insufficient for a portfolio demo or remote access. Cloudflare Tunnel would provide a public URL with automatic TLS, zero firewall changes, and DDoS protection — making the project presentable as a live demo.
 
 ### Authentication & User Management
-Add user accounts with login, session management, and role-based access control. Protect the API and dashboard so only authorised users can view devices, trigger actions, or modify automations. Essential before exposing Aeolus over the internet.
+Add user accounts with login, session management, and role-based access control. Protect the API and dashboard so only authorised users can view devices, trigger actions, or modify automations. Essential before exposing Aeolus over the internet via Cloudflare Tunnel or any public endpoint. Without auth, anyone with the URL could control devices and modify automations. Consider JWT-based sessions with a simple username/password login page as a first step.
 
 ---
 
@@ -18,6 +18,20 @@ Add user accounts with login, session management, and role-based access control.
 
 ### More Connectors (Zigbee, Z-Wave, Tasmota, Shelly)
 Expand the connector library with support for popular IoT protocols and device ecosystems. Zigbee (via zigbee2mqtt) and Z-Wave would cover a wide range of sensors and actuators. Tasmota and Shelly connectors would add support for popular DIY and off-the-shelf Wi-Fi devices.
+
+### Smart Camera Integration
+Connect IP cameras and smart camera systems (Reolink, Hikvision, UniFi Protect, RTSP-compatible cameras) to the Aeolus device registry. Stream snapshots or MJPEG feeds into a dedicated camera pane on the dashboard. Integrate motion detection events into the automation engine so cameras can trigger rules (e.g. "when front door camera detects motion after 11pm, turn on porch light and send a notification"). ONVIF protocol support would cover a wide range of cameras. For AI-capable cameras, ingest object detection events (person, vehicle, animal) as device state — enabling automations like "when a person is detected in the driveway, unlock the front gate." Camera feeds stay local, no cloud required.
+
+### Smart Lock Connector
+Integrate smart locks (Yale, August, Nuki, Schlage, TTLock) for keyless entry control from the Aeolus dashboard. Generate temporary access codes via the automation DSL — particularly powerful when combined with the short-term rental automation vertical (auto-generate a unique code per Airbnb booking, expire it at checkout). Surface lock state (locked/unlocked/jammed) in the device registry, log access events in the event log, and trigger automations on lock/unlock (e.g. "when front door unlocks after 6pm, turn on hallway lights"). Many smart locks expose local APIs or work via Zigbee/Z-Wave, fitting naturally into the connector framework.
+
+### Garden & Irrigation Automation
+Connect smart irrigation controllers and garden sensors (Holman, Orbit B-hyve, OpenSprinkler, soil moisture sensors via Zigbee/MQTT) for automated watering schedules driven by real data. Combine soil moisture readings, local weather forecasts (via the external services framework), and rain predictions to skip unnecessary watering cycles. Surface zone status, run history, and water usage in a dedicated garden pane. The automation DSL can express rules like "water zone 3 for 15 minutes at 6am, but skip if rain probability exceeds 60% or soil moisture is above 40%." This ties into the energy/cost analytics opportunity — tracking water usage and savings from smart scheduling.
+
+### Bluetooth Low Energy (BLE) Connector
+Use the Raspberry Pi's built-in Bluetooth 5.0/BLE radio (standard on every Pi since the Pi 3) to communicate directly with nearby BLE IoT devices — no extra hardware required. The BLE ecosystem includes Xiaomi/Mijia sensors (temperature, humidity, door/window — ~$5-10 each), Switchbot (curtain motors, button pushers, locks), Govee (LED strips, thermometers), BLE smart locks, and plant/soil moisture sensors. A BLE connector would use `noble` or `node-ble` to scan for devices, decode manufacturer-specific advertisements and GATT characteristics, and push state through the event bus like any other connector. The Docker container already uses host networking, so accessing the host Bluetooth adapter is straightforward.
+
+The main limitation is range — BLE reaches ~10-30 metres, so it only covers devices near the Pi. For whole-house coverage, the recommended approach is BLE proxy nodes: cheap ESP32 boards (~$5 each) placed in each room running ESPHome or Theengs Gateway, which scan for BLE devices locally and forward the data to the MQTT broker over Wi-Fi. From Aeolus's perspective, the BLE data arrives as standard MQTT topics — no special connector needed. This hybrid approach (direct BLE for nearby devices + ESP32 proxies for distant rooms) gives full-house BLE coverage while keeping the architecture clean. The direct BLE connector on the Pi is still valuable for devices in the same room (smart locks on the front door, presence detection, nearby sensors) and for setups where users don't want to deploy ESP32 proxies.
 
 ### External Services Framework
 A structured way to integrate external APIs (weather forecasts, river height data, energy prices, calendar events) as virtual devices in the Aeolus device registry. Services would poll external APIs on a schedule and emit events through the standard event bus, making external data available to automations and the dashboard.
@@ -47,3 +61,68 @@ React Native companion app for quick device control, push notifications when aut
 
 ### Plugin Marketplace
 Community-contributed connectors and pane types installable from the dashboard. A registry of published plugins with one-click install, automatic dependency resolution, and version management. Would lower the barrier for extending Aeolus without writing code.
+
+---
+
+## Untapped Opportunities
+
+These are areas where the current smart home landscape has genuine gaps. Aeolus's architecture — TypeScript DSL, pluggable connectors, event bus, local-first design — positions it well to explore any of these directions.
+
+### Energy Analytics & Cost Intelligence
+Turn raw wattage data from smart plugs (Kasa HS110, Shelly PM, etc.) and CT clamps into actionable insights. Per-device cost breakdowns using real electricity tariffs, anomaly detection ("your fridge is drawing 40% more than last month"), time-of-use scheduling to shift loads to cheaper rate periods, and solar self-consumption optimisation. Home Assistant has a basic energy dashboard but it's widely considered clunky. A dedicated energy analytics layer with historical trends, cost forecasting, and automated recommendations is a clear monetisation path — the home energy management market is growing fast and homeowners can save $200+/year just by understanding their consumption patterns.
+
+### Short-Term Rental Automation (Airbnb / VRBO)
+Calendar-driven automation for vacation rental properties. Sync with Airbnb/VRBO booking calendars to automatically generate smart lock codes per guest, pre-condition HVAC before check-in, set welcome lighting scenes, switch to energy-saving mode during vacancy, and send automated check-in instructions. The workflow is well-defined but no open source platform handles it end-to-end. Rental Home Automator exists but is basic and closed-source. Aeolus's TypeScript DSL is a natural fit for expressing calendar-triggered automation rules, and the connector framework already supports smart locks (via Kasa/Zigbee) and thermostats. This is a vertical with paying customers — hosts managing 5-50 properties would pay for a reliable, self-hosted solution.
+
+### Local AI / On-Device LLM Assistant
+Run a small language model (e.g. quantized Llama, Phi, or Gemma) directly on the Raspberry Pi for natural language device control and intelligent automation generation. "Turn on the lights when I get home after sunset" gets parsed locally and converted into a TypeScript automation rule — no cloud dependency, full privacy. Research is advancing rapidly on edge LLM inference (Pi 5 with 8GB RAM can run 3B parameter models). Home Assistant is experimenting with voice pipelines but they're slow and cloud-dependent. A local-first AI assistant that understands your device registry, suggests automations based on usage patterns, and detects anomalies ("your bathroom humidity has been above 80% for 3 hours — possible ventilation issue") would be a compelling differentiator and an incredible portfolio piece.
+
+### Small Building / Commercial Lite Management
+Traditional Building Management Systems (BMS) cost $2.50-8 per square foot and are designed for large commercial buildings. Small businesses, churches, community centres, co-working spaces, and small offices have zero affordable options for HVAC scheduling, occupancy-based lighting, and energy monitoring. Aeolus running on a Pi with a handful of smart plugs, temperature sensors, and occupancy detectors could serve this market at a fraction of the cost. The dashboard's modular pane system already supports multi-room views, and the automation DSL can express occupancy-based rules. This is a genuinely underserved segment — IoT for All calls it "the other 90%" of buildings that have no smart infrastructure.
+
+### Multi-Property Management
+Landlords and property managers with 5-50 rental units need to monitor water leaks, HVAC health, energy usage, and security across properties from a single dashboard. Current solutions are either enterprise-grade (expensive, complex) or consumer-grade (one home at a time). Aeolus's multi-node clustering roadmap item could evolve into a multi-property management platform where each property runs its own Pi hub and a central Aeolus Cloud dashboard aggregates device state, alerts, and energy data across all locations. Combine with the short-term rental automation vertical for a complete property management IoT stack.
+
+### Matter Bridge / Protocol Translation Hub
+The Matter smart home standard is struggling with adoption — it only standardises basic functions (on/off, dimming) and can't handle advanced features like colour gradients, energy monitoring, or complex device states. Devices speaking Zigbee, Z-Wave, or proprietary protocols still need bridges to participate in Matter ecosystems. Aeolus could act as a universal Matter bridge — exposing non-Matter devices to Apple Home, Google Home, and Alexa via Matter, while preserving full feature access through the Aeolus dashboard and API. The connector framework is architecturally ready for this: each connector already normalises devices into a standard format, and adding a Matter server layer on top would make Aeolus the translation hub between legacy protocols and the Matter world.
+
+### TypeScript Automation SDK & Developer Platform
+The current `when/if/then` DSL is a convenient shorthand for simple rules, but it's a constraint — you can't query devices, call external APIs, maintain state across events, or compose multi-step workflows. The SDK vision is to give developers full, unrestricted TypeScript access to the entire Aeolus runtime while keeping the DSL as an optional convenience layer.
+
+**The `@aeolus/sdk` npm package** would expose typed access to the device registry, event bus, connectors, services, and scheduling — all with IntelliSense and compile-time type safety. Automation files would be plain TypeScript that can import any npm package, use `async/await`, and express arbitrarily complex logic:
+
+```typescript
+import { aeolus } from "@aeolus/sdk";
+
+// Direct device access — query, filter, act on any device by ID or type
+const thermostat = aeolus.devices.get("climate-living-room");
+const allLights = aeolus.devices.filter(d => d.type === "light" && d.state.on);
+
+// Subscribe to events with full context — not limited to topic matching
+aeolus.on("device:state-change", async (event) => {
+  if (event.deviceId !== "motion-living-room") return;
+  const forecast = await aeolus.services.get("weather").getForecast();
+  if (event.state.motion && forecast.low < 5) {
+    await aeolus.devices.action("climate-living-room", "setTemperature", { target: 22 });
+  }
+});
+
+// Cron-based scheduling — not possible with the DSL
+aeolus.schedule("0 23 * * *", async () => {
+  for (const light of aeolus.devices.filter(d => d.type === "light" && d.state.on)) {
+    await aeolus.devices.action(light.id, "off");
+  }
+});
+
+// Use any npm package — date-fns, axios, node-cron, whatever you need
+import { format } from "date-fns";
+aeolus.log.info(`Rule loaded at ${format(new Date(), "HH:mm")}`);
+```
+
+**The `@aeolus/cli`** would provide a proper developer workflow:
+- `npx @aeolus/cli init` — scaffold a project with tsconfig, types, and example rules
+- `npx @aeolus/cli dev` — hot-reload automations against a running Aeolus instance
+- `npx @aeolus/cli test` — run automation tests with a simulated device registry and event stream
+- `npx @aeolus/cli deploy` — push rules to the Pi over SSH or via the REST API
+
+**Why this matters:** Home Assistant's community has been asking for "real code" automation support for years. Their YAML automations and visual editor are fine for simple rules, but developers hit a wall when they need conditional logic, external API calls, or state machines. Aeolus would be the only platform where you write automations in a real programming language with a real type system, test them with a real test runner, version them in git, and deploy them through CI/CD. That's a developer experience no other home automation platform offers.
