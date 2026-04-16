@@ -198,8 +198,21 @@ function SetupWizard({
         }
         onComplete();
       } else if (result.success && currentStepIdx < steps.length - 1) {
+        // Pre-fill next step's fields from accumulated data (e.g. bridgeIp from discovery)
+        const nextStep = steps[currentStepIdx + 1];
+        const prefilled: Record<string, unknown> = {};
+        const newAccumulated = result.data
+          ? { ...accumulatedConfig, ...(result.data as Record<string, unknown>) }
+          : accumulatedConfig;
+        if (nextStep?.fields) {
+          for (const field of nextStep.fields) {
+            if (newAccumulated[field.id] !== undefined) {
+              prefilled[field.id] = newAccumulated[field.id];
+            }
+          }
+        }
         setCurrentStepIdx((i) => i + 1);
-        setStepParams({});
+        setStepParams(prefilled);
       }
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "Step failed");
@@ -394,7 +407,15 @@ export function ConnectorsPage() {
           >
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-sm font-semibold text-[#E6EDF3]">Setup Required</h2>
-              <button onClick={() => { setSetupConnectorId(null); setSetupSteps([]); }} className="text-[#6B7785] hover:text-[#9AA6B2]">
+              <button onClick={async () => {
+                const id = setupConnectorId;
+                setSetupConnectorId(null);
+                setSetupSteps([]);
+                if (id) {
+                  try { await disableConnector(id); } catch {}
+                }
+                refresh();
+              }} className="text-[#6B7785] hover:text-[#9AA6B2]">
                 <X size={16} />
               </button>
             </div>
@@ -402,18 +423,45 @@ export function ConnectorsPage() {
               connectorId={setupConnectorId}
               steps={setupSteps}
               onComplete={() => { setSetupConnectorId(null); setSetupSteps([]); refresh(); }}
-              onCancel={() => { setSetupConnectorId(null); setSetupSteps([]); }}
+              onCancel={async () => {
+                // Disable the connector if setup was cancelled — it's useless without completing setup
+                const id = setupConnectorId;
+                setSetupConnectorId(null);
+                setSetupSteps([]);
+                if (id) {
+                  try { await disableConnector(id); } catch {}
+                }
+                refresh();
+              }}
             />
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Enabled connectors */}
-      {enabled.length > 0 && (
+      {/* Enabled connectors — hide connectors mid-setup or with incomplete setup */}
+      {enabled.filter((conn) => {
+        // Hide the connector currently going through the setup wizard
+        if (conn.id === setupConnectorId) return false;
+        // Hide requiresSetup connectors that never completed setup (disconnected, 0 devices, no config)
+        const meta = available.find((a) => a.metadata.id === conn.connectorType);
+        if (meta?.metadata.requiresSetup && conn.health.status === "disconnected" && conn.deviceCount === 0) {
+          const hasConfig = Object.keys(conn.config).some((k) => conn.config[k] && conn.config[k] !== "********");
+          if (!hasConfig) return false;
+        }
+        return true;
+      }).length > 0 && (
         <div className="space-y-3">
           <h2 className="text-xs font-semibold text-[#9AA6B2] uppercase tracking-wider">Active Connectors</h2>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {enabled.map((conn) => (
+            {enabled.filter((conn) => {
+              if (conn.id === setupConnectorId) return false;
+              const meta = available.find((a) => a.metadata.id === conn.connectorType);
+              if (meta?.metadata.requiresSetup && conn.health.status === "disconnected" && conn.deviceCount === 0) {
+                const hasConfig = Object.keys(conn.config).some((k) => conn.config[k] && conn.config[k] !== "********");
+                if (!hasConfig) return false;
+              }
+              return true;
+            }).map((conn) => (
               <div key={conn.id} className="bg-surface border border-[#2A3441] rounded-xl p-4 space-y-3">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
