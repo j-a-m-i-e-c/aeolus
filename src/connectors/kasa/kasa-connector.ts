@@ -86,14 +86,24 @@ export class KasaConnector implements Connector {
       }, this.discoveryTimeout);
     });
 
-    // Update health based on discovered devices
+    // Update health — the client is still functional even if no devices were found on this cycle.
+    // Only mark disconnected if we've NEVER found any devices. If we previously found devices
+    // but this poll came back empty, mark as degraded (transient UDP broadcast miss).
     if (devices.length > 0) {
       this.lastSuccessTimestamp = Date.now();
       this.healthStatus = {
         status: "connected",
         lastSeen: this.lastSuccessTimestamp,
       };
+    } else if (this.discoveredDevices.size > 0) {
+      // We've found devices before but this poll was empty — likely a transient issue
+      this.healthStatus = {
+        status: "degraded",
+        lastSeen: this.lastSuccessTimestamp,
+        errorMessage: "No devices found on last scan — previously discovered devices may still be reachable",
+      };
     } else {
+      // Never found any devices at all
       this.healthStatus = {
         status: "disconnected",
         lastSeen: this.lastSuccessTimestamp,

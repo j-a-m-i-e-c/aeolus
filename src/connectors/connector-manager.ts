@@ -428,10 +428,16 @@ export class ConnectorManager {
     return setInterval(async () => {
       try {
         const discovered = await connector.discoverDevices();
-        for (const device of discovered) {
-          this.emitDeviceEvent(device);
-          devices.add(device.id);
+        // Sync the device set — replace with current poll results, not just accumulate.
+        // This ensures the device count reflects reality, not a high-water mark.
+        if (discovered.length > 0) {
+          devices.clear();
+          for (const device of discovered) {
+            this.emitDeviceEvent(device);
+            devices.add(device.id);
+          }
         }
+        // If discovered is empty, keep the existing set — don't wipe devices on a transient miss
       } catch (err) {
         logger.error(
           { instanceId, error: (err as Error).message },
