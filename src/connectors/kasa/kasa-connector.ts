@@ -65,11 +65,14 @@ export class KasaConnector implements Connector {
         discoveryTimeout: this.discoveryTimeout,
       });
 
-      client.on("device-new", (device: unknown) => {
+      const handleDevice = (device: unknown) => {
         try {
           const mapped = this.mapDevice(device);
           if (mapped) {
-            devices.push(mapped);
+            // Avoid duplicates within the same scan
+            if (!devices.some((d) => d.id === mapped.id)) {
+              devices.push(mapped);
+            }
             this.discoveredDevices.set(mapped.id, device);
           }
         } catch (err) {
@@ -78,7 +81,11 @@ export class KasaConnector implements Connector {
             "Failed to map discovered Kasa device",
           );
         }
-      });
+      };
+
+      // Listen for both new and already-known devices
+      client.on("device-new", handleDevice);
+      client.on("device-online", handleDevice);
 
       setTimeout(() => {
         client.stopDiscovery();
