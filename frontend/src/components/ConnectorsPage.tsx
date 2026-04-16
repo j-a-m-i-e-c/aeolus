@@ -567,6 +567,25 @@ export function ConnectorsPage() {
             const isEnabled = enabledTypes.has(connType.metadata.id);
             const isConfiguring = configuringType === connType.metadata.id;
 
+            // Check if this is a requiresSetup connector with incomplete setup (ghost record)
+            const enabledInstance = enabled.find((e) => e.connectorType === connType.metadata.id);
+            const isIncompleteSetup = isEnabled && connType.metadata.requiresSetup && enabledInstance
+              && enabledInstance.health.status === "disconnected" && enabledInstance.deviceCount === 0
+              && !Object.keys(enabledInstance.config).some((k) => enabledInstance.config[k] && enabledInstance.config[k] !== "********");
+
+            const handleResumeSetup = async () => {
+              if (!enabledInstance) return;
+              setActionLoading(connType.metadata.id);
+              try {
+                const steps = await fetchSetupSteps(enabledInstance.id) as unknown as SetupStep[];
+                if (steps.length > 0) {
+                  setSetupConnectorId(enabledInstance.id);
+                  setSetupSteps(steps);
+                }
+              } catch {}
+              setActionLoading(null);
+            };
+
             return (
               <div key={connType.metadata.id} className="bg-surface border border-[#2A3441] rounded-xl p-4 space-y-3">
                 <div className="flex items-center justify-between">
@@ -579,7 +598,24 @@ export function ConnectorsPage() {
                       <div className="text-[10px] text-[#6B7785]">{connType.metadata.description}</div>
                     </div>
                   </div>
-                  {isEnabled ? (
+                  {isIncompleteSetup ? (
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={handleResumeSetup}
+                        disabled={actionLoading === connType.metadata.id}
+                        className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-lg bg-[#F59E0B]/20 text-[#F59E0B] border border-[#F59E0B]/30 hover:bg-[#F59E0B]/30 transition-colors disabled:opacity-50"
+                      >
+                        Setup
+                      </button>
+                      <button
+                        onClick={() => enabledInstance && handleDisable(enabledInstance.id)}
+                        disabled={actionLoading === connType.metadata.id}
+                        className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-lg bg-[#EF4444]/10 text-[#EF4444] border border-[#EF4444]/20 hover:bg-[#EF4444]/20 transition-colors disabled:opacity-50"
+                      >
+                        <PowerOff size={10} />
+                      </button>
+                    </div>
+                  ) : isEnabled ? (
                     <span className="text-[10px] px-2 py-0.5 rounded bg-[#22C55E]/20 text-[#22C55E]">Active</span>
                   ) : (
                     <button
