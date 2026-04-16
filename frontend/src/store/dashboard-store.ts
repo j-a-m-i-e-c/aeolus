@@ -61,6 +61,14 @@ function debouncedPersist(getState: () => DashboardState): void {
 // Store
 // ---------------------------------------------------------------------------
 
+/** Convert a tab name to a URL-safe slug */
+export function tabNameToSlug(name: string): string {
+  return name.trim().toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
+}
+
+/** Reserved slugs that cannot be used for custom tabs */
+const RESERVED_SLUGS = new Set(["dashboard", "automations", "connectors", "system"]);
+
 export const useDashboardStore = create<DashboardState>((set, get) => ({
   tabs: [],
   panes: [],
@@ -72,6 +80,13 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
   addTab: (name, icon) => {
     if (!name.trim()) return;
     const state = get();
+    const slug = tabNameToSlug(name);
+
+    // Reject empty slugs, reserved names, and duplicates
+    if (!slug || RESERVED_SLUGS.has(slug)) return;
+    const existingSlugs = new Set(state.tabs.map((t) => tabNameToSlug(t.name)));
+    if (existingSlugs.has(slug)) return;
+
     const newTab: Tab = {
       id: generateId(),
       name: name.trim(),
@@ -86,8 +101,18 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
 
   renameTab: (tabId, name) => {
     if (!name.trim()) return;
-    set((state) => ({
-      tabs: state.tabs.map((t) => (t.id === tabId ? { ...t, name: name.trim() } : t)),
+    const state = get();
+    const slug = tabNameToSlug(name);
+
+    // Reject empty slugs, reserved names, and duplicates (excluding the tab being renamed)
+    if (!slug || RESERVED_SLUGS.has(slug)) return;
+    const existingSlugs = new Set(
+      state.tabs.filter((t) => t.id !== tabId).map((t) => tabNameToSlug(t.name)),
+    );
+    if (existingSlugs.has(slug)) return;
+
+    set((s) => ({
+      tabs: s.tabs.map((t) => (t.id === tabId ? { ...t, name: name.trim() } : t)),
     }));
     debouncedPersist(get);
   },

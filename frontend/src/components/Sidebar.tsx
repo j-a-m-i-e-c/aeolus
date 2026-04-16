@@ -2,7 +2,8 @@
 
 import { AeolusLogo } from "./AeolusLogo";
 import { useDeviceStore } from "../store/device-store";
-import { useDashboardStore } from "../store/dashboard-store";
+import { useDashboardStore, tabNameToSlug } from "../store/dashboard-store";
+import { useNavigate, useLocation } from "react-router-dom";
 import * as icons from "lucide-react";
 import { Plus, Trash2, Wifi, WifiOff, Play, Square, GripVertical } from "lucide-react";
 import { useState, useEffect, useRef, useCallback } from "react";
@@ -37,10 +38,10 @@ const ICON_CHOICES = [
 export function Sidebar() {
   const wsConnected = useDeviceStore((s) => s.wsConnected);
   const health = useDeviceStore((s) => s.health);
+  const navigate = useNavigate();
+  const location = useLocation();
 
   const tabs = useDashboardStore((s) => s.tabs);
-  const activeTabId = useDashboardStore((s) => s.activeTabId);
-  const setActiveTab = useDashboardStore((s) => s.setActiveTab);
   const addTab = useDashboardStore((s) => s.addTab);
   const renameTab = useDashboardStore((s) => s.renameTab);
   const reorderTabs = useDashboardStore((s) => s.reorderTabs);
@@ -68,6 +69,24 @@ export function Sidebar() {
   // Derived tab lists
   const pinnedTabs = tabs.filter((t) => t.pinned).sort((a, b) => a.order - b.order);
   const customTabs = tabs.filter((t) => !t.pinned).sort((a, b) => a.order - b.order);
+
+  // Route helpers
+  const PINNED_ROUTES: Record<string, string> = {
+    "default-dashboard": "/dashboard",
+    "default-automations": "/automations",
+    "default-connectors": "/connectors",
+    "default-system": "/system",
+  };
+
+  const getTabRoute = (tab: { id: string; name: string; pinned: boolean }): string => {
+    if (tab.pinned) return PINNED_ROUTES[tab.id] || "/dashboard";
+    return `/tab/${tabNameToSlug(tab.name)}`;
+  };
+
+  const isTabActive = (tab: { id: string; name: string; pinned: boolean }): boolean => {
+    const route = getTabRoute(tab);
+    return location.pathname === route;
+  };
 
   // Fetch simulator status on mount
   useEffect(() => {
@@ -100,12 +119,19 @@ export function Sidebar() {
 
   // ---- Add tab handlers ----
 
+  const newTabSlug = tabNameToSlug(newTabName);
+  const RESERVED_SLUGS = new Set(["dashboard", "automations", "connectors", "system"]);
+  const existingSlugs = new Set(tabs.map((t) => tabNameToSlug(t.name)));
+  const isNameTaken = !!newTabSlug && (existingSlugs.has(newTabSlug) || RESERVED_SLUGS.has(newTabSlug));
+
   const handleAddSubmit = () => {
-    if (!newTabName.trim()) return;
+    if (!newTabName.trim() || isNameTaken) return;
+    const slug = tabNameToSlug(newTabName);
     addTab(newTabName, newTabIcon);
     setNewTabName("");
     setNewTabIcon("cpu");
     setShowAddForm(false);
+    navigate(`/tab/${slug}`);
   };
 
   const handleAddKeyDown = (e: React.KeyboardEvent) => {
@@ -126,7 +152,14 @@ export function Sidebar() {
 
   const confirmRename = () => {
     if (renamingTabId && renameValue.trim()) {
+      const tab = tabs.find((t) => t.id === renamingTabId);
+      const wasActive = tab && isTabActive({ ...tab, pinned: false });
       renameTab(renamingTabId, renameValue);
+      // Navigate to the new slug if this tab was active
+      if (wasActive) {
+        const newSlug = tabNameToSlug(renameValue);
+        navigate(`/tab/${newSlug}`, { replace: true });
+      }
     }
     setRenamingTabId(null);
     setRenameValue("");
@@ -188,14 +221,17 @@ export function Sidebar() {
 
   const handleDelete = (tabId: string, tabName: string) => {
     if (window.confirm(`Delete tab "${tabName}"? This will remove all its panes.`)) {
+      const tab = tabs.find((t) => t.id === tabId);
+      const wasActive = tab && isTabActive({ ...tab, pinned: false });
       deleteTab(tabId);
+      if (wasActive) navigate("/dashboard");
     }
   };
 
   // ---- Tab button helper ----
 
-  const tabButton = (tab: { id: string; name: string; icon: string }, isPinned: boolean) => {
-    const isActive = activeTabId === tab.id;
+  const tabButton = (tab: { id: string; name: string; icon: string; pinned: boolean }, isPinned: boolean) => {
+    const isActive = isTabActive(tab);
     const isRenaming = renamingTabId === tab.id;
     const isDragOver = dragOverTabId === tab.id;
 
@@ -205,7 +241,7 @@ export function Sidebar() {
         className={`group flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
           isActive ? "bg-elevated text-[#E6EDF3]" : "text-[#6B7785] hover:text-[#9AA6B2] hover:bg-elevated/50"
         } ${isDragOver ? "border border-primary/50" : ""} ${dragTabId === tab.id ? "opacity-50" : ""}`}
-        onClick={() => setActiveTab(tab.id)}
+        onClick={() => navigate(getTabRoute(tab))}
         onDoubleClick={!isPinned ? () => startRename(tab.id, tab.name) : undefined}
         draggable={!isPinned}
         onDragStart={!isPinned ? (e) => handleDragStart(e, tab.id) : undefined}
@@ -282,8 +318,11 @@ export function Sidebar() {
               value={newTabName}
               onChange={(e) => setNewTabName(e.target.value)}
               onKeyDown={handleAddKeyDown}
-              className="w-full bg-transparent border-b border-[#2A3441] text-[#E6EDF3] text-sm outline-none focus:border-primary py-1"
+              className={`w-full bg-transparent border-b text-[#E6EDF3] text-sm outline-none py-1 ${isNameTaken ? "border-[#EF4444]" : "border-[#2A3441] focus:border-primary"}`}
             />
+            {isNameTaken && (
+              <p className="text-[10px] text-[#EF4444]">A tab with this name already exists</p>
+            )}
             <div className="grid grid-cols-8 gap-1">
               {ICON_CHOICES.map((iconName) => (
                 <button
@@ -303,7 +342,8 @@ export function Sidebar() {
             <div className="flex gap-2">
               <button
                 onClick={handleAddSubmit}
-                className="flex-1 text-xs px-2 py-1 rounded bg-primary/20 text-primary hover:bg-primary/30 transition-colors"
+                disabled={isNameTaken || !newTabName.trim()}
+                className="flex-1 text-xs px-2 py-1 rounded bg-primary/20 text-primary hover:bg-primary/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Add
               </button>

@@ -1,6 +1,7 @@
-// frontend/src/App.tsx — Main application component
+// frontend/src/App.tsx — Main application component with client-side routing
 
 import { useEffect, useState } from "react";
+import { Routes, Route, Navigate, useParams, useNavigate } from "react-router-dom";
 import { Layout } from "./components/Layout";
 import { DeviceGrid } from "./components/DeviceGrid";
 import { SensorPanel } from "./components/SensorPanel";
@@ -20,21 +21,62 @@ import { AnimatePresence } from "framer-motion";
 import { connectWebSocket, disconnectWebSocket } from "./lib/ws-client";
 import { fetchDevices } from "./lib/api-client";
 import { useDeviceStore } from "./store/device-store";
-import { useDashboardStore } from "./store/dashboard-store";
+import { useDashboardStore, tabNameToSlug } from "./store/dashboard-store";
 import type { Device } from "./store/device-store";
 
-/** Map of pinned tab IDs to their dedicated page components */
-const PINNED_PAGES: Record<string, string> = {
-  "default-dashboard": "dashboard",
-  "default-automations": "automations",
-  "default-connectors": "connectors",
-  "default-system": "system",
-};
+// ---------------------------------------------------------------------------
+// Dashboard page (pinned)
+// ---------------------------------------------------------------------------
+
+function DashboardPage({ onSelectDevice }: { onSelectDevice: (id: string) => void }) {
+  return (
+    <div className="space-y-6">
+      <h1 className="text-2xl font-bold text-[#E6EDF3]">Dashboard</h1>
+      <SystemHealth />
+      <AutomationsPanel />
+      <SensorPanel />
+      <DeviceGrid onSelectDevice={onSelectDevice} />
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <MqttInspector />
+        <TopicTree />
+      </div>
+      <EventLog />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Custom tab page — resolves slug from URL to tab ID
+// ---------------------------------------------------------------------------
+
+function CustomTabPage() {
+  const { slug } = useParams<{ slug: string }>();
+  const tabs = useDashboardStore((s) => s.tabs);
+  const setActiveTab = useDashboardStore((s) => s.setActiveTab);
+
+  const tab = tabs.find((t) => !t.pinned && tabNameToSlug(t.name) === slug);
+
+  useEffect(() => {
+    if (tab) setActiveTab(tab.id);
+  }, [tab, setActiveTab]);
+
+  if (!tab) {
+    return (
+      <div className="flex items-center justify-center h-full min-h-[60vh]">
+        <div className="text-[#6B7785] text-sm">Tab not found</div>
+      </div>
+    );
+  }
+
+  return <TabLayout tabId={tab.id} />;
+}
+
+// ---------------------------------------------------------------------------
+// App
+// ---------------------------------------------------------------------------
 
 export default function App() {
   const setDevices = useDeviceStore((s) => s.setDevices);
-  const activeTabId = useDashboardStore((s) => s.activeTabId);
-  const tabs = useDashboardStore((s) => s.tabs);
   const initialized = useDashboardStore((s) => s.initialized);
   const initialize = useDashboardStore((s) => s.initialize);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
@@ -66,45 +108,17 @@ export default function App() {
     );
   }
 
-  // Determine if the active tab is a pinned system tab
-  const activeTab = tabs.find((t) => t.id === activeTabId);
-  const pinnedPage = activeTabId ? PINNED_PAGES[activeTabId] : null;
-
-  const renderContent = () => {
-    // Pinned system tabs render their dedicated, styled components directly
-    if (pinnedPage === "dashboard") {
-      return (
-        <div className="space-y-6">
-          <h1 className="text-2xl font-bold text-[#E6EDF3]">Dashboard</h1>
-          <SystemHealth />
-          <AutomationsPanel />
-          <SensorPanel />
-          <DeviceGrid onSelectDevice={setSelectedDeviceId} />
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <MqttInspector />
-            <TopicTree />
-          </div>
-          <EventLog />
-        </div>
-      );
-    }
-    if (pinnedPage === "automations") return <AutomationsPage />;
-    if (pinnedPage === "connectors") return <ConnectorsPage />;
-    if (pinnedPage === "system") return <SystemPage />;
-
-    // Custom (unpinned) tabs render via the modular pane grid
-    if (activeTabId) return <TabLayout tabId={activeTabId} />;
-
-    return (
-      <div className="flex items-center justify-center h-full min-h-[60vh]">
-        <div className="text-[#6B7785] text-sm">No tab selected</div>
-      </div>
-    );
-  };
-
   return (
     <Layout>
-      {renderContent()}
+      <Routes>
+        <Route path="/" element={<Navigate to="/dashboard" replace />} />
+        <Route path="/dashboard" element={<DashboardPage onSelectDevice={setSelectedDeviceId} />} />
+        <Route path="/automations" element={<AutomationsPage />} />
+        <Route path="/connectors" element={<ConnectorsPage />} />
+        <Route path="/system" element={<SystemPage />} />
+        <Route path="/tab/:slug" element={<CustomTabPage />} />
+        <Route path="*" element={<Navigate to="/dashboard" replace />} />
+      </Routes>
 
       <AnimatePresence>
         {selectedDeviceId && (
