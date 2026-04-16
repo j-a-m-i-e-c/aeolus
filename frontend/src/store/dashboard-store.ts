@@ -6,6 +6,18 @@ import { DEFAULT_TABS, DEFAULT_PANES } from "../types/dashboard";
 import { PANE_REGISTRY } from "../lib/pane-registry";
 import { fetchLayout, saveLayout } from "../lib/api-client";
 
+/** Generate a UUID that works in non-secure contexts (HTTP) */
+function generateId(): string {
+  if (typeof crypto !== "undefined" && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  // Fallback for non-secure contexts (HTTP on LAN)
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    return (c === "x" ? r : (r & 0x3) | 0x8).toString(16);
+  });
+}
+
 interface DashboardState {
   tabs: Tab[];
   panes: Pane[];
@@ -61,7 +73,7 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
     if (!name.trim()) return;
     const state = get();
     const newTab: Tab = {
-      id: crypto.randomUUID(),
+      id: generateId(),
       name: name.trim(),
       icon,
       order: state.tabs.length,
@@ -132,7 +144,7 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
     const defaultConfig = entry?.defaultConfig ?? {};
 
     const newPane: Pane = {
-      id: crypto.randomUUID(),
+      id: generateId(),
       tabId,
       paneType,
       config: { ...defaultConfig },
