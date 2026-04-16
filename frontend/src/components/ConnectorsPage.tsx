@@ -1,6 +1,6 @@
 // frontend/src/components/ConnectorsPage.tsx — Connector management dashboard
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import * as icons from "lucide-react";
 import { RefreshCw, Power, PowerOff, RotateCcw, ChevronRight, X, Loader2 } from "lucide-react";
@@ -171,11 +171,117 @@ function SetupWizard({
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [accumulatedConfig, setAccumulatedConfig] = useState<Record<string, unknown>>({});
+  const [polling, setPolling] = useState(false);
+  const [pollSeconds, setPollSeconds] = useState(0);
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const accumulatedRef = useRef(accumulatedConfig);
+  accumulatedRef.current = accumulatedConfig;
+  const stepParamsRef = useRef(stepParams);
+  stepParamsRef.current = stepParams;
 
   const currentStep = steps[currentStepIdx];
+  const isButtonPressStep = currentStep?.id === "press-button";
+
+  const stopPolling = useCallback(() => {
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current);
+      pollingRef.current = null;
+    }
+    setPolling(false);
+    setPollSeconds(0);
+  }, []);
+
+  const completeWizard = useCallback(async (resultData?: Record<string, unknown>) => {
+    stopPolling();
+    const finalConfig = resultData
+      ? { ...accumulatedRef.current, ...resultData }
+      : accumulatedRef.current;
+    try { await patchConnectorConfig(connectorId, finalConfig); } catch {}
+    onComplete();
+  }, [connectorId, onComplete, stopPolling]);
+
+  // Auto-poll for button-press steps
+  useEffect(() => {
+    if (!isButtonPressStep || !currentStep) return;
+
+    let attempts = 0;
+    const maxAttempts = 10; // 30s at 3s intervals
+    setPolling(true);
+    setPollSeconds(0);
+
+    const tick = async () => {
+      attempts++;
+      setPollSeconds(attempts * 3);
+
+      if (attempts > maxAttempts) {
+        stopPolling();
+        setMessage("Timed out — press the bridge button and click Retry");
+        return;
+      }
+
+      try {
+        const result = await executeConnectorSetupStep(
+          connectorId, currentStep.id,
+          { ...stepParamsRef.current, ...accumulatedRef.current },
+        );
+
+        if (result.complete) {
+          if (result.data) {
+            setAccumulatedConfig((prev) => ({ ...prev, ...(result.data as Record<string, unknown>) }));
+          }
+          setMessage("Paired successfully!");
+          await completeWizard(result.data as Record<string, unknown> | undefined);
+          return;
+        }
+        // Button not pressed yet — keep polling silently
+      } catch {
+        // Network error — keep polling
+      }
+    };
+
+    pollingRef.current = setInterval(tick, 3000);
+    // Fire first attempt immediately
+    tick();
+
+    return () => stopPolling();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentStepIdx]);
 
   const executeStep = async () => {
     if (!currentStep) return;
+    // If we're on the button-press step and polling timed out, restart polling
+    if (isButtonPressStep) {
+      if (!polling) {
+        setMessage("");
+        setPolling(true);
+        setPollSeconds(0);
+        let attempts = 0;
+        pollingRef.current = setInterval(async () => {
+          attempts++;
+          setPollSeconds(attempts * 3);
+          if (attempts > 10) {
+            stopPolling();
+            setMessage("Timed out — press the bridge button and click Retry");
+            return;
+          }
+          try {
+            const result = await executeConnectorSetupStep(
+              connectorId, currentStep.id,
+              { ...stepParamsRef.current, ...accumulatedRef.current },
+            );
+            if (result.complete) {
+              if (result.data) {
+                setAccumulatedConfig((prev) => ({ ...prev, ...(result.data as Record<string, unknown>) }));
+              }
+              setMessage("Paired successfully!");
+              await completeWizard(result.data as Record<string, unknown> | undefined);
+            }
+          } catch {}
+        }, 3000);
+      }
+      return;
+    }
+
     setLoading(true);
     setMessage("");
     try {
@@ -187,18 +293,8 @@ function SetupWizard({
       }
 
       if (result.complete) {
-        // Patch connector config with accumulated data before completing
-        const finalConfig = result.data
-          ? { ...accumulatedConfig, ...(result.data as Record<string, unknown>) }
-          : accumulatedConfig;
-        try {
-          await patchConnectorConfig(connectorId, finalConfig);
-        } catch {
-          // Best-effort patch — wizard still closes
-        }
-        onComplete();
+        await completeWizard(result.data as Record<string, unknown> | undefined);
       } else if (result.success && currentStepIdx < steps.length - 1) {
-        // Pre-fill next step's fields from accumulated data (e.g. bridgeIp from discovery)
         const nextStep = steps[currentStepIdx + 1];
         const prefilled: Record<string, unknown> = {};
         const newAccumulated = result.data
@@ -239,56 +335,67 @@ function SetupWizard({
       <p className="text-sm text-[#9AA6B2]">{currentStep.description}</p>
 
       {/* Visual pairing guide for physical button-press steps */}
-      {currentStep.id === "press-button" && (
+      {isButtonPressStep && (
         <div className="flex items-center gap-4 p-4 rounded-xl bg-elevated border border-[#2A3441]">
-          {/* Bridge diagram */}
           <div className="flex-shrink-0">
             <svg width="80" height="64" viewBox="0 0 80 64" fill="none" xmlns="http://www.w3.org/2000/svg">
-              {/* Bridge body */}
               <rect x="8" y="20" width="64" height="36" rx="8" fill="#1A2330" stroke="#2A3441" strokeWidth="1.5" />
-              {/* Status LEDs */}
               <circle cx="20" cy="48" r="2" fill="#3BA4FF" opacity="0.6" />
               <circle cx="28" cy="48" r="2" fill="#3BA4FF" opacity="0.6" />
               <circle cx="36" cy="48" r="2" fill="#3BA4FF" opacity="0.6" />
-              {/* Link button on top */}
               <circle cx="40" cy="20" r="12" fill="#121821" stroke="#3BA4FF" strokeWidth="2">
                 <animate attributeName="stroke-opacity" values="1;0.3;1" dur="2s" repeatCount="indefinite" />
               </circle>
               <circle cx="40" cy="20" r="6" fill="#3BA4FF" opacity="0.3">
                 <animate attributeName="opacity" values="0.3;0.7;0.3" dur="2s" repeatCount="indefinite" />
               </circle>
-              {/* Arrow pointing to button */}
               <path d="M62 8 L48 16" stroke="#5CE1E6" strokeWidth="1.5" strokeLinecap="round" markerEnd="url(#arrowhead)" />
               <defs>
                 <marker id="arrowhead" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
                   <path d="M0,0 L6,3 L0,6" fill="none" stroke="#5CE1E6" strokeWidth="1" />
                 </marker>
               </defs>
-              {/* "Press" label */}
               <text x="64" y="8" fill="#5CE1E6" fontSize="8" fontFamily="Inter, sans-serif" fontWeight="600">Press</text>
             </svg>
           </div>
-          {/* Instructions */}
           <div className="space-y-1.5">
-            <div className="flex items-center gap-2">
-              <div className="w-5 h-5 rounded-full bg-[#F59E0B]/20 flex items-center justify-center">
-                <span className="text-[10px] font-bold text-[#F59E0B]">!</span>
-              </div>
-              <span className="text-xs font-medium text-[#E6EDF3]">30-second pairing window</span>
-            </div>
-            <p className="text-[11px] text-[#6B7785] leading-relaxed">
-              Press the button, then click Continue immediately. The bridge only accepts new connections for 30 seconds after the button is pressed.
-            </p>
+            {polling ? (
+              <>
+                <div className="flex items-center gap-2">
+                  <Loader2 size={14} className="animate-spin text-primary" />
+                  <span className="text-xs font-medium text-[#E6EDF3]">Waiting for button press...</span>
+                </div>
+                <div className="w-full bg-[#2A3441] rounded-full h-1.5">
+                  <div
+                    className="bg-primary h-1.5 rounded-full transition-all duration-1000"
+                    style={{ width: `${Math.min((pollSeconds / 30) * 100, 100)}%` }}
+                  />
+                </div>
+                <p className="text-[10px] text-[#6B7785]">{30 - pollSeconds}s remaining</p>
+              </>
+            ) : (
+              <>
+                <div className="flex items-center gap-2">
+                  <div className="w-5 h-5 rounded-full bg-[#F59E0B]/20 flex items-center justify-center">
+                    <span className="text-[10px] font-bold text-[#F59E0B]">!</span>
+                  </div>
+                  <span className="text-xs font-medium text-[#E6EDF3]">30-second pairing window</span>
+                </div>
+                <p className="text-[11px] text-[#6B7785] leading-relaxed">
+                  Press the button on the bridge. Aeolus will detect it automatically.
+                </p>
+              </>
+            )}
           </div>
         </div>
       )}
 
-      {currentStep.fields && currentStep.fields.length > 0 && (
+      {currentStep.fields && currentStep.fields.length > 0 && !isButtonPressStep && (
         <ConfigForm schema={currentStep.fields} values={{ ...accumulatedConfig, ...stepParams }} onChange={setStepParams} />
       )}
 
       {message && (
-        <p className={`text-xs px-3 py-2 rounded-lg ${message.toLowerCase().includes("fail") || message.toLowerCase().includes("error") ? "bg-[#EF4444]/10 text-[#EF4444]" : "bg-primary/10 text-primary"}`}>
+        <p className={`text-xs px-3 py-2 rounded-lg ${message.toLowerCase().includes("fail") || message.toLowerCase().includes("error") || message.toLowerCase().includes("timed out") ? "bg-[#EF4444]/10 text-[#EF4444]" : "bg-primary/10 text-primary"}`}>
           {message}
         </p>
       )}
@@ -297,13 +404,24 @@ function SetupWizard({
         <button onClick={onCancel} className="flex-1 py-2 text-xs font-medium rounded-lg bg-elevated text-[#6B7785] border border-[#2A3441] hover:text-[#9AA6B2] transition-colors">
           Cancel
         </button>
-        <button
-          onClick={executeStep}
-          disabled={loading}
-          className="flex-1 py-2 text-xs font-medium rounded-lg bg-primary/20 text-primary border border-primary/30 hover:bg-primary/30 transition-colors disabled:opacity-50"
-        >
-          {loading ? <Loader2 size={14} className="animate-spin mx-auto" /> : currentStepIdx < steps.length - 1 ? "Continue" : "Finish"}
-        </button>
+        {isButtonPressStep ? (
+          !polling && (
+            <button
+              onClick={executeStep}
+              className="flex-1 py-2 text-xs font-medium rounded-lg bg-primary/20 text-primary border border-primary/30 hover:bg-primary/30 transition-colors"
+            >
+              Retry
+            </button>
+          )
+        ) : (
+          <button
+            onClick={executeStep}
+            disabled={loading}
+            className="flex-1 py-2 text-xs font-medium rounded-lg bg-primary/20 text-primary border border-primary/30 hover:bg-primary/30 transition-colors disabled:opacity-50"
+          >
+            {loading ? <Loader2 size={14} className="animate-spin mx-auto" /> : "Continue"}
+          </button>
+        )}
       </div>
     </div>
   );
