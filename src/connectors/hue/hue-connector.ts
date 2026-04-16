@@ -184,9 +184,9 @@ export class HueConnector implements Connector {
       },
       {
         id: "press-button",
-        title: "Press Link Button",
+        title: "Pair Bridge",
         description:
-          "Press the large link button on top of your Hue bridge, then click Continue to pair.",
+          "Press the large round link button on top of your Hue bridge, then click Continue within 30 seconds. The bridge only accepts pairing requests for 30 seconds after the button is pressed.",
         fields: [
           {
             id: "bridgeIp",
@@ -246,8 +246,8 @@ export class HueConnector implements Connector {
       return {
         success: true,
         message: bridges.length === 1
-          ? `Found bridge at ${firstBridgeIp}`
-          : `Found ${bridges.length} bridge(s). Using ${firstBridgeIp} — change the IP in the next step if needed.`,
+          ? `Found your bridge at ${firstBridgeIp}. Press the link button on the bridge, then click Continue.`
+          : `Found ${bridges.length} bridges. Using ${firstBridgeIp} — change the IP in the next step if needed.`,
         data: { bridges, bridgeIp: firstBridgeIp },
       };
     } catch (err) {
@@ -295,7 +295,7 @@ export class HueConnector implements Connector {
           if (error.type === 101) {
             return {
               success: false,
-              message: "Press the link button on your Hue bridge and try again",
+              message: "Link button not pressed — press the button on the bridge and click Continue again within 30 seconds",
             };
           }
           return { success: false, message: error.description };

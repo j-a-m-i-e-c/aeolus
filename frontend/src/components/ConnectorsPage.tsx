@@ -238,8 +238,53 @@ function SetupWizard({
 
       <p className="text-sm text-[#9AA6B2]">{currentStep.description}</p>
 
+      {/* Visual pairing guide for physical button-press steps */}
+      {currentStep.id === "press-button" && (
+        <div className="flex items-center gap-4 p-4 rounded-xl bg-elevated border border-[#2A3441]">
+          {/* Bridge diagram */}
+          <div className="flex-shrink-0">
+            <svg width="80" height="64" viewBox="0 0 80 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+              {/* Bridge body */}
+              <rect x="8" y="20" width="64" height="36" rx="8" fill="#1A2330" stroke="#2A3441" strokeWidth="1.5" />
+              {/* Status LEDs */}
+              <circle cx="20" cy="48" r="2" fill="#3BA4FF" opacity="0.6" />
+              <circle cx="28" cy="48" r="2" fill="#3BA4FF" opacity="0.6" />
+              <circle cx="36" cy="48" r="2" fill="#3BA4FF" opacity="0.6" />
+              {/* Link button on top */}
+              <circle cx="40" cy="20" r="12" fill="#121821" stroke="#3BA4FF" strokeWidth="2">
+                <animate attributeName="stroke-opacity" values="1;0.3;1" dur="2s" repeatCount="indefinite" />
+              </circle>
+              <circle cx="40" cy="20" r="6" fill="#3BA4FF" opacity="0.3">
+                <animate attributeName="opacity" values="0.3;0.7;0.3" dur="2s" repeatCount="indefinite" />
+              </circle>
+              {/* Arrow pointing to button */}
+              <path d="M62 8 L48 16" stroke="#5CE1E6" strokeWidth="1.5" strokeLinecap="round" markerEnd="url(#arrowhead)" />
+              <defs>
+                <marker id="arrowhead" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+                  <path d="M0,0 L6,3 L0,6" fill="none" stroke="#5CE1E6" strokeWidth="1" />
+                </marker>
+              </defs>
+              {/* "Press" label */}
+              <text x="64" y="8" fill="#5CE1E6" fontSize="8" fontFamily="Inter, sans-serif" fontWeight="600">Press</text>
+            </svg>
+          </div>
+          {/* Instructions */}
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-2">
+              <div className="w-5 h-5 rounded-full bg-[#F59E0B]/20 flex items-center justify-center">
+                <span className="text-[10px] font-bold text-[#F59E0B]">!</span>
+              </div>
+              <span className="text-xs font-medium text-[#E6EDF3]">30-second pairing window</span>
+            </div>
+            <p className="text-[11px] text-[#6B7785] leading-relaxed">
+              Press the button, then click Continue immediately. The bridge only accepts new connections for 30 seconds after the button is pressed.
+            </p>
+          </div>
+        </div>
+      )}
+
       {currentStep.fields && currentStep.fields.length > 0 && (
-        <ConfigForm schema={currentStep.fields} values={stepParams} onChange={setStepParams} />
+        <ConfigForm schema={currentStep.fields} values={{ ...accumulatedConfig, ...stepParams }} onChange={setStepParams} />
       )}
 
       {message && (
