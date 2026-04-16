@@ -12,6 +12,7 @@ A local-first, developer-centric IoT automation platform. Aeolus unifies communi
 - Exposes a REST API and WebSocket server for device control
 - Provides a modular React dashboard with dynamic tabs, configurable panes, device monitoring, MQTT inspector, automation editor, and system diagnostics
 - Pluggable connector framework — add new device integrations (Philips Hue, TP-Link Kasa, etc.) without modifying core code
+- Application log viewer and one-click self-update from the System page
 - Runs on Raspberry Pi with one-line Docker install and auto-start on boot
 - Built-in device simulator for development without hardware
 
@@ -85,17 +86,17 @@ Or use the built-in simulator — toggle it from the sidebar or set `SIMULATOR=t
 
 ## Dashboard
 
-The dashboard uses a modular tab-and-pane layout. The sidebar shows pinned system tabs plus user-created custom tabs. Each tab contains configurable panes that can be added, removed, and rearranged. Layout is persisted to SQLite automatically.
+The dashboard uses a modular tab-and-pane layout. On a fresh install, the sidebar shows 4 pinned system tabs: Dashboard, Automations, Connectors, and System. No custom tabs or panes are created by default — users add their own via the sidebar and PanePicker. Layout is persisted to SQLite automatically.
 
 **Dashboard** — Device grid grouped by room, sensor panel with sparkline charts, MQTT inspector with publish form, topic tree, event log, system health, and command palette (Ctrl+K).
 
 **Automations** — Create automation rules with a when/if/then form editor, live DSL preview, enable/disable/delete rules, toggle visibility of code-based rules.
 
-**Connectors** — Manage device integrations from the dashboard. View available connector types, enable/disable connectors with dynamic config forms, monitor health status (connected/degraded/disconnected), and run guided setup wizards for connectors that require pairing (e.g. Hue bridge).
+**Connectors** — Manage device integrations from the dashboard. View available connector types, enable/disable connectors with dynamic config forms, monitor health status (connected/degraded/disconnected), and run a generic setup wizard for connectors that require pairing (e.g. Hue bridge). The wizard fetches steps from the backend — no hardcoded flows in the frontend.
 
-**System** — Host diagnostics including CPU load, temperature, memory, disk, and network interfaces. Designed for Raspberry Pi monitoring.
+**System** — Host diagnostics including CPU load, temperature, memory, disk, and network interfaces. Collapsible application log viewer with level filtering and auto-refresh. One-click "Update & Restart" button for self-update via git pull + Docker rebuild.
 
-**Custom Tabs** — Create your own tabs with a name and icon, then add any combination of panes (device grid, sensor panel, MQTT inspector, etc.).
+**Custom Tabs** — Create your own tabs with a name and icon, then add any combination of panes (device grid, sensor panel, MQTT inspector, Hue control, Kasa control, etc.).
 
 ## API Endpoints
 
@@ -120,11 +121,14 @@ The dashboard uses a modular tab-and-pane layout. The sidebar shows pinned syste
 | PATCH | `/api/connectors/:id` | Update connector config |
 | DELETE | `/api/connectors/:id` | Disable a connector |
 | GET | `/api/connectors/:id/status` | Connector health status |
+| GET | `/api/connectors/:id/setup-steps` | Get setup step descriptors |
 | POST | `/api/connectors/:id/setup/:stepId` | Execute setup wizard step |
 | POST | `/api/connectors/:id/retry` | Retry connector connection |
 | GET | `/api/layout` | Get dashboard layout |
 | PUT | `/api/layout` | Save dashboard layout |
 | GET | `/api/system` | Host system diagnostics |
+| GET | `/api/system/logs` | Recent application log entries |
+| POST | `/api/system/update` | Trigger self-update + restart |
 | WS | `/ws` | Real-time state updates |
 
 ## Automation DSL
@@ -146,7 +150,7 @@ Place rule files in the `automations/` directory. They're loaded automatically o
 
 ## Connector Framework
 
-Aeolus uses a pluggable connector architecture for device integrations. Built-in connectors include Philips Hue (smart lighting) and TP-Link Kasa (smart plugs/switches). Connectors are managed entirely from the Connectors page in the dashboard — enable, configure, monitor health, and run setup wizards without editing config files.
+Aeolus uses a pluggable connector architecture for device integrations. Built-in connectors include Philips Hue (smart lighting) and TP-Link Kasa (smart plugs/switches). Connectors are managed entirely from the Connectors page in the dashboard — enable, configure, monitor health, and run a generic setup wizard that fetches its steps from the backend. No hardcoded setup flows in the frontend.
 
 ### Adding a New Connector
 
@@ -162,10 +166,8 @@ Hue lights are managed through the Connectors page in the dashboard.
 
 1. Go to the Connectors tab in the sidebar
 2. Find "Philips Hue" in Available Connectors and click Enable
-3. Enter the bridge IP (or use the setup wizard to discover bridges)
-4. Press the physical button on your Hue bridge and complete pairing
-
-Once connected, Hue lights appear in the device grid. A dedicated Lighting tab (custom, not pinned) provides the full light control experience with toggle, brightness slider, colour picker, Zigbee scan, and drag-to-reorder.
+3. The setup wizard launches automatically — discover bridges and press the link button to pair
+4. Once paired, Hue lights appear in the device grid and can be controlled via the Hue Control pane
 
 ## Raspberry Pi Deployment
 
@@ -214,6 +216,8 @@ docker compose down           # Stop everything
 docker compose up -d --build  # Rebuild after updates
 ```
 
+Or use the "Update & Restart" button on the System page to pull the latest code and rebuild from the dashboard.
+
 ## Running Tests
 
 ```bash
@@ -223,6 +227,8 @@ npm test
 ## Documentation
 
 See `docs/COMPREHENSIVE_DOCUMENTATION.md` for full technical documentation including architecture, data models, WebSocket protocol, error handling, and design decisions.
+
+See `docs/ROADMAP.md` for the future development roadmap.
 
 ## License
 

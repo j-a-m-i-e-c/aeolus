@@ -66,7 +66,7 @@ aeolus/
 │   │   │   ├── simulator.routes.ts   # Start/stop device simulator
 │   │   │   ├── connector.routes.ts   # Generic connector REST API (replaces hue.routes.ts)
 │   │   │   ├── layout.routes.ts      # GET/PUT /api/layout (tab + pane persistence)
-│   │   │   └── system.routes.ts      # Host system diagnostics (CPU, mem, disk, temp)
+│   │   │   └── system.routes.ts      # Host diagnostics, application logs, self-update
 │   │   └── middleware/
 │   │       ├── error-handler.ts      # AppError hierarchy + global handler
 │   │       ├── request-logger.ts     # pino HTTP request logging
@@ -110,7 +110,8 @@ aeolus/
 │   ├── types/
 │   │   └── sql.js.d.ts              # Type declarations for sql.js
 │   ├── config.ts                     # Environment variable loading
-│   ├── logger.ts                     # pino logger
+│   ├── log-buffer.ts                 # In-memory circular buffer for recent log entries
+│   ├── logger.ts                     # pino logger with log buffer interception
 │   └── index.ts                      # Entry point
 ├── frontend/                         # React + Vite dashboard
 │   └── src/
@@ -118,7 +119,7 @@ aeolus/
 │       │   ├── AeolusLogo.tsx        # Animated SVG logo
 │       │   ├── Layout.tsx            # Sidebar + main content
 │       │   ├── Sidebar.tsx           # Dynamic tab navigation + system status + simulator toggle
-│       │   ├── TabLayout.tsx         # Renders panes for the active tab
+│       │   ├── TabLayout.tsx         # Renders panes for the active tab (custom tabs only)
 │       │   ├── PanePicker.tsx        # Pane type selector for adding panes to a tab
 │       │   ├── PaneConfigPanel.tsx   # Per-pane configuration editor
 │       │   ├── DeviceGrid.tsx        # Responsive device card grid
@@ -132,16 +133,16 @@ aeolus/
 │       │   ├── EventLog.tsx          # Automation fire event log
 │       │   ├── AutomationsPanel.tsx  # Dashboard automations summary
 │       │   ├── AutomationsPage.tsx   # Full automation rule editor (CRUD)
-│       │   ├── LightingPage.tsx      # Hue bridge setup + light control + colour picker
-│       │   ├── ConnectorsPage.tsx    # Connector management (enable/disable, config, setup wizard)
-│       │   ├── SystemPage.tsx        # Host diagnostics (CPU, memory, disk, temp, network)
+│       │   ├── ConnectorsPage.tsx    # Connector management (enable/disable, config, generic setup wizard)
+│       │   ├── SystemPage.tsx        # Host diagnostics, application log viewer, self-update
 │       │   ├── CommandPalette.tsx    # Ctrl+K command palette
 │       │   ├── ToastContainer.tsx    # Animated toast notifications
 │       │   └── panes/               # Pane wrapper components for modular dashboard
 │       │       ├── DeviceGridPane.tsx
 │       │       ├── SensorPanelPane.tsx
 │       │       ├── MqttInspectorPane.tsx
-│       │       ├── HueLightsPane.tsx
+│       │       ├── HueControlPane.tsx    # Hue light control pane
+│       │       ├── KasaControlPane.tsx   # Kasa device control pane
 │       │       ├── AutomationRulesPane.tsx
 │       │       ├── SystemStatsPane.tsx
 │       │       ├── TopicTreePane.tsx
@@ -164,7 +165,7 @@ aeolus/
 │   ├── setup-pi.sh                   # One-line Raspberry Pi install script
 │   └── deploy-pi.sh                  # Pull + rebuild deploy script
 ├── docker-compose.yml
-├── Dockerfile                        # Backend multi-stage build
+├── Dockerfile                        # Backend multi-stage build (includes git + docker-cli)
 └── frontend/Dockerfile               # Frontend build + nginx
 ```
 
@@ -197,9 +198,21 @@ Evaluates code-driven rules against incoming device events.
 - Fault isolation: one rule throwing doesn't affect others
 - Loads rule files from `automations/` directory on startup
 
+### Log Buffer (`src/log-buffer.ts`)
+
+In-memory circular buffer that captures recent application log entries for the dashboard log viewer.
+
+- Stores up to 200 log entries in a ring buffer
+- Intercepts pino JSON output via a write hook in `logger.ts`
+- Parses pino JSON lines and normalises level labels (trace/debug/info/warn/error/fatal)
+- Strips pino internals (pid, hostname) for cleaner UI display
+- Served via `GET /api/system/logs` with optional count and level filter parameters
+
 ### Connector Framework
 
 The connector framework is a pluggable architecture that replaces the previous hardcoded integration system. Each connector is a self-contained module in `src/connectors/{name}/` that exports metadata, a config schema, and a factory function.
+
+Connector devices flow through the same `DEVICE_STATE_CHANGE` event bus as MQTT devices, using synthetic topics in the format `connector/{integration}/{deviceId}`. This unifies the device pipeline so automations can match on connector device events using the standard topic pattern system.
 
 #### ConnectorRegistry (`src/connectors/connector-registry.ts`)
 
@@ -218,7 +231,7 @@ Lifecycle management for enabled connector instances.
 - Disable: stop polling → disconnect → dispose → remove devices → update store
 - Config update: apply new config at runtime without full reconnect
 - Retry: re-attempt connection for disconnected connectors
-- Setup steps: delegate multi-step setup flows (e.g. Hue button-press pairing)
+- Setup steps: `getSetupSteps(instanceId)` returns setup step descriptors for a connector; `executeSetupStep()` delegates multi-step setup flows (e.g. Hue button-press pairing)
 - Action routing: route device actions to the correct connector by `integration` field
 - Restore: re-enable previously enabled connectors from SQLite on startup
 - Periodic device discovery via 60-second polling interval
@@ -238,8 +251,9 @@ SQLite persistence layer for connector records.
 Philips Hue smart lighting via local bridge API.
 
 - Metadata: id `"hue"`, icon `"lightbulb"`, supports `["light"]`, requires setup
-- Config schema: `bridgeIp` (text, required), `apiKey` (password, required)
+- Config schema: `bridgeIp` (text, optional), `apiKey` (password, optional) — both are populated by the setup wizard during pairing
 - Multi-step setup: bridge discovery + button-press pairing
+- Connectors with `requiresSetup` skip the config form and go straight to enable + wizard
 - Discovers lights and maps them to Aeolus Device format
 - Supports toggle, brightness, hue, and saturation actions
 
@@ -323,6 +337,9 @@ Returns `{ "success": true }`.
 **GET /api/connectors/:id/status**
 Get connector health status, device count, and configuration for a specific instance.
 
+**GET /api/connectors/:id/setup-steps**
+Returns the setup step descriptors for a connector instance. Each step includes an `id`, `title`, `description`, and optional `fields` array. Returns `[]` if the connector does not implement setup steps. 404 if instance not found.
+
 **POST /api/connectors/:id/setup/:stepId**
 Execute a setup step in the connector's guided wizard (e.g. bridge discovery, button-press pairing).
 Returns `{ "success": true, "message": "...", "data": {...}, "complete": false }`.
@@ -330,6 +347,24 @@ Returns `{ "success": true, "message": "...", "data": {...}, "complete": false }
 **POST /api/connectors/:id/retry**
 Retry connection for a disconnected connector, then re-discover devices.
 Returns `{ "success": true }`.
+
+### System API
+
+**GET /api/system**
+Returns host system diagnostics: hostname, platform, architecture, Node.js version, CPU model/cores/temperature/load averages, memory usage, disk usage, network interfaces, and uptime.
+
+**GET /api/system/logs**
+Returns recent application log entries from the in-memory circular buffer.
+Query parameters:
+- `count` (optional, default 100, max 200) — number of entries to return
+- `level` (optional) — filter by level label (`error`, `warn`, `info`, `debug`)
+
+Returns an array of log entry objects with `level`, `levelLabel`, `msg`, `time`, and any additional context fields.
+
+**POST /api/system/update**
+Triggers a self-update: runs `git pull` followed by `docker compose up -d --build` in the mounted project directory. The process is fire-and-forget — the response is returned immediately and the container is replaced during rebuild.
+Returns `{ "success": true, "message": "Update started — the system will restart shortly" }`.
+Returns 400 if the project directory is not mounted (only works on deployed Pi).
 
 ### Layout API
 
@@ -388,6 +423,19 @@ interface Device {
 }
 ```
 
+### NormalizedEvent
+```typescript
+interface NormalizedEvent {
+  deviceId: string;
+  deviceType: DeviceType;
+  state: Record<string, unknown>;
+  topic: string;
+  timestamp: number;
+  /** Source integration identifier. Defaults to "mqtt" if not provided. */
+  integration?: string;
+}
+```
+
 ### ConnectorRecord
 ```typescript
 interface ConnectorRecord {
@@ -424,6 +472,17 @@ interface Pane {
   w: number;           // Width in grid columns (1-12)
   h: number;           // Height in grid rows (min 2)
   createdAt: number;   // Unix timestamp ms
+}
+```
+
+### LogEntry
+```typescript
+interface LogEntry {
+  level: number;       // pino numeric level (10-60)
+  levelLabel: string;  // "trace" | "debug" | "info" | "warn" | "error" | "fatal"
+  msg: string;         // Log message
+  time: string;        // ISO 8601 timestamp
+  [key: string]: unknown; // Additional context fields
 }
 ```
 
@@ -494,20 +553,30 @@ CREATE TABLE connectors (
 | LOG_LEVEL | debug | pino log level |
 | NODE_ENV | development | Environment |
 | SIMULATOR | false | Enable device simulator (generates fake data without MQTT) |
+| AEOLUS_PROJECT_DIR | /aeolus-host | Host project directory mounted into the backend container (used by self-update) |
 
 **Note:** MQTT_TOPICS must be quoted in `.env` files because `#` is treated as a comment character by dotenv.
 
 ## Docker Compose
 
-Three services on a shared bridge network:
+Three services:
 
-| Service | Image | Port | Description |
-|---------|-------|------|-------------|
-| mosquitto | eclipse-mosquitto:2 | 1883 | MQTT broker with healthcheck |
-| backend | Custom (Node.js) | 3001 | Express API + WebSocket |
-| frontend | Custom (nginx) | 3000 | React dashboard |
+| Service | Image | Port | Network | Description |
+|---------|-------|------|---------|-------------|
+| mosquitto | eclipse-mosquitto:2 | 1883 | aeolus bridge | MQTT broker with healthcheck |
+| backend | Custom (Node.js) | 3001 | host | Express API + WebSocket |
+| frontend | Custom (nginx) | 3000 | aeolus bridge | React dashboard |
+
+The backend uses `network_mode: host` to enable UDP broadcast for Kasa device discovery and direct LAN access for Hue bridge communication. Because of host networking, the MQTT broker URL is `mqtt://localhost:1883` (not the Docker service name).
 
 Backend waits for Mosquitto healthcheck before starting. Named volumes persist broker data and SQLite database.
+
+Backend container mounts:
+- `backend_data:/app/data` — SQLite database persistence
+- `/var/run/docker.sock:/var/run/docker.sock` — Docker socket for self-update rebuild
+- `.:/aeolus-host` — Project directory for `git pull` during self-update
+
+The Dockerfile installs `git`, `docker-cli`, and `docker-cli-compose` in the production stage to support the self-update feature.
 
 ## Error Handling
 
@@ -529,6 +598,10 @@ Backend waits for Mosquitto healthcheck before starting. Named volumes persist b
 | Connector | Legacy migration file unreadable | Log warning, skip migration |
 | Layout | Invalid layout payload | 400 JSON error |
 | Layout | Database write failure | Rollback transaction, return 500 |
+| Log Viewer | Unparseable log line | Silently ignored by log buffer |
+| Log Viewer | Fetch failure | Frontend shows empty log list, retries on next auto-refresh cycle |
+| Self-Update | Project directory not mounted | 400 JSON error with explanation |
+| Self-Update | git pull or docker compose fails | Fire-and-forget — container may restart or remain on current version |
 
 ## Design Decisions
 
@@ -537,11 +610,13 @@ Backend waits for Mosquitto healthcheck before starting. Named volumes persist b
 - **Zustand over Redux:** Lightweight, minimal boilerplate, matches the "clarity over decoration" design principle.
 - **Express over Fastify:** Broader ecosystem familiarity, easier WebSocket integration via ws library.
 - **Pluggable connector architecture over hardcoded integrations:** Each connector is a self-contained module with metadata, config schema, and factory function. The ConnectorRegistry discovers modules at startup, the ConnectorManager handles lifecycle (enable/disable/poll/action routing), and the ConnectorStore persists state to SQLite. This replaces the previous `src/integrations/` approach where each integration required its own route file and manual wiring. New connectors can be added by creating a directory in `src/connectors/` with the standard module exports — no changes to core code required. A `_template/` skeleton is provided for developers.
+- **Host networking for LAN device discovery:** The backend container uses `network_mode: host` instead of the shared bridge network. This is required for Kasa's UDP broadcast discovery (which doesn't work across Docker bridge networks) and for direct LAN access to Hue bridges. The trade-off is that the backend port is exposed directly on the host rather than through Docker port mapping, and the MQTT broker URL must use `localhost` instead of the Docker service name.
+- **Pinned tabs render dedicated components:** Pinned system tabs (Dashboard, Automations, Connectors, System) render their own full-page components directly via a `PINNED_PAGES` map in `App.tsx`, bypassing the modular pane grid. This gives each system page full control over its layout and styling. Custom (unpinned) tabs use the `TabLayout` component with the pane grid system. This separation keeps system pages polished while maintaining flexibility for user-created tabs.
 
 
 ## Dashboard Features
 
-The React dashboard provides a comprehensive developer-focused interface with a modular tab-and-pane layout. The sidebar displays dynamic tabs — pinned system tabs (Dashboard, Automations, Connectors, System) plus user-created custom tabs. Each tab contains configurable panes that can be added, removed, resized, and repositioned.
+The React dashboard provides a comprehensive developer-focused interface with a modular tab-and-pane layout. The sidebar displays dynamic tabs — 4 pinned system tabs (Dashboard, Automations, Connectors, System) plus user-created custom tabs. Pinned tabs render dedicated full-page components; custom tabs use the modular pane grid. On a fresh install, only the 4 pinned tabs are present with no custom tabs or panes.
 
 ### Sidebar
 - **Pinned System Tabs** — Dashboard, Automations, Connectors, System (cannot be deleted or reordered)
@@ -555,13 +630,13 @@ The React dashboard provides a comprehensive developer-focused interface with a 
 
 ### Modular Pane System
 - **Pane Registry** — Maps pane type identifiers to React components with metadata (display name, icon, default size)
-- **Available Pane Types:** device-grid, sensor-panel, mqtt-inspector, hue-lights, automation-rules, system-stats, topic-tree, event-log, connectors-page
+- **Available Pane Types:** device-grid, sensor-panel, mqtt-inspector, hue-control, kasa-control, automation-rules, system-stats, topic-tree, event-log, connectors-page
 - **PanePicker** — UI for selecting which pane type to add to the active tab
 - **PaneConfigPanel** — Per-pane configuration editor for type-specific settings
-- **TabLayout** — Renders all panes for the active tab
+- **TabLayout** — Renders all panes for the active tab (custom tabs only)
 - **Layout Persistence** — Dashboard layout (tabs + panes) is persisted to SQLite via `GET/PUT /api/layout`, with debounced auto-save (2s)
 
-### Dashboard Tab (default)
+### Dashboard Tab (pinned)
 - **Device Grid** — Cards grouped by room (parsed from MQTT topic), collapsible sections, click to open detail modal
 - **Device Detail Modal** — Full state view, capabilities, toggle/brightness controls, last seen timestamp
 - **Sensor Panel** — Live sensor values with sparkline SVG charts showing last 20 readings
@@ -573,21 +648,12 @@ The React dashboard provides a comprehensive developer-focused interface with a 
 
 ### Connectors Tab (pinned)
 - **Available Connectors** — Cards for each discovered connector type showing display name, icon, description, supported device types, and setup requirement badge
-- **Enable Flow** — Click Enable to expand a dynamic config form generated from the connector's `configSchema`, then submit to enable
+- **Enable Flow** — Click Enable to expand a dynamic config form generated from the connector's `configSchema`, then submit to enable. Connectors with `requiresSetup` skip the config form and go straight to enable + wizard
+- **Generic Setup Wizard** — Fully generic multi-step guided flow that fetches step descriptors from the backend via `GET /api/connectors/:id/setup-steps`. No hardcoded steps in the frontend. The wizard accumulates data across steps and patches the connector config on completion via `PATCH /api/connectors/:id`
 - **Active Connectors** — Cards for each enabled instance showing health status (green/amber/red dot), device count, last seen time, and error messages
-- **Setup Wizard** — Multi-step guided flow for connectors that require setup (e.g. Hue bridge discovery + button-press pairing), with step indicators and field forms
 - **Disable** — Stop and disconnect a connector instance (preserves config in store)
 - **Retry** — Re-attempt connection for disconnected connectors
 - **Health Indicators** — Real-time status: connected (green), degraded (amber), disconnected (red)
-
-### Lighting Tab (custom, not pinned by default)
-- **Bridge Setup Wizard** — Auto-discover bridges via meethue.com or enter IP manually, button-press pairing flow
-- **Bridge Info Card** — Firmware version, model, API version, Zigbee channel, MAC address, update status
-- **Light Grid** — Cards with toggle, brightness slider (debounced — sends on release only), and online/offline status
-- **Colour Picker** — Palette icon on colour-capable lights opens a swatch picker with 10 preset colours (HSV mapped to Hue API)
-- **Add Lights** — Triggers Zigbee scan for new unpaired bulbs, shows results after ~40s
-- **Delete Lights** — Remove individual lights from the bridge with confirmation
-- **Drag-to-Reorder** — Rearrange light cards via HTML5 drag-and-drop
 
 ### Automations Tab (pinned)
 - **Rule Editor** — Create automation rules with when/if/then form (trigger topic, condition, action)
@@ -602,6 +668,8 @@ The React dashboard provides a comprehensive developer-focused interface with a 
 - **Memory** — Used/total with percentage bar and colour coding
 - **Disk** — Used/total with percentage bar
 - **Network** — Interface names and IP addresses
+- **Application Logs** — Collapsible log viewer section with level filter dropdown (all/error/warn/info/debug), auto-refresh toggle (10-second interval), colour-coded entries by level, and manual refresh button. Fetches from `GET /api/system/logs`
+- **Self-Update Button** — "Update & Restart" button that triggers `POST /api/system/update` with a confirmation dialog. Shows status message and instructs user to refresh after ~60 seconds
 
 ### Global Features
 - **Toast Notifications** — Animated alerts in bottom-right when automations fire (auto-dismiss 4s)
@@ -609,6 +677,7 @@ The React dashboard provides a comprehensive developer-focused interface with a 
 - **Simulator Toggle** — Start/stop device simulator from the sidebar without restarting backend
 - **Dynamic API URLs** — Frontend uses `window.location.hostname` so the dashboard works from any browser on the network
 - **Animated Logo** — SVG Aeolus logo with framer-motion wind swirl animation
+- **UUID Fallback** — Dashboard store uses a `generateId()` fallback for HTTP contexts where `crypto.randomUUID()` isn't available (e.g. accessing the dashboard over LAN without HTTPS)
 
 ## Additional API Endpoints
 
@@ -628,11 +697,14 @@ The React dashboard provides a comprehensive developer-focused interface with a 
 | PATCH | `/api/connectors/:id` | Update connector config `{ config }` |
 | DELETE | `/api/connectors/:id` | Disable a connector instance |
 | GET | `/api/connectors/:id/status` | Connector health, device count, config |
+| GET | `/api/connectors/:id/setup-steps` | Get setup step descriptors for a connector instance |
 | POST | `/api/connectors/:id/setup/:stepId` | Execute a setup wizard step |
 | POST | `/api/connectors/:id/retry` | Retry connection for disconnected connector |
 | GET | `/api/layout` | Get saved dashboard layout (tabs + panes) |
 | PUT | `/api/layout` | Save dashboard layout (atomic replace) |
 | GET | `/api/system` | Host system diagnostics (CPU, memory, disk, temp) |
+| GET | `/api/system/logs` | Recent application log entries (count, level filter) |
+| POST | `/api/system/update` | Trigger self-update (git pull + docker compose rebuild) |
 
 ## Device Simulator
 
@@ -652,15 +724,10 @@ Enable via `SIMULATOR=true` env var (auto-starts on boot) or toggle from the sid
 
 ---
 
-**Last Updated:** April 13, 2026
-**Version:** 0.4.0
+**Last Updated:** April 16, 2026
+**Version:** 0.5.0
 **Status:** MVP Development
 
 ## Future Enhancements
 
-- **Visual Flow Editor** — Drag-and-drop canvas for building automations visually (Node-RED style). Nodes for triggers, conditions, and actions connected by wires. Would generate the same underlying rule structure as the form-based editor and TypeScript DSL.
-- **State History & Charts** — Store last N values per device in SQLite, display trend charts in the device detail modal.
-- **Device Offline Detection** — Mark devices as offline if no message received within a configurable timeout.
-- **Multi-Node Clustering** — Run Aeolus across multiple Raspberry Pis with shared state.
-- **Mobile App** — React Native companion app for quick device control.
-- **Plugin Marketplace** — Community-contributed connectors installable from the dashboard.
+See `docs/ROADMAP.md` for the full categorised roadmap.
