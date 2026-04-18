@@ -1,0 +1,82 @@
+# Contributing to Aeolus
+
+Thanks for your interest in contributing to Aeolus! This guide will help you get started.
+
+## Getting Started
+
+1. Fork the repository
+2. Clone your fork: `git clone https://github.com/YOUR_USERNAME/aeolus.git`
+3. Install dependencies:
+   ```bash
+   cd aeolus
+   npm install
+   cd frontend && npm install && cd ..
+   ```
+4. Copy the environment file: `cp .env.example .env`
+5. Start with Docker Compose: `docker compose up`
+
+The backend runs on port 3001, the frontend on port 3000, and Mosquitto on port 1883.
+
+## Development Workflow
+
+1. Create a branch from `main`: `git checkout -b feat/your-feature`
+2. Make your changes
+3. Run tests: `npm test`
+4. Commit using [Conventional Commits](https://www.conventionalcommits.org/):
+   ```
+   feat(dashboard): add new pane type for weather data
+   fix(kasa): handle timeout during device discovery
+   docs: update API reference with new endpoint
+   ```
+5. Push and open a Pull Request against `main`
+
+## Commit Convention
+
+We use Conventional Commits with scoped types:
+
+- `feat(scope)` — new feature
+- `fix(scope)` — bug fix
+- `refactor(scope)` — code change that neither fixes a bug nor adds a feature
+- `docs` — documentation changes
+- `test(scope)` — adding or updating tests
+- `chore(scope)` — build, tooling, dependencies
+
+Scopes: `mqtt`, `devices`, `automations`, `api`, `dashboard`, `hue`, `kasa`, `docker`, `deps`
+
+## Adding a New Connector
+
+Aeolus uses a pluggable connector framework. To add a new device integration:
+
+1. Copy `src/connectors/_template/` to `src/connectors/your-connector/`
+2. Implement the `Connector` interface
+3. Export `metadata`, `configSchema`, and `createConnector` from `index.ts`
+4. Register in `src/index.ts`
+
+See `src/connectors/README.md` for the full developer guide.
+
+## Code Standards
+
+- TypeScript strict mode
+- Use `interface` for object shapes, `type` for unions
+- Explicit return types on exported functions
+- kebab-case for file names, PascalCase for components
+- No `any` — use `unknown` and narrow with type guards
+
+## Testing
+
+- Vitest as the test runner
+- Test files live next to source: `device-registry.test.ts`
+- Property-based tests use fast-check
+
+## Pull Request Checklist
+
+- [ ] Code builds without errors
+- [ ] Tests pass (`npm test`)
+- [ ] Follows Conventional Commits format
+- [ ] New files added to project structure in `docs/COMPREHENSIVE_DOCUMENTATION.md` if applicable
+- [ ] New API endpoints documented
+- [ ] No secrets or API keys committed
+
+## Questions?
+
+Open a [GitHub Issue](https://github.com/j-a-m-i-e-c/aeolus/issues) or start a [Discussion](https://github.com/j-a-m-i-e-c/aeolus/discussions).
