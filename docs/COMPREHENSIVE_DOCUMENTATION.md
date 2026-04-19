@@ -2,29 +2,34 @@
 
 ## Overview
 
-Aeolus is a local-first, developer-centric IoT automation platform. It ingests MQTT messages from IoT devices, maintains a persistent device registry, evaluates code-driven automation rules, and exposes device state through a REST API, WebSocket real-time updates, and a React dashboard.
+Aeolus is a local-first, developer-centric IoT platform that acts as the central nervous system for all your connected devices. It bridges custom microcontroller projects (ESP32, Arduino), commercial smart devices (Philips Hue, TP-Link Kasa), and external APIs into one unified system — regardless of what protocol each device speaks.
 
-The system runs as three services: a Mosquitto MQTT broker (central event bus), an Express.js + TypeScript backend (core engine), and a React + Vite frontend (dashboard). All data stays local — no cloud dependency.
+Custom devices communicate via MQTT (bidirectional — Aeolus both ingests sensor data and publishes commands back to actuators). Commercial devices connect through pluggable connectors that translate their native protocols (Zigbee, Wi-Fi, local HTTP APIs) into the same internal pipeline. Everything flows through a central event bus, enabling automations that cross device and protocol boundaries.
+
+The system runs as three Docker services: a Mosquitto MQTT broker, an Express.js + TypeScript backend (core engine), and a React + Vite frontend (dashboard). All data stays local on a Raspberry Pi — no cloud dependency.
 
 ## Architecture
 
 ```
-[ IoT Devices / Sensors ]
-        ↓ MQTT publish
-[ Mosquitto Broker :1883 ]
-        ↓ subscribe
-[ MQTT Ingestion Service ]
-        ↓ normalized event
-[ Internal EventEmitter Bus ]
-        ↓                    ↓
-[ Device Registry ]    [ Automation Engine ]
-        ↓                    ↓
-[ SQLite DB ]          [ Connector Framework → Hue / Kasa / ... ]
-        ↓
-[ WebSocket Server ] → [ React Dashboard ]
-        ↑
-[ REST API (Express) ]
+[ Custom Microcontrollers ]              [ Commercial Devices ]
+  ESP32 / Arduino / Pi Pico               Hue (Zigbee) / Kasa (Wi-Fi) / ...
+        ↕ MQTT pub/sub                          ↕ Connector APIs
+[ Mosquitto Broker :1883 ]               [ Connector Framework ]
+        ↓ subscribe                              ↓
+        ↓ publish commands ↑             ────────┘
+                    ↓
+        [ Internal EventEmitter Bus ]
+              ↓              ↓
+    [ Device Registry ]  [ Automation Engine ]
+              ↓              ↓ publish MQTT / trigger connectors
+    [ SQLite DB ]        [ Actions → devices ]
+              ↓
+    [ WebSocket Server ] → [ React Dashboard ]
+              ↑
+    [ REST API (Express) ]
 ```
+
+MQTT devices are bidirectional: sensors publish data to topics like `sensor/tank/level`, and Aeolus publishes commands to topics like `valve/irrigation/command` that microcontrollers subscribe to. This enables the full IoT loop — sense, decide, act — across any combination of custom and commercial hardware.
 
 ## Tech Stack
 
@@ -173,12 +178,11 @@ aeolus/
 
 ### MQTT Ingestion Service (`src/mqtt/mqtt-service.ts`)
 
-Connects to the Mosquitto broker, subscribes to configurable topic patterns, and normalizes incoming messages.
+Connects to the Mosquitto broker for bidirectional communication with custom IoT devices.
 
-- Exponential backoff retry: `baseDelay * 2^(attempt-1)`, max 5 attempts
-- Topic parsing: `{type}/{location}/{metric}` → device ID + type
-- Payload handling: JSON objects, JSON primitives, plain numbers, plain strings
-- Emits `device:state-change` events on the internal bus
+**Inbound (sensor data):** Subscribes to configurable topic patterns, normalises incoming messages, and emits `device:state-change` events on the internal bus. Supports exponential backoff retry (max 5 attempts), topic parsing (`{type}/{location}/{metric}` → device ID + type), and multiple payload formats (JSON objects, primitives, plain numbers, strings).
+
+**Outbound (device commands):** Publishes MQTT messages to command topics via `POST /api/mqtt/publish` and the dashboard's MQTT Inspector. This enables Aeolus to send commands to custom microcontroller devices — e.g. publishing `{"action": "open"}` to `valve/irrigation/command` where an ESP32 with a solenoid valve is subscribed. The roadmap includes making outbound MQTT publish a first-class automation action type so rules can trigger device commands directly.
 
 ### Device Registry (`src/core/device-registry.ts`)
 
