@@ -83,6 +83,16 @@ function initSchema(database: Database): void {
       updated_at INTEGER NOT NULL
     );
   `);
+  database.run(`
+    CREATE TABLE IF NOT EXISTS services (
+      id TEXT PRIMARY KEY,
+      service_type TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      config TEXT NOT NULL DEFAULT '{}',
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+  `);
 }
 
 function saveToFile(database: Database): void {
