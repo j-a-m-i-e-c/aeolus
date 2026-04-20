@@ -31,14 +31,24 @@ function initSchema(database: Database): void {
       action_type TEXT NOT NULL DEFAULT 'log',
       action_target TEXT NOT NULL DEFAULT '',
       action_params TEXT NOT NULL DEFAULT '{}',
-      rule_type TEXT NOT NULL DEFAULT 'form' CHECK(rule_type IN ('form', 'script')),
+      rule_type TEXT NOT NULL DEFAULT 'form',
       script_source TEXT DEFAULT NULL,
       compiled_js TEXT DEFAULT NULL,
       enabled INTEGER NOT NULL DEFAULT 1,
       created_at INTEGER NOT NULL
     );
   `);
-  // Migration: backfill existing rows that lack a rule_type value
+
+  // Migration: add script rule columns to existing automation_rules tables
+  const addColumn = (col: string, def: string) => {
+    try { database.run(`ALTER TABLE automation_rules ADD COLUMN ${col} ${def};`); }
+    catch { /* column already exists */ }
+  };
+  addColumn("rule_type", "TEXT NOT NULL DEFAULT 'form'");
+  addColumn("script_source", "TEXT DEFAULT NULL");
+  addColumn("compiled_js", "TEXT DEFAULT NULL");
+
+  // Backfill existing rows that lack a rule_type value
   database.run(`UPDATE automation_rules SET rule_type = 'form' WHERE rule_type IS NULL;`);
   database.run(`
     CREATE TABLE IF NOT EXISTS tabs (
