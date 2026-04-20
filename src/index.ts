@@ -19,6 +19,7 @@ import * as kasaModule from "./connectors/kasa/index.js";
 import { migrateLegacyHueCredentials } from "./connectors/migrate-legacy-hue.js";
 import { ActionExecutor } from "./automations/action-executor.js";
 import { ExecutionLog } from "./automations/execution-log.js";
+import { Sandbox } from "./automations/sandbox.js";
 import { WsServer } from "./websocket/ws-server.js";
 import { createDeviceRoutes } from "./api/routes/device.routes.js";
 import { createStateRoutes } from "./api/routes/state.routes.js";
@@ -63,16 +64,17 @@ async function main(): Promise<void> {
   migrateLegacyHueCredentials(connectorStore);
   await connectorManager.restoreFromStore();
 
-  // 5. Action Executor and Execution Log
+  // 5. Action Executor, Execution Log, and Sandbox
   const actionExecutor = new ActionExecutor({
     mqttService,
     connectorManager,
     logger,
   });
   const executionLog = new ExecutionLog();
+  const sandbox = new Sandbox({ actionExecutor, deviceRegistry: registry });
 
-  // 6. Automation Engine
-  const engine = new AutomationEngine(eventBus);
+  // 6. Automation Engine (with sandbox, action executor, and execution log)
+  const engine = new AutomationEngine(eventBus, { sandbox, actionExecutor, executionLog });
   const automationsDir = path.resolve(process.cwd(), "automations");
   await engine.loadRulesFromDirectory(automationsDir);
   loadUiRules(engine, db, registry, actionExecutor);
