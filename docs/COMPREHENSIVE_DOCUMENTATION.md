@@ -73,6 +73,7 @@ aeolus/
 │   │   │   ├── automation.routes.ts  # CRUD for UI-created automation rules
 │   │   │   ├── simulator.routes.ts   # Start/stop device simulator
 │   │   │   ├── connector.routes.ts   # Generic connector REST API (replaces hue.routes.ts)
+│   │   │   ├── service.routes.ts     # Generic service REST API
 │   │   │   ├── layout.routes.ts      # GET/PUT /api/layout (tab + pane persistence)
 │   │   │   └── system.routes.ts      # Host diagnostics, application logs, self-update
 │   │   └── middleware/
@@ -114,7 +115,17 @@ aeolus/
 │   │   └── README.md                 # Developer guide for creating new connectors
 │   ├── simulator/
 │   │   └── device-simulator.ts       # Fake device data generator (7 devices)
-│   ├── services/                     # External API integrations (weather, river height, etc.)
+│   ├── services/                     # Pluggable service framework (non-device event producers)
+│   │   ├── service.interface.ts      # Core TypeScript interfaces (ServiceModule, ServiceInstance, etc.)
+│   │   ├── service-registry.ts       # Manual registration and lookup of service modules
+│   │   ├── service-manager.ts        # Lifecycle management (enable/disable/retry/restore)
+│   │   ├── service-store.ts          # SQLite persistence for service records
+│   │   ├── cron/                     # Cron Scheduler service
+│   │   │   └── index.ts             # Module exports (metadata, configSchema, createService)
+│   │   ├── trigger/                  # API Trigger service
+│   │   │   └── index.ts             # Module exports (metadata, configSchema, createService)
+│   │   ├── system/                   # System Events service
+│   │   │   └── index.ts             # Module exports (metadata, configSchema, createService)
 │   │   └── README.md                 # Developer guide for creating services
 │   ├── websocket/
 │   │   └── ws-server.ts              # WebSocket server
@@ -148,6 +159,7 @@ aeolus/
 │       │   ├── AutomationsPage.tsx   # Dual-mode automation rule editor (form + script)
 │       │   ├── ScriptEditor.tsx      # Monaco code editor with Aeolus dark theme + IntelliSense
 │       │   ├── ConnectorsPage.tsx    # Connector management (enable/disable, config, generic setup wizard)
+│       │   ├── ServicesPage.tsx     # Service management (enable/disable, cron schedule editor, health)
 │       │   ├── SystemPage.tsx        # Host diagnostics, application log viewer, self-update
 │       │   ├── CommandPalette.tsx    # Ctrl+K command palette
 │       │   ├── ToastContainer.tsx    # Animated toast notifications
@@ -338,6 +350,69 @@ One-time migration of legacy `hue-credentials.json` into the ConnectorStore.
 - Renames the file to `.migrated` to prevent re-import
 
 
+### Services Framework
+
+The Services Framework is a pluggable architecture for non-device event producers — timers, API triggers, system lifecycle events — that sits alongside the Connector Framework as a peer event source layer. Services emit events on the standard event bus using synthetic `service/{type}/{name}` topics, so automations match on service events identically to how they match on `sensor/` or `connector/` topics. Zero changes to the automation engine were required.
+
+The framework mirrors the Connector Framework's architecture: `ServiceModule` → `ServiceRegistry` → `ServiceManager` → `ServiceStore`. Three built-in services ship with the framework; future services (weather, energy pricing, calendar) plug in without touching core files.
+
+#### Service Interfaces (`src/services/service.interface.ts`)
+
+Every service module exports three members:
+
+- `metadata: ServiceMetadata` — static descriptor with `id`, `displayName`, `icon`, `description`, `category`
+- `configSchema: ServiceConfigSchema` — reuses `ConfigFieldDescriptor[]` from the Connector framework
+- `createService(config, deps): ServiceInstance` — factory function accepting config and `{ eventBus }` dependencies
+
+`ServiceInstance` exposes lifecycle methods: `start()`, `stop()`, `dispose()`, `getHealthStatus()`, `onConfigUpdate(config)`, and optional `getState()` for sandbox queries.
+
+#### ServiceRegistry (`src/services/service-registry.ts`)
+
+Manual registration and lookup of service modules. Validates that each module exports `metadata` (with string `id`), `configSchema` (array), and `createService` (function). Invalid modules are skipped with a warning; duplicate IDs overwrite with a warning.
+
+#### ServiceManager (`src/services/service-manager.ts`)
+
+Lifecycle management for enabled service instances. Handles enable (instantiate → start → persist), disable (stop → dispose → update store), config update, retry, restore from store on startup, and disposeAll on shutdown. Exposes `getServiceInstance(serviceType)` for sandbox queries.
+
+Key differences from ConnectorManager: no device discovery or polling (services emit events on their own schedule), no action routing (services are event producers only).
+
+#### ServiceStore (`src/services/service-store.ts`)
+
+SQLite persistence layer for service records. CRUD operations on the `services` table with JSON serialization for the config column. Disabling preserves the record (sets `enabled = 0`) rather than deleting it.
+
+#### Event Emission Pattern
+
+Services emit events through the existing `DEVICE_STATE_CHANGE` pipeline using synthetic topics:
+
+```typescript
+const event: NormalizedEvent = {
+  deviceId: `service-${serviceType}`,    // e.g. "service-cron"
+  deviceType: "sensor",                   // All service events use "sensor" type
+  state: { scheduleName, cronExpression, firedAt: Date.now() },
+  topic: `service/cron/${scheduleName}`,  // Synthetic topic
+  timestamp: Date.now(),
+  integration: "service",
+};
+eventBus.emit(DEVICE_STATE_CHANGE, event);
+```
+
+Automations match `service/cron/every-5m` or `service/+/+` or `service/#` using existing topic matching. Events flow through DeviceRegistry → WebSocket broadcast → frontend automatically.
+
+#### Built-in Services
+
+**Cron Scheduler** (`src/services/cron/index.ts`) — Time-based event scheduling using `node-cron`. Config accepts a `schedules` array of `{ name, cron }` objects. On each schedule fire, emits `service/cron/{scheduleName}` with state `{ scheduleName, cronExpression, firedAt }`. Invalid cron expressions are skipped with a warning. `getState()` returns all schedules with active status.
+
+**API Trigger** (`src/services/trigger/index.ts`) — Fire automation events via HTTP requests. No configuration needed. The route handler for `POST /api/services/trigger/{name}` calls `emitTrigger(name, body)` which emits `service/trigger/{name}` with state `{ triggerName, payload, firedAt }`. Accepts any trigger name without pre-registration. `getState()` returns `{ triggerCount, lastTriggerAt }`.
+
+**System Events** (`src/services/system/index.ts`) — Emits `service/system/startup` on start and `service/system/shutdown` on stop. No configuration needed. `getState()` returns `{ startupTimestamp, uptimeSeconds }`.
+
+#### Sandbox Services API
+
+The `services` global is available in automation scripts alongside `devices`, `mqtt`, `log`, and `context`:
+
+- `services.get(serviceType)` — returns a read-only snapshot of the service's `getState()`, or `undefined` if not running
+- `services.list()` — returns `[{ type, displayName, running }]` for all registered services
+
 ## API Reference
 
 ### REST Endpoints
@@ -452,6 +527,49 @@ Returns `{ "success": true, "message": "...", "data": {...}, "complete": false }
 **POST /api/connectors/:id/retry**
 Retry connection for a disconnected connector, then re-discover devices.
 Returns `{ "success": true }`.
+
+### Service API
+
+**GET /api/services/available**
+List all registered service types with metadata and config schemas.
+
+**GET /api/services**
+List enabled service instances with health status, config, and service type.
+
+**POST /api/services**
+Enable a new service instance.
+```json
+{ "service_type": "cron", "config": { "schedules": [{ "name": "every-5m", "cron": "*/5 * * * *" }] } }
+```
+Returns `{ "success": true, "id": "<uuid>" }`. 404 if service type not found, 400 if required config fields missing.
+
+**PATCH /api/services/:id**
+Update service configuration.
+```json
+{ "config": { "schedules": [...] } }
+```
+Returns `{ "success": true }`.
+
+**DELETE /api/services/:id**
+Disable and dispose a service instance.
+Returns `{ "success": true }`.
+
+**GET /api/services/:id/status**
+Get detailed health status for a specific service instance.
+
+**POST /api/services/:id/retry**
+Retry starting a stopped service.
+Returns `{ "success": true }`.
+
+**POST /api/services/trigger/:name**
+Fire an API trigger event. Emits `service/trigger/{name}` on the event bus with the request body as payload.
+```json
+{ "key": "value" }
+```
+Returns `{ "success": true, "trigger": "<name>" }`.
+
+**GET /api/services/topics**
+List available service event topics for all enabled services (e.g. `service/cron/every-5m`, `service/trigger/{name}`, `service/system/startup`).
 
 ### System API
 
@@ -685,6 +803,53 @@ interface ConnectorInstanceInfo {
 }
 ```
 
+### ServiceMetadata
+```typescript
+interface ServiceMetadata {
+  id: string;           // Unique service type ID (e.g. "cron", "trigger", "system")
+  displayName: string;  // Human-readable name for the UI
+  icon: string;         // Lucide icon name
+  description: string;  // Short description for the service card
+  category: string;     // Grouping category (e.g. "scheduling", "integration", "system")
+}
+
+type ServiceConfigSchema = ConfigFieldDescriptor[];
+```
+
+### ServiceHealthStatus
+```typescript
+interface ServiceHealthStatus {
+  status: "running" | "degraded" | "stopped";
+  lastActivity: number;       // Unix timestamp of last event emission
+  errorMessage?: string;      // Present when status is degraded or stopped
+}
+```
+
+### ServiceInstanceInfo
+```typescript
+interface ServiceInstanceInfo {
+  id: string;                        // UUID instance identifier
+  serviceType: string;               // Matches ServiceMetadata.id
+  displayName: string;               // From metadata
+  icon: string;                      // From metadata
+  config: Record<string, unknown>;   // Current config
+  health: ServiceHealthStatus;       // Live health status
+  enabled: boolean;                  // Whether the instance is active
+}
+```
+
+### ServiceRecord
+```typescript
+interface ServiceRecord {
+  id: string;                        // UUID primary key
+  serviceType: string;               // Service type ID
+  enabled: boolean;                  // Whether the service is active
+  config: Record<string, unknown>;   // JSON-serialized config
+  createdAt: number;                 // Unix timestamp ms
+  updatedAt: number;                 // Unix timestamp ms
+}
+```
+
 ### SQLite Schema
 ```sql
 CREATE TABLE devices (
@@ -737,6 +902,15 @@ CREATE TABLE panes (
 CREATE TABLE connectors (
   id TEXT PRIMARY KEY,
   connector_type TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  config TEXT NOT NULL DEFAULT '{}',
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE services (
+  id TEXT PRIMARY KEY,
+  service_type TEXT NOT NULL,
   enabled INTEGER NOT NULL DEFAULT 1,
   config TEXT NOT NULL DEFAULT '{}',
   created_at INTEGER NOT NULL,
@@ -811,6 +985,15 @@ The Dockerfile installs `git`, `docker-cli`, and `docker-cli-compose` in the pro
 | Connector | Unknown connector type on restore | Log warning, skip record |
 | Connector | Setup step fails | Return error message to dashboard wizard |
 | Connector | Legacy migration file unreadable | Log warning, skip migration |
+| Service | Service type not found in registry | 404 JSON error |
+| Service | Missing required config fields | 400 JSON error with field names |
+| Service | `start()` throws | Mark health as "stopped", log error, allow retry |
+| Service | Invalid cron expression | Log warning, skip schedule, continue with valid ones |
+| Service | `stop()` throws during disable | Log error, continue with disposal |
+| Service | `dispose()` throws during shutdown | Log error, continue with next service |
+| Service | Duplicate service type registration | Log warning, overwrite existing |
+| Service | ServiceStore JSON parse failure | Log warning, skip malformed record |
+| Service | Sandbox `services.get()` for non-running service | Return `undefined` |
 | Layout | Invalid layout payload | 400 JSON error |
 | Layout | Database write failure | Rollback transaction, return 500 |
 | Log Viewer | Unparseable log line | Silently ignored by log buffer |
@@ -826,7 +1009,8 @@ The Dockerfile installs `git`, `docker-cli`, and `docker-cli-compose` in the pro
 - **Express over Fastify:** Broader ecosystem familiarity, easier WebSocket integration via ws library.
 - **Pluggable connector architecture over hardcoded integrations:** Each connector is a self-contained module with metadata, config schema, and factory function. The ConnectorRegistry discovers modules at startup, the ConnectorManager handles lifecycle (enable/disable/poll/action routing), and the ConnectorStore persists state to SQLite. This replaces the previous `src/integrations/` approach where each integration required its own route file and manual wiring. New connectors can be added by creating a directory in `src/connectors/` with the standard module exports — no changes to core code required. A `_template/` skeleton is provided for developers.
 - **Host networking for LAN device discovery:** The backend container uses `network_mode: host` instead of the shared bridge network. This is required for Kasa's UDP broadcast discovery (which doesn't work across Docker bridge networks) and for direct LAN access to Hue bridges. The trade-off is that the backend port is exposed directly on the host rather than through Docker port mapping, and the MQTT broker URL must use `localhost` instead of the Docker service name.
-- **Pinned tabs render dedicated components:** Pinned system tabs (Dashboard, Automations, Connectors, System) render their own full-page components directly via a `PINNED_PAGES` map in `App.tsx`, bypassing the modular pane grid. This gives each system page full control over its layout and styling. Custom (unpinned) tabs use the `TabLayout` component with the pane grid system. This separation keeps system pages polished while maintaining flexibility for user-created tabs.
+- **Pinned tabs render dedicated components:** Pinned system tabs (Dashboard, Automations, Connectors, Services, System) render their own full-page components directly via a `PINNED_PAGES` map in `App.tsx`, bypassing the modular pane grid. This gives each system page full control over its layout and styling. Custom (unpinned) tabs use the `TabLayout` component with the pane grid system. This separation keeps system pages polished while maintaining flexibility for user-created tabs.
+- **Services Framework mirrors Connector Framework architecture:** The Services Framework deliberately mirrors the Connector Framework's architecture (Module → Registry → Manager → Store) so that anyone familiar with the connector code can immediately understand the services code. Services differ in that they are event producers only — no device discovery, no polling, no action routing. They emit events through the existing `DEVICE_STATE_CHANGE` pipeline using synthetic `service/{type}/{name}` topics, requiring zero changes to the automation engine.
 - **`isolated-vm` over Node.js `vm` for sandbox execution:** The Node.js `vm` module is explicitly documented as "not a security mechanism" — it runs code in the same V8 isolate as the host process, allowing escape via prototype pollution and `Function` constructor access. The `vm2` library was deprecated after repeated critical sandbox escape CVEs. `isolated-vm` creates a separate V8 isolate with its own heap, no access to the host's global scope, and built-in support for memory limits (32 MB) and execution timeouts (5 seconds). This is the same isolation primitive used by Cloudflare Workers. For a Raspberry Pi deployment where the automation engine shares a process with the MQTT broker connection and device registry, true V8-level isolation is essential. The tradeoff is that `isolated-vm` is a native addon requiring C++ compilation — the Dockerfile includes `build-essential` and `python3` for ARM64 builds.
 - **Monaco over CodeMirror for the script editor:** Monaco is the editor engine behind VS Code. It provides native TypeScript language service integration — IntelliSense, type checking, and error squiggles work out of the box when you register `.d.ts` type definitions via `addExtraLib()`. CodeMirror 6 is lighter but requires significant custom work to achieve comparable TypeScript support. Since the code editor is the centrepiece of the automation overhaul and developer experience is paramount, Monaco is the right choice. The `@monaco-editor/react` wrapper provides clean React integration.
 - **TypeScript as a runtime dependency:** The TypeScript compiler API (`ts.transpileModule()`) is used at runtime to transpile user-authored automation scripts on save. This means `typescript` is a production dependency, not just a dev dependency. The tradeoff is a larger production bundle, but it enables on-the-fly transpilation without a separate build step or external service.
@@ -835,10 +1019,10 @@ The Dockerfile installs `git`, `docker-cli`, and `docker-cli-compose` in the pro
 
 ## Dashboard Features
 
-The React dashboard provides a comprehensive developer-focused interface with a modular tab-and-pane layout. The sidebar displays dynamic tabs — 4 pinned system tabs (Dashboard, Automations, Connectors, System) plus user-created custom tabs. Pinned tabs render dedicated full-page components; custom tabs use the modular pane grid. On a fresh install, only the 4 pinned tabs are present with no custom tabs or panes.
+The React dashboard provides a comprehensive developer-focused interface with a modular tab-and-pane layout. The sidebar displays dynamic tabs — 5 pinned system tabs (Dashboard, Automations, Connectors, Services, System) plus user-created custom tabs. Pinned tabs render dedicated full-page components; custom tabs use the modular pane grid. On a fresh install, only the 5 pinned tabs are present with no custom tabs or panes.
 
 ### Sidebar
-- **Pinned System Tabs** — Dashboard, Automations, Connectors, System (cannot be deleted or reordered)
+- **Pinned System Tabs** — Dashboard, Automations, Connectors, Services, System (cannot be deleted or reordered)
 - **Custom Tabs** — User-created tabs with custom names and Lucide icons
 - **Add Tab** — Inline form with name input and icon picker (16 icon choices)
 - **Rename** — Double-click a custom tab to rename inline
@@ -873,6 +1057,14 @@ The React dashboard provides a comprehensive developer-focused interface with a 
 - **Disable** — Stop and disconnect a connector instance (preserves config in store)
 - **Retry** — Re-attempt connection for disconnected connectors
 - **Health Indicators** — Real-time status: connected (green), degraded (amber), disconnected (red)
+
+### Services Tab (pinned)
+- **Available Services** — Cards for each registered service type showing display name, icon, description, category, and enable button
+- **Enable Flow** — Click Enable to expand a dynamic config form generated from the service's `configSchema`, then submit to enable
+- **Cron Schedule Editor** — Custom schedule editor for the Cron service: list of configured schedules with name, cron expression, and human-readable description (via `cronstrue`). "Add Schedule" inline form with preset buttons for common schedules (every minute, every 5 minutes, every hour, daily at midnight, daily at 6am). Client-side cron expression validation
+- **Active Services** — Cards for each enabled instance showing health status (green=running, amber=degraded, red=stopped), config summary, and disable/retry buttons
+- **Disable** — Stop and dispose a service instance
+- **Retry** — Re-attempt starting a stopped service
 
 ### Automations Tab (pinned)
 - **Dual-Mode Rule Creator** — Segmented control toggle between "Quick Rule" (form-based, `FormInput` icon) and "Script" (Monaco code editor, `Code` icon)
@@ -975,6 +1167,15 @@ Custom tabs use the modular pane grid powered by `react-grid-layout`. Users crea
 | GET | `/api/connectors/:id/setup-steps` | Get setup step descriptors for a connector instance |
 | POST | `/api/connectors/:id/setup/:stepId` | Execute a setup wizard step |
 | POST | `/api/connectors/:id/retry` | Retry connection for disconnected connector |
+| GET | `/api/services/available` | List registered service types with metadata + config schemas |
+| GET | `/api/services` | List enabled service instances with health and config |
+| POST | `/api/services` | Enable a new service `{ service_type, config }` |
+| PATCH | `/api/services/:id` | Update service config `{ config }` |
+| DELETE | `/api/services/:id` | Disable and dispose a service instance |
+| GET | `/api/services/:id/status` | Service health status |
+| POST | `/api/services/:id/retry` | Retry starting a stopped service |
+| POST | `/api/services/trigger/:name` | Fire an API trigger event |
+| GET | `/api/services/topics` | List available service event topics |
 | GET | `/api/layout` | Get saved dashboard layout (tabs + panes) |
 | PUT | `/api/layout` | Save dashboard layout (atomic replace) |
 | GET | `/api/system` | Host system diagnostics (CPU, memory, disk, temp) |
@@ -999,8 +1200,8 @@ Enable via `SIMULATOR=true` env var (auto-starts on boot) or toggle from the sid
 
 ---
 
-**Last Updated:** April 17, 2026
-**Version:** 0.7.0
+**Last Updated:** April 18, 2026
+**Version:** 0.8.0
 **Status:** MVP Development
 
 ## Future Enhancements
