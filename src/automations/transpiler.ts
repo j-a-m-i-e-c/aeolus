@@ -10,13 +10,9 @@ export interface TranspileError {
 }
 
 /** Result of transpiling TypeScript source to JavaScript. */
-export interface TranspileResult {
-  success: true;
-  js: string;
-} | {
-  success: false;
-  errors: TranspileError[];
-}
+export type TranspileResult =
+  | { success: true; js: string }
+  | { success: false; errors: TranspileError[] };
 
 /**
  * Regex that catches import/require patterns that must be rejected:

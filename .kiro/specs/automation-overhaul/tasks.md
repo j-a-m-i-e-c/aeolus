@@ -148,8 +148,8 @@ Transform Aeolus from a platform that logs automation actions into one that exec
     - Ensure file-based DSL rules continue to work unchanged
     - _Requirements: 2.1, 3.1, 6.2, 6.3_
 
-- [-] 9. Update `src/index.ts` entry point
-  - [-] 9.1 Wire new services into the application bootstrap
+- [x] 9. Update `src/index.ts` entry point
+  - [x] 9.1 Wire new services into the application bootstrap
     - Instantiate `ActionExecutor` with `MqttService`, `ConnectorManager`, `Logger`
     - Instantiate `ExecutionLog`
     - Instantiate `Sandbox` with `ActionExecutor`, `DeviceRegistry`
@@ -158,15 +158,15 @@ Transform Aeolus from a platform that logs automation actions into one that exec
     - Move `typescript` from devDependencies to dependencies in `package.json`
     - _Requirements: 1.1, 2.1, 3.1_
 
-- [ ] 10. Checkpoint — backend complete
+- [x] 10. Checkpoint — backend complete
   - Ensure all tests pass, ask the user if questions arise.
 
-- [ ] 11. Monaco Script Editor component
-  - [~] 11.1 Install frontend dependencies
+- [x] 11. Monaco Script Editor component
+  - [x] 11.1 Install frontend dependencies
     - Add `@monaco-editor/react` and `monaco-editor` to `frontend/package.json`
     - _Requirements: 7.1_
 
-  - [~] 11.2 Create `ScriptEditor` component in `frontend/src/components/ScriptEditor.tsx`
+  - [x] 11.2 Create `ScriptEditor` component in `frontend/src/components/ScriptEditor.tsx`
     - Wrap `@monaco-editor/react` with Aeolus dark theme configuration
     - Define `aeolus-dark` Monaco theme: keywords `#3BA4FF`, strings `#5CE1E6`, comments `#6B7785`, functions `#E6EDF3`, types `#9AA6B2`, numbers `#F59E0B`, background `#0B0F14`, gutter `#121821`
     - Set JetBrains Mono as editor font (load via Google Fonts link in `index.html`)
@@ -183,22 +183,22 @@ Transform Aeolus from a platform that logs automation actions into one that exec
     - Test onChange and onSave callbacks
     - _Requirements: 7.2, 7.7_
 
-- [ ] 12. Dual-mode Automations Page
-  - [~] 12.1 Update `AutomationsPage` with mode toggle and script creation
+- [x] 12. Dual-mode Automations Page
+  - [x] 12.1 Update `AutomationsPage` with mode toggle and script creation
     - Add segmented control toggle: "Quick Rule" (FormInput icon) / "Script" (Code icon) using Lucide icons
     - In "Script" mode: render `ScriptEditor` with name input and trigger topic input
     - Wire save to `POST /api/automations` with `ruleType: "script"` and `scriptSource`
     - Display transpilation errors from backend response inline in the editor
     - _Requirements: 8.1, 8.4, 8.6_
 
-  - [~] 12.2 Update rule list with type badges and script editing
+  - [x] 12.2 Update rule list with type badges and script editing
     - Add `ruleType` field to `AutomationRule` interface (values: `"file"`, `"form"`, `"script"`)
     - Show `<Code />` icon badge for script rules, `<FormInput />` icon badge for form rules
     - Clicking a script rule opens it in the ScriptEditor with source pre-loaded
     - Wire edit save to `PUT /api/automations/:id`
     - _Requirements: 8.3, 8.5_
 
-  - [~] 12.3 Expand form-based rule creator with richer action types
+  - [x] 12.3 Expand form-based rule creator with richer action types
     - Add `device_action`, `delay`, and `webhook` options to the action type dropdown
     - For `device_action`: show device selector + action type input + parameters field
     - For `delay`: show duration input in milliseconds
@@ -213,23 +213,23 @@ Transform Aeolus from a platform that logs automation actions into one that exec
     - Test form action type dropdown shows all options
     - _Requirements: 8.1, 8.3, 10.1_
 
-- [ ] 13. Checkpoint — frontend complete
+- [x] 13. Checkpoint — frontend complete
   - Ensure all tests pass, ask the user if questions arise.
 
-- [ ] 14. Integration wiring and documentation
-  - [~] 14.1 End-to-end integration: form rule fires through ActionExecutor
+- [x] 14. Integration wiring and documentation
+  - [x] 14.1 End-to-end integration: form rule fires through ActionExecutor
     - Verify a form rule with `publish` action actually calls `MqttService.publish()`
     - Verify a form rule with `toggle` action calls `ConnectorManager.executeAction()`
     - Verify execution is recorded in ExecutionLog
     - _Requirements: 2.1, 6.3_
 
-  - [~] 14.2 End-to-end integration: script rule fires through Sandbox
+  - [x] 14.2 End-to-end integration: script rule fires through Sandbox
     - Verify a script rule with `devices.action()` call triggers ActionExecutor → ConnectorManager
     - Verify a script rule with `mqtt.publish()` call triggers ActionExecutor → MqttService
     - Verify execution is recorded in ExecutionLog
     - _Requirements: 2.2, 3.10_
 
-  - [~] 14.3 Update `docs/COMPREHENSIVE_DOCUMENTATION.md`
+  - [x] 14.3 Update `docs/COMPREHENSIVE_DOCUMENTATION.md`
     - Add Automation Overhaul section: Action Executor, Sandbox, Transpiler, Execution Log
     - Document new API endpoints: PUT /api/automations/:id, GET /api/automations/types, GET /api/automations/history
     - Update SQLite schema section with new columns
@@ -240,7 +240,7 @@ Transform Aeolus from a platform that logs automation actions into one that exec
     - Update design decisions section with isolated-vm rationale and Monaco choice
     - _Requirements: all_
 
-- [ ] 15. Final checkpoint — all tests pass, feature complete
+- [x] 15. Final checkpoint — all tests pass, feature complete
   - Ensure all tests pass, ask the user if questions arise.
 
 ## Notes
