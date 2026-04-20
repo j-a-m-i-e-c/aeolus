@@ -216,18 +216,12 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
   initialize: async () => {
     try {
       const layout = await fetchLayout();
-      if (!layout.tabs || layout.tabs.length === 0) {
-        // No saved layout — seed with defaults
-        set({ tabs: DEFAULT_TABS, panes: DEFAULT_PANES, activeTabId: DEFAULT_TABS[0]?.id ?? null, initialized: true });
-        try {
-          await saveLayout({ tabs: DEFAULT_TABS, panes: DEFAULT_PANES });
-        } catch (err) {
-          console.warn("[dashboard-store] Failed to persist default layout:", err);
-        }
-      } else {
-        // Populate state from saved layout
-        set({ tabs: layout.tabs, panes: layout.panes, activeTabId: layout.tabs[0]?.id ?? null, initialized: true });
-      }
+      // Always include pinned tabs from DEFAULT_TABS — they're hardcoded system navigation
+      const pinnedTabs = DEFAULT_TABS.filter((t) => t.pinned);
+      const savedCustomTabs = (layout.tabs || []).filter((t: Tab) => !t.pinned);
+      const allTabs = [...pinnedTabs, ...savedCustomTabs];
+      const panes = layout.panes || DEFAULT_PANES;
+      set({ tabs: allTabs, panes, activeTabId: allTabs[0]?.id ?? null, initialized: true });
     } catch (err) {
       console.warn("[dashboard-store] Failed to fetch layout, using defaults:", err);
       set({ tabs: DEFAULT_TABS, panes: DEFAULT_PANES, activeTabId: DEFAULT_TABS[0]?.id ?? null, initialized: true });
@@ -236,7 +230,9 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
 
   persistLayout: () => {
     const { tabs, panes } = get();
-    saveLayout({ tabs, panes }).catch((err) => {
+    // Only persist custom (unpinned) tabs — pinned tabs are hardcoded
+    const customTabs = tabs.filter((t) => !t.pinned);
+    saveLayout({ tabs: customTabs, panes }).catch((err) => {
       console.warn("[dashboard-store] Failed to persist layout:", err);
     });
   },
