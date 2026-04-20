@@ -12,6 +12,8 @@ import { SystemStatsPane } from "../components/panes/SystemStatsPane";
 import { TopicTreePane } from "../components/panes/TopicTreePane";
 import { EventLogPane } from "../components/panes/EventLogPane";
 import { ConnectorsPane } from "../components/panes/ConnectorsPane";
+import { TriggerButtonPane } from "../components/panes/TriggerButtonPane";
+import { AutomationCardPane } from "../components/panes/AutomationCardPane";
 
 export interface PaneRegistryEntry {
   component: ComponentType<{ config: PaneConfig }>;
@@ -91,6 +93,20 @@ export const PANE_REGISTRY: Record<string, PaneRegistryEntry> = {
     defaultIcon: "plug",
     defaultConfig: {},
     defaultSize: { w: 12, h: 8 },
+  },
+  "trigger-button": {
+    component: TriggerButtonPane,
+    displayName: "Trigger Button",
+    defaultIcon: "zap",
+    defaultConfig: { triggerName: "my-trigger", label: "Fire!", color: "primary" },
+    defaultSize: { w: 4, h: 3 },
+  },
+  "automation-card": {
+    component: AutomationCardPane,
+    displayName: "Automation Card",
+    defaultIcon: "git-branch",
+    defaultConfig: { ruleId: "" },
+    defaultSize: { w: 6, h: 3 },
   },
 };
 
