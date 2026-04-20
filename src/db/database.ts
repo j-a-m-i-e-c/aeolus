@@ -28,13 +28,18 @@ function initSchema(database: Database): void {
       trigger_topic TEXT NOT NULL,
       condition_type TEXT DEFAULT NULL,
       condition_value TEXT DEFAULT NULL,
-      action_type TEXT NOT NULL,
-      action_target TEXT NOT NULL,
+      action_type TEXT NOT NULL DEFAULT 'log',
+      action_target TEXT NOT NULL DEFAULT '',
       action_params TEXT NOT NULL DEFAULT '{}',
+      rule_type TEXT NOT NULL DEFAULT 'form' CHECK(rule_type IN ('form', 'script')),
+      script_source TEXT DEFAULT NULL,
+      compiled_js TEXT DEFAULT NULL,
       enabled INTEGER NOT NULL DEFAULT 1,
       created_at INTEGER NOT NULL
     );
   `);
+  // Migration: backfill existing rows that lack a rule_type value
+  database.run(`UPDATE automation_rules SET rule_type = 'form' WHERE rule_type IS NULL;`);
   database.run(`
     CREATE TABLE IF NOT EXISTS tabs (
       id TEXT PRIMARY KEY,
