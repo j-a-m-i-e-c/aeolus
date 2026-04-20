@@ -27,6 +27,13 @@ import { createHealthRoutes } from "./api/routes/health.routes.js";
 import { createMqttRoutes } from "./api/routes/mqtt.routes.js";
 import { createAutomationRoutes, loadUiRules } from "./api/routes/automation.routes.js";
 import { createConnectorRoutes } from "./api/routes/connector.routes.js";
+import { createServiceRoutes } from "./api/routes/service.routes.js";
+import { ServiceRegistry } from "./services/service-registry.js";
+import { ServiceStore } from "./services/service-store.js";
+import { ServiceManager } from "./services/service-manager.js";
+import cronModule from "./services/cron/index.js";
+import triggerModule from "./services/trigger/index.js";
+import systemModule from "./services/system/index.js";
 import { requestLogger } from "./api/middleware/request-logger.js";
 import { errorHandler } from "./api/middleware/error-handler.js";
 import { DeviceSimulator } from "./simulator/device-simulator.js";
@@ -64,16 +71,27 @@ async function main(): Promise<void> {
   migrateLegacyHueCredentials(connectorStore);
   await connectorManager.restoreFromStore();
 
-  // 5. Action Executor, Execution Log, and Sandbox
+  // 5. Services Framework
+  const serviceStore = new ServiceStore(db);
+  const serviceRegistry = new ServiceRegistry();
+  const serviceManager = new ServiceManager(serviceRegistry, serviceStore, eventBus);
+
+  serviceRegistry.register(cronModule);
+  serviceRegistry.register(triggerModule);
+  serviceRegistry.register(systemModule);
+
+  await serviceManager.restoreFromStore();
+
+  // 6. Action Executor, Execution Log, and Sandbox
   const actionExecutor = new ActionExecutor({
     mqttService,
     connectorManager,
     logger,
   });
   const executionLog = new ExecutionLog();
-  const sandbox = new Sandbox({ actionExecutor, deviceRegistry: registry });
+  const sandbox = new Sandbox({ actionExecutor, deviceRegistry: registry, serviceManager });
 
-  // 6. Automation Engine (with sandbox, action executor, and execution log)
+  // 7. Automation Engine (with sandbox, action executor, and execution log)
   const engine = new AutomationEngine(eventBus, { sandbox, actionExecutor, executionLog });
   const automationsDir = path.resolve(process.cwd(), "automations");
   await engine.loadRulesFromDirectory(automationsDir);
@@ -112,6 +130,7 @@ async function main(): Promise<void> {
   app.use("/api/automations", createAutomationRoutes(engine, db, registry, actionExecutor, executionLog, sandboxTypesPath));
   app.use("/api/simulator", createSimulatorRoutes(simulator));
   app.use("/api/connectors", createConnectorRoutes(connectorManager, connectorRegistry));
+  app.use("/api/services", createServiceRoutes(serviceManager, serviceRegistry));
   app.use("/api/system", createSystemRoutes());
   app.use("/api/layout", createLayoutRoutes(db));
 
@@ -133,6 +152,7 @@ async function main(): Promise<void> {
   const shutdown = async () => {
     logger.info("Shutting down Aeolus...");
     simulator.stop();
+    await serviceManager.disposeAll();
     await connectorManager.disposeAll();
     await mqttService.disconnect();
     persistDatabase();
