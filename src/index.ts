@@ -1,4 +1,4 @@
-﻿// src/index.ts — Aeolus backend entry point
+// src/index.ts — Aeolus backend entry point
 
 import express from "express";
 import cors from "cors";
@@ -17,6 +17,8 @@ import { ConnectorStore } from "./connectors/connector-store.js";
 import * as hueModule from "./connectors/hue/index.js";
 import * as kasaModule from "./connectors/kasa/index.js";
 import { migrateLegacyHueCredentials } from "./connectors/migrate-legacy-hue.js";
+import { ActionExecutor } from "./automations/action-executor.js";
+import { ExecutionLog } from "./automations/execution-log.js";
 import { WsServer } from "./websocket/ws-server.js";
 import { createDeviceRoutes } from "./api/routes/device.routes.js";
 import { createStateRoutes } from "./api/routes/state.routes.js";
@@ -30,6 +32,7 @@ import { DeviceSimulator } from "./simulator/device-simulator.js";
 import { createSimulatorRoutes } from "./api/routes/simulator.routes.js";
 import { createSystemRoutes } from "./api/routes/system.routes.js";
 import { createLayoutRoutes } from "./api/routes/layout.routes.js";
+
 
 const startTime = Date.now();
 
@@ -49,13 +52,7 @@ async function main(): Promise<void> {
     eventBus
   );
 
-  // 4. Automation Engine
-  const engine = new AutomationEngine(eventBus);
-  const automationsDir = path.resolve(process.cwd(), "automations");
-  await engine.loadRulesFromDirectory(automationsDir);
-  loadUiRules(engine, db, registry);
-
-  // 5. Connector Framework
+  // 4. Connector Framework (needed before ActionExecutor)
   const connectorStore = new ConnectorStore(db);
   const connectorRegistry = new ConnectorRegistry();
   const connectorManager = new ConnectorManager(connectorRegistry, connectorStore, registry, eventBus);
@@ -66,25 +63,40 @@ async function main(): Promise<void> {
   migrateLegacyHueCredentials(connectorStore);
   await connectorManager.restoreFromStore();
 
-  // 6. Wire MQTT events to device registry
+  // 5. Action Executor and Execution Log
+  const actionExecutor = new ActionExecutor({
+    mqttService,
+    connectorManager,
+    logger,
+  });
+  const executionLog = new ExecutionLog();
+
+  // 6. Automation Engine
+  const engine = new AutomationEngine(eventBus);
+  const automationsDir = path.resolve(process.cwd(), "automations");
+  await engine.loadRulesFromDirectory(automationsDir);
+  loadUiRules(engine, db, registry, actionExecutor);
+
+
+  // 7. Wire MQTT events to device registry
   eventBus.on(DEVICE_STATE_CHANGE, (event) => {
     registry.upsert(event);
   });
 
-  // 7. Simulator (always available, auto-starts if SIMULATOR=true)
+  // 8. Simulator (always available, auto-starts if SIMULATOR=true)
   const simulator = new DeviceSimulator(eventBus);
   if (config.simulator) {
     simulator.start();
   }
 
-  // 8. Connect MQTT (always attempt — works alongside simulator)
+  // 9. Connect MQTT (always attempt — works alongside simulator)
   try {
     await mqttService.connect();
   } catch (err) {
     logger.error({ error: (err as Error).message }, "MQTT connection failed — running without MQTT");
   }
 
-  // 9. Express app
+  // 10. Express app
   const app = express();
   app.use(cors());
   app.use(express.json());
@@ -94,7 +106,8 @@ async function main(): Promise<void> {
   app.use("/api/state", createStateRoutes(registry));
   app.use("/api/health", createHealthRoutes(mqttService, registry, engine, startTime));
   app.use("/api/mqtt", createMqttRoutes(mqttService));
-  app.use("/api/automations", createAutomationRoutes(engine, db, registry));
+  const sandboxTypesPath = path.resolve(import.meta.dirname, "automations/sandbox-types.d.ts");
+  app.use("/api/automations", createAutomationRoutes(engine, db, registry, actionExecutor, executionLog, sandboxTypesPath));
   app.use("/api/simulator", createSimulatorRoutes(simulator));
   app.use("/api/connectors", createConnectorRoutes(connectorManager, connectorRegistry));
   app.use("/api/system", createSystemRoutes());
@@ -102,7 +115,8 @@ async function main(): Promise<void> {
 
   app.use(errorHandler);
 
-  // 10. HTTP + WebSocket server
+
+  // 11. HTTP + WebSocket server
   const server = createServer(app);
   const wsServer = new WsServer(server, registry, eventBus);
 
@@ -113,7 +127,7 @@ async function main(): Promise<void> {
     );
   });
 
-  // 11. Graceful shutdown
+  // 12. Graceful shutdown
   const shutdown = async () => {
     logger.info("Shutting down Aeolus...");
     simulator.stop();
