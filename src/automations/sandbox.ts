@@ -2,6 +2,7 @@
 
 import type { ActionExecutor } from "./action-executor.js";
 import type { DeviceRegistry } from "../core/device-registry.js";
+import type { ServiceManager } from "../services/service-manager.js";
 import type { Device } from "../core/types.js";
 import logger from "../logger.js";
 
@@ -19,6 +20,7 @@ try {
 export interface SandboxDeps {
   actionExecutor: ActionExecutor;
   deviceRegistry: DeviceRegistry;
+  serviceManager?: ServiceManager;
 }
 
 /** Context describing the event that triggered the automation. */
@@ -52,6 +54,8 @@ const BOOTSTRAP_SCRIPT = `
   var logWarnRef = __logWarnRef;
   var logErrorRef = __logErrorRef;
   var ctx = __contextData;
+  var servicesGetRef = __servicesGetRef;
+  var servicesListRef = __servicesListRef;
 
   globalThis.devices = {
     list: function() { return data; },
@@ -76,6 +80,15 @@ const BOOTSTRAP_SCRIPT = `
 
   globalThis.context = Object.freeze(ctx);
 
+  globalThis.services = {
+    get: function(serviceType) {
+      return servicesGetRef.applySync(undefined, [serviceType]);
+    },
+    list: function() {
+      return servicesListRef.applySync(undefined, []);
+    }
+  };
+
   // Clean up temporary globals
   delete globalThis.__devicesData;
   delete globalThis.__devicesMap;
@@ -85,6 +98,8 @@ const BOOTSTRAP_SCRIPT = `
   delete globalThis.__logWarnRef;
   delete globalThis.__logErrorRef;
   delete globalThis.__contextData;
+  delete globalThis.__servicesGetRef;
+  delete globalThis.__servicesListRef;
 })();
 `;
 
@@ -100,10 +115,12 @@ const BOOTSTRAP_SCRIPT = `
 export class Sandbox {
   private actionExecutor: ActionExecutor;
   private deviceRegistry: DeviceRegistry;
+  private serviceManager?: ServiceManager;
 
   constructor(deps: SandboxDeps) {
     this.actionExecutor = deps.actionExecutor;
     this.deviceRegistry = deps.deviceRegistry;
+    this.serviceManager = deps.serviceManager;
   }
 
   /** Execute compiled JS in an isolated V8 context. Never throws. */
@@ -128,6 +145,7 @@ export class Sandbox {
       await this.setMqttRefs(jail, ruleId);
       await this.setLogRefs(jail, ruleId);
       await this.setContextData(jail, context);
+      await this.setServicesRefs(jail);
 
       // Run bootstrap to wire up the clean API from the raw refs
       const bootstrap = await isolate.compileScript(BOOTSTRAP_SCRIPT);
@@ -253,6 +271,43 @@ export class Sandbox {
   private async setContextData(jail: IvmGlobal, context: SandboxContext): Promise<void> {
     if (!ivm) return;
     await jail.set("__contextData", new ivm.ExternalCopy(context).copyInto());
+  }
+
+  /**
+   * Set services references on the jail for the bootstrap script.
+   * Provides `services.get(type)` and `services.list()` via host-side callbacks.
+   */
+  private async setServicesRefs(jail: IvmGlobal): Promise<void> {
+    if (!ivm) return;
+
+    const serviceManager = this.serviceManager;
+
+    // Host-side callback for services.get(serviceType)
+    await jail.set(
+      "__servicesGetRef",
+      new ivm.Reference(function (serviceType: string) {
+        if (!serviceManager) return undefined;
+        const instance = serviceManager.getServiceInstance(serviceType);
+        const state = instance?.getState?.();
+        if (state === undefined) return undefined;
+        return new ivm.ExternalCopy(state).copyInto();
+      }),
+    );
+
+    // Host-side callback for services.list()
+    await jail.set(
+      "__servicesListRef",
+      new ivm.Reference(function () {
+        if (!serviceManager) return new ivm.ExternalCopy([]).copyInto();
+        const enabled = serviceManager.listEnabled();
+        const list = enabled.map((s) => ({
+          type: s.serviceType,
+          displayName: s.displayName,
+          running: s.health.status === "running",
+        }));
+        return new ivm.ExternalCopy(list).copyInto();
+      }),
+    );
   }
 }
 
