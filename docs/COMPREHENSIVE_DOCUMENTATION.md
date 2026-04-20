@@ -39,6 +39,8 @@ MQTT devices are bidirectional: sensors publish data to topics like `sensor/tank
 - **Database:** SQLite via sql.js (pure JavaScript, no native deps)
 - **MQTT:** mqtt.js
 - **WebSocket:** ws library
+- **Sandbox:** isolated-vm (secure V8 isolate for user-authored automation scripts)
+- **Transpilation:** TypeScript compiler API (runtime dependency — used to transpile user scripts on save)
 - **Logging:** pino with pino-pretty in development
 - **Testing:** Vitest + fast-check (property-based testing)
 
@@ -49,6 +51,7 @@ MQTT devices are bidirectional: sensors publish data to topics like `sensor/tank
 - **Styling:** Tailwind CSS with Aeolus design tokens
 - **Icons:** Lucide React
 - **Animation:** Framer Motion
+- **Code Editor:** Monaco Editor via @monaco-editor/react (TypeScript automation script editor)
 
 ### Infrastructure
 - **MQTT Broker:** Eclipse Mosquitto 2 (Docker)
@@ -85,7 +88,12 @@ aeolus/
 │   │   ├── topic-parser.ts           # MQTT topic → device metadata
 │   │   └── topic-parser.test.ts      # Unit tests
 │   ├── automations/
-│   │   ├── automation-engine.ts      # Rule evaluation engine
+│   │   ├── automation-engine.ts      # Rule evaluation engine (dispatches to Sandbox or ActionExecutor)
+│   │   ├── action-executor.ts        # Central dispatch service for all automation actions
+│   │   ├── transpiler.ts             # TypeScript → JavaScript transpilation with import rejection
+│   │   ├── sandbox.ts                # Secure isolated-vm sandbox for user-authored scripts
+│   │   ├── execution-log.ts          # In-memory ring buffer for execution history (200 entries)
+│   │   ├── sandbox-types.d.ts        # Type definition bundle for Monaco IntelliSense
 │   │   ├── dsl.ts                    # when/if/then builder
 │   │   └── rule-registry.ts          # In-memory rule store
 │   ├── connectors/                   # Pluggable connector framework
@@ -137,7 +145,8 @@ aeolus/
 │       │   ├── TopicTree.tsx         # Hierarchical MQTT topic tree
 │       │   ├── EventLog.tsx          # Automation fire event log
 │       │   ├── AutomationsPanel.tsx  # Dashboard automations summary
-│       │   ├── AutomationsPage.tsx   # Full automation rule editor (CRUD)
+│       │   ├── AutomationsPage.tsx   # Dual-mode automation rule editor (form + script)
+│       │   ├── ScriptEditor.tsx      # Monaco code editor with Aeolus dark theme + IntelliSense
 │       │   ├── ConnectorsPage.tsx    # Connector management (enable/disable, config, generic setup wizard)
 │       │   ├── SystemPage.tsx        # Host diagnostics, application log viewer, self-update
 │       │   ├── CommandPalette.tsx    # Ctrl+K command palette
@@ -195,12 +204,62 @@ In-memory device cache backed by SQLite for persistence across restarts.
 
 ### Automation Engine (`src/automations/automation-engine.ts`)
 
-Evaluates code-driven rules against incoming device events.
+Evaluates code-driven rules against incoming device events. Supports three rule types: file-based DSL rules, form-based UI rules, and script-based TypeScript rules.
 
 - TypeScript DSL: `when(topic).if(condition).then(action)`
 - MQTT wildcard matching (`#` multi-level, `+` single-level)
 - Fault isolation: one rule throwing doesn't affect others
 - Loads rule files from `automations/` directory on startup
+- Script rules are dispatched through the Sandbox (isolated-vm) with execution timing
+- Form rules are dispatched through the ActionExecutor pipeline
+- Records every execution in the ExecutionLog with duration and success/failure status
+
+### Action Executor (`src/automations/action-executor.ts`)
+
+Central dispatch service for all automation actions. Every action — whether from a form rule, script rule, or file-based rule — flows through this single pipeline.
+
+- Dispatches `publish` actions to `MqttService.publish()`
+- Dispatches `toggle` and `device_action` to `ConnectorManager.executeAction()`
+- Dispatches `log` to the application logger
+- Dispatches `delay` as a `setTimeout` wrapper
+- Dispatches `webhook` via `fetch()` with configurable method, headers, and body
+- Each action is wrapped in try/catch — errors are logged with the rule ID, never thrown
+- Emits `AUTOMATION_FIRED` on the event bus after each successful action
+- `executeSequence()` runs actions in order, continuing on individual failures
+
+### TypeScript Transpiler (`src/automations/transpiler.ts`)
+
+Handles TypeScript → JavaScript compilation using the TypeScript compiler API (`ts.transpileModule()`).
+
+- Strips type annotations and produces ES2022-compatible JavaScript output
+- Rejects empty source strings with a descriptive error
+- Rejects source containing `import` or `require` statements via regex pre-check before transpilation
+- Returns structured errors with `line`, `column`, and `message` for the frontend to display inline
+- Does not perform full type checking — only syntactic transpilation (type checking happens in the Monaco editor via the `.d.ts` bundle)
+
+### Sandbox (`src/automations/sandbox.ts`)
+
+Secure execution environment for user-authored TypeScript automation scripts using `isolated-vm`.
+
+- Creates a fresh V8 isolate per execution with a 32 MB memory limit
+- Enforces a 5-second execution timeout to prevent infinite loops
+- Exposes a controlled API surface as globals: `devices`, `mqtt`, `log`, `context`
+- `devices.get/list/filter` — synchronous, data copied into isolate via `ivm.ExternalCopy`
+- `devices.action()` and `mqtt.publish()` — host-side callbacks via `ivm.Reference` delegating to ActionExecutor
+- `log.info/warn/error` — host-side callbacks delegating to the application logger with ruleId context
+- `context` — frozen object with `topic`, `deviceId`, `state`, `timestamp` from the triggering event
+- Blocks access to `require`, `import`, `process`, `fs`, `child_process`, `eval`, `Function`, `global`
+- Graceful fallback: if `isolated-vm` is not available (e.g. Windows dev without C++ toolchain), sandbox execution is disabled with a warning
+
+### Execution Log (`src/automations/execution-log.ts`)
+
+In-memory ring buffer that records every automation execution for debugging.
+
+- Stores up to 200 entries in a ring buffer (oldest evicted when full)
+- Each entry records: rule ID, rule name, rule type, trigger topic, actions with success/failure, duration, and timestamp
+- `list(limit?)` returns the most recent entries (newest first)
+- `getByRuleId(ruleId)` filters entries for a specific rule
+- Exposed via `GET /api/automations/history` for the frontend
 
 ### Log Buffer (`src/log-buffer.ts`)
 
@@ -311,6 +370,48 @@ Returns all devices keyed by ID.
   "timestamp": "2026-03-30T13:44:04.000Z"
 }
 ```
+
+### Automation API
+
+**GET /api/automations**
+List all automation rules (file-based, form, and script) with `ruleType` field.
+
+**POST /api/automations**
+Create a new automation rule (form or script). For script rules, include `ruleType: "script"` and `scriptSource`.
+```json
+{
+  "name": "Smart heating",
+  "triggerTopic": "sensor/+/temperature",
+  "ruleType": "script",
+  "scriptSource": "if (context.state.value < 18) {\n  devices.action('climate-living-room', 'setTemperature', { target: 22 });\n}"
+}
+```
+Returns `{ "success": true, "id": "..." }`. 400 if transpilation fails (with `details` array of `{ line, column, message }`).
+
+**PUT /api/automations/:id**
+Update an existing automation rule. For script rules, re-transpiles the TypeScript source on save.
+Returns `{ "success": true, "id": "..." }`. 404 if rule not found, 400 if transpilation fails.
+
+**DELETE /api/automations/:id**
+Delete a UI automation rule from both the database and the Rule Registry.
+Returns `{ "success": true }`. 404 if not found.
+
+**PATCH /api/automations/:id/toggle**
+Enable or disable a rule. Enabling a script rule re-registers it with the compiled JavaScript.
+```json
+{ "enabled": true }
+```
+Returns `{ "success": true, "enabled": true }`. 404 if not found.
+
+**GET /api/automations/types**
+Serve the sandbox type definition bundle (`sandbox-types.d.ts`) as `text/plain`. The Monaco editor fetches this on mount to provide IntelliSense for `devices`, `mqtt`, `log`, and `context` globals.
+
+**GET /api/automations/history**
+Return execution log entries from the in-memory ring buffer (newest first).
+Query parameters:
+- `limit` (optional) — number of entries to return
+
+Returns an array of `ExecutionLogEntry` objects.
 
 ### Connector API
 
@@ -490,6 +591,29 @@ interface LogEntry {
 }
 ```
 
+### ActionDescriptor
+```typescript
+interface ActionDescriptor {
+  type: "publish" | "toggle" | "device_action" | "log" | "delay" | "webhook";
+  target: string;           // topic for publish, deviceId for toggle/device_action, URL for webhook
+  params: Record<string, unknown>;
+}
+```
+
+### ExecutionLogEntry
+```typescript
+interface ExecutionLogEntry {
+  id: string;
+  ruleId: string;
+  ruleName: string;
+  ruleType: "file" | "form" | "script";
+  triggerTopic: string;
+  actions: Array<{ type: string; target: string; success: boolean; error?: string }>;
+  duration: number;     // ms
+  timestamp: number;
+}
+```
+
 ### ConnectorMetadata
 ```typescript
 interface ConnectorMetadata {
@@ -579,9 +703,12 @@ CREATE TABLE automation_rules (
   trigger_topic TEXT NOT NULL,
   condition_type TEXT,
   condition_value TEXT,
-  action_type TEXT NOT NULL,
-  action_target TEXT,
+  action_type TEXT NOT NULL DEFAULT 'log',
+  action_target TEXT NOT NULL DEFAULT '',
   action_params TEXT NOT NULL DEFAULT '{}',
+  rule_type TEXT NOT NULL DEFAULT 'form' CHECK(rule_type IN ('form', 'script')),
+  script_source TEXT DEFAULT NULL,
+  compiled_js TEXT DEFAULT NULL,
   enabled INTEGER NOT NULL DEFAULT 1,
   created_at INTEGER NOT NULL
 );
@@ -662,6 +789,19 @@ The Dockerfile installs `git`, `docker-cli`, and `docker-cli-compose` in the pro
 | Device Registry | Malformed JSON on load | Log warning, skip entry |
 | Automation Engine | Rule file syntax error | Log error, skip file |
 | Automation Engine | Rule action throws | Log error, continue with remaining rules |
+| Action Executor | MqttService not connected during publish | Log error with rule ID, skip publish, continue sequence |
+| Action Executor | ConnectorManager.executeAction throws | Log error with rule ID and device ID, continue sequence |
+| Action Executor | Webhook HTTP request fails (network error, non-2xx) | Log error with URL and status, continue sequence |
+| Action Executor | Unknown action type | Log warning with type string, skip, continue sequence |
+| Action Executor | Delay with negative/zero duration | Treat as no-op, log warning, continue |
+| Sandbox | Script throws uncaught exception | Catch, log with rule ID and error message, do not propagate |
+| Sandbox | Script exceeds 5-second timeout | isolated-vm terminates execution, log timeout error with rule ID |
+| Sandbox | Script exceeds 32MB memory limit | isolated-vm terminates isolate, log OOM error with rule ID |
+| Sandbox | Script attempts forbidden API access | ReferenceError or undefined — caught by sandbox error handler |
+| Sandbox | isolated-vm not available (Windows dev) | Log warning, sandbox execution disabled, script rules skip |
+| Transpiler | Syntax error in TypeScript source | Return 400 with `{ error, details: [{ line, column, message }] }` |
+| Transpiler | Source contains import/require | Return 400 with descriptive error before transpilation |
+| Transpiler | Empty source string | Return 400 with "Script source cannot be empty" |
 | REST API | Device not found | 404 JSON error |
 | REST API | Invalid action payload | 400 JSON error |
 | Connector | connect() fails | Log error, set health to disconnected, keep instance |
@@ -687,6 +827,9 @@ The Dockerfile installs `git`, `docker-cli`, and `docker-cli-compose` in the pro
 - **Pluggable connector architecture over hardcoded integrations:** Each connector is a self-contained module with metadata, config schema, and factory function. The ConnectorRegistry discovers modules at startup, the ConnectorManager handles lifecycle (enable/disable/poll/action routing), and the ConnectorStore persists state to SQLite. This replaces the previous `src/integrations/` approach where each integration required its own route file and manual wiring. New connectors can be added by creating a directory in `src/connectors/` with the standard module exports — no changes to core code required. A `_template/` skeleton is provided for developers.
 - **Host networking for LAN device discovery:** The backend container uses `network_mode: host` instead of the shared bridge network. This is required for Kasa's UDP broadcast discovery (which doesn't work across Docker bridge networks) and for direct LAN access to Hue bridges. The trade-off is that the backend port is exposed directly on the host rather than through Docker port mapping, and the MQTT broker URL must use `localhost` instead of the Docker service name.
 - **Pinned tabs render dedicated components:** Pinned system tabs (Dashboard, Automations, Connectors, System) render their own full-page components directly via a `PINNED_PAGES` map in `App.tsx`, bypassing the modular pane grid. This gives each system page full control over its layout and styling. Custom (unpinned) tabs use the `TabLayout` component with the pane grid system. This separation keeps system pages polished while maintaining flexibility for user-created tabs.
+- **`isolated-vm` over Node.js `vm` for sandbox execution:** The Node.js `vm` module is explicitly documented as "not a security mechanism" — it runs code in the same V8 isolate as the host process, allowing escape via prototype pollution and `Function` constructor access. The `vm2` library was deprecated after repeated critical sandbox escape CVEs. `isolated-vm` creates a separate V8 isolate with its own heap, no access to the host's global scope, and built-in support for memory limits (32 MB) and execution timeouts (5 seconds). This is the same isolation primitive used by Cloudflare Workers. For a Raspberry Pi deployment where the automation engine shares a process with the MQTT broker connection and device registry, true V8-level isolation is essential. The tradeoff is that `isolated-vm` is a native addon requiring C++ compilation — the Dockerfile includes `build-essential` and `python3` for ARM64 builds.
+- **Monaco over CodeMirror for the script editor:** Monaco is the editor engine behind VS Code. It provides native TypeScript language service integration — IntelliSense, type checking, and error squiggles work out of the box when you register `.d.ts` type definitions via `addExtraLib()`. CodeMirror 6 is lighter but requires significant custom work to achieve comparable TypeScript support. Since the code editor is the centrepiece of the automation overhaul and developer experience is paramount, Monaco is the right choice. The `@monaco-editor/react` wrapper provides clean React integration.
+- **TypeScript as a runtime dependency:** The TypeScript compiler API (`ts.transpileModule()`) is used at runtime to transpile user-authored automation scripts on save. This means `typescript` is a production dependency, not just a dev dependency. The tradeoff is a larger production bundle, but it enables on-the-fly transpilation without a separate build step or external service.
 - **Generic backend-driven setup wizard:** The ConnectorsPage setup wizard is fully generic — it fetches step descriptors from `GET /api/connectors/:id/setup-steps` and renders them dynamically. No connector-specific UI code exists in the frontend. Each step can include input fields, and the wizard accumulates data across steps, passing it to subsequent step executions and patching the connector config on completion. This means adding a new connector with a multi-step setup flow requires zero frontend changes.
 
 
@@ -732,10 +875,35 @@ The React dashboard provides a comprehensive developer-focused interface with a 
 - **Health Indicators** — Real-time status: connected (green), degraded (amber), disconnected (red)
 
 ### Automations Tab (pinned)
-- **Rule Editor** — Create automation rules with when/if/then form (trigger topic, condition, action)
-- **Live DSL Preview** — Shows the equivalent TypeScript DSL as you build the rule
-- **Rule Listing** — Enable/disable/delete UI-created rules, source badges (file vs ui)
+- **Dual-Mode Rule Creator** — Segmented control toggle between "Quick Rule" (form-based, `FormInput` icon) and "Script" (Monaco code editor, `Code` icon)
+- **Script Mode** — Monaco editor with Aeolus dark theme, name input, and trigger topic input. Saves via `POST /api/automations` with `ruleType: "script"`. Transpilation errors from the backend are displayed inline in the editor and below it with line/column numbers
+- **Quick Rule Mode** — Form-based rule creator with when/if/then fields (trigger topic, condition, action type)
+- **Richer Action Types** — Action type dropdown includes: log, toggle, publish, device_action, delay, and webhook. Each type shows contextual input fields (e.g. device selector for device_action, URL/method/body for webhook, duration for delay, topic/payload for publish)
+- **Live DSL Preview** — Shows the equivalent TypeScript DSL as you build the rule, updates dynamically for all action types
+- **Unified Rule List** — All rules (file, form, script) in one list with type badges: `<Code />` icon for script rules, `<FormInput />` icon for form rules
+- **Script Editing** — Clicking a script rule opens it in the Monaco editor with source pre-loaded for editing via `PUT /api/automations/:id`
+- **Rule Management** — Enable/disable/delete UI-created rules, source badges (file vs ui)
 - **Code Rules Toggle** — Checkbox to show/hide rules loaded from TypeScript files
+
+#### Monaco Script Editor (`frontend/src/components/ScriptEditor.tsx`)
+
+A React component wrapping `@monaco-editor/react` with Aeolus theming and sandbox API IntelliSense.
+
+- Fetches type definitions from `GET /api/automations/types` on mount
+- Registers types via `monaco.languages.typescript.typescriptDefaults.addExtraLib()` for IntelliSense on `devices`, `mqtt`, `log`, and `context`
+- Custom `aeolus-dark` Monaco theme mapping Aeolus brand colours to token types:
+  - Keywords (`if`, `const`, `await`): `#3BA4FF` (Aeolus Blue)
+  - Strings: `#5CE1E6` (Wind Cyan)
+  - Comments: `#6B7785` (Muted Text)
+  - Functions/identifiers: `#E6EDF3` (Primary Text)
+  - Types: `#9AA6B2` (Secondary Text)
+  - Numbers: `#F59E0B` (Amber)
+  - Editor background: `#0B0F14` (Deep Void)
+  - Gutter: `#121821` (Graphite)
+- JetBrains Mono as the editor font
+- Displays inline error markers from backend transpilation errors at corresponding line numbers
+- Ctrl+S / Cmd+S keyboard shortcut to save
+- Accepts `onChange`, `onSave`, `initialValue`, and `errors` props
 
 ### System Tab (pinned)
 - **Host Info** — Hostname, platform, architecture, Node.js version, uptime
@@ -787,10 +955,13 @@ Custom tabs use the modular pane grid powered by `react-grid-layout`. Users crea
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/automations` | List active automation rules |
-| POST | `/api/automations` | Create a UI automation rule |
+| GET | `/api/automations` | List active automation rules (file, form, script) with ruleType field |
+| POST | `/api/automations` | Create a UI automation rule (form or script) |
+| PUT | `/api/automations/:id` | Update an existing automation rule (re-transpiles script source) |
 | DELETE | `/api/automations/:id` | Delete a UI automation rule |
 | PATCH | `/api/automations/:id/toggle` | Enable/disable a rule |
+| GET | `/api/automations/types` | Serve sandbox type definition bundle as text/plain |
+| GET | `/api/automations/history` | Execution log entries (optional limit param) |
 | POST | `/api/mqtt/publish` | Publish MQTT message `{ topic, payload }` |
 | GET | `/api/simulator` | Simulator running status |
 | POST | `/api/simulator/start` | Start device simulator |
@@ -828,8 +999,8 @@ Enable via `SIMULATOR=true` env var (auto-starts on boot) or toggle from the sid
 
 ---
 
-**Last Updated:** April 16, 2026
-**Version:** 0.6.0
+**Last Updated:** April 17, 2026
+**Version:** 0.7.0
 **Status:** MVP Development
 
 ## Future Enhancements
