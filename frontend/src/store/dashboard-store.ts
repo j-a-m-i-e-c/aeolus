@@ -67,7 +67,7 @@ export function tabNameToSlug(name: string): string {
 }
 
 /** Reserved slugs that cannot be used for custom tabs */
-const RESERVED_SLUGS = new Set(["dashboard", "automations", "connectors", "system"]);
+const RESERVED_SLUGS = new Set(["dashboard", "automations", "connectors", "services", "system"]);
 
 export const useDashboardStore = create<DashboardState>((set, get) => ({
   tabs: [],

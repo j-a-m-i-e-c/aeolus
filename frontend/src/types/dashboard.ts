@@ -49,7 +49,8 @@ export const DEFAULT_TABS: Tab[] = [
   { id: "default-dashboard",   name: "Dashboard",   icon: "cpu",       order: 0, pinned: true,  createdAt: NOW },
   { id: "default-automations", name: "Automations", icon: "zap",       order: 1, pinned: true,  createdAt: NOW },
   { id: "default-connectors",  name: "Connectors",  icon: "plug",      order: 2, pinned: true,  createdAt: NOW },
-  { id: "default-system",      name: "System",      icon: "server",    order: 3, pinned: true,  createdAt: NOW },
+  { id: "default-services",   name: "Services",    icon: "zap",       order: 3, pinned: true,  createdAt: NOW },
+  { id: "default-system",      name: "System",      icon: "server",    order: 4, pinned: true,  createdAt: NOW },
 ];
 
 /** Default panes — empty, users add their own via PanePicker. */

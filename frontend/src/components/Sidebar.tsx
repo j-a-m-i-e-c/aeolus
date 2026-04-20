@@ -75,6 +75,7 @@ export function Sidebar() {
     "default-dashboard": "/dashboard",
     "default-automations": "/automations",
     "default-connectors": "/connectors",
+    "default-services": "/services",
     "default-system": "/system",
   };
 
@@ -120,7 +121,7 @@ export function Sidebar() {
   // ---- Add tab handlers ----
 
   const newTabSlug = tabNameToSlug(newTabName);
-  const RESERVED_SLUGS = new Set(["dashboard", "automations", "connectors", "system"]);
+  const RESERVED_SLUGS = new Set(["dashboard", "automations", "connectors", "services", "system"]);
   const existingSlugs = new Set(tabs.map((t) => tabNameToSlug(t.name)));
   const isNameTaken = !!newTabSlug && (existingSlugs.has(newTabSlug) || RESERVED_SLUGS.has(newTabSlug));
 
