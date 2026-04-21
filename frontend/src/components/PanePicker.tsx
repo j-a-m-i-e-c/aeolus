@@ -29,6 +29,25 @@ interface PanePickerProps {
 
 const paneEntries = Object.entries(PANE_REGISTRY);
 
+const CATEGORY_LABELS: Record<string, { label: string; icon: string }> = {
+  controls: { label: "Controls", icon: "toggle-right" },
+  automations: { label: "Automations", icon: "code" },
+  monitoring: { label: "Monitoring", icon: "activity" },
+  system: { label: "System", icon: "server" },
+};
+
+const CATEGORY_ORDER = ["controls", "automations", "monitoring", "system"];
+
+function groupByCategory() {
+  const groups: Record<string, Array<[string, (typeof PANE_REGISTRY)[string]]>> = {};
+  for (const [key, entry] of paneEntries) {
+    const cat = entry.category || "system";
+    if (!groups[cat]) groups[cat] = [];
+    groups[cat].push([key, entry]);
+  }
+  return groups;
+}
+
 export function PanePicker({ tabId, onClose }: PanePickerProps) {
   const addPane = useDashboardStore((s) => s.addPane);
   const overlayRef = useRef<HTMLDivElement>(null);
@@ -75,18 +94,35 @@ export function PanePicker({ tabId, onClose }: PanePickerProps) {
           </button>
         </div>
 
-        {/* Pane type grid */}
-        <div className="grid grid-cols-2 gap-2">
-          {paneEntries.map(([key, entry]) => (
-            <button
-              key={key}
-              onClick={() => handleSelect(key)}
-              className="flex items-center gap-3 px-3 py-3 rounded-lg text-left text-sm text-[#9AA6B2] hover:text-[#E6EDF3] hover:bg-elevated/50 border border-transparent hover:border-[#2A3441] transition-colors"
-            >
-              <DynamicIcon name={entry.defaultIcon} size={18} className="shrink-0 text-primary" />
-              <span className="truncate">{entry.displayName}</span>
-            </button>
-          ))}
+        {/* Pane type grid — grouped by category */}
+        <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1">
+          {CATEGORY_ORDER.map((cat) => {
+            const items = groupByCategory()[cat];
+            if (!items || items.length === 0) return null;
+            const catInfo = CATEGORY_LABELS[cat];
+            return (
+              <div key={cat}>
+                <div className="flex items-center gap-2 mb-2 px-1">
+                  <DynamicIcon name={catInfo.icon} size={13} className="text-[#6B7785]" />
+                  <span className="text-[10px] font-semibold text-[#6B7785] uppercase tracking-wider">
+                    {catInfo.label}
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {items.map(([key, entry]) => (
+                    <button
+                      key={key}
+                      onClick={() => handleSelect(key)}
+                      className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-left text-sm text-[#9AA6B2] hover:text-[#E6EDF3] hover:bg-elevated/50 border border-transparent hover:border-[#2A3441] transition-colors"
+                    >
+                      <DynamicIcon name={entry.defaultIcon} size={16} className="shrink-0 text-primary" />
+                      <span className="truncate text-xs">{entry.displayName}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>
