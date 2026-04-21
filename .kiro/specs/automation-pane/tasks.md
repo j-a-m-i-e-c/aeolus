@@ -148,8 +148,8 @@ Replace the multi-component automation workflow with a single self-contained Aut
 - [x] 10. Checkpoint — Ensure all frontend component tests pass
   - Ensure all tests pass, ask the user if questions arise.
 
-- [ ] 11. Frontend — Pane registry changes and TabLayout extension
-  - [ ] 11.1 Update pane registry: add `automation`, remove `automations-editor` and `automation-card`
+- [x] 11. Frontend — Pane registry changes and TabLayout extension
+  - [x] 11.1 Update pane registry: add `automation`, remove `automations-editor` and `automation-card`
     - In `frontend/src/lib/pane-registry.ts`:
       - Add import for `AutomationPane`
       - Add `"automation"` entry with `displayName: "Automation"`, `defaultIcon: "code"`, `defaultConfig: { ruleId: "" }`, `defaultSize: { w: 6, h: 5 }`, `category: "automations"`
@@ -158,12 +158,12 @@ Replace the multi-component automation workflow with a single self-contained Aut
       - Keep the `"automation-rules"` entry unchanged
     - _Requirements: 1.1, 1.2, 1.3, 7.1, 7.2, 7.3_
 
-  - [ ] 11.2 Extend TabLayout to pass `paneId` to pane components
+  - [x] 11.2 Extend TabLayout to pass `paneId` to pane components
     - In `frontend/src/components/TabLayout.tsx`, update the pane rendering to pass `paneId={pane.id}` to the pane component: `<entry.component config={pane.config} paneId={pane.id} />`
     - Update the `PaneRegistryEntry` component type to accept optional `paneId`: `ComponentType<{ config: PaneConfig; paneId?: string }>`
     - _Requirements: 3.2, 6.1_
 
-  - [ ] 11.3 Add pane removal cleanup hook for automation rule deletion
+  - [x] 11.3 Add pane removal cleanup hook for automation rule deletion
     - In `TabLayout.tsx`, before calling `removePane(paneId)`, check if the pane type is `"automation"` and has a non-empty `ruleId` in config
     - If so, send DELETE to `/api/automations/:ruleId` (fire-and-forget — do not block removal on failure)
     - Then proceed with `removePane(paneId)`
@@ -175,7 +175,7 @@ Replace the multi-component automation workflow with a single self-contained Aut
     - Verify `automation-rules` is retained
     - _Requirements: 1.1, 7.1, 7.2, 7.3_
 
-- [ ] 12. Frontend — Update ScriptEditor default template
+- [x] 12. Frontend — Update ScriptEditor default template
   - Update the `DEFAULT_TEMPLATE` in `frontend/src/components/ScriptEditor.tsx` to use the `automation()` helper pattern:
     ```typescript
     automation({
@@ -189,17 +189,17 @@ Replace the multi-component automation workflow with a single self-contained Aut
     ```
   - _Requirements: 11.2_
 
-- [ ] 13. Frontend — Custom UI placeholder tab (future)
+- [x] 13. Frontend — Custom UI placeholder tab (future)
   - In the AutomationPane editing view, add a "UI" tab alongside the "Logic" tab
   - The "UI" tab displays a placeholder message: "Custom UI — coming soon" with an "Experimental" badge
   - No functional implementation — just the tab and placeholder
   - _Requirements: 14.2, 14.4_
 
-- [ ] 14. Checkpoint — Ensure all tests pass
+- [x] 14. Checkpoint — Ensure all tests pass
   - Ensure all tests pass, ask the user if questions arise.
 
-- [ ] 15. Documentation and cleanup
-  - [ ] 15.1 Update `docs/COMPREHENSIVE_DOCUMENTATION.md`
+- [x] 15. Documentation and cleanup
+  - [x] 15.1 Update `docs/COMPREHENSIVE_DOCUMENTATION.md`
     - Document the new Automation Pane: registration, setup mode, status mode, editing, deletion cleanup
     - Document the `automation()` sandbox global and structured metadata extraction
     - Document the FlowDiagram and ActivityFeed status mode tiers
@@ -207,11 +207,11 @@ Replace the multi-component automation workflow with a single self-contained Aut
     - Document the deprecated pane types (`automations-editor`, `automation-card`)
     - Follow steering rules in `.kiro/steering/documentation-updates.md`
 
-  - [ ] 15.2 Final cleanup commit
+  - [x] 15.2 Final cleanup commit
     - Verify no unused imports from removed pane components
     - Ensure all files follow project code standards from `.kiro/steering/development-workflow.md`
 
-- [ ] 16. Final checkpoint — Ensure all tests pass
+- [x] 16. Final checkpoint — Ensure all tests pass
   - Ensure all tests pass, ask the user if questions arise.
 
 ## Notes

@@ -259,6 +259,8 @@ export class ConnectorManager {
 
   /**
    * Route an action to the correct connector based on the device's integration field.
+   * After successful execution, immediately emits a synthetic DEVICE_STATE_CHANGE
+   * event so automations and the dashboard update without waiting for the next poll.
    */
   async executeAction(deviceId: string, action: Action): Promise<void> {
     const device = this.deviceRegistry.getById(deviceId);
@@ -275,6 +277,26 @@ export class ConnectorManager {
     for (const instance of this.instances.values()) {
       if (instance.record.connectorType === device.integration) {
         await instance.connector.execute(action);
+
+        // Emit immediate synthetic event with optimistic state update
+        // so automations fire and the dashboard updates without waiting for the next poll
+        const updatedState = { ...device.state };
+        if (action.type === "toggle") {
+          updatedState.on = !device.state.on;
+        } else if (action.params) {
+          Object.assign(updatedState, action.params);
+        }
+
+        this.emitDeviceEvent({
+          ...device,
+          state: updatedState,
+          lastSeen: Date.now(),
+        });
+
+        logger.debug(
+          { deviceId, actionType: action.type, integration: device.integration },
+          "Immediate state event emitted after action execution",
+        );
         return;
       }
     }
