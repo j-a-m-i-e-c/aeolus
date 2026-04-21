@@ -83,6 +83,9 @@ export function AutomationPane({ config, paneId }: Props) {
     }
   }, [ruleId]);
 
+  // Editing tab state (Logic vs UI)
+  const [editingTab, setEditingTab] = useState<"logic" | "ui">("logic");
+
   // ── Fetch rule data for status mode ──
   const fetchRule = useCallback(async () => {
     if (!ruleId) return;
@@ -408,14 +411,52 @@ export function AutomationPane({ config, paneId }: Props) {
         className="w-full px-3 py-2 text-sm rounded-lg bg-[#0B0F14] border border-[#2A3441] text-[#E6EDF3] placeholder-[#6B7785] focus:outline-none focus:border-primary transition-colors font-mono"
       />
 
-      {/* Script editor — fills remaining space */}
+      {/* Editing tabs (Logic / UI) — only in editing mode */}
+      {isEditing && (
+        <div className="flex items-center gap-1 border-b border-[#2A3441]">
+          <button
+            onClick={() => setEditingTab("logic")}
+            className={`px-3 py-1.5 text-xs font-medium rounded-t-lg transition-colors ${
+              editingTab === "logic"
+                ? "text-[#E6EDF3] border-b-2 border-primary"
+                : "text-[#6B7785] hover:text-[#9AA6B2]"
+            }`}
+          >
+            Logic
+          </button>
+          <button
+            onClick={() => setEditingTab("ui")}
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-t-lg transition-colors ${
+              editingTab === "ui"
+                ? "text-[#E6EDF3] border-b-2 border-primary"
+                : "text-[#6B7785] hover:text-[#9AA6B2]"
+            }`}
+          >
+            UI
+            <span className="px-1.5 py-0.5 text-[9px] font-semibold rounded bg-[#F59E0B]/15 text-[#F59E0B] border border-[#F59E0B]/30">
+              Experimental
+            </span>
+          </button>
+        </div>
+      )}
+
+      {/* Script editor or UI placeholder — fills remaining space */}
       <div className="flex-1 min-h-0">
-        <ScriptEditor
-          initialValue={scriptSource}
-          onChange={setScriptSource}
-          onSave={handleEditorSave}
-          errors={errors}
-        />
+        {(!isEditing || editingTab === "logic") ? (
+          <ScriptEditor
+            initialValue={scriptSource}
+            onChange={setScriptSource}
+            onSave={handleEditorSave}
+            errors={errors}
+          />
+        ) : (
+          <div className="h-full flex flex-col items-center justify-center gap-2 text-center">
+            <div className="text-sm text-[#6B7785]">Custom UI — coming soon</div>
+            <span className="px-2 py-0.5 text-[10px] font-semibold rounded bg-[#F59E0B]/15 text-[#F59E0B] border border-[#F59E0B]/30">
+              Experimental
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Error summary panel */}

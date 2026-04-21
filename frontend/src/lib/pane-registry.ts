@@ -8,16 +8,15 @@ import { MqttInspectorPane } from "../components/panes/MqttInspectorPane";
 import { HueControlPane } from "../components/panes/HueControlPane";
 import { KasaControlPane } from "../components/panes/KasaControlPane";
 import { AutomationRulesPane } from "../components/panes/AutomationRulesPane";
-import { AutomationsEditorPane } from "../components/panes/AutomationsEditorPane";
+import { AutomationPane } from "../components/panes/AutomationPane";
 import { SystemStatsPane } from "../components/panes/SystemStatsPane";
 import { TopicTreePane } from "../components/panes/TopicTreePane";
 import { EventLogPane } from "../components/panes/EventLogPane";
 import { ConnectorsPane } from "../components/panes/ConnectorsPane";
 import { TriggerButtonPane } from "../components/panes/TriggerButtonPane";
-import { AutomationCardPane } from "../components/panes/AutomationCardPane";
 
 export interface PaneRegistryEntry {
-  component: ComponentType<{ config: PaneConfig }>;
+  component: ComponentType<{ config: PaneConfig; paneId?: string }>;
   displayName: string;
   defaultIcon: string;
   defaultConfig: PaneConfig;
@@ -61,12 +60,12 @@ export const PANE_REGISTRY: Record<string, PaneRegistryEntry> = {
   },
 
   // ── Automations ──
-  "automations-editor": {
-    component: AutomationsEditorPane,
-    displayName: "Automation Editor",
+  "automation": {
+    component: AutomationPane,
+    displayName: "Automation",
     defaultIcon: "code",
-    defaultConfig: {},
-    defaultSize: { w: 12, h: 10 },
+    defaultConfig: { ruleId: "" },
+    defaultSize: { w: 6, h: 5 },
     category: "automations",
   },
   "automation-rules": {
@@ -77,15 +76,6 @@ export const PANE_REGISTRY: Record<string, PaneRegistryEntry> = {
     defaultSize: { w: 12, h: 8 },
     category: "automations",
   },
-  "automation-card": {
-    component: AutomationCardPane,
-    displayName: "Automation Card",
-    defaultIcon: "git-branch",
-    defaultConfig: { ruleId: "" },
-    defaultSize: { w: 6, h: 3 },
-    category: "automations",
-  },
-
   // ── Monitoring ──
   "sensor-panel": {
     component: SensorPanelPane,

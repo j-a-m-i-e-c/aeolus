@@ -11,6 +11,10 @@ import { Settings, X, Plus } from "lucide-react";
 import { PanePicker } from "./PanePicker";
 import { PaneConfigPanel } from "./PaneConfigPanel";
 
+const API_URL =
+  (import.meta as any).env?.VITE_API_URL ||
+  `http://${window.location.hostname}:3001`;
+
 interface TabLayoutProps {
   tabId: string;
 }
@@ -80,6 +84,22 @@ export function TabLayout({ tabId }: TabLayoutProps) {
 
   const configPane = configPaneId ? tabPanes.find((p) => p.id === configPaneId) : null;
 
+  const handleRemovePane = useCallback(
+    (paneId: string) => {
+      const pane = tabPanes.find((p) => p.id === paneId);
+      if (pane?.paneType === "automation" && pane.config.ruleId) {
+        // Fire-and-forget DELETE for the linked automation rule
+        fetch(`${API_URL}/api/automations/${pane.config.ruleId}`, {
+          method: "DELETE",
+        }).catch(() => {
+          // Do not block removal on failure
+        });
+      }
+      removePane(paneId);
+    },
+    [tabPanes, removePane],
+  );
+
   return (
     <div ref={containerRef} className="w-full">
       {/* Header area with Add Pane button */}
@@ -136,7 +156,7 @@ export function TabLayout({ tabId }: TabLayoutProps) {
                     className="p-1 rounded text-[#6B7785] hover:text-[#EF4444] hover:bg-elevated transition-colors"
                     title="Remove pane"
                     onMouseDown={(e) => e.stopPropagation()}
-                    onClick={() => removePane(pane.id)}
+                    onClick={() => handleRemovePane(pane.id)}
                   >
                     <X size={13} />
                   </button>
@@ -146,7 +166,7 @@ export function TabLayout({ tabId }: TabLayoutProps) {
               {/* Pane content */}
               <div className="flex-1 overflow-auto p-2">
                 {entry ? (
-                  <entry.component config={pane.config} />
+                  <entry.component config={pane.config} paneId={pane.id} />
                 ) : (
                   <div className="flex items-center justify-center h-full text-[#EF4444] text-sm">
                     Unknown pane type: {pane.paneType}

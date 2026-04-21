@@ -19,18 +19,14 @@ export interface ScriptEditorProps {
   errors?: TranspileError[];
 }
 
-const DEFAULT_TEMPLATE = `// Aeolus Automation Script
-// Available APIs: devices, mqtt, log, context
-//
-// context.topic     — the MQTT topic that triggered this rule
-// context.deviceId  — the device that fired the event
-// context.state     — device state at trigger time
-// context.timestamp — when the event occurred
-
-const device = devices.get(context.deviceId);
-if (device) {
-  log.info(\`Event on \${device.name}: \${JSON.stringify(context.state)}\`);
-}
+const DEFAULT_TEMPLATE = `automation({
+  condition: (ctx) => {
+    return ctx.state.value !== undefined;
+  },
+  actions: (ctx) => {
+    log.info(\`Triggered on \${ctx.topic}\`);
+  },
+});
 `;
 
 /** Define the Aeolus dark theme for Monaco */
