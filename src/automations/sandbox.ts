@@ -56,6 +56,8 @@ const BOOTSTRAP_SCRIPT = `
   var ctx = __contextData;
   var servicesGetRef = __servicesGetRef;
   var servicesListRef = __servicesListRef;
+  var httpGetRef = __httpGetRef;
+  var httpPostRef = __httpPostRef;
 
   globalThis.devices = {
     list: function() { return data; },
@@ -89,6 +91,18 @@ const BOOTSTRAP_SCRIPT = `
     }
   };
 
+  globalThis.http = {
+    get: function(url, options) {
+      var headers = (options && options.headers) ? JSON.stringify(options.headers) : '{}';
+      return httpGetRef.apply(undefined, [url, headers], { result: { promise: true } });
+    },
+    post: function(url, options) {
+      var headers = (options && options.headers) ? JSON.stringify(options.headers) : '{}';
+      var body = (options && options.body) ? options.body : '';
+      return httpPostRef.apply(undefined, [url, headers, body], { result: { promise: true } });
+    }
+  };
+
   globalThis.automation = function(config) {
     // Normalize conditions: accept single function, array, or undefined
     var conditions = config.conditions || config.condition;
@@ -118,6 +132,8 @@ const BOOTSTRAP_SCRIPT = `
   delete globalThis.__contextData;
   delete globalThis.__servicesGetRef;
   delete globalThis.__servicesListRef;
+  delete globalThis.__httpGetRef;
+  delete globalThis.__httpPostRef;
 })();
 `;
 
@@ -164,6 +180,7 @@ export class Sandbox {
       await this.setLogRefs(jail, ruleId);
       await this.setContextData(jail, context);
       await this.setServicesRefs(jail);
+      await this.setHttpRefs(jail, ruleId);
 
       // Run bootstrap to wire up the clean API from the raw refs
       const bootstrap = await isolate.compileScript(BOOTSTRAP_SCRIPT);
@@ -324,6 +341,67 @@ export class Sandbox {
           running: s.health.status === "running",
         }));
         return new ivm.ExternalCopy(list).copyInto();
+      }),
+    );
+  }
+
+  /** HTTP request timeout in milliseconds. */
+  private static readonly HTTP_TIMEOUT_MS = 10_000;
+
+  /**
+   * Set HTTP references on the jail for the bootstrap script.
+   * Provides `http.get(url, headers)` and `http.post(url, headers, body)` via host-side callbacks.
+   * Requests are made from the host process using `fetch()` with a 10-second timeout.
+   */
+  private async setHttpRefs(jail: IvmGlobal, ruleId: string): Promise<void> {
+    if (!ivm) return;
+
+    const timeoutMs = Sandbox.HTTP_TIMEOUT_MS;
+
+    // Host-side callback for http.get(url, headersJson)
+    await jail.set(
+      "__httpGetRef",
+      new ivm.Reference(async function (url: string, headersJson: string) {
+        try {
+          const headers = JSON.parse(headersJson) as Record<string, string>;
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), timeoutMs);
+          const res = await fetch(url, {
+            method: "GET",
+            headers,
+            signal: controller.signal,
+          });
+          clearTimeout(timer);
+          const body = await res.text();
+          return new ivm.ExternalCopy({ status: res.status, body }).copyInto();
+        } catch (err) {
+          logger.error({ ruleId, url, error: (err as Error).message }, "[sandbox] http.get failed");
+          return new ivm.ExternalCopy({ status: 0, body: (err as Error).message }).copyInto();
+        }
+      }),
+    );
+
+    // Host-side callback for http.post(url, headersJson, body)
+    await jail.set(
+      "__httpPostRef",
+      new ivm.Reference(async function (url: string, headersJson: string, body: string) {
+        try {
+          const headers = JSON.parse(headersJson) as Record<string, string>;
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), timeoutMs);
+          const res = await fetch(url, {
+            method: "POST",
+            headers,
+            body: body || undefined,
+            signal: controller.signal,
+          });
+          clearTimeout(timer);
+          const responseBody = await res.text();
+          return new ivm.ExternalCopy({ status: res.status, body: responseBody }).copyInto();
+        } catch (err) {
+          logger.error({ ruleId, url, error: (err as Error).message }, "[sandbox] http.post failed");
+          return new ivm.ExternalCopy({ status: 0, body: (err as Error).message }).copyInto();
+        }
       }),
     );
   }

@@ -54,6 +54,7 @@ const DEFAULT_SCRIPT = `// Aeolus Automation Script
 //   mqtt      — .publish(topic, payload)
 //   log       — .info(msg), .warn(msg), .error(msg)
 //   services  — .get(type), .list()
+//   http      — .get(url, opts?), .post(url, opts?)
 //
 // Use named functions so the flow diagram can label each step.
 // All conditions must pass (AND logic) for actions to run.

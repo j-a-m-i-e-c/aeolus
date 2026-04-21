@@ -137,6 +137,44 @@ declare function automation(config: {
   actions: Array<(ctx: typeof context) => void | Promise<void>> | ((ctx: typeof context) => void | Promise<void>);
 }): void;
 
+/**
+ * Make HTTP requests to external APIs from your automation scripts.
+ *
+ * Both methods return a promise that resolves to a simplified response object.
+ * Requests have a 10-second timeout. Only HTTPS and HTTP URLs are allowed.
+ *
+ * @example
+ * ```typescript
+ * // GET a weather forecast
+ * const weather = await http.get("https://api.weather.com/current?city=London");
+ * log.info(`Temperature: ${weather.body}`);
+ *
+ * // POST to a webhook
+ * const result = await http.post("https://hooks.slack.com/services/...", {
+ *   headers: { "Content-Type": "application/json" },
+ *   body: JSON.stringify({ text: "Automation fired!" }),
+ * });
+ * log.info(`Webhook responded: ${result.status}`);
+ * ```
+ */
+declare const http: {
+  /**
+   * Send an HTTP GET request.
+   * @param url - The URL to request.
+   * @param options - Optional headers.
+   * @returns A promise resolving to `{ status, body }`.
+   */
+  get(url: string, options?: { headers?: Record<string, string> }): Promise<{ status: number; body: string }>;
+
+  /**
+   * Send an HTTP POST request.
+   * @param url - The URL to request.
+   * @param options - Optional headers and body.
+   * @returns A promise resolving to `{ status, body }`.
+   */
+  post(url: string, options?: { headers?: Record<string, string>; body?: string }): Promise<{ status: number; body: string }>;
+};
+
 declare const services: {
   /**
    * Get a read-only snapshot of a service's current state.
