@@ -2,8 +2,8 @@
 
 interface FlowDiagramProps {
   trigger: string;
-  conditionText?: string;
-  actionsText: string;
+  conditions: string[];
+  actions: string[];
 }
 
 const COLORS = {
@@ -29,29 +29,40 @@ function truncate(text: string, max: number): string {
   return clean.length > max ? clean.slice(0, max - 1) + "…" : clean;
 }
 
-export function FlowDiagram({ trigger, conditionText, actionsText }: FlowDiagramProps) {
-  const hasCondition = !!conditionText;
+export function FlowDiagram({ trigger, conditions, actions }: FlowDiagramProps) {
+  const cx = 140; // center x
 
   // Layout: vertical flow
-  // Trigger → (Condition?) → Action
+  // Trigger → Condition1 → Condition2 → ... → Action1 → Action2 → ...
   let y = 20;
-  const cx = 140; // center x
 
   const triggerY = y;
   y += NODE_H + GAP;
 
-  const conditionY = hasCondition ? y : 0;
-  if (hasCondition) y += DIAMOND_SIZE * 2 + GAP;
+  // Compute condition positions
+  const conditionPositions: number[] = [];
+  for (const _c of conditions) {
+    conditionPositions.push(y);
+    y += DIAMOND_SIZE * 2 + GAP;
+  }
 
-  const actionY = y;
-  y += NODE_H + 20;
+  // Compute action positions
+  const actionPositions: number[] = [];
+  for (const _a of actions) {
+    actionPositions.push(y);
+    y += NODE_H + GAP;
+  }
 
   // "No" branch end point (right side)
   const noEndX = cx + NODE_W / 2 + 60;
-  const noEndY = hasCondition ? conditionY + DIAMOND_SIZE : 0;
 
   const svgW = NODE_W + 80;
   const svgH = y;
+
+  // First target after trigger: first condition or first action
+  const firstTargetY = conditions.length > 0 ? conditionPositions[0] : (actionPositions[0] ?? y);
+  // First action Y for condition → action arrows
+  const firstActionY = actionPositions[0] ?? y;
 
   return (
     <svg
@@ -100,103 +111,135 @@ export function FlowDiagram({ trigger, conditionText, actionsText }: FlowDiagram
         {truncate(trigger, 26)}
       </text>
 
-      {/* Arrow: Trigger → Condition or Action */}
+      {/* Arrow: Trigger → first target */}
       <line
         x1={cx}
         y1={triggerY + NODE_H}
         x2={cx}
-        y2={hasCondition ? conditionY : actionY}
+        y2={firstTargetY}
         stroke={COLORS.arrow}
         strokeWidth={1.5}
         markerEnd="url(#arrowhead)"
       />
 
-      {hasCondition && (
-        <>
-          {/* Condition node — diamond */}
-          <polygon
-            points={`${cx},${conditionY} ${cx + DIAMOND_SIZE},${conditionY + DIAMOND_SIZE} ${cx},${conditionY + DIAMOND_SIZE * 2} ${cx - DIAMOND_SIZE},${conditionY + DIAMOND_SIZE}`}
-            fill="none"
-            stroke={COLORS.conditionBorder}
-            strokeWidth={2}
-          />
-          <text
-            x={cx}
-            y={conditionY + DIAMOND_SIZE}
-            textAnchor="middle"
-            dominantBaseline="middle"
-            fill={COLORS.text}
-            fontFamily={FONT}
-            fontSize={10}
-          >
-            {truncate(conditionText!, 18)}
-          </text>
+      {/* Condition diamonds */}
+      {conditions.map((cond, i) => {
+        const cY = conditionPositions[i];
+        const noEndY = cY + DIAMOND_SIZE;
+        // Next target: next condition, or first action
+        const nextY = i < conditions.length - 1
+          ? conditionPositions[i + 1]
+          : firstActionY;
 
-          {/* "Yes" arrow: Condition → Action */}
-          <line
-            x1={cx}
-            y1={conditionY + DIAMOND_SIZE * 2}
-            x2={cx}
-            y2={actionY}
-            stroke={COLORS.arrow}
-            strokeWidth={1.5}
-            markerEnd="url(#arrowhead)"
-          />
-          <text
-            x={cx + 8}
-            y={conditionY + DIAMOND_SIZE * 2 + 14}
-            fill={COLORS.muted}
-            fontFamily={FONT}
-            fontSize={9}
-          >
-            Yes
-          </text>
+        return (
+          <g key={`cond-${i}`}>
+            {/* Diamond */}
+            <polygon
+              points={`${cx},${cY} ${cx + DIAMOND_SIZE},${cY + DIAMOND_SIZE} ${cx},${cY + DIAMOND_SIZE * 2} ${cx - DIAMOND_SIZE},${cY + DIAMOND_SIZE}`}
+              fill="none"
+              stroke={COLORS.conditionBorder}
+              strokeWidth={2}
+            />
+            <text
+              x={cx}
+              y={cY + DIAMOND_SIZE}
+              textAnchor="middle"
+              dominantBaseline="middle"
+              fill={COLORS.text}
+              fontFamily={FONT}
+              fontSize={10}
+            >
+              {truncate(cond, 18)}
+            </text>
 
-          {/* "No" arrow: Condition → right side (end) */}
-          <line
-            x1={cx + DIAMOND_SIZE}
-            y1={conditionY + DIAMOND_SIZE}
-            x2={noEndX}
-            y2={noEndY}
-            stroke={COLORS.arrow}
-            strokeWidth={1.5}
-            markerEnd="url(#arrowhead)"
-          />
-          <text
-            x={cx + DIAMOND_SIZE + 6}
-            y={noEndY - 6}
-            fill={COLORS.muted}
-            fontFamily={FONT}
-            fontSize={9}
-          >
-            No
-          </text>
-        </>
-      )}
+            {/* "Yes" arrow: Condition → next */}
+            <line
+              x1={cx}
+              y1={cY + DIAMOND_SIZE * 2}
+              x2={cx}
+              y2={nextY}
+              stroke={COLORS.arrow}
+              strokeWidth={1.5}
+              markerEnd="url(#arrowhead)"
+            />
+            <text
+              x={cx + 8}
+              y={cY + DIAMOND_SIZE * 2 + 14}
+              fill={COLORS.muted}
+              fontFamily={FONT}
+              fontSize={9}
+            >
+              Yes
+            </text>
 
-      {/* Action node — rect */}
-      <rect
-        x={cx - NODE_W / 2}
-        y={actionY}
-        width={NODE_W}
-        height={NODE_H}
-        rx={4}
-        ry={4}
-        fill="none"
-        stroke={COLORS.actionBorder}
-        strokeWidth={2}
-      />
-      <text
-        x={cx}
-        y={actionY + NODE_H / 2 + 1}
-        textAnchor="middle"
-        dominantBaseline="middle"
-        fill={COLORS.text}
-        fontFamily={FONT}
-        fontSize={11}
-      >
-        {truncate(actionsText, 26)}
-      </text>
+            {/* "No" arrow: Condition → right side (end) */}
+            <line
+              x1={cx + DIAMOND_SIZE}
+              y1={cY + DIAMOND_SIZE}
+              x2={noEndX}
+              y2={noEndY}
+              stroke={COLORS.arrow}
+              strokeWidth={1.5}
+              markerEnd="url(#arrowhead)"
+            />
+            <text
+              x={cx + DIAMOND_SIZE + 6}
+              y={noEndY - 6}
+              fill={COLORS.muted}
+              fontFamily={FONT}
+              fontSize={9}
+            >
+              No
+            </text>
+          </g>
+        );
+      })}
+
+      {/* Action nodes — rects */}
+      {actions.map((action, i) => {
+        const aY = actionPositions[i];
+        const nextActionY = i < actions.length - 1 ? actionPositions[i + 1] : null;
+
+        return (
+          <g key={`action-${i}`}>
+            <rect
+              x={cx - NODE_W / 2}
+              y={aY}
+              width={NODE_W}
+              height={NODE_H}
+              rx={4}
+              ry={4}
+              fill="none"
+              stroke={COLORS.actionBorder}
+              strokeWidth={2}
+            />
+            <text
+              x={cx}
+              y={aY + NODE_H / 2 + 1}
+              textAnchor="middle"
+              dominantBaseline="middle"
+              fill={COLORS.text}
+              fontFamily={FONT}
+              fontSize={11}
+            >
+              {truncate(action, 26)}
+            </text>
+
+            {/* Arrow to next action if there is one */}
+            {nextActionY !== null && (
+              <line
+                x1={cx}
+                y1={aY + NODE_H}
+                x2={cx}
+                y2={nextActionY}
+                stroke={COLORS.arrow}
+                strokeWidth={1.5}
+                markerEnd="url(#arrowhead)"
+              />
+            )}
+          </g>
+        );
+      })}
     </svg>
   );
 }

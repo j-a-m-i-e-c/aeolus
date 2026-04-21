@@ -20,12 +20,16 @@ export interface ScriptEditorProps {
 }
 
 const DEFAULT_TEMPLATE = `automation({
-  condition: (ctx) => {
-    return ctx.state.value !== undefined;
-  },
-  actions: (ctx) => {
-    log.info(\`Triggered on \${ctx.topic}\`);
-  },
+  conditions: [
+    function hasValue(ctx) {
+      return ctx.state.value !== undefined;
+    },
+  ],
+  actions: [
+    function logEvent(ctx) {
+      log.info(\`Triggered on \${ctx.topic}\`);
+    },
+  ],
 });
 `;
 

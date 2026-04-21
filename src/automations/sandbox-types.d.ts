@@ -121,17 +121,20 @@ declare const context: {
  * or `services.list()` to enumerate all registered services.
  */
 /**
- * Declare a structured automation with optional condition and required actions.
+ * Declare a structured automation with optional conditions and required actions.
  *
  * The trigger topic is configured separately in the pane UI — this call
- * only declares the condition/actions logic. If a condition is provided
- * and returns `false` for the current context, the actions are skipped.
+ * only declares the conditions/actions logic. Conditions use AND logic —
+ * all must return `true` for the actions to execute.
  *
- * @param config - Object with optional `condition` and required `actions`.
+ * Accepts arrays of named functions (preferred for visualization) or
+ * single functions for backward compatibility.
+ *
+ * @param config - Object with optional `conditions` and required `actions`.
  */
 declare function automation(config: {
-  condition?: (ctx: typeof context) => boolean;
-  actions: (ctx: typeof context) => void | Promise<void>;
+  conditions?: Array<(ctx: typeof context) => boolean> | ((ctx: typeof context) => boolean);
+  actions: Array<(ctx: typeof context) => void | Promise<void>> | ((ctx: typeof context) => void | Promise<void>);
 }): void;
 
 declare const services: {

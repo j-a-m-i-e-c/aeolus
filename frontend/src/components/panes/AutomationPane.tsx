@@ -33,8 +33,8 @@ interface AutomationRule {
   scriptSource?: string;
   structured?: {
     trigger: string;
-    conditionText: string | null;
-    actionsText: string;
+    conditions: string[];
+    actions: string[];
   } | null;
 }
 
@@ -44,12 +44,16 @@ interface Props {
 }
 
 const DEFAULT_SCRIPT = `automation({
-  condition: (ctx) => {
-    return ctx.state.value !== undefined;
-  },
-  actions: (ctx) => {
-    log.info(\`Triggered on \${ctx.topic}\`);
-  },
+  conditions: [
+    function hasValue(ctx) {
+      return ctx.state.value !== undefined;
+    },
+  ],
+  actions: [
+    function logEvent(ctx) {
+      log.info(\`Triggered on \${ctx.topic}\`);
+    },
+  ],
 });
 `;
 
@@ -405,8 +409,8 @@ export function AutomationPane({ config, paneId }: Props) {
           {rule.structured ? (
             <FlowDiagram
               trigger={rule.structured.trigger}
-              conditionText={rule.structured.conditionText ?? undefined}
-              actionsText={rule.structured.actionsText}
+              conditions={rule.structured.conditions}
+              actions={rule.structured.actions}
             />
           ) : (
             <ActivityFeed ruleId={rule.id} />

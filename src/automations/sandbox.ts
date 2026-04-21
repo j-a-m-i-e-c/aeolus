@@ -90,12 +90,21 @@ const BOOTSTRAP_SCRIPT = `
   };
 
   globalThis.automation = function(config) {
-    if (config.condition) {
-      if (!config.condition(globalThis.context)) {
-        return;
+    // Normalize conditions: accept single function, array, or undefined
+    var conditions = config.conditions || config.condition;
+    if (conditions) {
+      var condArr = Array.isArray(conditions) ? conditions : [conditions];
+      for (var i = 0; i < condArr.length; i++) {
+        if (!condArr[i](globalThis.context)) {
+          return;
+        }
       }
     }
-    config.actions(globalThis.context);
+    // Normalize actions: accept single function or array
+    var actions = Array.isArray(config.actions) ? config.actions : [config.actions];
+    for (var j = 0; j < actions.length; j++) {
+      actions[j](globalThis.context);
+    }
   };
 
   // Clean up temporary globals
