@@ -182,14 +182,14 @@ export function ScriptEditor({
 
   return (
     <div
-      className="rounded-xl border border-[#2A3441] overflow-hidden"
+      className="rounded-xl border border-[#2A3441] overflow-hidden h-full"
       style={{
         background: "#121821",
         borderRadius: "14px",
       }}
     >
       <Editor
-        height="400px"
+        height="100%"
         defaultLanguage="typescript"
         defaultValue={initialValue ?? DEFAULT_TEMPLATE}
         theme="aeolus-dark"
