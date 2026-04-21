@@ -250,12 +250,10 @@ export function AutomationPane({ config, paneId }: Props) {
     if (!rule || firing) return;
     setFiring(true);
     try {
-      // Use the trigger topic as the trigger name (strip slashes for a clean name)
-      const triggerName = rule.topic.replace(/\//g, "-");
-      await fetch(`${API_URL}/api/services/trigger/${triggerName}`, {
+      await fetch(`${API_URL}/api/automations/${rule.id}/fire`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ruleId: rule.id, manual: true }),
+        body: JSON.stringify({}),
       });
       setLastFired(Date.now());
     } catch {

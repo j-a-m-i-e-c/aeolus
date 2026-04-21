@@ -340,6 +340,42 @@ export function createAutomationRoutes(
     }
   });
 
+  /** POST /api/automations/:id/fire — manually fire a specific automation rule */
+  router.post("/:id/fire", async (req, res, next) => {
+    try {
+      const id = req.params.id as string;
+      const rule = engine.getRule(id);
+      if (!rule) {
+        throw new NotFoundError(`Automation rule ${id} not found or not enabled`);
+      }
+
+      // Build a synthetic context for manual firing
+      const ctx = {
+        topic: rule.topic,
+        deviceId: "manual-fire",
+        state: req.body ?? {},
+        timestamp: Date.now(),
+      };
+
+      // Check if it's a script rule (has compiled_js)
+      const compiledJs = (rule as unknown as Record<string, unknown>).compiled_js as string | undefined;
+
+      if (compiledJs) {
+        // Script rule — need to get the sandbox from the engine
+        // For now, just call the rule's action directly which logs
+        // The automation engine will handle sandbox dispatch
+        await rule.action(ctx);
+      } else {
+        await rule.action(ctx);
+      }
+
+      logger.info({ ruleId: id, ruleName: rule.name }, "Automation rule manually fired");
+      res.json({ success: true, ruleId: id });
+    } catch (err) {
+      next(err);
+    }
+  });
+
   return router;
 }
 
