@@ -120,6 +120,20 @@ declare const context: {
  * Use `services.get()` to inspect a specific service's state,
  * or `services.list()` to enumerate all registered services.
  */
+/**
+ * Declare a structured automation with optional condition and required actions.
+ *
+ * The trigger topic is configured separately in the pane UI — this call
+ * only declares the condition/actions logic. If a condition is provided
+ * and returns `false` for the current context, the actions are skipped.
+ *
+ * @param config - Object with optional `condition` and required `actions`.
+ */
+declare function automation(config: {
+  condition?: (ctx: typeof context) => boolean;
+  actions: (ctx: typeof context) => void | Promise<void>;
+}): void;
+
 declare const services: {
   /**
    * Get a read-only snapshot of a service's current state.

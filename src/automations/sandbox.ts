@@ -89,6 +89,15 @@ const BOOTSTRAP_SCRIPT = `
     }
   };
 
+  globalThis.automation = function(config) {
+    if (config.condition) {
+      if (!config.condition(globalThis.context)) {
+        return;
+      }
+    }
+    config.actions(globalThis.context);
+  };
+
   // Clean up temporary globals
   delete globalThis.__devicesData;
   delete globalThis.__devicesMap;
