@@ -82,6 +82,13 @@ async function main(): Promise<void> {
 
   await serviceManager.restoreFromStore();
 
+  // Auto-enable built-in services if not already enabled
+  const enabledServices = serviceManager.listEnabled();
+  const enabledTypes = new Set(enabledServices.map(s => s.serviceType));
+  if (!enabledTypes.has("system")) await serviceManager.enable("system", {});
+  if (!enabledTypes.has("trigger")) await serviceManager.enable("trigger", {});
+  if (!enabledTypes.has("cron")) await serviceManager.enable("cron", { schedules: [] });
+
   // 6. Action Executor, Execution Log, and Sandbox
   const actionExecutor = new ActionExecutor({
     mqttService,

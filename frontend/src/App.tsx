@@ -15,7 +15,6 @@ import { ToastContainer } from "./components/ToastContainer";
 import { CommandPalette } from "./components/CommandPalette";
 import { AutomationsPage } from "./components/AutomationsPage";
 import { ConnectorsPage } from "./components/ConnectorsPage";
-import { ServicesPage } from "./components/ServicesPage";
 import { SystemPage } from "./components/SystemPage";
 import { TabLayout } from "./components/TabLayout";
 import { AnimatePresence } from "framer-motion";
@@ -114,9 +113,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
         <Route path="/dashboard" element={<DashboardPage onSelectDevice={setSelectedDeviceId} />} />
-        <Route path="/automations" element={<AutomationsPage />} />
         <Route path="/connectors" element={<ConnectorsPage />} />
-        <Route path="/services" element={<ServicesPage />} />
         <Route path="/system" element={<SystemPage />} />
         <Route path="/tab/:slug" element={<CustomTabPage />} />
         <Route path="*" element={<Navigate to="/dashboard" replace />} />

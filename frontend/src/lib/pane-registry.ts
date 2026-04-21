@@ -8,6 +8,7 @@ import { MqttInspectorPane } from "../components/panes/MqttInspectorPane";
 import { HueControlPane } from "../components/panes/HueControlPane";
 import { KasaControlPane } from "../components/panes/KasaControlPane";
 import { AutomationRulesPane } from "../components/panes/AutomationRulesPane";
+import { AutomationsEditorPane } from "../components/panes/AutomationsEditorPane";
 import { SystemStatsPane } from "../components/panes/SystemStatsPane";
 import { TopicTreePane } from "../components/panes/TopicTreePane";
 import { EventLogPane } from "../components/panes/EventLogPane";
@@ -65,6 +66,13 @@ export const PANE_REGISTRY: Record<string, PaneRegistryEntry> = {
     defaultIcon: "zap",
     defaultConfig: {},
     defaultSize: { w: 12, h: 8 },
+  },
+  "automations-editor": {
+    component: AutomationsEditorPane,
+    displayName: "Automation Editor",
+    defaultIcon: "code",
+    defaultConfig: {},
+    defaultSize: { w: 12, h: 10 },
   },
   "system-stats": {
     component: SystemStatsPane,
