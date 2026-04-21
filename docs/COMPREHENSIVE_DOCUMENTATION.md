@@ -21,8 +21,8 @@ The system runs as three Docker services: a Mosquitto MQTT broker, an Express.js
         [ Internal EventEmitter Bus ]
               ↓              ↓
     [ Device Registry ]  [ Automation Engine ]
-              ↓              ↓ publish MQTT / trigger connectors
-    [ SQLite DB ]        [ Actions → devices ]
+              ↓              ↓ publish MQTT / trigger connectors / http calls
+    [ SQLite DB ]        [ Actions → devices / APIs ]
               ↓
     [ WebSocket Server ] → [ React Dashboard ]
               ↑
@@ -95,6 +95,7 @@ aeolus/
 │   │   ├── sandbox.ts                # Secure isolated-vm sandbox for user-authored scripts
 │   │   ├── execution-log.ts          # In-memory ring buffer for execution history (200 entries)
 │   │   ├── sandbox-types.d.ts        # Type definition bundle for Monaco IntelliSense
+│   │   ├── structured-metadata-extractor.ts  # Best-effort extraction of automation() call metadata for flow diagrams
 │   │   ├── dsl.ts                    # when/if/then builder
 │   │   └── rule-registry.ts          # In-memory rule store
 │   ├── connectors/                   # Pluggable connector framework
@@ -143,8 +144,8 @@ aeolus/
 │       │   ├── AeolusLogo.tsx        # Animated SVG logo
 │       │   ├── Layout.tsx            # Sidebar + main content
 │       │   ├── Sidebar.tsx           # Dynamic tab navigation + system status + simulator toggle
-│       │   ├── TabLayout.tsx         # Renders panes for the active tab (custom tabs only)
-│       │   ├── PanePicker.tsx        # Pane type selector for adding panes to a tab
+│       │   ├── TabLayout.tsx         # Renders panes for the active tab (passes paneId to components)
+│       │   ├── PanePicker.tsx        # Grouped pane type selector with categories (Controls, Automations, Monitoring, System)
 │       │   ├── PaneConfigPanel.tsx   # Per-pane configuration editor
 │       │   ├── DeviceGrid.tsx        # Responsive device card grid
 │       │   ├── DeviceCard.tsx        # Individual device with controls
@@ -158,8 +159,9 @@ aeolus/
 │       │   ├── AutomationsPanel.tsx  # Dashboard automations summary
 │       │   ├── AutomationsPage.tsx   # Dual-mode automation rule editor (form + script)
 │       │   ├── ScriptEditor.tsx      # Monaco code editor with Aeolus dark theme + IntelliSense
+│       │   ├── FlowDiagram.tsx       # Pure inline SVG flow diagram for structured automations
+│       │   ├── ActivityFeed.tsx      # Recent execution feed for free-form automations
 │       │   ├── ConnectorsPage.tsx    # Connector management (enable/disable, config, generic setup wizard)
-│       │   ├── ServicesPage.tsx     # Service management (enable/disable, cron schedule editor, health)
 │       │   ├── SystemPage.tsx        # Host diagnostics, application log viewer, self-update
 │       │   ├── CommandPalette.tsx    # Ctrl+K command palette
 │       │   ├── ToastContainer.tsx    # Animated toast notifications
@@ -170,6 +172,8 @@ aeolus/
 │       │       ├── HueControlPane.tsx    # Hue light control pane
 │       │       ├── KasaControlPane.tsx   # Kasa device control pane
 │       │       ├── AutomationRulesPane.tsx
+│       │       ├── AutomationPane.tsx    # Self-contained one-pane-one-automation (setup/status/editing)
+│       │       ├── TriggerButtonPane.tsx  # Configurable API trigger button
 │       │       ├── SystemStatsPane.tsx
 │       │       ├── TopicTreePane.tsx
 │       │       ├── EventLogPane.tsx
@@ -255,13 +259,29 @@ Secure execution environment for user-authored TypeScript automation scripts usi
 
 - Creates a fresh V8 isolate per execution with a 32 MB memory limit
 - Enforces a 5-second execution timeout to prevent infinite loops
-- Exposes a controlled API surface as globals: `devices`, `mqtt`, `log`, `context`
+- Exposes a controlled API surface as globals: `devices`, `mqtt`, `log`, `context`, `services`, `http`, `automation`
 - `devices.get/list/filter` — synchronous, data copied into isolate via `ivm.ExternalCopy`
 - `devices.action()` and `mqtt.publish()` — host-side callbacks via `ivm.Reference` delegating to ActionExecutor
 - `log.info/warn/error` — host-side callbacks delegating to the application logger with ruleId context
 - `context` — frozen object with `topic`, `deviceId`, `state`, `timestamp` from the triggering event
+- `services.get(type)` — returns read-only snapshot of a service's state, or `undefined` if not running
+- `services.list()` — returns `[{ type, displayName, running }]` for all registered services
+- `http.get(url, opts?)` — async GET request via host-side `fetch()` with 10-second timeout, returns `{ status, body }`
+- `http.post(url, opts?)` — async POST request via host-side `fetch()` with 10-second timeout, returns `{ status, body }`
+- `automation({ conditions?, actions })` — structured helper that evaluates conditions (AND logic) and runs actions; supports arrays of named functions for flow diagram visualization
 - Blocks access to `require`, `import`, `process`, `fs`, `child_process`, `eval`, `Function`, `global`
 - Graceful fallback: if `isolated-vm` is not available (e.g. Windows dev without C++ toolchain), sandbox execution is disabled with a warning
+
+### Structured Metadata Extractor (`src/automations/structured-metadata-extractor.ts`)
+
+Best-effort extraction of `automation()` call metadata from transpiled JavaScript for flow diagram visualization.
+
+- Parses the `automation({ conditions: [...], actions: [...] })` pattern from compiled JS
+- Extracts named function names from arrays (e.g. `function isLowLight(ctx)` → `"isLowLight"`)
+- Falls back to extracting function body text for anonymous/arrow functions
+- Supports both array form (`conditions: [fn1, fn2]`) and legacy single-function form (`condition: fn`)
+- Returns `StructuredMetadata` with `trigger`, `conditions: string[]`, and `actions: string[]`
+- Returns `null` if the code doesn't use the `automation()` helper (free-form scripts)
 
 ### Execution Log (`src/automations/execution-log.ts`)
 
@@ -307,7 +327,7 @@ Lifecycle management for enabled connector instances.
 - Config update: apply new config at runtime without full reconnect
 - Retry: re-attempt connection for disconnected connectors
 - Setup steps: `getSetupSteps(instanceId)` returns setup step descriptors for a connector; `executeSetupStep()` delegates multi-step setup flows (e.g. Hue button-press pairing)
-- Action routing: route device actions to the correct connector by `integration` field
+- Action routing: route device actions to the correct connector by `integration` field; emits an immediate `DEVICE_STATE_CHANGE` event with optimistic state after action succeeds (for toggle actions, flips the `on` state; for other actions, merges params) — no waiting for the 60-second polling cycle
 - Restore: re-enable previously enabled connectors from SQLite on startup
 - Periodic device discovery via 60-second polling interval
 
@@ -408,7 +428,7 @@ Automations match `service/cron/every-5m` or `service/+/+` or `service/#` using 
 
 #### Sandbox Services API
 
-The `services` global is available in automation scripts alongside `devices`, `mqtt`, `log`, and `context`:
+The `services` global is available in automation scripts alongside `devices`, `mqtt`, `log`, `context`, `http`, and `automation`:
 
 - `services.get(serviceType)` — returns a read-only snapshot of the service's `getState()`, or `undefined` if not running
 - `services.list()` — returns `[{ type, displayName, running }]` for all registered services
@@ -479,7 +499,11 @@ Enable or disable a rule. Enabling a script rule re-registers it with the compil
 Returns `{ "success": true, "enabled": true }`. 404 if not found.
 
 **GET /api/automations/types**
-Serve the sandbox type definition bundle (`sandbox-types.d.ts`) as `text/plain`. The Monaco editor fetches this on mount to provide IntelliSense for `devices`, `mqtt`, `log`, and `context` globals.
+Serve the sandbox type definition bundle (`sandbox-types.d.ts`) as `text/plain`. The Monaco editor fetches this on mount to provide IntelliSense for `devices`, `mqtt`, `log`, `context`, `services`, `http`, and `automation` globals.
+
+**POST /api/automations/:id/fire**
+Manually fire a specific automation rule by ID, bypassing topic matching. Executes the rule's action directly with a synthetic context. Works for any automation regardless of trigger topic.
+Returns `{ "success": true }`. 404 if rule not found.
 
 **GET /api/automations/history**
 Return execution log entries from the in-memory ring buffer (newest first).
@@ -732,6 +756,15 @@ interface ExecutionLogEntry {
 }
 ```
 
+### StructuredMetadata
+```typescript
+interface StructuredMetadata {
+  trigger: string;       // The trigger topic from the rule
+  conditions: string[];  // Named function names or body text from conditions array
+  actions: string[];     // Named function names or body text from actions array
+}
+```
+
 ### ConnectorMetadata
 ```typescript
 interface ConnectorMetadata {
@@ -972,6 +1005,8 @@ The Dockerfile installs `git`, `docker-cli`, and `docker-cli-compose` in the pro
 | Sandbox | Script exceeds 5-second timeout | isolated-vm terminates execution, log timeout error with rule ID |
 | Sandbox | Script exceeds 32MB memory limit | isolated-vm terminates isolate, log OOM error with rule ID |
 | Sandbox | Script attempts forbidden API access | ReferenceError or undefined — caught by sandbox error handler |
+| Sandbox | `http.get/post` request fails (network error, timeout) | Returns `{ status: 0, body: errorMessage }` — logged with ruleId, never throws |
+| Sandbox | `http.get/post` exceeds 10-second timeout | AbortController cancels request, returns error response |
 | Sandbox | isolated-vm not available (Windows dev) | Log warning, sandbox execution disabled, script rules skip |
 | Transpiler | Syntax error in TypeScript source | Return 400 with `{ error, details: [{ line, column, message }] }` |
 | Transpiler | Source contains import/require | Return 400 with descriptive error before transpilation |
@@ -1015,14 +1050,18 @@ The Dockerfile installs `git`, `docker-cli`, and `docker-cli-compose` in the pro
 - **Monaco over CodeMirror for the script editor:** Monaco is the editor engine behind VS Code. It provides native TypeScript language service integration — IntelliSense, type checking, and error squiggles work out of the box when you register `.d.ts` type definitions via `addExtraLib()`. CodeMirror 6 is lighter but requires significant custom work to achieve comparable TypeScript support. Since the code editor is the centrepiece of the automation overhaul and developer experience is paramount, Monaco is the right choice. The `@monaco-editor/react` wrapper provides clean React integration.
 - **TypeScript as a runtime dependency:** The TypeScript compiler API (`ts.transpileModule()`) is used at runtime to transpile user-authored automation scripts on save. This means `typescript` is a production dependency, not just a dev dependency. The tradeoff is a larger production bundle, but it enables on-the-fly transpilation without a separate build step or external service.
 - **Generic backend-driven setup wizard:** The ConnectorsPage setup wizard is fully generic — it fetches step descriptors from `GET /api/connectors/:id/setup-steps` and renders them dynamically. No connector-specific UI code exists in the frontend. Each step can include input fields, and the wizard accumulates data across steps, passing it to subsequent step executions and patching the connector config on completion. This means adding a new connector with a multi-step setup flow requires zero frontend changes.
+- **3 pinned tabs instead of 5:** Simplified from 5 pinned tabs (Dashboard, Automations, Connectors, Services, System) to 3 (Dashboard, Connectors, System). Automations moved to self-contained panes in custom tabs — each automation is one pane, reflecting the code-first philosophy. Services are infrastructure that auto-enable on startup and don't need a dedicated tab. Pinned tabs are hardcoded in the frontend, not stored in the database.
+- **One-pane-one-automation pattern:** Each AutomationPane manages a single automation rule through a setup → status → editing state machine. This replaces the previous list-based approach where all automations lived in one page. The pane pattern means automations live alongside the controls they manage in custom tabs, and users can see the flow diagram or activity feed at a glance.
+- **Structured `automation()` helper with named function arrays:** The `automation({ conditions: [...], actions: [...] })` helper accepts arrays of named functions. Named functions become labeled nodes in the FlowDiagram SVG. This gives users the flexibility of free-form TypeScript while enabling automatic visualization. Backward compatible with single-function form.
+- **Host-side HTTP for sandbox `http` global:** The `http.get/post` sandbox globals delegate to host-side `fetch()` via `ivm.Reference` callbacks rather than allowing network access inside the isolate. This maintains the security boundary — the isolate has no network stack — while enabling external API calls with a 10-second timeout. Errors are caught and returned as `{ status: 0, body: errorMessage }` rather than throwing.
 
 
 ## Dashboard Features
 
-The React dashboard provides a comprehensive developer-focused interface with a modular tab-and-pane layout. The sidebar displays dynamic tabs — 5 pinned system tabs (Dashboard, Automations, Connectors, Services, System) plus user-created custom tabs. Pinned tabs render dedicated full-page components; custom tabs use the modular pane grid. On a fresh install, only the 5 pinned tabs are present with no custom tabs or panes.
+The React dashboard provides a comprehensive developer-focused interface with a modular tab-and-pane layout. The sidebar displays dynamic tabs — 3 pinned system tabs (Dashboard, Connectors, System) plus user-created custom tabs. Pinned tabs are hardcoded in the frontend (not from DB) and render dedicated full-page components; custom tabs use the modular pane grid. Automations and services are accessed through panes in custom tabs rather than dedicated pinned tabs — this reflects the code-first philosophy where automations are self-contained units that live alongside the controls they manage.
 
 ### Sidebar
-- **Pinned System Tabs** — Dashboard, Automations, Connectors, Services, System (cannot be deleted or reordered)
+- **Pinned System Tabs** — Dashboard, Connectors, System (hardcoded, cannot be deleted or reordered)
 - **Custom Tabs** — User-created tabs with custom names and Lucide icons
 - **Add Tab** — Inline form with name input and icon picker (16 icon choices)
 - **Rename** — Double-click a custom tab to rename inline
@@ -1032,12 +1071,12 @@ The React dashboard provides a comprehensive developer-focused interface with a 
 - **System Status** — MQTT connection and WebSocket status indicators
 
 ### Modular Pane System
-- **Pane Registry** — Maps pane type identifiers to React components with metadata (display name, icon, default size)
-- **Available Pane Types:** device-grid, sensor-panel, mqtt-inspector, hue-control, kasa-control, automation-rules, system-stats, topic-tree, event-log, connectors-page
-- **PanePicker** — UI for selecting which pane type to add to the active tab
+- **Pane Registry** — Maps pane type identifiers to React components with metadata (display name, icon, default size, category)
+- **Available Pane Types:** device-grid, sensor-panel, mqtt-inspector, hue-control, kasa-control, trigger-button, automation, automation-rules, system-stats, topic-tree, event-log, connectors-page
+- **PanePicker** — Grouped pane type selector organized into categories: Controls, Automations, Monitoring, System. Each category is a collapsible section with pane type cards
 - **PaneConfigPanel** — Per-pane configuration editor for type-specific settings
-- **TabLayout** — Renders all panes for the active tab (custom tabs only)
-- **Layout Persistence** — Dashboard layout (tabs + panes) is persisted to SQLite via `GET/PUT /api/layout`, with debounced auto-save (2s)
+- **TabLayout** — Renders all panes for the active tab (custom tabs only), passes `paneId` to pane components for state management
+- **Layout Persistence** — Dashboard layout (tabs + panes) is persisted to SQLite via `GET/PUT /api/layout`, with debounced auto-save (2s). Only custom (unpinned) tabs are persisted — pinned tabs are hardcoded
 
 ### Dashboard Tab (pinned)
 - **Device Grid** — Cards grouped by room (parsed from MQTT topic), collapsible sections, click to open detail modal
@@ -1058,31 +1097,72 @@ The React dashboard provides a comprehensive developer-focused interface with a 
 - **Retry** — Re-attempt connection for disconnected connectors
 - **Health Indicators** — Real-time status: connected (green), degraded (amber), disconnected (red)
 
-### Services Tab (pinned)
-- **Available Services** — Cards for each registered service type showing display name, icon, description, category, and enable button
-- **Enable Flow** — Click Enable to expand a dynamic config form generated from the service's `configSchema`, then submit to enable
-- **Cron Schedule Editor** — Custom schedule editor for the Cron service: list of configured schedules with name, cron expression, and human-readable description (via `cronstrue`). "Add Schedule" inline form with preset buttons for common schedules (every minute, every 5 minutes, every hour, daily at midnight, daily at 6am). Client-side cron expression validation
-- **Active Services** — Cards for each enabled instance showing health status (green=running, amber=degraded, red=stopped), config summary, and disable/retry buttons
-- **Disable** — Stop and dispose a service instance
-- **Retry** — Re-attempt starting a stopped service
+### Services (removed as pinned tab)
+Services are infrastructure that auto-enable on startup — they don't need a dedicated pinned tab. The three built-in services (Cron, API Trigger, System Events) start automatically and emit events on synthetic `service/{type}/{name}` topics. Services are managed via the REST API (`/api/services/*`).
 
-### Automations Tab (pinned)
-- **Dual-Mode Rule Creator** — Segmented control toggle between "Quick Rule" (form-based, `FormInput` icon) and "Script" (Monaco code editor, `Code` icon)
-- **Script Mode** — Monaco editor with Aeolus dark theme, name input, and trigger topic input. Saves via `POST /api/automations` with `ruleType: "script"`. Transpilation errors from the backend are displayed inline in the editor and below it with line/column numbers
-- **Quick Rule Mode** — Form-based rule creator with when/if/then fields (trigger topic, condition, action type)
-- **Richer Action Types** — Action type dropdown includes: log, toggle, publish, device_action, delay, and webhook. Each type shows contextual input fields (e.g. device selector for device_action, URL/method/body for webhook, duration for delay, topic/payload for publish)
-- **Live DSL Preview** — Shows the equivalent TypeScript DSL as you build the rule, updates dynamically for all action types
-- **Unified Rule List** — All rules (file, form, script) in one list with type badges: `<Code />` icon for script rules, `<FormInput />` icon for form rules
-- **Script Editing** — Clicking a script rule opens it in the Monaco editor with source pre-loaded for editing via `PUT /api/automations/:id`
-- **Rule Management** — Enable/disable/delete UI-created rules, source badges (file vs ui)
-- **Code Rules Toggle** — Checkbox to show/hide rules loaded from TypeScript files
+### Automation Pane (`automation` pane type)
+
+Self-contained one-pane-one-automation component with a 3-mode state machine. Each automation pane manages a single automation rule — add more panes for more automations.
+
+**Setup Mode** (no ruleId yet):
+- Name input and trigger topic input
+- Monaco code editor with the default template showing all available globals (`devices`, `mqtt`, `log`, `context`, `services`, `http`, `automation`)
+- Save button creates the rule via `POST /api/automations` and transitions to status mode
+- Transpilation errors displayed inline in the editor and in an error summary panel
+
+**Status Mode** (ruleId linked):
+- Rule name and trigger topic badge
+- Enable/Disable toggle with optimistic UI
+- "Fire Now" button (Zap icon) — directly executes the rule via `POST /api/automations/:id/fire`, bypassing topic matching
+- Last fired timestamp (polls every 10 seconds)
+- Visual: FlowDiagram for structured automations (using `automation()` helper), ActivityFeed for free-form scripts
+
+**Editing Mode** (entered via Edit button):
+- Pre-filled name, topic, and script source
+- Logic / UI tabs (UI tab is experimental placeholder)
+- Save updates the rule via `PUT /api/automations/:id` and returns to status mode
+- Cancel returns to status mode without saving
+
+**Pane Lifecycle:**
+- Adding an automation pane starts in setup mode
+- Saving links the pane to a ruleId via `updatePaneConfig()`
+- Removing the pane sends `DELETE /api/automations/:id` to clean up the backend rule
+
+### FlowDiagram (`frontend/src/components/FlowDiagram.tsx`)
+
+Pure inline SVG flow diagram for structured automations that use the `automation()` helper.
+
+- Renders trigger topic as a rounded rect node (Aeolus Blue border)
+- Conditions as diamond nodes (Wind Cyan border) with Yes/No branches
+- Actions as rectangular nodes chained vertically
+- Arrow markers connecting all nodes in sequence
+- Named functions from the `automation()` call become labeled nodes (e.g. `isLowLight`, `dimHueLights`)
+- Responsive SVG with `viewBox` scaling
+
+### ActivityFeed (`frontend/src/components/ActivityFeed.tsx`)
+
+Recent execution feed for free-form automations (scripts that don't use the `automation()` helper).
+
+- Fetches last 5 execution history entries from `GET /api/automations/history?ruleId=...&limit=5`
+- Polls every 10 seconds for updates
+- Each entry shows success/failure icon, timestamp, and action details (type → target)
+- Error messages displayed inline for failed actions
+
+### Trigger Button Pane (`trigger-button` pane type)
+
+Configurable button that fires an API trigger event via `POST /api/services/trigger/{name}`.
+
+- Configurable trigger name, button label, color (primary/accent/red/green), and payload
+- Shows the synthetic topic (`service/trigger/{name}`) below the button
+- Last fired timestamp display
+- Useful for manual automation triggers from the dashboard
 
 #### Monaco Script Editor (`frontend/src/components/ScriptEditor.tsx`)
 
 A React component wrapping `@monaco-editor/react` with Aeolus theming and sandbox API IntelliSense.
 
 - Fetches type definitions from `GET /api/automations/types` on mount
-- Registers types via `monaco.languages.typescript.typescriptDefaults.addExtraLib()` for IntelliSense on `devices`, `mqtt`, `log`, and `context`
+- Registers types via `monaco.languages.typescript.typescriptDefaults.addExtraLib()` for IntelliSense on `devices`, `mqtt`, `log`, `context`, `services`, `http`, and `automation`
 - Custom `aeolus-dark` Monaco theme mapping Aeolus brand colours to token types:
   - Keywords (`if`, `const`, `await`): `#3BA4FF` (Aeolus Blue)
   - Strings: `#5CE1E6` (Wind Cyan)
@@ -1153,6 +1233,7 @@ Custom tabs use the modular pane grid powered by `react-grid-layout`. Users crea
 | DELETE | `/api/automations/:id` | Delete a UI automation rule |
 | PATCH | `/api/automations/:id/toggle` | Enable/disable a rule |
 | GET | `/api/automations/types` | Serve sandbox type definition bundle as text/plain |
+| POST | `/api/automations/:id/fire` | Manually fire a specific automation rule (bypasses topic matching) |
 | GET | `/api/automations/history` | Execution log entries (optional limit param) |
 | POST | `/api/mqtt/publish` | Publish MQTT message `{ topic, payload }` |
 | GET | `/api/simulator` | Simulator running status |
@@ -1200,8 +1281,8 @@ Enable via `SIMULATOR=true` env var (auto-starts on boot) or toggle from the sid
 
 ---
 
-**Last Updated:** April 18, 2026
-**Version:** 0.8.0
+**Last Updated:** April 21, 2026
+**Version:** 0.9.0
 **Status:** MVP Development
 
 ## Future Enhancements
