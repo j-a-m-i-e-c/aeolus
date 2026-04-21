@@ -10,6 +10,7 @@ import {
   Loader2,
   AlertTriangle,
   RotateCcw,
+  Zap,
 } from "lucide-react";
 import { ScriptEditor, type TranspileError } from "../ScriptEditor";
 import { FlowDiagram } from "../FlowDiagram";
@@ -73,6 +74,7 @@ export function AutomationPane({ config, paneId }: Props) {
   const [lastFired, setLastFired] = useState<number | null>(null);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
+  const [firing, setFiring] = useState(false);
 
   // Track ruleId changes to switch modes
   useEffect(() => {
@@ -243,6 +245,25 @@ export function AutomationPane({ config, paneId }: Props) {
     }
   }, [rule, toggling]);
 
+  // ── Fire Now handler ──
+  const handleFireNow = useCallback(async () => {
+    if (!rule || firing) return;
+    setFiring(true);
+    try {
+      // Use the trigger topic as the trigger name (strip slashes for a clean name)
+      const triggerName = rule.topic.replace(/\//g, "-");
+      await fetch(`${API_URL}/api/services/trigger/${triggerName}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ruleId: rule.id, manual: true }),
+      });
+      setLastFired(Date.now());
+    } catch {
+      // Fire-and-forget
+    }
+    setTimeout(() => setFiring(false), 600);
+  }, [rule, firing]);
+
   // ── Enter editing mode ──
   const handleEdit = useCallback(() => {
     if (!rule) return;
@@ -349,8 +370,8 @@ export function AutomationPane({ config, paneId }: Props) {
           </button>
         </div>
 
-        {/* Toggle + last fired */}
-        <div className="flex items-center gap-3">
+        {/* Toggle + Fire Now + last fired */}
+        <div className="flex items-center gap-2">
           <button
             onClick={handleToggle}
             disabled={toggling}
@@ -362,6 +383,15 @@ export function AutomationPane({ config, paneId }: Props) {
           >
             {rule.enabled ? <Power size={12} /> : <PowerOff size={12} />}
             {rule.enabled ? "Enabled" : "Disabled"}
+          </button>
+
+          <button
+            onClick={handleFireNow}
+            disabled={firing}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-primary/20 text-primary border border-primary/30 hover:bg-primary/30 transition-colors disabled:opacity-50"
+          >
+            <Zap size={12} />
+            {firing ? "Fired!" : "Fire Now"}
           </button>
 
           <div className="text-[10px] text-[#6B7785]">
