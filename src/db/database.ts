@@ -47,6 +47,8 @@ function initSchema(database: Database): void {
   addColumn("rule_type", "TEXT NOT NULL DEFAULT 'form'");
   addColumn("script_source", "TEXT DEFAULT NULL");
   addColumn("compiled_js", "TEXT DEFAULT NULL");
+  addColumn("structured_metadata", "TEXT DEFAULT NULL");
+  addColumn("ui_source", "TEXT DEFAULT NULL");
 
   // Backfill existing rows that lack a rule_type value
   database.run(`UPDATE automation_rules SET rule_type = 'form' WHERE rule_type IS NULL;`);

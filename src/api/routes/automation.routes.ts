@@ -26,6 +26,8 @@ interface StoredRule {
   rule_type: "form" | "script";
   script_source: string | null;
   compiled_js: string | null;
+  structured_metadata: string | null;
+  ui_source: string | null;
   enabled: number;
   created_at: number;
 }
@@ -159,6 +161,7 @@ export function createAutomationRoutes(
           condition_type: conditionType || null, condition_value: conditionValue || null,
           action_type: "script", action_target: "", action_params: "{}",
           rule_type: "script", script_source: scriptSource, compiled_js: result.js,
+          structured_metadata: null, ui_source: null,
           enabled: 1, created_at: now,
         });
 
@@ -183,6 +186,7 @@ export function createAutomationRoutes(
           action_type: actionType, action_target: actionTarget,
           action_params: JSON.stringify(actionParams || {}),
           rule_type: "form", script_source: null, compiled_js: null,
+          structured_metadata: null, ui_source: null,
           enabled: 1, created_at: now,
         });
 
