@@ -10,6 +10,7 @@ import type { ActionExecutor, ActionDescriptor } from "../../automations/action-
 import type { ExecutionLog } from "../../automations/execution-log.js";
 import type { EventContext } from "../../core/types.js";
 import { transpile } from "../../automations/transpiler.js";
+import { extractStructuredMetadata } from "../../automations/structured-metadata-extractor.js";
 import { BadRequestError, NotFoundError } from "../middleware/error-handler.js";
 import { persistDatabase } from "../../db/database.js";
 import logger from "../../logger.js";
@@ -59,7 +60,18 @@ export function createAutomationRoutes(
   /** GET /api/automations/history — return execution log entries */
   router.get("/history", (req, res) => {
     const limit = req.query.limit !== undefined ? Number(req.query.limit) : undefined;
-    const entries = executionLog.list(limit);
+    const ruleId = req.query.ruleId as string | undefined;
+
+    let entries;
+    if (ruleId) {
+      entries = executionLog.getByRuleId(ruleId);
+      if (limit !== undefined && limit >= 0) {
+        entries = entries.slice(0, limit);
+      }
+    } else {
+      entries = executionLog.list(limit);
+    }
+
     res.json(entries);
   });
 
@@ -114,6 +126,8 @@ export function createAutomationRoutes(
           entry.scriptSource = row.script_source;
           entry.conditionType = row.condition_type;
           entry.conditionValue = row.condition_value;
+          const rawMeta = row.structured_metadata as string | null;
+          entry.structured = rawMeta ? JSON.parse(rawMeta) : null;
         }
         dbRules.push(entry);
       }
@@ -149,10 +163,13 @@ export function createAutomationRoutes(
           return;
         }
 
+        const structured = extractStructuredMetadata(result.js, triggerTopic);
+        const structuredJson = structured ? JSON.stringify(structured) : null;
+
         db.run(
-          `INSERT INTO automation_rules (id, name, trigger_topic, condition_type, condition_value, action_type, action_target, action_params, rule_type, script_source, compiled_js, enabled, created_at)
-           VALUES (?, ?, ?, ?, ?, 'script', '', '{}', 'script', ?, ?, 1, ?)`,
-          [id, name, triggerTopic, conditionType || null, conditionValue || null, scriptSource, result.js, now]
+          `INSERT INTO automation_rules (id, name, trigger_topic, condition_type, condition_value, action_type, action_target, action_params, rule_type, script_source, compiled_js, structured_metadata, enabled, created_at)
+           VALUES (?, ?, ?, ?, ?, 'script', '', '{}', 'script', ?, ?, ?, 1, ?)`,
+          [id, name, triggerTopic, conditionType || null, conditionValue || null, scriptSource, result.js, structuredJson, now]
         );
         persistDatabase();
 
@@ -161,7 +178,7 @@ export function createAutomationRoutes(
           condition_type: conditionType || null, condition_value: conditionValue || null,
           action_type: "script", action_target: "", action_params: "{}",
           rule_type: "script", script_source: scriptSource, compiled_js: result.js,
-          structured_metadata: null, ui_source: null,
+          structured_metadata: structuredJson, ui_source: null,
           enabled: 1, created_at: now,
         });
 
@@ -227,9 +244,12 @@ export function createAutomationRoutes(
           return;
         }
 
+        const structured = extractStructuredMetadata(result.js, triggerTopic || existing.trigger_topic);
+        const structuredJson = structured ? JSON.stringify(structured) : null;
+
         db.run(
-          `UPDATE automation_rules SET name = ?, trigger_topic = ?, condition_type = ?, condition_value = ?, script_source = ?, compiled_js = ? WHERE id = ?`,
-          [name || existing.name, triggerTopic || existing.trigger_topic, conditionType ?? existing.condition_type, conditionValue ?? existing.condition_value, updatedSource, result.js, id]
+          `UPDATE automation_rules SET name = ?, trigger_topic = ?, condition_type = ?, condition_value = ?, script_source = ?, compiled_js = ?, structured_metadata = ? WHERE id = ?`,
+          [name || existing.name, triggerTopic || existing.trigger_topic, conditionType ?? existing.condition_type, conditionValue ?? existing.condition_value, updatedSource, result.js, structuredJson, id]
         );
         persistDatabase();
 
