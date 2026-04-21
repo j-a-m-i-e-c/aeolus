@@ -43,7 +43,22 @@ interface Props {
   paneId?: string;
 }
 
-const DEFAULT_SCRIPT = `automation({
+const DEFAULT_SCRIPT = `// Aeolus Automation Script
+// ─────────────────────────────────────────────────────
+// Write your automation logic using the automation() helper.
+// The trigger topic is set above — this code runs when it fires.
+//
+// Available globals:
+//   context   — { topic, deviceId, state, timestamp } of the triggering event
+//   devices   — .get(id), .list(), .filter(fn), .action(id, type, params?)
+//   mqtt      — .publish(topic, payload)
+//   log       — .info(msg), .warn(msg), .error(msg)
+//   services  — .get(type), .list()
+//
+// Use named functions so the flow diagram can label each step.
+// All conditions must pass (AND logic) for actions to run.
+
+automation({
   conditions: [
     function hasValue(ctx) {
       return ctx.state.value !== undefined;
@@ -51,7 +66,7 @@ const DEFAULT_SCRIPT = `automation({
   ],
   actions: [
     function logEvent(ctx) {
-      log.info(\`Triggered on \${ctx.topic}\`);
+      log.info(\`Triggered on \${ctx.topic}: \${JSON.stringify(ctx.state)}\`);
     },
   ],
 });
