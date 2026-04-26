@@ -182,53 +182,53 @@ This plan implements the custom automation UI feature in a backend-first order: 
 - [x] 13. Checkpoint — Ensure all tests pass
   - Ensure all tests pass, ask the user if questions arise.
 
-- [-] 14. Create frontend automation state store
-  - [~] 14.1 Create `frontend/src/store/automation-state-store.ts`
+- [x] 14. Create frontend automation state store
+  - [x] 14.1 Create `frontend/src/store/automation-state-store.ts`
     - Zustand store with `stateByRule: Map<string, Map<string, unknown>>`
     - Actions: `setRuleState(ruleId, key, value)` — merge into existing map, `initRuleState(ruleId, state)` — set full state from API, `clearRuleState(ruleId)`
     - _Requirements: 16.1, 16.6_
-  - [~] 14.2 Add WebSocket listener for `automation-state` messages
+  - [x] 14.2 Add WebSocket listener for `automation-state` messages
     - In the existing WebSocket connection setup (or a new hook), listen for `type: "automation-state"` messages
     - On receive, call `setRuleState(data.ruleId, data.key, data.value)` on the Zustand store
     - _Requirements: 16.3_
-  - [~] 14.3 Add `stateSet` helper that calls `PUT /api/automations/:id/state`
+  - [x] 14.3 Add `stateSet` helper that calls `PUT /api/automations/:id/state`
     - Create a function `sendStateUpdate(ruleId, key, value)` that POSTs to the API
     - This will be passed as `props.stateSet` to custom components
     - _Requirements: 16.2, 16.5_
 
-- [ ] 15. Update AutomationPane with UI tab, custom component rendering, and rebuild status
-  - [~] 15.1 Add UI tab to both setup and editing modes
+- [x] 15. Update AutomationPane with UI tab, custom component rendering, and rebuild status
+  - [x] 15.1 Add UI tab to both setup and editing modes
     - Show tab bar with "Logic" and "UI" tabs in both setup mode and editing mode (currently only editing mode has tabs)
     - Remove the "Experimental" badge and placeholder text from the UI tab
     - Track `uiSource` state alongside `scriptSource`, preserve both independently when switching tabs
     - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 14.1_
-  - [~] 15.2 Render UiEditor in UI tab
+  - [x] 15.2 Render UiEditor in UI tab
     - When UI tab is selected, render `UiEditor` component instead of ScriptEditor
     - Pass `uiSource` as `initialValue`, wire `onChange` to `setUiSource`, wire `onSave`
     - Show snippet panel in UI tab (same toggle mechanism as Logic tab)
     - _Requirements: 1.2, 2.1, 9.5_
-  - [~] 15.3 Add default UI template
+  - [x] 15.3 Add default UI template
     - When `uiSource` is empty, populate with a default template that exports a React.FC using `CustomComponentProps`
     - Template demonstrates `devices`, `ruleName`, `lastFired` props usage
     - Uses Tailwind classes with Aeolus design system colors (#121821, #E6EDF3, #3BA4FF)
     - Includes comments explaining available props
     - _Requirements: 8.1, 8.2, 8.3, 8.4, 14.3_
-  - [~] 15.4 Include `uiSource` in save/update API calls
+  - [x] 15.4 Include `uiSource` in save/update API calls
     - Modify `handleSave` (setup mode) to include `uiSource` in the POST body
     - Modify `handleUpdate` (editing mode) to include `uiSource` in the PUT body
     - On entering editing mode, populate `uiSource` from the fetched rule data
     - _Requirements: 10.1, 10.2, 14.2_
-  - [~] 15.5 Render custom component in status mode
+  - [x] 15.5 Render custom component in status mode
     - Import `CUSTOM_COMPONENTS` from `./custom/index`
     - In status mode, if rule has `uiSource` and `CUSTOM_COMPONENTS[ruleId]` exists, render the custom component wrapped in `CustomComponentBoundary`
     - Pass all `CustomComponentProps`: devices from store, ruleId, ruleName, lastFired, enabled, deviceAction, mqttPublish, executionHistory, state from automation-state-store, stateSet helper
     - If `uiSource` exists but no compiled component in registry, show banner "Custom UI saved — rebuild frontend to activate"
     - Error boundary `onFallback` switches to default FlowDiagram/ActivityFeed view
     - _Requirements: 6.1, 6.2, 6.3, 6.4, 6.5, 3.1–3.10, 16.1, 16.2, 16.4_
-  - [~] 15.6 Fetch initial state snapshot in status mode
+  - [x] 15.6 Fetch initial state snapshot in status mode
     - When entering status mode for a rule, fetch `GET /api/automations/:id/state` and call `initRuleState()` on the Zustand store
     - _Requirements: 16.4_
-  - [~] 15.7 Add "Rebuild Frontend" button and status indicator
+  - [x] 15.7 Add "Rebuild Frontend" button and status indicator
     - Add "Rebuild Frontend" button in the UI tab action bar
     - On click, call `POST /api/system/rebuild-frontend`, disable button during rebuild
     - Poll `GET /api/system/rebuild-status` every 3s while rebuilding
@@ -240,15 +240,15 @@ This plan implements the custom automation UI feature in a backend-first order: 
     - Generate random string pairs (scriptSource, uiSource), simulate tab switches, verify both strings preserved
     - **Validates: Requirements 1.4**
 
-- [ ] 16. Add UI component snippets to snippet catalog
-  - [~] 16.1 Add "UI Components" category to `src/automations/snippet-catalog.ts`
+- [x] 16. Add UI component snippets to snippet catalog
+  - [x] 16.1 Add "UI Components" category to `src/automations/snippet-catalog.ts`
     - Add a new `SnippetGroup` with category "UI Components", icon "layout"
     - Include snippet: device status card (displays device name, type, state)
     - Include snippet: toggle button (calls `props.deviceAction` to toggle)
     - Include snippet: execution history list (renders `props.executionHistory` with timestamps)
     - _Requirements: 9.1, 9.2, 9.3, 9.4_
 
-- [ ] 17. Final checkpoint — Ensure all tests pass
+- [x] 17. Final checkpoint — Ensure all tests pass
   - Ensure all tests pass, ask the user if questions arise.
 
 ## Notes

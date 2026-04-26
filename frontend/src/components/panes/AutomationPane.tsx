@@ -177,8 +177,7 @@ export function AutomationPane({ config, paneId }: Props) {
 
   // Device store for custom component props
   const devices = useDeviceStore((s) => s.devices);
-  const ruleState = useAutomationStateStore((s) => s.stateByRule[ruleId] || {});
-  const initRuleState = useAutomationStateStore((s) => s.initRuleState);
+  const ruleState = useAutomationStateStore((s) => s.stateByRule[ruleId]) ?? {};
 
   // ── Fetch rule data for status mode ──
   const fetchRule = useCallback(async () => {
@@ -242,11 +241,11 @@ export function AutomationPane({ config, paneId }: Props) {
       const res = await fetch(`${API_URL}/api/automations/${ruleId}/state`);
       if (!res.ok) return;
       const state: Record<string, unknown> = await res.json();
-      initRuleState(ruleId, state);
+      useAutomationStateStore.getState().initRuleState(ruleId, state);
     } catch {
       // Non-critical
     }
-  }, [ruleId, initRuleState]);
+  }, [ruleId]);
 
   useEffect(() => {
     if (mode === "status" && ruleId) {
