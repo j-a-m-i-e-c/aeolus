@@ -14,7 +14,7 @@ export interface Config {
 
 export const config: Config = {
   mqttBrokerUrl: process.env.MQTT_BROKER_URL || "mqtt://localhost:1883",
-  mqttTopics: (process.env.MQTT_TOPICS || "sensor/#,switch/#,motion/#,light/#")
+  mqttTopics: (process.env.MQTT_TOPICS || "#")
     .split(",")
     .map((t) => t.trim()),
   port: parseInt(process.env.PORT || "3001", 10),
