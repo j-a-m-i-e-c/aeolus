@@ -17,6 +17,7 @@ import { BadRequestError, NotFoundError } from "../middleware/error-handler.js";
 import { persistDatabase } from "../../db/database.js";
 import { eventBus, AUTOMATION_STATE_CHANGE } from "../../core/event-bus.js";
 import type { AutomationStateStore } from "../../automations/automation-state-store.js";
+import type { CustomUiManager } from "../../automations/custom-ui-manager.js";
 import logger from "../../logger.js";
 
 interface StoredRule {
@@ -46,6 +47,7 @@ export function createAutomationRoutes(
   sandboxTypesPath: string,
   connectorRegistry?: ConnectorRegistry,
   stateStore?: AutomationStateStore,
+  customUiManager?: CustomUiManager,
 ): Router {
   const router = Router();
 
@@ -143,6 +145,9 @@ export function createAutomationRoutes(
           const rawMeta = row.structured_metadata as string | null;
           entry.structured = rawMeta ? JSON.parse(rawMeta) : null;
         }
+        if (row.ui_source != null) {
+          entry.uiSource = row.ui_source;
+        }
         dbRules.push(entry);
       }
     }
@@ -153,7 +158,7 @@ export function createAutomationRoutes(
   /** POST /api/automations — create a new UI rule (form or script) */
   router.post("/", (req, res, next) => {
     try {
-      const { name, triggerTopic, ruleType, conditionType, conditionValue, actionType, actionTarget, actionParams, scriptSource } = req.body;
+      const { name, triggerTopic, ruleType, conditionType, conditionValue, actionType, actionTarget, actionParams, scriptSource, uiSource } = req.body;
 
       if (!name || !triggerTopic) {
         throw new BadRequestError("name and triggerTopic are required");
@@ -180,19 +185,25 @@ export function createAutomationRoutes(
         const structured = extractStructuredMetadata(result.js, triggerTopic);
         const structuredJson = structured ? JSON.stringify(structured) : null;
 
+        const uiSourceValue = (typeof uiSource === "string" && uiSource.trim()) ? uiSource : null;
+
         db.run(
-          `INSERT INTO automation_rules (id, name, trigger_topic, condition_type, condition_value, action_type, action_target, action_params, rule_type, script_source, compiled_js, structured_metadata, enabled, created_at)
-           VALUES (?, ?, ?, ?, ?, 'script', '', '{}', 'script', ?, ?, ?, 1, ?)`,
-          [id, name, triggerTopic, conditionType || null, conditionValue || null, scriptSource, result.js, structuredJson, now]
+          `INSERT INTO automation_rules (id, name, trigger_topic, condition_type, condition_value, action_type, action_target, action_params, rule_type, script_source, compiled_js, structured_metadata, ui_source, enabled, created_at)
+           VALUES (?, ?, ?, ?, ?, 'script', '', '{}', 'script', ?, ?, ?, ?, 1, ?)`,
+          [id, name, triggerTopic, conditionType || null, conditionValue || null, scriptSource, result.js, structuredJson, uiSourceValue, now]
         );
         persistDatabase();
+
+        if (uiSourceValue && customUiManager?.isAvailable()) {
+          customUiManager.writeComponent(id, uiSourceValue);
+        }
 
         registerUiRule(engine, registry, actionExecutor, {
           id, name, trigger_topic: triggerTopic,
           condition_type: conditionType || null, condition_value: conditionValue || null,
           action_type: "script", action_target: "", action_params: "{}",
           rule_type: "script", script_source: scriptSource, compiled_js: result.js,
-          structured_metadata: structuredJson, ui_source: null,
+          structured_metadata: structuredJson, ui_source: uiSourceValue,
           enabled: 1, created_at: now,
         });
 
@@ -204,12 +215,18 @@ export function createAutomationRoutes(
           throw new BadRequestError("actionType and actionTarget are required for form rules");
         }
 
+        const uiSourceValue = (typeof uiSource === "string" && uiSource.trim()) ? uiSource : null;
+
         db.run(
-          `INSERT INTO automation_rules (id, name, trigger_topic, condition_type, condition_value, action_type, action_target, action_params, rule_type, enabled, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'form', 1, ?)`,
-          [id, name, triggerTopic, conditionType || null, conditionValue || null, actionType, actionTarget, JSON.stringify(actionParams || {}), now]
+          `INSERT INTO automation_rules (id, name, trigger_topic, condition_type, condition_value, action_type, action_target, action_params, rule_type, ui_source, enabled, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'form', ?, 1, ?)`,
+          [id, name, triggerTopic, conditionType || null, conditionValue || null, actionType, actionTarget, JSON.stringify(actionParams || {}), uiSourceValue, now]
         );
         persistDatabase();
+
+        if (uiSourceValue && customUiManager?.isAvailable()) {
+          customUiManager.writeComponent(id, uiSourceValue);
+        }
 
         registerUiRule(engine, registry, actionExecutor, {
           id, name, trigger_topic: triggerTopic,
@@ -217,7 +234,7 @@ export function createAutomationRoutes(
           action_type: actionType, action_target: actionTarget,
           action_params: JSON.stringify(actionParams || {}),
           rule_type: "form", script_source: null, compiled_js: null,
-          structured_metadata: null, ui_source: null,
+          structured_metadata: null, ui_source: uiSourceValue,
           enabled: 1, created_at: now,
         });
 
@@ -240,7 +257,7 @@ export function createAutomationRoutes(
         throw new NotFoundError(`Automation rule ${id} not found`);
       }
 
-      const { name, triggerTopic, conditionType, conditionValue, actionType, actionTarget, actionParams, scriptSource } = req.body;
+      const { name, triggerTopic, conditionType, conditionValue, actionType, actionTarget, actionParams, scriptSource, uiSource } = req.body;
 
       if (existing.rule_type === "script") {
         // Script rule update — re-transpile
@@ -261,11 +278,30 @@ export function createAutomationRoutes(
         const structured = extractStructuredMetadata(result.js, triggerTopic || existing.trigger_topic);
         const structuredJson = structured ? JSON.stringify(structured) : null;
 
+        // Determine ui_source value: explicit empty/null means clear, non-empty means update, undefined means keep existing
+        let uiSourceValue: string | null;
+        if (uiSource === "" || uiSource === null) {
+          uiSourceValue = null;
+        } else if (typeof uiSource === "string" && uiSource.trim()) {
+          uiSourceValue = uiSource;
+        } else {
+          uiSourceValue = existing.ui_source;
+        }
+
         db.run(
-          `UPDATE automation_rules SET name = ?, trigger_topic = ?, condition_type = ?, condition_value = ?, script_source = ?, compiled_js = ?, structured_metadata = ? WHERE id = ?`,
-          [name || existing.name, triggerTopic || existing.trigger_topic, conditionType ?? existing.condition_type, conditionValue ?? existing.condition_value, updatedSource, result.js, structuredJson, id]
+          `UPDATE automation_rules SET name = ?, trigger_topic = ?, condition_type = ?, condition_value = ?, script_source = ?, compiled_js = ?, structured_metadata = ?, ui_source = ? WHERE id = ?`,
+          [name || existing.name, triggerTopic || existing.trigger_topic, conditionType ?? existing.condition_type, conditionValue ?? existing.condition_value, updatedSource, result.js, structuredJson, uiSourceValue, id]
         );
         persistDatabase();
+
+        // Handle custom UI file writes/deletes
+        if (customUiManager?.isAvailable()) {
+          if (uiSourceValue) {
+            customUiManager.writeComponent(id, uiSourceValue);
+          } else if (uiSource === "" || uiSource === null) {
+            customUiManager.deleteComponent(id);
+          }
+        }
 
         // Re-register in engine
         engine.unregister(id);
@@ -278,8 +314,18 @@ export function createAutomationRoutes(
         res.json({ success: true, id });
       } else {
         // Form rule update
+        // Determine ui_source value: explicit empty/null means clear, non-empty means update, undefined means keep existing
+        let uiSourceValue: string | null;
+        if (uiSource === "" || uiSource === null) {
+          uiSourceValue = null;
+        } else if (typeof uiSource === "string" && uiSource.trim()) {
+          uiSourceValue = uiSource;
+        } else {
+          uiSourceValue = existing.ui_source;
+        }
+
         db.run(
-          `UPDATE automation_rules SET name = ?, trigger_topic = ?, condition_type = ?, condition_value = ?, action_type = ?, action_target = ?, action_params = ? WHERE id = ?`,
+          `UPDATE automation_rules SET name = ?, trigger_topic = ?, condition_type = ?, condition_value = ?, action_type = ?, action_target = ?, action_params = ?, ui_source = ? WHERE id = ?`,
           [
             name || existing.name,
             triggerTopic || existing.trigger_topic,
@@ -288,10 +334,20 @@ export function createAutomationRoutes(
             actionType || existing.action_type,
             actionTarget || existing.action_target,
             JSON.stringify(actionParams || JSON.parse(existing.action_params)),
+            uiSourceValue,
             id,
           ]
         );
         persistDatabase();
+
+        // Handle custom UI file writes/deletes
+        if (customUiManager?.isAvailable()) {
+          if (uiSourceValue) {
+            customUiManager.writeComponent(id, uiSourceValue);
+          } else if (uiSource === "" || uiSource === null) {
+            customUiManager.deleteComponent(id);
+          }
+        }
 
         // Re-register in engine
         engine.unregister(id);
@@ -318,6 +374,9 @@ export function createAutomationRoutes(
       }
       if (stateStore) {
         stateStore.deleteAll(id);
+      }
+      if (existing.ui_source && customUiManager?.isAvailable()) {
+        customUiManager.deleteComponent(id);
       }
       db.run("DELETE FROM automation_rules WHERE id = ?", [id]);
       persistDatabase();

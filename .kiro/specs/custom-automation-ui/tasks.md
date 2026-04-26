@@ -52,28 +52,28 @@ This plan implements the custom automation UI feature in a backend-first order: 
 - [x] 3. Checkpoint — Ensure all tests pass
   - Ensure all tests pass, ask the user if questions arise.
 
-- [-] 4. Add state API endpoints and WebSocket broadcast
-  - [~] 4.1 Add state routes to `src/api/routes/automation.routes.ts`
+- [x] 4. Add state API endpoints and WebSocket broadcast
+  - [x] 4.1 Add state routes to `src/api/routes/automation.routes.ts`
     - Accept `AutomationStateStore` as a parameter in `createAutomationRoutes()`
     - `GET /api/automations/:id/state` — return `stateStore.getAll(id)` as JSON object
     - `PUT /api/automations/:id/state` — accept `{ key, value }`, call `stateStore.set()`, broadcast via WebSocket, return success
     - `DELETE /api/automations/:id/state/:key` — call `stateStore.delete()`, return success
     - _Requirements: 17.2, 17.3, 17.4_
-  - [~] 4.2 Add WebSocket broadcast method to `src/websocket/ws-server.ts`
+  - [x] 4.2 Add WebSocket broadcast method to `src/websocket/ws-server.ts`
     - Add a new event constant `AUTOMATION_STATE_CHANGE` to `src/core/event-bus.ts`
     - Listen for `AUTOMATION_STATE_CHANGE` in `WsServer` constructor and broadcast `{ type: "automation-state", data: { ruleId, key, value } }`
     - _Requirements: 15.7_
-  - [~] 4.3 Wire state broadcast into the sandbox set callback and API PUT handler
+  - [x] 4.3 Wire state broadcast into the sandbox set callback and API PUT handler
     - In the sandbox `set` callback (from task 2.1), emit `AUTOMATION_STATE_CHANGE` on the event bus after persisting
     - In the `PUT /api/automations/:id/state` handler, also emit `AUTOMATION_STATE_CHANGE`
     - Pass `eventBus` to `createAutomationRoutes()` if not already available
     - _Requirements: 15.7, 16.5_
-  - [~] 4.4 Add state cleanup to DELETE /api/automations/:id handler
+  - [x] 4.4 Add state cleanup to DELETE /api/automations/:id handler
     - When a rule is deleted, call `stateStore.deleteAll(id)` before removing the DB row
     - _Requirements: 17.5_
 
-- [ ] 5. Implement CustomUiManager for file writes and registry generation
-  - [~] 5.1 Create `src/automations/custom-ui-manager.ts`
+- [x] 5. Implement CustomUiManager for file writes and registry generation
+  - [x] 5.1 Create `src/automations/custom-ui-manager.ts`
     - Constructor takes `projectDir` string (from `AEOLUS_PROJECT_DIR`)
     - `isAvailable()` — check if `projectDir` exists and the `frontend/src/components/panes/custom/` subdirectory is writable
     - `writeComponent(ruleId, uiSource)` — write to `${projectDir}/frontend/src/components/panes/custom/automation-${ruleId}.tsx`, then call `regenerateRegistry()`
@@ -93,7 +93,7 @@ This plan implements the custom automation UI feature in a backend-first order: 
     - Generate whitespace-only strings, verify no files are created; if a file previously existed, verify it is deleted
     - **Validates: Requirements 10.5**
 
-- [ ] 6. Modify automation API to handle uiSource and file writes
+- [-] 6. Modify automation API to handle uiSource and file writes
   - [~] 6.1 Update POST /api/automations to accept `uiSource`
     - Accept optional `uiSource` field in request body
     - Store in `ui_source` column on INSERT
