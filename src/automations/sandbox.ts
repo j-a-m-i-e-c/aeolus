@@ -1,6 +1,7 @@
 // src/automations/sandbox.ts — Secure isolated-vm sandbox for user-authored automation scripts
 
 import type { ActionExecutor } from "./action-executor.js";
+import type { AutomationStateStore } from "./automation-state-store.js";
 import type { DeviceRegistry } from "../core/device-registry.js";
 import type { ServiceManager } from "../services/service-manager.js";
 import type { Device } from "../core/types.js";
@@ -21,6 +22,8 @@ export interface SandboxDeps {
   actionExecutor: ActionExecutor;
   deviceRegistry: DeviceRegistry;
   serviceManager?: ServiceManager;
+  stateStore?: AutomationStateStore;
+  onStateChange?: (ruleId: string, key: string, value: unknown) => void;
 }
 
 /** Context describing the event that triggered the automation. */
@@ -58,6 +61,10 @@ const BOOTSTRAP_SCRIPT = `
   var servicesListRef = __servicesListRef;
   var httpGetRef = __httpGetRef;
   var httpPostRef = __httpPostRef;
+  var stateGetRef = __stateGetRef;
+  var stateSetRef = __stateSetRef;
+  var stateGetAllRef = __stateGetAllRef;
+  var stateDeleteRef = __stateDeleteRef;
 
   globalThis.devices = {
     list: function() { return data; },
@@ -103,6 +110,13 @@ const BOOTSTRAP_SCRIPT = `
     }
   };
 
+  globalThis.state = {
+    get: function(key) { return stateGetRef.applySync(undefined, [key]); },
+    set: function(key, value) { stateSetRef.applySync(undefined, [key, JSON.stringify(value)]); },
+    getAll: function() { return stateGetAllRef.applySync(undefined, []); },
+    delete: function(key) { stateDeleteRef.applySync(undefined, [key]); }
+  };
+
   globalThis.automation = function(config) {
     // Normalize conditions: accept single function, array, or undefined
     var conditions = config.conditions || config.condition;
@@ -134,6 +148,10 @@ const BOOTSTRAP_SCRIPT = `
   delete globalThis.__servicesListRef;
   delete globalThis.__httpGetRef;
   delete globalThis.__httpPostRef;
+  delete globalThis.__stateGetRef;
+  delete globalThis.__stateSetRef;
+  delete globalThis.__stateGetAllRef;
+  delete globalThis.__stateDeleteRef;
 })();
 `;
 
@@ -150,11 +168,15 @@ export class Sandbox {
   private actionExecutor: ActionExecutor;
   private deviceRegistry: DeviceRegistry;
   private serviceManager?: ServiceManager;
+  private stateStore?: AutomationStateStore;
+  private onStateChange?: (ruleId: string, key: string, value: unknown) => void;
 
   constructor(deps: SandboxDeps) {
     this.actionExecutor = deps.actionExecutor;
     this.deviceRegistry = deps.deviceRegistry;
     this.serviceManager = deps.serviceManager;
+    this.stateStore = deps.stateStore;
+    this.onStateChange = deps.onStateChange;
   }
 
   /** Execute compiled JS in an isolated V8 context. Never throws. */
@@ -181,6 +203,7 @@ export class Sandbox {
       await this.setContextData(jail, context);
       await this.setServicesRefs(jail);
       await this.setHttpRefs(jail, ruleId);
+      await this.setStateRefs(jail, ruleId);
 
       // Run bootstrap to wire up the clean API from the raw refs
       const bootstrap = await isolate.compileScript(BOOTSTRAP_SCRIPT);
@@ -402,6 +425,65 @@ export class Sandbox {
           logger.error({ ruleId, url, error: (err as Error).message }, "[sandbox] http.post failed");
           return new ivm.ExternalCopy({ status: 0, body: (err as Error).message }).copyInto();
         }
+      }),
+    );
+  }
+  /**
+   * Set state store references on the jail for the bootstrap script.
+   * Provides `state.get(key)`, `state.set(key, value)`, `state.getAll()`, and `state.delete(key)`.
+   */
+  private async setStateRefs(jail: IvmGlobal, ruleId: string): Promise<void> {
+    if (!ivm) return;
+
+    const stateStore = this.stateStore;
+    const onStateChange = this.onStateChange;
+
+    // Host-side callback for state.get(key)
+    await jail.set(
+      "__stateGetRef",
+      new ivm.Reference(function (key: string) {
+        if (!stateStore) return undefined;
+        const value = stateStore.get(ruleId, key);
+        if (value === undefined) return undefined;
+        return new ivm.ExternalCopy(value).copyInto();
+      }),
+    );
+
+    // Host-side callback for state.set(key, jsonValue)
+    await jail.set(
+      "__stateSetRef",
+      new ivm.Reference(function (key: string, jsonValue: string) {
+        if (!stateStore) return;
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(jsonValue);
+        } catch (err) {
+          logger.warn({ ruleId, key, error: (err as Error).message }, "Cannot parse state value from sandbox");
+          return;
+        }
+        stateStore.set(ruleId, key, parsed);
+        if (onStateChange) {
+          onStateChange(ruleId, key, parsed);
+        }
+      }),
+    );
+
+    // Host-side callback for state.getAll()
+    await jail.set(
+      "__stateGetAllRef",
+      new ivm.Reference(function () {
+        if (!stateStore) return new ivm.ExternalCopy({}).copyInto();
+        const all = stateStore.getAll(ruleId);
+        return new ivm.ExternalCopy(all).copyInto();
+      }),
+    );
+
+    // Host-side callback for state.delete(key)
+    await jail.set(
+      "__stateDeleteRef",
+      new ivm.Reference(function (key: string) {
+        if (!stateStore) return;
+        stateStore.delete(ruleId, key);
       }),
     );
   }

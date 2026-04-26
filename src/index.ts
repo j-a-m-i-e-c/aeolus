@@ -20,6 +20,7 @@ import { migrateLegacyHueCredentials } from "./connectors/migrate-legacy-hue.js"
 import { ActionExecutor } from "./automations/action-executor.js";
 import { ExecutionLog } from "./automations/execution-log.js";
 import { Sandbox } from "./automations/sandbox.js";
+import { AutomationStateStore } from "./automations/automation-state-store.js";
 import { WsServer } from "./websocket/ws-server.js";
 import { createDeviceRoutes } from "./api/routes/device.routes.js";
 import { createStateRoutes } from "./api/routes/state.routes.js";
@@ -96,7 +97,9 @@ async function main(): Promise<void> {
     logger,
   });
   const executionLog = new ExecutionLog();
-  const sandbox = new Sandbox({ actionExecutor, deviceRegistry: registry, serviceManager });
+  const stateStore = new AutomationStateStore(db);
+  stateStore.loadFromDb();
+  const sandbox = new Sandbox({ actionExecutor, deviceRegistry: registry, serviceManager, stateStore, onStateChange: undefined });
 
   // 7. Automation Engine (with sandbox, action executor, and execution log)
   const engine = new AutomationEngine(eventBus, { sandbox, actionExecutor, executionLog });

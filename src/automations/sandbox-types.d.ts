@@ -189,3 +189,54 @@ declare const services: {
    */
   list(): Array<{ type: string; displayName: string; running: boolean }>;
 };
+
+/**
+ * Per-rule key-value state store for communicating between automation scripts
+ * and custom UI components.
+ *
+ * Values are JSON-serializable (strings, numbers, booleans, arrays, plain objects).
+ * State is persisted to SQLite and broadcast to the frontend via WebSocket on each `set()`.
+ *
+ * @example
+ * ```typescript
+ * // Store a computed average temperature
+ * state.set("avgTemp", 22.5);
+ *
+ * // Read it back later
+ * const avg = state.get("avgTemp"); // 22.5
+ *
+ * // Get all state for this rule
+ * const all = state.getAll(); // { avgTemp: 22.5 }
+ *
+ * // Remove a key
+ * state.delete("avgTemp");
+ * ```
+ */
+declare const state: {
+  /**
+   * Retrieve a stored value for the current rule.
+   * @param key - The state key to look up.
+   * @returns The stored value, or `undefined` if the key does not exist.
+   */
+  get(key: string): unknown;
+
+  /**
+   * Store a key-value pair scoped to the current rule.
+   * The value is persisted to SQLite and broadcast to connected frontends via WebSocket.
+   * @param key - The state key.
+   * @param value - A JSON-serializable value (string, number, boolean, array, or plain object).
+   */
+  set(key: string, value: unknown): void;
+
+  /**
+   * Retrieve all key-value pairs for the current rule.
+   * @returns A plain object with all stored keys and values.
+   */
+  getAll(): Record<string, unknown>;
+
+  /**
+   * Delete a key-value pair for the current rule.
+   * @param key - The state key to remove.
+   */
+  delete(key: string): void;
+};
