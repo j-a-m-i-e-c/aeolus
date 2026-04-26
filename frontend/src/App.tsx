@@ -4,13 +4,8 @@ import { useEffect, useState } from "react";
 import { Routes, Route, Navigate, useParams } from "react-router-dom";
 import { Layout } from "./components/Layout";
 import { DeviceGrid } from "./components/DeviceGrid";
-import { SensorPanel } from "./components/SensorPanel";
 import { SystemHealth } from "./components/SystemHealth";
-import { MqttInspector } from "./components/MqttInspector";
-import { AutomationsPanel } from "./components/AutomationsPanel";
 import { DeviceDetail } from "./components/DeviceDetail";
-import { EventLog } from "./components/EventLog";
-import { TopicTree } from "./components/TopicTree";
 import { ToastContainer } from "./components/ToastContainer";
 import { CommandPalette } from "./components/CommandPalette";
 import { ConnectorsPage } from "./components/ConnectorsPage";
@@ -38,16 +33,8 @@ function DashboardPage({ onSelectDevice }: { onSelectDevice: (id: string) => voi
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold text-[#E6EDF3]">Dashboard</h1>
       <SystemHealth />
-      <AutomationsPanel />
-      <SensorPanel />
       <DeviceGrid onSelectDevice={onSelectDevice} />
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <MqttInspector />
-        <TopicTree />
-      </div>
-      <EventLog />
     </div>
   );
 }
