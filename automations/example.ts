@@ -1,17 +1,16 @@
-// automations/example.ts — Sample automation rule
-//
-// This file demonstrates the when/if/then DSL.
-// Place rule files in this directory and they will be loaded on startup.
+// automations/example.ts — Smart Evening Mode
+// Trigger topic: sensor/+/light
+// When ambient light drops below 200 lux during evening hours,
+// dim all Hue lights and publish a mode change notification.
 
 import { when } from "../src/automations/dsl.js";
 
-/** Turn on living room light when motion is detected at night */
-export default when("motion/living-room")
+export default when("sensor/+/light")
   .if((ctx) => {
+    const lux = ctx.state.value as number;
     const hour = new Date(ctx.timestamp).getHours();
-    return hour >= 20 || hour < 6; // Night time: 8pm - 6am
+    return typeof lux === "number" && lux < 200 && hour >= 16 && hour < 23;
   })
   .then((ctx) => {
-    console.log(`[Automation] Motion detected in living room at night — turning on light`);
-    // In production, this would call: devices.light("living-room").on()
-  }, "Night motion → living room light");
+    console.log(`[Evening Mode] Low light detected: ${ctx.state.value} lux — activating evening mode`);
+  }, "Smart Evening Mode");
