@@ -4,6 +4,7 @@ import type {
   ConnectorMetadata,
   ConnectorConfigSchema,
   Connector,
+  SnippetDescriptor,
 } from "../connector.interface.js";
 import { KasaConnector } from "./kasa-connector.js";
 
@@ -38,3 +39,57 @@ export const configSchema: ConnectorConfigSchema = [
 export function createConnector(config: Record<string, unknown>): Connector {
   return new KasaConnector(config);
 }
+
+export const snippets: SnippetDescriptor[] = [
+  {
+    id: "toggle-plug",
+    name: "Toggle Kasa Plug",
+    description: "Toggle a specific Kasa smart plug on or off",
+    code: `function toggleKasaPlug(ctx) {
+  devices.action("kasa-my-plug", "toggle");
+  log.info("Toggled Kasa plug");
+}`,
+  },
+  {
+    id: "turn-on-plug",
+    name: "Turn On Kasa Plug",
+    description: "Turn on a specific Kasa smart plug",
+    code: `function turnOnKasaPlug(ctx) {
+  devices.action("kasa-my-plug", "on");
+  log.info("Turned on Kasa plug");
+}`,
+  },
+  {
+    id: "turn-off-plug",
+    name: "Turn Off Kasa Plug",
+    description: "Turn off a specific Kasa smart plug",
+    code: `function turnOffKasaPlug(ctx) {
+  devices.action("kasa-my-plug", "off");
+  log.info("Turned off Kasa plug");
+}`,
+  },
+  {
+    id: "check-energy",
+    name: "Condition: High Power Draw",
+    description: "Check if a Kasa plug is drawing more than a threshold wattage",
+    code: `function isHighPowerDraw(ctx) {
+  const plug = devices.get("kasa-my-plug");
+  const power = (plug?.state?.power as number) ?? 0;
+  return power > 100; // watts
+}`,
+  },
+  {
+    id: "all-plugs-off",
+    name: "All Kasa Plugs Off",
+    description: "Turn off every Kasa plug in the system",
+    code: `function allKasaPlugsOff(ctx) {
+  const plugs = devices.filter(d => d.integration === "kasa" && d.type === "plug");
+  for (const plug of plugs) {
+    if (plug.state.on) {
+      devices.action(plug.id, "off");
+    }
+  }
+  log.info(\`Turned off \${plugs.length} Kasa plugs\`);
+}`,
+  },
+];

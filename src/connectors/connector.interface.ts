@@ -351,11 +351,33 @@ export interface Connector {
 }
 
 /**
+ * A code snippet that can be inserted into the automation script editor.
+ *
+ * Connectors export an array of these as `snippets` from their `index.ts`.
+ * The snippet catalog aggregates connector snippets with platform-level
+ * snippets and serves them via `GET /api/automations/snippets`.
+ */
+export interface SnippetDescriptor {
+  /** Unique snippet identifier (scoped to the connector, e.g. "toggle-light"). */
+  id: string;
+  /** Short display name shown in the snippet picker (e.g. "Toggle Light"). */
+  name: string;
+  /** One-line description of what this snippet does. */
+  description: string;
+  /** The TypeScript code to insert at the cursor position. */
+  code: string;
+}
+
+/**
  * The standard export shape for a connector module.
  *
  * Every `src/connectors/{name}/index.ts` must export these three members.
  * The {@link ConnectorRegistry} validates this shape at discovery time —
  * modules missing any of the three exports are skipped with a warning.
+ *
+ * Optionally, a module may export `snippets` — an array of code snippet
+ * templates for the automation script editor. These appear grouped under
+ * the connector's display name in the snippet picker.
  *
  * @example
  * ```typescript
@@ -365,6 +387,9 @@ export interface Connector {
  * export function createConnector(config: Record<string, unknown>): Connector {
  *   return new MyConnector(config);
  * }
+ * export const snippets: SnippetDescriptor[] = [
+ *   { id: "toggle", name: "Toggle Device", description: "Toggle a device on/off", code: "..." },
+ * ];
  * ```
  */
 export interface ConnectorModule {
@@ -385,6 +410,15 @@ export interface ConnectorModule {
    * @returns A new {@link Connector} instance ready to be connected.
    */
   createConnector: (config: Record<string, unknown>) => Connector;
+
+  /**
+   * Optional code snippets for the automation script editor.
+   *
+   * When provided, these snippets appear grouped under the connector's
+   * display name in the snippet picker. Each snippet is a TypeScript
+   * code template that can be inserted at the cursor position.
+   */
+  snippets?: SnippetDescriptor[];
 }
 
 /**

@@ -11,10 +11,12 @@ import {
   AlertTriangle,
   RotateCcw,
   Zap,
+  Blocks,
 } from "lucide-react";
 import { ScriptEditor, type TranspileError } from "../ScriptEditor";
 import { FlowDiagram } from "../FlowDiagram";
 import { ActivityFeed } from "../ActivityFeed";
+import { SnippetPicker } from "../SnippetPicker";
 import { useDashboardStore } from "../../store/dashboard-store";
 import type { PaneConfig } from "../../types/dashboard";
 
@@ -107,6 +109,10 @@ export function AutomationPane({ config, paneId }: Props) {
 
   // Editing tab state (Logic vs UI)
   const [editingTab, setEditingTab] = useState<"logic" | "ui">("logic");
+
+  // Snippet panel state
+  const [showSnippets, setShowSnippets] = useState(false);
+  const editorApiRef = useRef<{ insertText: (text: string) => void } | null>(null);
 
   // ── Fetch rule data for status mode ──
   const fetchRule = useCallback(async () => {
@@ -488,21 +494,38 @@ export function AutomationPane({ config, paneId }: Props) {
         </div>
       )}
 
-      {/* Script editor or UI placeholder — fills remaining space */}
-      <div className="flex-1 min-h-0">
-        {(!isEditing || editingTab === "logic") ? (
-          <ScriptEditor
-            initialValue={scriptSource}
-            onChange={setScriptSource}
-            onSave={handleEditorSave}
-            errors={errors}
-          />
-        ) : (
-          <div className="h-full flex flex-col items-center justify-center gap-2 text-center">
-            <div className="text-sm text-[#6B7785]">Custom UI — coming soon</div>
-            <span className="px-2 py-0.5 text-[10px] font-semibold rounded bg-[#F59E0B]/15 text-[#F59E0B] border border-[#F59E0B]/30">
-              Experimental
-            </span>
+      {/* Script editor + snippet panel — fills remaining space */}
+      <div className="flex-1 min-h-0 flex gap-2">
+        {/* Editor */}
+        <div className="flex-1 min-w-0">
+          {(!isEditing || editingTab === "logic") ? (
+            <ScriptEditor
+              initialValue={scriptSource}
+              onChange={setScriptSource}
+              onSave={handleEditorSave}
+              errors={errors}
+              onEditorReady={(api) => { editorApiRef.current = api; }}
+            />
+          ) : (
+            <div className="h-full flex flex-col items-center justify-center gap-2 text-center">
+              <div className="text-sm text-[#6B7785]">Custom UI — coming soon</div>
+              <span className="px-2 py-0.5 text-[10px] font-semibold rounded bg-[#F59E0B]/15 text-[#F59E0B] border border-[#F59E0B]/30">
+                Experimental
+              </span>
+            </div>
+          )}
+        </div>
+
+        {/* Snippet panel — collapsible */}
+        {showSnippets && (!isEditing || editingTab === "logic") && (
+          <div className="w-56 shrink-0 rounded-xl border border-[#2A3441] bg-[#121821] overflow-hidden">
+            <SnippetPicker
+              onInsert={(code) => {
+                if (editorApiRef.current) {
+                  editorApiRef.current.insertText(code);
+                }
+              }}
+            />
           </div>
         )}
       </div>
@@ -535,6 +558,20 @@ export function AutomationPane({ config, paneId }: Props) {
           )}
           Save
         </button>
+
+        {(!isEditing || editingTab === "logic") && (
+          <button
+            onClick={() => setShowSnippets((v) => !v)}
+            className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-lg border transition-colors ${
+              showSnippets
+                ? "bg-primary/20 text-primary border-primary/30"
+                : "text-[#9AA6B2] hover:text-[#E6EDF3] hover:bg-elevated/50 border-[#2A3441]"
+            }`}
+          >
+            <Blocks size={12} />
+            Snippets
+          </button>
+        )}
 
         {isEditing && (
           <button

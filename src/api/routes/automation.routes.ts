@@ -11,6 +11,8 @@ import type { ExecutionLog } from "../../automations/execution-log.js";
 import type { EventContext } from "../../core/types.js";
 import { transpile } from "../../automations/transpiler.js";
 import { extractStructuredMetadata } from "../../automations/structured-metadata-extractor.js";
+import { buildSnippetCatalog } from "../../automations/snippet-catalog.js";
+import type { ConnectorRegistry } from "../../connectors/connector-registry.js";
 import { BadRequestError, NotFoundError } from "../middleware/error-handler.js";
 import { persistDatabase } from "../../db/database.js";
 import logger from "../../logger.js";
@@ -40,8 +42,17 @@ export function createAutomationRoutes(
   actionExecutor: ActionExecutor,
   executionLog: ExecutionLog,
   sandboxTypesPath: string,
+  connectorRegistry?: ConnectorRegistry,
 ): Router {
   const router = Router();
+
+  /** GET /api/automations/snippets — return the snippet catalog */
+  router.get("/snippets", (_req, res) => {
+    const catalog = connectorRegistry
+      ? buildSnippetCatalog(connectorRegistry)
+      : [];
+    res.json(catalog);
+  });
 
   /** GET /api/automations/types — serve sandbox type definitions as text/plain */
   router.get("/types", (_req, res, next) => {

@@ -96,6 +96,7 @@ aeolus/
 │   │   ├── execution-log.ts          # In-memory ring buffer for execution history (200 entries)
 │   │   ├── sandbox-types.d.ts        # Type definition bundle for Monaco IntelliSense
 │   │   ├── structured-metadata-extractor.ts  # Best-effort extraction of automation() call metadata for flow diagrams
+│   │   ├── snippet-catalog.ts        # Platform + connector code snippet aggregation
 │   │   ├── dsl.ts                    # when/if/then builder
 │   │   └── rule-registry.ts          # In-memory rule store
 │   ├── connectors/                   # Pluggable connector framework
@@ -161,6 +162,7 @@ aeolus/
 │       │   ├── ScriptEditor.tsx      # Monaco code editor with Aeolus dark theme + IntelliSense
 │       │   ├── FlowDiagram.tsx       # Pure inline SVG flow diagram for structured automations
 │       │   ├── ActivityFeed.tsx      # Recent execution feed for free-form automations
+│       │   ├── SnippetPicker.tsx     # Code snippet picker panel for the automation editor
 │       │   ├── ConnectorsPage.tsx    # Connector management (enable/disable, config, generic setup wizard)
 │       │   ├── SystemPage.tsx        # Host diagnostics, application log viewer, self-update
 │       │   ├── CommandPalette.tsx    # Ctrl+K command palette
@@ -283,6 +285,17 @@ Best-effort extraction of `automation()` call metadata from transpiled JavaScrip
 - Returns `StructuredMetadata` with `trigger`, `conditions: string[]`, and `actions: string[]`
 - Returns `null` if the code doesn't use the `automation()` helper (free-form scripts)
 
+### Snippet Catalog (`src/automations/snippet-catalog.ts`)
+
+Aggregates platform-level and connector-provided code snippets for the automation script editor.
+
+- Platform snippets organized into categories: MQTT, HTTP, Conditions, Devices, Services, Templates
+- Connector snippets pulled from each registered connector's optional `snippets` export
+- Connector snippets are grouped under the connector's display name (e.g. "Philips Hue", "TP-Link Kasa")
+- Served via `GET /api/automations/snippets` as an array of `SnippetGroup` objects
+- Each snippet has `id`, `name`, `description`, and `code` (TypeScript to insert at cursor)
+- New connectors automatically contribute snippets by exporting a `snippets: SnippetDescriptor[]` array
+
 ### Execution Log (`src/automations/execution-log.ts`)
 
 In-memory ring buffer that records every automation execution for debugging.
@@ -308,6 +321,8 @@ In-memory circular buffer that captures recent application log entries for the d
 The connector framework is a pluggable architecture that replaces the previous hardcoded integration system. Each connector is a self-contained module in `src/connectors/{name}/` that exports metadata, a config schema, and a factory function.
 
 Connector devices flow through the same `DEVICE_STATE_CHANGE` event bus as MQTT devices, using synthetic topics in the format `connector/{integration}/{deviceId}`. This unifies the device pipeline so automations can match on connector device events using the standard topic pattern system.
+
+Each connector module optionally exports a `snippets: SnippetDescriptor[]` array — code templates for the automation script editor that appear grouped under the connector's display name in the snippet picker. This is part of the connector developer contract: when building a new connector, ship snippets alongside it so users can quickly write automations for your devices.
 
 #### ConnectorRegistry (`src/connectors/connector-registry.ts`)
 
@@ -497,6 +512,10 @@ Enable or disable a rule. Enabling a script rule re-registers it with the compil
 { "enabled": true }
 ```
 Returns `{ "success": true, "enabled": true }`. 404 if not found.
+
+**GET /api/automations/snippets**
+Return the snippet catalog — platform-level snippets plus connector-provided snippets grouped by category.
+Returns an array of `SnippetGroup` objects: `[{ category, icon, snippets: [{ id, name, description, code }] }]`.
 
 **GET /api/automations/types**
 Serve the sandbox type definition bundle (`sandbox-types.d.ts`) as `text/plain`. The Monaco editor fetches this on mount to provide IntelliSense for `devices`, `mqtt`, `log`, `context`, `services`, `http`, and `automation` globals.
@@ -762,6 +781,22 @@ interface StructuredMetadata {
   trigger: string;       // The trigger topic from the rule
   conditions: string[];  // Named function names or body text from conditions array
   actions: string[];     // Named function names or body text from actions array
+}
+```
+
+### SnippetDescriptor
+```typescript
+interface SnippetDescriptor {
+  id: string;          // Unique snippet identifier (scoped to connector or platform)
+  name: string;        // Short display name in the snippet picker
+  description: string; // One-line description
+  code: string;        // TypeScript code to insert at cursor
+}
+
+interface SnippetGroup {
+  category: string;    // Group label (e.g. "MQTT", "Philips Hue", "Conditions")
+  icon: string;        // Lucide icon name for the category
+  snippets: SnippetDescriptor[];
 }
 ```
 
@@ -1054,6 +1089,7 @@ The Dockerfile installs `git`, `docker-cli`, and `docker-cli-compose` in the pro
 - **One-pane-one-automation pattern:** Each AutomationPane manages a single automation rule through a setup → status → editing state machine. This replaces the previous list-based approach where all automations lived in one page. The pane pattern means automations live alongside the controls they manage in custom tabs, and users can see the flow diagram or activity feed at a glance.
 - **Structured `automation()` helper with named function arrays:** The `automation({ conditions: [...], actions: [...] })` helper accepts arrays of named functions. Named functions become labeled nodes in the FlowDiagram SVG. This gives users the flexibility of free-form TypeScript while enabling automatic visualization. Backward compatible with single-function form.
 - **Host-side HTTP for sandbox `http` global:** The `http.get/post` sandbox globals delegate to host-side `fetch()` via `ivm.Reference` callbacks rather than allowing network access inside the isolate. This maintains the security boundary — the isolate has no network stack — while enabling external API calls with a 10-second timeout. Errors are caught and returned as `{ status: 0, body: errorMessage }` rather than throwing.
+- **Connector-provided code snippets:** Each connector module can optionally export a `snippets` array alongside `metadata`, `configSchema`, and `createConnector`. These snippets appear grouped under the connector's display name in the automation editor's snippet picker. This makes the snippet system extensible — new connectors automatically contribute code templates without any changes to the snippet catalog or frontend. Platform-level snippets (MQTT, HTTP, Conditions, Devices, Services, Templates) are always available regardless of which connectors are installed.
 
 
 ## Dashboard Features
@@ -1107,6 +1143,7 @@ Self-contained one-pane-one-automation component with a 3-mode state machine. Ea
 **Setup Mode** (no ruleId yet):
 - Name input and trigger topic input
 - Monaco code editor with the default template showing all available globals (`devices`, `mqtt`, `log`, `context`, `services`, `http`, `automation`)
+- Collapsible snippet picker panel (toggle via "Snippets" button) — shows categorized code templates from platform and connectors, click to insert at cursor
 - Save button creates the rule via `POST /api/automations` and transitions to status mode
 - Transpilation errors displayed inline in the editor and in an error summary panel
 
@@ -1233,6 +1270,7 @@ Custom tabs use the modular pane grid powered by `react-grid-layout`. Users crea
 | DELETE | `/api/automations/:id` | Delete a UI automation rule |
 | PATCH | `/api/automations/:id/toggle` | Enable/disable a rule |
 | GET | `/api/automations/types` | Serve sandbox type definition bundle as text/plain |
+| GET | `/api/automations/snippets` | Code snippet catalog (platform + connector snippets) |
 | POST | `/api/automations/:id/fire` | Manually fire a specific automation rule (bypasses topic matching) |
 | GET | `/api/automations/history` | Execution log entries (optional limit param) |
 | POST | `/api/mqtt/publish` | Publish MQTT message `{ topic, payload }` |
@@ -1281,8 +1319,8 @@ Enable via `SIMULATOR=true` env var (auto-starts on boot) or toggle from the sid
 
 ---
 
-**Last Updated:** April 21, 2026
-**Version:** 0.9.0
+**Last Updated:** April 26, 2026
+**Version:** 0.10.0
 **Status:** MVP Development
 
 ## Future Enhancements

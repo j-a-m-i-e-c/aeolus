@@ -17,6 +17,8 @@ export interface ScriptEditorProps {
   onChange?: (value: string) => void;
   onSave?: (value: string) => void;
   errors?: TranspileError[];
+  /** Ref callback to expose the insertText method to parent components. */
+  onEditorReady?: (api: { insertText: (text: string) => void }) => void;
 }
 
 const DEFAULT_TEMPLATE = `// Aeolus Automation Script
@@ -137,6 +139,7 @@ export function ScriptEditor({
   onChange,
   onSave,
   errors,
+  onEditorReady,
 }: ScriptEditorProps) {
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
   const monacoRef = useRef<Parameters<OnMount>[1] | null>(null);
@@ -173,7 +176,29 @@ export function ScriptEditor({
         onSave(ed.getValue());
       }
     });
-  }, [onSave]);
+
+    // Expose insertText API to parent
+    if (onEditorReady) {
+      onEditorReady({
+        insertText: (text: string) => {
+          const position = ed.getPosition();
+          if (!position) return;
+          ed.executeEdits("snippet-insert", [
+            {
+              range: {
+                startLineNumber: position.lineNumber,
+                startColumn: position.column,
+                endLineNumber: position.lineNumber,
+                endColumn: position.column,
+              },
+              text: "\n" + text + "\n",
+            },
+          ]);
+          ed.focus();
+        },
+      });
+    }
+  }, [onSave, onEditorReady]);
 
   const handleChange: OnChange = useCallback(
     (value) => {

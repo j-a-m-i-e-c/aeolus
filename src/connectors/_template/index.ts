@@ -13,6 +13,7 @@ import type {
   ConnectorMetadata,
   ConnectorConfigSchema,
   Connector,
+  SnippetDescriptor,
 } from "../connector.interface.js";
 import { TemplateConnector } from "./connector.js";
 
@@ -67,3 +68,20 @@ export const configSchema: ConnectorConfigSchema = [
 export function createConnector(config: Record<string, unknown>): Connector {
   return new TemplateConnector(config);
 }
+
+/**
+ * Code snippets for the automation script editor.
+ *
+ * These appear grouped under your connector's display name in the snippet picker.
+ * Include snippets for common actions, conditions, and patterns specific to your
+ * connector's devices. Use named functions so they work as automation() blocks.
+ */
+export const snippets: SnippetDescriptor[] = [
+  // ← Add snippets for your connector's devices, e.g.:
+  // {
+  //   id: "toggle-device",
+  //   name: "Toggle My Device",
+  //   description: "Toggle a device managed by this connector",
+  //   code: `function toggleMyDevice(ctx) {\n  devices.action("my-connector-device-1", "toggle");\n  log.info("Toggled device");\n}`,
+  // },
+];

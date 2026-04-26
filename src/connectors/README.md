@@ -117,6 +117,39 @@ export function createConnector(config: Record<string, unknown>): Connector {
 
 The `config` object contains values matching your `configSchema` field ids, with defaults applied for optional fields the user did not provide.
 
+### 4. `snippets: SnippetDescriptor[]` (optional but recommended)
+
+Code snippets for the automation script editor. These appear grouped under your connector's display name in the snippet picker, helping users write automations for your devices.
+
+```typescript
+export const snippets: SnippetDescriptor[] = [
+  {
+    id: "toggle-device",
+    name: "Toggle Zigbee Device",
+    description: "Toggle a Zigbee device on or off",
+    code: `function toggleZigbeeDevice(ctx) {\n  devices.action("zigbee-device-1", "toggle");\n  log.info("Toggled Zigbee device");\n}`,
+  },
+  {
+    id: "check-battery",
+    name: "Condition: Low Battery",
+    description: "Check if a Zigbee sensor has low battery",
+    code: `function isLowBattery(ctx) {\n  const sensor = devices.get("zigbee-sensor-1");\n  return (sensor?.state?.battery as number) < 20;\n}`,
+  },
+];
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | `string` | Unique snippet identifier scoped to your connector (e.g. `"toggle-device"`). |
+| `name` | `string` | Short display name shown in the snippet picker. |
+| `description` | `string` | One-line description of what the snippet does. |
+| `code` | `string` | TypeScript code inserted at the cursor position. Use named functions so they work as `automation()` condition/action blocks. |
+
+Include snippets for:
+- Common device actions (toggle, set brightness, set temperature, etc.)
+- Useful conditions (device online, threshold checks, state comparisons)
+- Multi-device patterns (filter by integration, loop and control)
+
 ---
 
 ## Connector Lifecycle
@@ -269,6 +302,7 @@ See `src/connectors/hue/` — requires bridge discovery and button-press pairing
 Before shipping your connector:
 
 - [ ] `index.ts` exports `metadata`, `configSchema`, and `createConnector`
+- [ ] `index.ts` exports `snippets` array with at least 2-3 useful code templates
 - [ ] `metadata.id` is unique and URL-safe
 - [ ] `metadata.id` matches the `integration` field on all discovered devices
 - [ ] Required config fields are validated (the REST API handles this via your schema)
