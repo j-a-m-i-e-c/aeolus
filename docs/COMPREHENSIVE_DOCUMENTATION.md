@@ -75,7 +75,7 @@ aeolus/
 │   │   │   ├── connector.routes.ts   # Generic connector REST API (replaces hue.routes.ts)
 │   │   │   ├── service.routes.ts     # Generic service REST API
 │   │   │   ├── layout.routes.ts      # GET/PUT /api/layout (tab + pane persistence)
-│   │   │   └── system.routes.ts      # Host diagnostics, application logs, self-update
+│   │   │   └── system.routes.ts      # Host diagnostics, application logs, self-update, frontend rebuild
 │   │   └── middleware/
 │   │       ├── error-handler.ts      # AppError hierarchy + global handler
 │   │       ├── request-logger.ts     # pino HTTP request logging
@@ -91,10 +91,13 @@ aeolus/
 │   ├── automations/
 │   │   ├── automation-engine.ts      # Rule evaluation engine (dispatches to Sandbox or ActionExecutor)
 │   │   ├── action-executor.ts        # Central dispatch service for all automation actions
+│   │   ├── automation-state-store.ts # Per-rule key-value store with SQLite persistence + in-memory cache
+│   │   ├── custom-ui-manager.ts      # Writes custom TSX files and regenerates component registry
 │   │   ├── transpiler.ts             # TypeScript → JavaScript transpilation with import rejection
 │   │   ├── sandbox.ts                # Secure isolated-vm sandbox for user-authored scripts
 │   │   ├── execution-log.ts          # In-memory ring buffer for execution history (200 entries)
 │   │   ├── sandbox-types.d.ts        # Type definition bundle for Monaco IntelliSense
+│   │   ├── ui-types.d.ts             # Type definition bundle for custom UI component editor
 │   │   ├── structured-metadata-extractor.ts  # Best-effort extraction of automation() call metadata for flow diagrams
 │   │   ├── snippet-catalog.ts        # Platform + connector code snippet aggregation
 │   │   ├── dsl.ts                    # when/if/then builder
@@ -163,6 +166,9 @@ aeolus/
 │       │   ├── FlowDiagram.tsx       # Pure inline SVG flow diagram for structured automations
 │       │   ├── ActivityFeed.tsx      # Recent execution feed for free-form automations
 │       │   ├── SnippetPicker.tsx     # Code snippet picker panel for the automation editor
+│       │   ├── UiEditor.tsx          # Monaco editor for custom automation UI components (TSX)
+│       │   ├── CustomComponentBoundary.tsx  # Error boundary for custom automation UI components
+│       │   ├── WelcomeScreen.tsx     # Onboarding screen for empty dashboard (no devices)
 │       │   ├── ConnectorsPage.tsx    # Connector management (enable/disable, config, generic setup wizard)
 │       │   ├── SystemPage.tsx        # Host diagnostics, application log viewer, self-update
 │       │   ├── CommandPalette.tsx    # Ctrl+K command palette
@@ -179,10 +185,14 @@ aeolus/
 │       │       ├── SystemStatsPane.tsx
 │       │       ├── TopicTreePane.tsx
 │       │       ├── EventLogPane.tsx
-│       │       └── ConnectorsPane.tsx
+│       │       ├── ConnectorsPane.tsx
+│       │       └── custom/              # Custom automation UI components
+│       │           ├── types.ts         # CustomComponentProps interface
+│       │           └── index.ts         # Auto-generated component registry (CUSTOM_COMPONENTS map)
 │       ├── store/
 │       │   ├── device-store.ts       # Zustand device state + WebSocket sync
-│       │   └── dashboard-store.ts    # Zustand dashboard layout state (tabs, panes, persistence)
+│       │   ├── dashboard-store.ts    # Zustand dashboard layout state (tabs, panes, persistence)
+│       │   └── automation-state-store.ts  # Zustand store for per-rule automation state + WebSocket sync
 │       ├── lib/
 │       │   ├── api-client.ts         # REST API client (dynamic hostname)
 │       │   ├── ws-client.ts          # WebSocket client with auto-reconnect
@@ -261,7 +271,7 @@ Secure execution environment for user-authored TypeScript automation scripts usi
 
 - Creates a fresh V8 isolate per execution with a 32 MB memory limit
 - Enforces a 5-second execution timeout to prevent infinite loops
-- Exposes a controlled API surface as globals: `devices`, `mqtt`, `log`, `context`, `services`, `http`, `automation`
+- Exposes a controlled API surface as globals: `devices`, `mqtt`, `log`, `context`, `services`, `http`, `automation`, `state`
 - `devices.get/list/filter` — synchronous, data copied into isolate via `ivm.ExternalCopy`
 - `devices.action()` and `mqtt.publish()` — host-side callbacks via `ivm.Reference` delegating to ActionExecutor
 - `log.info/warn/error` — host-side callbacks delegating to the application logger with ruleId context
@@ -271,6 +281,10 @@ Secure execution environment for user-authored TypeScript automation scripts usi
 - `http.get(url, opts?)` — async GET request via host-side `fetch()` with 10-second timeout, returns `{ status, body }`
 - `http.post(url, opts?)` — async POST request via host-side `fetch()` with 10-second timeout, returns `{ status, body }`
 - `automation({ conditions?, actions })` — structured helper that evaluates conditions (AND logic) and runs actions; supports arrays of named functions for flow diagram visualization
+- `state.get(key)` — read a value from the per-rule state store (from in-memory cache)
+- `state.set(key, value)` — write a JSON-serializable value; persists to SQLite and broadcasts via WebSocket
+- `state.getAll()` — returns all key-value pairs for the current rule as a plain object
+- `state.delete(key)` — remove a key from the state store
 - Blocks access to `require`, `import`, `process`, `fs`, `child_process`, `eval`, `Function`, `global`
 - Graceful fallback: if `isolated-vm` is not available (e.g. Windows dev without C++ toolchain), sandbox execution is disabled with a warning
 
@@ -295,6 +309,34 @@ Aggregates platform-level and connector-provided code snippets for the automatio
 - Served via `GET /api/automations/snippets` as an array of `SnippetGroup` objects
 - Each snippet has `id`, `name`, `description`, and `code` (TypeScript to insert at cursor)
 - New connectors automatically contribute snippets by exporting a `snippets: SnippetDescriptor[]` array
+
+### Automation State Store (`src/automations/automation-state-store.ts`)
+
+Per-rule key-value store enabling bidirectional communication between backend automation scripts and frontend custom UI components.
+
+- In-memory `Map<string, Map<string, unknown>>` cache for fast reads from the sandbox
+- SQLite persistence in the `automation_state` table (composite primary key: `rule_id` + `key`)
+- Values are JSON-serialized for storage; non-serializable values are silently skipped with a warning
+- `set(ruleId, key, value)` — writes to SQLite, updates cache, triggers `AUTOMATION_STATE_CHANGE` event on the event bus
+- `get(ruleId, key)` — reads from cache (no DB hit)
+- `getAll(ruleId)` — returns all key-value pairs for a rule as a plain object
+- `delete(ruleId, key)` — removes from SQLite and cache
+- `deleteAll(ruleId)` — removes all state for a rule (called on rule deletion)
+- `loadFromDb()` — populates cache from SQLite on startup; malformed JSON entries are skipped with a warning
+- Exposed to automation scripts via the `state` sandbox global
+- State changes are broadcast to all WebSocket clients via the `AUTOMATION_STATE_CHANGE` event
+
+### Custom UI Manager (`src/automations/custom-ui-manager.ts`)
+
+Manages writing/deleting custom automation UI component `.tsx` files and regenerating the static import registry consumed by the Vite build.
+
+- Writes user-authored TSX source to `frontend/src/components/panes/custom/automation-{ruleId}.tsx`
+- Auto-generates `frontend/src/components/panes/custom/index.ts` with static imports and a `CUSTOM_COMPONENTS` record mapping rule IDs to React components
+- `writeComponent(ruleId, uiSource)` — writes the TSX file and regenerates the registry
+- `deleteComponent(ruleId)` — deletes the TSX file (ENOENT silently ignored) and regenerates the registry
+- `regenerateRegistry()` — scans the `custom/` directory for `automation-*.tsx` files, generates PascalCase import names, and writes the registry file
+- `isAvailable()` — checks if the project directory and custom component subdirectory exist (creates the directory if needed)
+- The registry file includes a header comment warning against manual editing
 
 ### Execution Log (`src/automations/execution-log.ts`)
 
@@ -443,7 +485,7 @@ Automations match `service/cron/every-5m` or `service/+/+` or `service/#` using 
 
 #### Sandbox Services API
 
-The `services` global is available in automation scripts alongside `devices`, `mqtt`, `log`, `context`, `http`, and `automation`:
+The `services` global is available in automation scripts alongside `devices`, `mqtt`, `log`, `context`, `http`, `automation`, and `state`:
 
 - `services.get(serviceType)` — returns a read-only snapshot of the service's `getState()`, or `undefined` if not running
 - `services.list()` — returns `[{ type, displayName, running }]` for all registered services
@@ -487,19 +529,20 @@ Returns all devices keyed by ID.
 List all automation rules (file-based, form, and script) with `ruleType` field.
 
 **POST /api/automations**
-Create a new automation rule (form or script). For script rules, include `ruleType: "script"` and `scriptSource`.
+Create a new automation rule (form or script). For script rules, include `ruleType: "script"` and `scriptSource`. Optionally include `uiSource` for custom UI component TSX source.
 ```json
 {
   "name": "Smart heating",
   "triggerTopic": "sensor/+/temperature",
   "ruleType": "script",
-  "scriptSource": "if (context.state.value < 18) {\n  devices.action('climate-living-room', 'setTemperature', { target: 22 });\n}"
+  "scriptSource": "if (context.state.value < 18) {\n  devices.action('climate-living-room', 'setTemperature', { target: 22 });\n}",
+  "uiSource": "export default function MyUI(props: CustomComponentProps) { ... }"
 }
 ```
 Returns `{ "success": true, "id": "..." }`. 400 if transpilation fails (with `details` array of `{ line, column, message }`).
 
 **PUT /api/automations/:id**
-Update an existing automation rule. For script rules, re-transpiles the TypeScript source on save.
+Update an existing automation rule. For script rules, re-transpiles the TypeScript source on save. Optionally update `uiSource` — the backend writes the TSX file via CustomUiManager and regenerates the component registry.
 Returns `{ "success": true, "id": "..." }`. 404 if rule not found, 400 if transpilation fails.
 
 **DELETE /api/automations/:id**
@@ -518,7 +561,25 @@ Return the snippet catalog — platform-level snippets plus connector-provided s
 Returns an array of `SnippetGroup` objects: `[{ category, icon, snippets: [{ id, name, description, code }] }]`.
 
 **GET /api/automations/types**
-Serve the sandbox type definition bundle (`sandbox-types.d.ts`) as `text/plain`. The Monaco editor fetches this on mount to provide IntelliSense for `devices`, `mqtt`, `log`, `context`, `services`, `http`, and `automation` globals.
+Serve the sandbox type definition bundle (`sandbox-types.d.ts`) as `text/plain`. The Monaco editor fetches this on mount to provide IntelliSense for `devices`, `mqtt`, `log`, `context`, `services`, `http`, `automation`, and `state` globals.
+
+**GET /api/automations/ui-types**
+Serve the custom UI component type definition bundle (`ui-types.d.ts`) as `text/plain`. The UiEditor fetches this on mount to provide IntelliSense for `CustomComponentProps`, React hooks, and JSX types.
+
+**GET /api/automations/:id/state**
+Return all key-value state pairs for an automation rule from the AutomationStateStore.
+Returns `{ "state": { "key1": "value1", "key2": 42 } }`. 404 if rule not found.
+
+**PUT /api/automations/:id/state**
+Set a key-value pair in the automation state store. The value is persisted to SQLite and broadcast to all WebSocket clients via `AUTOMATION_STATE_CHANGE`.
+```json
+{ "key": "avgTemp", "value": 22.5 }
+```
+Returns `{ "success": true }`. 400 if key or value missing.
+
+**DELETE /api/automations/:id/state/:key**
+Delete a single key from the automation state store.
+Returns `{ "success": true }`. 404 if rule not found.
 
 **POST /api/automations/:id/fire**
 Manually fire a specific automation rule by ID, bypassing topic matching. Executes the rule's action directly with a synthetic context. Works for any automation regardless of trigger topic.
@@ -632,6 +693,18 @@ Triggers a self-update: runs `git pull` followed by `docker compose up -d --buil
 Returns `{ "success": true, "message": "Update started — the system will restart shortly" }`.
 Returns 400 if the project directory is not mounted (only works on deployed Pi).
 
+**POST /api/system/rebuild-frontend**
+Triggers a frontend-only rebuild: runs `docker compose up -d --build frontend` in the mounted project directory. Used after saving custom UI components to compile the new TSX into the Vite bundle. Starts the rebuild status tracking state machine.
+Returns `{ "success": true, "message": "Frontend rebuild started" }`.
+Returns 400 if the project directory is not mounted.
+
+**GET /api/system/rebuild-status**
+Returns the current frontend rebuild status. The state machine transitions: `idle` → `rebuilding` → `ready` → `idle` (auto-reset after 30 seconds).
+```json
+{ "status": "rebuilding" }
+```
+The tracking uses health-poll-based detection: polls the frontend container every 2 seconds, waits for an 8-second grace period (for Docker to tear down the old container), then transitions to `ready` when the frontend responds.
+
 ### Layout API
 
 **GET /api/layout**
@@ -671,6 +744,12 @@ Connect to `ws://localhost:3001/ws`
 ```json
 { "type": "automation-fired", "data": { "ruleId": "...", "ruleName": "Night motion → light on", "topic": "motion/living-room", "deviceId": "motion-living-room", "timestamp": 1711806244000 } }
 ```
+
+**Server → Client: Automation state change**
+```json
+{ "type": "automation-state", "data": { "ruleId": "...", "key": "avgTemp", "value": 22.5 } }
+```
+Broadcast whenever a script calls `state.set(key, value)` or the REST API updates state via `PUT /api/automations/:id/state`.
 
 ## Data Models
 
@@ -797,6 +876,22 @@ interface SnippetGroup {
   category: string;    // Group label (e.g. "MQTT", "Philips Hue", "Conditions")
   icon: string;        // Lucide icon name for the category
   snippets: SnippetDescriptor[];
+}
+```
+
+### CustomComponentProps
+```typescript
+interface CustomComponentProps {
+  devices: Device[];
+  ruleId: string;
+  ruleName: string;
+  lastFired: number | null;
+  enabled: boolean;
+  deviceAction: (deviceId: string, actionType: string, params?: Record<string, unknown>) => Promise<void>;
+  mqttPublish: (topic: string, payload: string) => void;
+  executionHistory: ExecutionEntry[];
+  state: Map<string, unknown>;       // Live key-value state from AutomationStateStore, updated via WebSocket
+  stateSet: (key: string, value: unknown) => void;  // Write back to the state store (persisted + broadcast)
 }
 ```
 
@@ -942,6 +1037,8 @@ CREATE TABLE automation_rules (
   rule_type TEXT NOT NULL DEFAULT 'form' CHECK(rule_type IN ('form', 'script')),
   script_source TEXT DEFAULT NULL,
   compiled_js TEXT DEFAULT NULL,
+  structured_metadata TEXT DEFAULT NULL,
+  ui_source TEXT DEFAULT NULL,
   enabled INTEGER NOT NULL DEFAULT 1,
   created_at INTEGER NOT NULL
 );
@@ -984,6 +1081,13 @@ CREATE TABLE services (
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
+
+CREATE TABLE automation_state (
+  rule_id TEXT NOT NULL,
+  key TEXT NOT NULL,
+  value TEXT NOT NULL,
+  PRIMARY KEY (rule_id, key)
+);
 ```
 
 ## Environment Variables
@@ -991,7 +1095,7 @@ CREATE TABLE services (
 | Variable | Default | Description |
 |----------|---------|-------------|
 | MQTT_BROKER_URL | mqtt://localhost:1883 | Mosquitto broker URL |
-| MQTT_TOPICS | sensor/#,switch/#,motion/#,light/# | Comma-separated topic patterns (quote in .env) |
+| MQTT_TOPICS | # | Comma-separated topic patterns (quote in .env — `#` is a comment character) |
 | PORT | 3001 | Backend API port |
 | DB_PATH | ./data/aeolus.db | SQLite database file path |
 | LOG_LEVEL | debug | pino log level |
@@ -999,7 +1103,7 @@ CREATE TABLE services (
 | SIMULATOR | false | Enable device simulator (generates fake data without MQTT) |
 | AEOLUS_PROJECT_DIR | /aeolus-host | Host project directory mounted into the backend container (used by self-update) |
 
-**Note:** MQTT_TOPICS must be quoted in `.env` files because `#` is treated as a comment character by dotenv.
+**Note:** MQTT_TOPICS must be quoted in `.env` files because `#` is treated as a comment character by dotenv. The default is `#` (all topics) — this subscribes to every MQTT topic on the broker.
 
 ## Docker Compose
 
@@ -1070,6 +1174,16 @@ The Dockerfile installs `git`, `docker-cli`, and `docker-cli-compose` in the pro
 | Log Viewer | Fetch failure | Frontend shows empty log list, retries on next auto-refresh cycle |
 | Self-Update | Project directory not mounted | 400 JSON error with explanation |
 | Self-Update | git pull or docker compose fails | Fire-and-forget — container may restart or remain on current version |
+| State Store | Non-serializable value in `state.set()` | Log warning with ruleId and key, silently skip the set operation |
+| State Store | Malformed JSON in `automation_state` table | Log warning, skip entry during `loadFromDb()`, continue with remaining entries |
+| State Store | Missing rule on state API request | 404 JSON error |
+| Custom UI | TSX syntax error in user-authored component | Caught at Vite build time during frontend rebuild — component not compiled |
+| Custom UI | Component render error at runtime | Caught by `CustomComponentBoundary` error boundary — shows fallback UI, isolates crash from other panes |
+| Custom UI | Source saved but component not yet compiled | "Rebuild frontend to activate" banner shown in AutomationPane status mode |
+| Custom UI | CustomUiManager project directory not available | `isAvailable()` returns false, custom UI features gracefully disabled |
+| Rebuild | Docker compose rebuild fails | Fire-and-forget — rebuild status may remain in `rebuilding` state until 30-second auto-reset |
+| Rebuild | Frontend health check timeout | Poll continues every 2 seconds; 30-second auto-reset returns status to `idle` |
+| Rebuild | Project directory not mounted | 400 JSON error from `POST /api/system/rebuild-frontend` |
 
 ## Design Decisions
 
@@ -1090,6 +1204,12 @@ The Dockerfile installs `git`, `docker-cli`, and `docker-cli-compose` in the pro
 - **Structured `automation()` helper with named function arrays:** The `automation({ conditions: [...], actions: [...] })` helper accepts arrays of named functions. Named functions become labeled nodes in the FlowDiagram SVG. This gives users the flexibility of free-form TypeScript while enabling automatic visualization. Backward compatible with single-function form.
 - **Host-side HTTP for sandbox `http` global:** The `http.get/post` sandbox globals delegate to host-side `fetch()` via `ivm.Reference` callbacks rather than allowing network access inside the isolate. This maintains the security boundary — the isolate has no network stack — while enabling external API calls with a 10-second timeout. Errors are caught and returned as `{ status: 0, body: errorMessage }` rather than throwing.
 - **Connector-provided code snippets:** Each connector module can optionally export a `snippets` array alongside `metadata`, `configSchema`, and `createConnector`. These snippets appear grouped under the connector's display name in the automation editor's snippet picker. This makes the snippet system extensible — new connectors automatically contribute code templates without any changes to the snippet catalog or frontend. Platform-level snippets (MQTT, HTTP, Conditions, Devices, Services, Templates) are always available regardless of which connectors are installed.
+- **Build-time compilation for custom UI components:** Custom automation UI components are written as TSX files and compiled at Vite build time, not evaluated at runtime with `eval()` or `new Function()`. The CustomUiManager writes `.tsx` files to the `frontend/src/components/panes/custom/` directory and regenerates a static import registry (`index.ts`). A frontend rebuild (`docker compose up -d --build frontend`) compiles the new components into the production bundle. This approach is safer (no runtime code execution in the browser), produces optimized output, and gives users full access to React, TypeScript, and the component ecosystem. The tradeoff is a rebuild step after saving UI source.
+- **Per-rule key-value state store for backend↔frontend communication:** The AutomationStateStore provides a simple key-value interface (`state.set/get/getAll/delete`) scoped per automation rule. Values are JSON-serialized to SQLite for persistence and kept in an in-memory cache for fast sandbox reads. State changes emit `AUTOMATION_STATE_CHANGE` events on the event bus, which the WebSocket server broadcasts to all clients. The frontend Zustand store (`automation-state-store.ts`) listens for `automation-state` WebSocket messages and updates reactively. This enables automation scripts to compute values (e.g. rolling averages, counters) that custom UI components can display in real time.
+- **Health-poll-based rebuild tracking:** The rebuild status endpoint uses a state machine (`idle` → `rebuilding` → `ready` → `idle`) with health polling rather than Docker event streaming. After triggering `docker compose up -d --build frontend`, the backend polls `http://localhost:3000` every 2 seconds. An 8-second grace period prevents false positives from the old container still responding. Once the frontend responds after the grace period (or after the container was seen down), status transitions to `ready`. A 30-second auto-reset returns to `idle`. This is simpler than parsing Docker events and works reliably across Docker versions.
+- **Error boundary isolation for custom components:** Each custom automation UI component renders inside a `CustomComponentBoundary` React error boundary. If a component throws during render, the error boundary catches it and displays a fallback UI without crashing the entire pane or dashboard. This is essential because custom components are user-authored code — runtime errors are expected and must be contained.
+- **nginx cache-busting strategy:** `index.html` is served with `no-cache, no-store, must-revalidate` headers so the browser always fetches the latest version (which contains hashed asset references). Static assets under `/assets/` are served with `immutable` caching because Vite includes content hashes in filenames — when assets change, the filename changes, so stale caches are never served. The frontend "Refresh Now" button appends a `?_t=timestamp` query parameter for additional cache busting.
+- **MQTT subscribe to all topics (`#`):** Changed the default `MQTT_TOPICS` from `sensor/#,switch/#,motion/#,light/#` to `#` (all topics). This simplifies setup for new users — any MQTT device publishing to any topic is automatically discovered. The previous selective subscription required users to know their topic structure upfront and manually configure the filter. The tradeoff is slightly higher message throughput on busy brokers, but for a local-first Raspberry Pi deployment this is negligible.
 
 
 ## Dashboard Features
@@ -1115,6 +1235,7 @@ The React dashboard provides a comprehensive developer-focused interface with a 
 - **Layout Persistence** — Dashboard layout (tabs + panes) is persisted to SQLite via `GET/PUT /api/layout`, with debounced auto-save (2s). Only custom (unpinned) tabs are persisted — pinned tabs are hardcoded
 
 ### Dashboard Tab (pinned)
+- **Welcome Screen** — Shown when no devices exist. Three animated onboarding cards: Enable Simulator (starts the device simulator), Connect Devices (navigates to Connectors tab), Write Automations (navigates to create a custom tab). Uses framer-motion animations and Aeolus branding. Also shown in DeviceGrid when the device list is empty
 - **Device Grid** — Cards grouped by room (parsed from MQTT topic), collapsible sections, click to open detail modal
 - **Device Detail Modal** — Full state view, capabilities, toggle/brightness controls, last seen timestamp
 - **Sensor Panel** — Live sensor values with sparkline SVG charts showing last 20 readings
@@ -1142,7 +1263,7 @@ Self-contained one-pane-one-automation component with a 3-mode state machine. Ea
 
 **Setup Mode** (no ruleId yet):
 - Name input and trigger topic input
-- Monaco code editor with the default template showing all available globals (`devices`, `mqtt`, `log`, `context`, `services`, `http`, `automation`)
+- Monaco code editor with the default template showing all available globals (`devices`, `mqtt`, `log`, `context`, `services`, `http`, `automation`, `state`)
 - Collapsible snippet picker panel (toggle via "Snippets" button) — shows categorized code templates from platform and connectors, click to insert at cursor
 - Save button creates the rule via `POST /api/automations` and transitions to status mode
 - Transpilation errors displayed inline in the editor and in an error summary panel
@@ -1153,11 +1274,15 @@ Self-contained one-pane-one-automation component with a 3-mode state machine. Ea
 - "Fire Now" button (Zap icon) — directly executes the rule via `POST /api/automations/:id/fire`, bypassing topic matching
 - Last fired timestamp (polls every 10 seconds)
 - Visual: FlowDiagram for structured automations (using `automation()` helper), ActivityFeed for free-form scripts
+- Custom UI component rendering: if `CUSTOM_COMPONENTS[ruleId]` exists in the auto-generated registry, renders the custom component inside a `CustomComponentBoundary` error boundary with full `CustomComponentProps` (devices, state, stateSet, deviceAction, mqttPublish, executionHistory)
+- "Rebuild frontend to activate" banner: shown when `uiSource` exists on the rule but the compiled component is not yet in the registry (frontend rebuild needed)
 
 **Editing Mode** (entered via Edit button):
 - Pre-filled name, topic, and script source
-- Logic / UI tabs (UI tab is experimental placeholder)
-- Save updates the rule via `PUT /api/automations/:id` and returns to status mode
+- Logic / UI tabs — Logic tab contains the Monaco script editor; UI tab contains the UiEditor (Monaco with TSX language support) for writing custom React components
+- UiEditor fetches type definitions from `GET /api/automations/ui-types` for IntelliSense on `CustomComponentProps`, React hooks, and JSX
+- UI component snippets available in the snippet picker under the "UI Components" category (device status card, toggle button, execution history)
+- Save updates the rule via `PUT /api/automations/:id` (including `uiSource` if present) and returns to status mode
 - Cancel returns to status mode without saving
 
 **Pane Lifecycle:**
@@ -1199,7 +1324,7 @@ Configurable button that fires an API trigger event via `POST /api/services/trig
 A React component wrapping `@monaco-editor/react` with Aeolus theming and sandbox API IntelliSense.
 
 - Fetches type definitions from `GET /api/automations/types` on mount
-- Registers types via `monaco.languages.typescript.typescriptDefaults.addExtraLib()` for IntelliSense on `devices`, `mqtt`, `log`, `context`, `services`, `http`, and `automation`
+- Registers types via `monaco.languages.typescript.typescriptDefaults.addExtraLib()` for IntelliSense on `devices`, `mqtt`, `log`, `context`, `services`, `http`, `automation`, and `state`
 - Custom `aeolus-dark` Monaco theme mapping Aeolus brand colours to token types:
   - Keywords (`if`, `const`, `await`): `#3BA4FF` (Aeolus Blue)
   - Strings: `#5CE1E6` (Wind Cyan)
@@ -1214,6 +1339,18 @@ A React component wrapping `@monaco-editor/react` with Aeolus theming and sandbo
 - Ctrl+S / Cmd+S keyboard shortcut to save
 - Accepts `onChange`, `onSave`, `initialValue`, and `errors` props
 
+#### Monaco UI Editor (`frontend/src/components/UiEditor.tsx`)
+
+A React component wrapping `@monaco-editor/react` for editing custom automation UI components in TSX.
+
+- Fetches type definitions from `GET /api/automations/ui-types` on mount
+- Registers types for `CustomComponentProps`, React hooks (`useState`, `useEffect`, `useCallback`, `useMemo`, `useRef`), and JSX intrinsic elements
+- Uses the same `aeolus-dark` Monaco theme as the ScriptEditor
+- TSX language mode with full IntelliSense for component props
+- Ctrl+S / Cmd+S keyboard shortcut to save
+- Accepts `onChange`, `onSave`, `initialValue`, and `onEditorReady` props
+- `onEditorReady` exposes an `insertText` API for the snippet picker to insert code at cursor
+
 ### System Tab (pinned)
 - **Host Info** — Hostname, platform, architecture, Node.js version, uptime
 - **CPU** — Model, core count, 1m/5m/15m load averages
@@ -1223,6 +1360,7 @@ A React component wrapping `@monaco-editor/react` with Aeolus theming and sandbo
 - **Network** — Interface names and IP addresses
 - **Application Logs** — Collapsible log viewer section with level filter dropdown (all/error/warn/info/debug), auto-refresh toggle (10-second interval), colour-coded entries by level, and manual refresh button. Fetches from `GET /api/system/logs`
 - **Self-Update Button** — "Update & Restart" button that triggers `POST /api/system/update` with a confirmation dialog. Shows status message and instructs user to refresh after ~60 seconds
+- **Rebuild Frontend Button** — "Rebuild Frontend" button that triggers `POST /api/system/rebuild-frontend` for recompiling custom UI components. Shows rebuild status (idle/rebuilding/ready) with a "Refresh Now" button that appends a cache-busting `?_t=timestamp` query parameter
 
 ### Custom Tabs (unpinned)
 Custom tabs use the modular pane grid powered by `react-grid-layout`. Users create tabs from the sidebar, then add any combination of panes via the PanePicker.
@@ -1271,6 +1409,10 @@ Custom tabs use the modular pane grid powered by `react-grid-layout`. Users crea
 | PATCH | `/api/automations/:id/toggle` | Enable/disable a rule |
 | GET | `/api/automations/types` | Serve sandbox type definition bundle as text/plain |
 | GET | `/api/automations/snippets` | Code snippet catalog (platform + connector snippets) |
+| GET | `/api/automations/ui-types` | Serve custom UI component type definition bundle as text/plain |
+| GET | `/api/automations/:id/state` | Get all key-value state pairs for an automation rule |
+| PUT | `/api/automations/:id/state` | Set a key-value pair in the automation state store |
+| DELETE | `/api/automations/:id/state/:key` | Delete a single key from the automation state store |
 | POST | `/api/automations/:id/fire` | Manually fire a specific automation rule (bypasses topic matching) |
 | GET | `/api/automations/history` | Execution log entries (optional limit param) |
 | POST | `/api/mqtt/publish` | Publish MQTT message `{ topic, payload }` |
@@ -1300,6 +1442,8 @@ Custom tabs use the modular pane grid powered by `react-grid-layout`. Users crea
 | GET | `/api/system` | Host system diagnostics (CPU, memory, disk, temp) |
 | GET | `/api/system/logs` | Recent application log entries (count, level filter) |
 | POST | `/api/system/update` | Trigger self-update (git pull + docker compose rebuild) |
+| POST | `/api/system/rebuild-frontend` | Trigger frontend-only rebuild (docker compose up --build frontend) |
+| GET | `/api/system/rebuild-status` | Frontend rebuild status (idle/rebuilding/ready) |
 
 ## Device Simulator
 
@@ -1320,7 +1464,7 @@ Enable via `SIMULATOR=true` env var (auto-starts on boot) or toggle from the sid
 ---
 
 **Last Updated:** April 26, 2026
-**Version:** 0.10.0
+**Version:** 0.11.0
 **Status:** MVP Development
 
 ## Future Enhancements
