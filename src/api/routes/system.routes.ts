@@ -15,13 +15,19 @@ let readyTimeout: NodeJS.Timeout | null = null;
 function startRebuildTracking(): void {
   stopRebuildTracking();
   rebuildStatus = "rebuilding";
-  let wasDown = false;
+  let seenDown = false;
+  let graceElapsed = false;
+
+  // Give Docker 8 seconds to start tearing down the old container.
+  // After the grace period, if the frontend responds it means the new
+  // container is up (or the old one never went down — rolling replace).
+  setTimeout(() => { graceElapsed = true; }, 8000);
 
   pollInterval = setInterval(async () => {
     try {
       await fetch("http://localhost:3000");
-      // Frontend responded — if it was previously down, it's now ready
-      if (wasDown) {
+      // Frontend responded
+      if (seenDown || graceElapsed) {
         rebuildStatus = "ready";
         if (pollInterval) {
           clearInterval(pollInterval);
@@ -35,7 +41,7 @@ function startRebuildTracking(): void {
       }
     } catch {
       // Frontend not responding — container is down/rebuilding
-      wasDown = true;
+      seenDown = true;
     }
   }, 2000);
 }
