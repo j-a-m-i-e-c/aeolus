@@ -2,6 +2,7 @@
 
 import { useDeviceStore } from "../store/device-store";
 import { DeviceCard } from "./DeviceCard";
+import { WelcomeScreen } from "./WelcomeScreen";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { useState } from "react";
 
@@ -27,12 +28,7 @@ export function DeviceGrid({ onSelectDevice }: DeviceGridProps) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
   if (deviceList.length === 0) {
-    return (
-      <div className="text-center py-12 text-[#6B7785]">
-        <p className="text-lg">No devices found</p>
-        <p className="text-sm mt-1">Connect devices via MQTT or configure an integration</p>
-      </div>
-    );
+    return <WelcomeScreen />;
   }
 
   const rooms = groupByRoom(devices);

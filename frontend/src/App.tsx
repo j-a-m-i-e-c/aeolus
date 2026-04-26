@@ -1,7 +1,7 @@
 // frontend/src/App.tsx — Main application component with client-side routing
 
 import { useEffect, useState } from "react";
-import { Routes, Route, Navigate, useParams, useNavigate } from "react-router-dom";
+import { Routes, Route, Navigate, useParams } from "react-router-dom";
 import { Layout } from "./components/Layout";
 import { DeviceGrid } from "./components/DeviceGrid";
 import { SensorPanel } from "./components/SensorPanel";
@@ -13,10 +13,10 @@ import { EventLog } from "./components/EventLog";
 import { TopicTree } from "./components/TopicTree";
 import { ToastContainer } from "./components/ToastContainer";
 import { CommandPalette } from "./components/CommandPalette";
-import { AutomationsPage } from "./components/AutomationsPage";
 import { ConnectorsPage } from "./components/ConnectorsPage";
 import { SystemPage } from "./components/SystemPage";
 import { TabLayout } from "./components/TabLayout";
+import { WelcomeScreen } from "./components/WelcomeScreen";
 import { AnimatePresence } from "framer-motion";
 import { connectWebSocket, disconnectWebSocket } from "./lib/ws-client";
 import { fetchDevices } from "./lib/api-client";
@@ -29,6 +29,13 @@ import type { Device } from "./store/device-store";
 // ---------------------------------------------------------------------------
 
 function DashboardPage({ onSelectDevice }: { onSelectDevice: (id: string) => void }) {
+  const devices = useDeviceStore((s) => s.devices);
+  const hasDevices = Object.keys(devices).length > 0;
+
+  if (!hasDevices) {
+    return <WelcomeScreen />;
+  }
+
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-bold text-[#E6EDF3]">Dashboard</h1>
