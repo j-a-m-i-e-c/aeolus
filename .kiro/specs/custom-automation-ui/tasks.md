@@ -93,26 +93,26 @@ This plan implements the custom automation UI feature in a backend-first order: 
     - Generate whitespace-only strings, verify no files are created; if a file previously existed, verify it is deleted
     - **Validates: Requirements 10.5**
 
-- [-] 6. Modify automation API to handle uiSource and file writes
-  - [~] 6.1 Update POST /api/automations to accept `uiSource`
+- [x] 6. Modify automation API to handle uiSource and file writes
+  - [x] 6.1 Update POST /api/automations to accept `uiSource`
     - Accept optional `uiSource` field in request body
     - Store in `ui_source` column on INSERT
     - If `uiSource` is non-empty, call `customUiManager.writeComponent(id, uiSource)` (skip if manager not available)
     - If `uiSource` is empty/whitespace, skip file write
     - _Requirements: 10.1, 10.5, 4.1, 4.2_
-  - [~] 6.2 Update PUT /api/automations/:id to accept `uiSource`
+  - [x] 6.2 Update PUT /api/automations/:id to accept `uiSource`
     - Accept optional `uiSource` field in request body
     - Update `ui_source` column
     - If `uiSource` is non-empty, call `customUiManager.writeComponent(id, uiSource)`
     - If `uiSource` is empty/cleared, call `customUiManager.deleteComponent(id)` and set `ui_source` to NULL
     - _Requirements: 10.2, 4.1, 4.4_
-  - [~] 6.3 Update GET /api/automations to return `uiSource`
+  - [x] 6.3 Update GET /api/automations to return `uiSource`
     - Include `uiSource` field in the response for each rule that has a non-null `ui_source` column
     - _Requirements: 10.3_
-  - [~] 6.4 Update DELETE /api/automations/:id to clean up files
+  - [x] 6.4 Update DELETE /api/automations/:id to clean up files
     - If the deleted rule has a non-empty `ui_source`, call `customUiManager.deleteComponent(id)`
     - _Requirements: 10.4, 12.1, 12.2, 12.3_
-  - [~] 6.5 Instantiate CustomUiManager in `src/index.ts` and pass to routes
+  - [x] 6.5 Instantiate CustomUiManager in `src/index.ts` and pass to routes
     - Create `const customUiManager = new CustomUiManager(process.env.AEOLUS_PROJECT_DIR || "/aeolus-host")`
     - Pass to `createAutomationRoutes()`
     - _Requirements: 4.5_
@@ -121,23 +121,23 @@ This plan implements the custom automation UI feature in a backend-first order: 
     - Generate random non-empty TSX strings, create/update via API (mock DB), retrieve via GET, verify exact match
     - **Validates: Requirements 4.1, 10.1, 10.2, 10.3, 14.2**
 
-- [ ] 7. Checkpoint — Ensure all tests pass
+- [x] 7. Checkpoint — Ensure all tests pass
   - Ensure all tests pass, ask the user if questions arise.
 
-- [ ] 8. Add rebuild frontend endpoint and status tracker
-  - [~] 8.1 Add rebuild status state machine to `src/api/routes/system.routes.ts`
+- [x] 8. Add rebuild frontend endpoint and status tracker
+  - [x] 8.1 Add rebuild status state machine to `src/api/routes/system.routes.ts`
     - Add module-level `rebuildStatus: "idle" | "rebuilding" | "ready"` state
     - Add `pollInterval` and `readyTimeout` timer references
     - Implement `startRebuildTracking()` — poll `http://localhost:3000` every 2s; when response succeeds after being down, transition to `ready`; set 30s auto-reset timeout back to `idle`
     - Implement `stopRebuildTracking()` — clear intervals and timeouts
     - _Requirements: 13.1, 13.3, 13.4, 13.5_
-  - [~] 8.2 Add `POST /api/system/rebuild-frontend` endpoint
+  - [x] 8.2 Add `POST /api/system/rebuild-frontend` endpoint
     - Check `AEOLUS_PROJECT_DIR` exists, return 400 if not
     - Spawn `docker compose up -d --build frontend` in background (detached, stdio ignore)
     - Set `rebuildStatus = "rebuilding"` and call `startRebuildTracking()`
     - Return `{ success: true, message: "Frontend rebuild started" }`
     - _Requirements: 7.1, 7.2, 7.3, 7.4_
-  - [~] 8.3 Add `GET /api/system/rebuild-status` endpoint
+  - [x] 8.3 Add `GET /api/system/rebuild-status` endpoint
     - Return `{ status: rebuildStatus }`
     - _Requirements: 13.2_
   - [ ]* 8.4 Write property test for rebuild status state machine
@@ -145,7 +145,7 @@ This plan implements the custom automation UI feature in a backend-first order: 
     - Generate random sequences of health check results, drive the state machine, verify correct transitions (idle→rebuilding→ready→idle)
     - **Validates: Requirements 13.1, 13.3, 13.4, 13.5**
 
-- [ ] 9. Add UI types endpoint
+- [-] 9. Add UI types endpoint
   - [~] 9.1 Add `GET /api/automations/ui-types` endpoint
     - Create a `ui-types.d.ts` file in `src/automations/` with `CustomComponentProps`, `ExecutionEntry`, React.FC, useState, useEffect, useCallback type declarations
     - Serve it as `text/plain` from the new endpoint, similar to the existing `/api/automations/types` endpoint

@@ -73,6 +73,22 @@ export function createAutomationRoutes(
     }
   });
 
+  /** GET /api/automations/ui-types — serve custom UI component type definitions as text/plain */
+  router.get("/ui-types", (_req, res, next) => {
+    try {
+      // Resolve ui-types.d.ts relative to sandbox-types.d.ts (same directory)
+      const uiTypesPath = sandboxTypesPath.replace("sandbox-types.d.ts", "ui-types.d.ts");
+      if (!fs.existsSync(uiTypesPath)) {
+        res.status(500).json({ error: "UI type definitions not available", statusCode: 500 });
+        return;
+      }
+      const content = fs.readFileSync(uiTypesPath, "utf-8");
+      res.type("text/plain").send(content);
+    } catch (err) {
+      next(err);
+    }
+  });
+
   /** GET /api/automations/history — return execution log entries */
   router.get("/history", (req, res) => {
     const limit = req.query.limit !== undefined ? Number(req.query.limit) : undefined;
