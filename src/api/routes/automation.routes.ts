@@ -15,6 +15,8 @@ import { buildSnippetCatalog } from "../../automations/snippet-catalog.js";
 import type { ConnectorRegistry } from "../../connectors/connector-registry.js";
 import { BadRequestError, NotFoundError } from "../middleware/error-handler.js";
 import { persistDatabase } from "../../db/database.js";
+import { eventBus, AUTOMATION_STATE_CHANGE } from "../../core/event-bus.js";
+import type { AutomationStateStore } from "../../automations/automation-state-store.js";
 import logger from "../../logger.js";
 
 interface StoredRule {
@@ -43,6 +45,7 @@ export function createAutomationRoutes(
   executionLog: ExecutionLog,
   sandboxTypesPath: string,
   connectorRegistry?: ConnectorRegistry,
+  stateStore?: AutomationStateStore,
 ): Router {
   const router = Router();
 
@@ -313,6 +316,9 @@ export function createAutomationRoutes(
       if (!existing) {
         throw new NotFoundError(`Automation rule ${id} not found`);
       }
+      if (stateStore) {
+        stateStore.deleteAll(id);
+      }
       db.run("DELETE FROM automation_rules WHERE id = ?", [id]);
       persistDatabase();
       engine.unregister(id);
@@ -382,6 +388,46 @@ export function createAutomationRoutes(
 
       logger.info({ ruleId: id, ruleName: rule.name }, "Automation rule manually fired");
       res.json({ success: true, ruleId: id });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  /** GET /api/automations/:id/state — return all state key-value pairs for a rule */
+  router.get("/:id/state", (req, res) => {
+    const id = req.params.id as string;
+    const state = stateStore ? stateStore.getAll(id) : {};
+    res.json(state);
+  });
+
+  /** PUT /api/automations/:id/state — upsert a key-value pair, persist + broadcast */
+  router.put("/:id/state", (req, res, next) => {
+    try {
+      const id = req.params.id as string;
+      const { key, value } = req.body;
+      if (!key || typeof key !== "string") {
+        throw new BadRequestError("key is required and must be a string");
+      }
+      if (!stateStore) {
+        throw new BadRequestError("State store not available");
+      }
+      stateStore.set(id, key, value);
+      eventBus.emit(AUTOMATION_STATE_CHANGE, { ruleId: id, key, value });
+      res.json({ success: true });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  /** DELETE /api/automations/:id/state/:key — remove a single key-value pair */
+  router.delete("/:id/state/:key", (req, res, next) => {
+    try {
+      const id = req.params.id as string;
+      const key = req.params.key as string;
+      if (stateStore) {
+        stateStore.delete(id, key);
+      }
+      res.json({ success: true });
     } catch (err) {
       next(err);
     }

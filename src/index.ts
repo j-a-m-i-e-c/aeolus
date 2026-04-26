@@ -7,7 +7,7 @@ import path from "node:path";
 import { config } from "./config.js";
 import logger from "./logger.js";
 import { getDatabase, persistDatabase } from "./db/database.js";
-import { eventBus, DEVICE_STATE_CHANGE } from "./core/event-bus.js";
+import { eventBus, DEVICE_STATE_CHANGE, AUTOMATION_STATE_CHANGE } from "./core/event-bus.js";
 import { DeviceRegistry } from "./core/device-registry.js";
 import { MqttService } from "./mqtt/mqtt-service.js";
 import { AutomationEngine } from "./automations/automation-engine.js";
@@ -99,7 +99,9 @@ async function main(): Promise<void> {
   const executionLog = new ExecutionLog();
   const stateStore = new AutomationStateStore(db);
   stateStore.loadFromDb();
-  const sandbox = new Sandbox({ actionExecutor, deviceRegistry: registry, serviceManager, stateStore, onStateChange: undefined });
+  const sandbox = new Sandbox({ actionExecutor, deviceRegistry: registry, serviceManager, stateStore, onStateChange: (ruleId, key, value) => {
+    eventBus.emit(AUTOMATION_STATE_CHANGE, { ruleId, key, value });
+  } });
 
   // 7. Automation Engine (with sandbox, action executor, and execution log)
   const engine = new AutomationEngine(eventBus, { sandbox, actionExecutor, executionLog });
@@ -137,7 +139,7 @@ async function main(): Promise<void> {
   app.use("/api/health", createHealthRoutes(mqttService, registry, engine, startTime));
   app.use("/api/mqtt", createMqttRoutes(mqttService));
   const sandboxTypesPath = path.resolve(import.meta.dirname, "automations/sandbox-types.d.ts");
-  app.use("/api/automations", createAutomationRoutes(engine, db, registry, actionExecutor, executionLog, sandboxTypesPath, connectorRegistry));
+  app.use("/api/automations", createAutomationRoutes(engine, db, registry, actionExecutor, executionLog, sandboxTypesPath, connectorRegistry, stateStore));
   app.use("/api/simulator", createSimulatorRoutes(simulator));
   app.use("/api/connectors", createConnectorRoutes(connectorManager, connectorRegistry));
   app.use("/api/services", createServiceRoutes(serviceManager, serviceRegistry));

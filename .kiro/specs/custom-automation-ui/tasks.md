@@ -27,8 +27,8 @@ This plan implements the custom automation UI feature in a backend-first order: 
     - Generate random sets of key-value pairs for a rule, call `deleteAll(ruleId)`, verify `getAll(ruleId)` returns empty object and SQLite table has no rows for that rule
     - **Validates: Requirements 17.5**
 
-- [-] 2. Wire state sandbox global into isolated-vm
-  - [~] 2.1 Add state references to `src/automations/sandbox.ts`
+- [x] 2. Wire state sandbox global into isolated-vm
+  - [x] 2.1 Add state references to `src/automations/sandbox.ts`
     - Add `AutomationStateStore` to `SandboxDeps` interface
     - Add `ruleId` parameter to the `execute()` method signature (or extract from existing context)
     - Create `setStateRefs(jail, ruleId)` method that sets `__stateGetRef`, `__stateSetRef`, `__stateGetAllRef`, `__stateDeleteRef` as `ivm.Reference` callbacks
@@ -37,22 +37,22 @@ This plan implements the custom automation UI feature in a backend-first order: 
     - The `getAll` callback should call `stateStore.getAll(ruleId)` and return via `ExternalCopy`
     - The `delete` callback should call `stateStore.delete(ruleId, key)`
     - _Requirements: 15.1, 15.2, 15.3, 15.4, 15.5_
-  - [~] 2.2 Update bootstrap script in `sandbox.ts`
+  - [x] 2.2 Update bootstrap script in `sandbox.ts`
     - Add `globalThis.state = { get, set, getAll, delete }` wiring using the `__state*Ref` temporaries
     - Clean up the temporary globals in the bootstrap cleanup section
     - _Requirements: 15.1_
-  - [~] 2.3 Update `src/automations/sandbox-types.d.ts`
+  - [x] 2.3 Update `src/automations/sandbox-types.d.ts`
     - Add `declare const state` with JSDoc for `get(key)`, `set(key, value)`, `getAll()`, `delete(key)` methods
     - _Requirements: 15.9_
-  - [~] 2.4 Instantiate AutomationStateStore in `src/index.ts` and pass to Sandbox
+  - [x] 2.4 Instantiate AutomationStateStore in `src/index.ts` and pass to Sandbox
     - Create `const stateStore = new AutomationStateStore(db); stateStore.loadFromDb();`
     - Pass `stateStore` to the `Sandbox` constructor via `SandboxDeps`
     - _Requirements: 17.6_
 
-- [ ] 3. Checkpoint — Ensure all tests pass
+- [x] 3. Checkpoint — Ensure all tests pass
   - Ensure all tests pass, ask the user if questions arise.
 
-- [ ] 4. Add state API endpoints and WebSocket broadcast
+- [-] 4. Add state API endpoints and WebSocket broadcast
   - [~] 4.1 Add state routes to `src/api/routes/automation.routes.ts`
     - Accept `AutomationStateStore` as a parameter in `createAutomationRoutes()`
     - `GET /api/automations/:id/state` — return `stateStore.getAll(id)` as JSON object

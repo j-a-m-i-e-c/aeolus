@@ -5,7 +5,7 @@ import type { Server } from "node:http";
 import type { EventEmitter } from "node:events";
 import type { DeviceRegistry } from "../core/device-registry.js";
 import type { Device } from "../core/types.js";
-import { WS_STATE_CHANGE, MQTT_RAW_MESSAGE, AUTOMATION_FIRED } from "../core/event-bus.js";
+import { WS_STATE_CHANGE, MQTT_RAW_MESSAGE, AUTOMATION_FIRED, AUTOMATION_STATE_CHANGE } from "../core/event-bus.js";
 import logger from "../logger.js";
 
 export class WsServer {
@@ -51,6 +51,11 @@ export class WsServer {
     // Broadcast automation fired events
     eventBus.on(AUTOMATION_FIRED, (data: { ruleId: string; ruleName: string; topic: string; deviceId: string; timestamp: number }) => {
       this.broadcast({ type: "automation-fired", data });
+    });
+
+    // Broadcast automation state changes
+    eventBus.on(AUTOMATION_STATE_CHANGE, (data: { ruleId: string; key: string; value: unknown }) => {
+      this.broadcast({ type: "automation-state", data });
     });
   }
 
