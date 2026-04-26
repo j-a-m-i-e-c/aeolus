@@ -1,6 +1,7 @@
 // frontend/src/lib/ws-client.ts — WebSocket client with auto-reconnect
 
 import { useDeviceStore } from "../store/device-store";
+import { useAutomationStateStore } from "../store/automation-state-store";
 
 const WS_URL = import.meta.env.VITE_WS_URL || `ws://${window.location.hostname}:3001/ws`;
 const RECONNECT_DELAY = 3000;
@@ -34,6 +35,9 @@ export function connectWebSocket(): void {
         useDeviceStore.getState().addMqttMessage(msg.data);
       } else if (msg.type === "automation-fired") {
         useDeviceStore.getState().addAutomationEvent(msg.data);
+      } else if (msg.type === "automation-state") {
+        const { ruleId, key, value } = msg.data;
+        useAutomationStateStore.getState().setRuleState(ruleId, key, value);
       }
     } catch {
       // Ignore malformed messages

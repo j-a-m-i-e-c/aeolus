@@ -12,12 +12,21 @@ import {
   RotateCcw,
   Zap,
   Blocks,
+  Hammer,
+  CheckCircle,
+  RefreshCw,
 } from "lucide-react";
 import { ScriptEditor, type TranspileError } from "../ScriptEditor";
+import { UiEditor } from "../UiEditor";
 import { FlowDiagram } from "../FlowDiagram";
 import { ActivityFeed } from "../ActivityFeed";
 import { SnippetPicker } from "../SnippetPicker";
+import { CustomComponentBoundary } from "../CustomComponentBoundary";
+import { CUSTOM_COMPONENTS } from "./custom/index";
+import type { ExecutionEntry } from "./custom/types";
 import { useDashboardStore } from "../../store/dashboard-store";
+import { useDeviceStore } from "../../store/device-store";
+import { useAutomationStateStore, sendStateUpdate } from "../../store/automation-state-store";
 import type { PaneConfig } from "../../types/dashboard";
 
 const API_URL =
@@ -33,6 +42,7 @@ interface AutomationRule {
   ruleType: string;
   enabled: boolean;
   scriptSource?: string;
+  uiSource?: string;
   structured?: {
     trigger: string;
     conditions: string[];
@@ -69,10 +79,51 @@ automation({
   ],
   actions: [
     function logEvent(ctx) {
-      log.info(\`Triggered on \${ctx.topic}: \${JSON.stringify(ctx.state)}\`);
+      log.info(\\\`Triggered on \\\${ctx.topic}: \\\${JSON.stringify(ctx.state)}\\\`);
     },
   ],
 });
+`;
+
+const DEFAULT_UI_TEMPLATE = `// Custom Automation UI Component
+// ─────────────────────────────────────────────────────
+// This component renders in the automation pane's status mode.
+// It receives live data from the Aeolus runtime as props.
+//
+// Available props:
+//   props.devices        — All devices from the registry (live via WebSocket)
+//   props.ruleId         — This automation's unique ID
+//   props.ruleName       — This automation's display name
+//   props.lastFired      — Unix timestamp of last execution (or null)
+//   props.enabled        — Whether this automation is enabled
+//   props.deviceAction   — Trigger a device action: (deviceId, actionType, params?) => Promise
+//   props.mqttPublish    — Publish MQTT message: (topic, payload) => void
+//   props.executionHistory — Last 10 execution log entries
+//   props.state          — Live key-value state from the automation script
+//   props.stateSet       — Write state back: (key, value) => void
+
+import type { CustomComponentProps } from "./custom/types";
+
+export default function AutomationUI(props: CustomComponentProps) {
+  return (
+    <div className="p-4 space-y-3">
+      <div className="text-sm font-semibold text-[#E6EDF3]">
+        {props.ruleName}
+      </div>
+      <div className="text-xs text-[#9AA6B2]">
+        {props.enabled ? "✅ Enabled" : "⏸ Disabled"}
+        {props.lastFired && (
+          <span className="ml-2">
+            Last fired: {new Date(props.lastFired).toLocaleTimeString()}
+          </span>
+        )}
+      </div>
+      <div className="text-xs text-[#6B7785]">
+        {props.devices.length} devices registered
+      </div>
+    </div>
+  );
+}
 `;
 
 export function AutomationPane({ config, paneId }: Props) {
@@ -86,6 +137,7 @@ export function AutomationPane({ config, paneId }: Props) {
   const [name, setName] = useState("");
   const [triggerTopic, setTriggerTopic] = useState("");
   const [scriptSource, setScriptSource] = useState(DEFAULT_SCRIPT);
+  const [uiSource, setUiSource] = useState("");
   const [errors, setErrors] = useState<TranspileError[]>([]);
   const [saving, setSaving] = useState(false);
 
@@ -97,6 +149,8 @@ export function AutomationPane({ config, paneId }: Props) {
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [firing, setFiring] = useState(false);
+  const [customFallback, setCustomFallback] = useState(false);
+  const [executionHistory, setExecutionHistory] = useState<ExecutionEntry[]>([]);
 
   // Track ruleId changes to switch modes
   useEffect(() => {
@@ -113,6 +167,18 @@ export function AutomationPane({ config, paneId }: Props) {
   // Snippet panel state
   const [showSnippets, setShowSnippets] = useState(false);
   const editorApiRef = useRef<{ insertText: (text: string) => void } | null>(null);
+  const uiEditorApiRef = useRef<{ insertText: (text: string) => void } | null>(null);
+
+  // Rebuild status state
+  const [rebuilding, setRebuilding] = useState(false);
+  const [rebuildStatus, setRebuildStatus] = useState<"idle" | "rebuilding" | "ready">("idle");
+  const [rebuildStartTime, setRebuildStartTime] = useState<number | null>(null);
+  const rebuildPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Device store for custom component props
+  const devices = useDeviceStore((s) => s.devices);
+  const ruleState = useAutomationStateStore((s) => s.stateByRule[ruleId] || {});
+  const initRuleState = useAutomationStateStore((s) => s.initRuleState);
 
   // ── Fetch rule data for status mode ──
   const fetchRule = useCallback(async () => {
@@ -154,12 +220,43 @@ export function AutomationPane({ config, paneId }: Props) {
     }
   }, [ruleId]);
 
+  // Fetch execution history for custom component
+  const fetchExecutionHistory = useCallback(async () => {
+    if (!ruleId) return;
+    try {
+      const res = await fetch(
+        `${API_URL}/api/automations/history?ruleId=${ruleId}&limit=10`,
+      );
+      if (!res.ok) return;
+      const entries: ExecutionEntry[] = await res.json();
+      setExecutionHistory(entries);
+    } catch {
+      // Non-critical
+    }
+  }, [ruleId]);
+
+  // Fetch initial state snapshot for status mode (15.6)
+  const fetchInitialState = useCallback(async () => {
+    if (!ruleId) return;
+    try {
+      const res = await fetch(`${API_URL}/api/automations/${ruleId}/state`);
+      if (!res.ok) return;
+      const state: Record<string, unknown> = await res.json();
+      initRuleState(ruleId, state);
+    } catch {
+      // Non-critical
+    }
+  }, [ruleId, initRuleState]);
+
   useEffect(() => {
     if (mode === "status" && ruleId) {
       fetchRule();
       fetchLastFired();
+      fetchExecutionHistory();
+      fetchInitialState();
+      setCustomFallback(false);
     }
-  }, [mode, ruleId, fetchRule, fetchLastFired]);
+  }, [mode, ruleId, fetchRule, fetchLastFired, fetchExecutionHistory, fetchInitialState]);
 
   // Poll for last fired updates every 10s in status mode
   useEffect(() => {
@@ -181,7 +278,7 @@ export function AutomationPane({ config, paneId }: Props) {
     return () => clearInterval(interval);
   }, [mode, ruleId]);
 
-  // ── Save handler (setup mode) ──
+  // ── Save handler (setup mode) — includes uiSource (15.4) ──
   const handleSave = useCallback(async () => {
     if (!name.trim() || !triggerTopic.trim() || saving) return;
     setSaving(true);
@@ -195,6 +292,7 @@ export function AutomationPane({ config, paneId }: Props) {
           triggerTopic: triggerTopic.trim(),
           ruleType: "script",
           scriptSource,
+          uiSource: uiSource || undefined,
         }),
       });
       const data = await res.json();
@@ -213,9 +311,9 @@ export function AutomationPane({ config, paneId }: Props) {
     } finally {
       setSaving(false);
     }
-  }, [name, triggerTopic, scriptSource, saving, paneId, config, updatePaneConfig]);
+  }, [name, triggerTopic, scriptSource, uiSource, saving, paneId, config, updatePaneConfig]);
 
-  // ── Update handler (editing mode) ──
+  // ── Update handler (editing mode) — includes uiSource (15.4) ──
   const handleUpdate = useCallback(async () => {
     if (!name.trim() || !triggerTopic.trim() || saving || !ruleId) return;
     setSaving(true);
@@ -228,6 +326,7 @@ export function AutomationPane({ config, paneId }: Props) {
           name: name.trim(),
           triggerTopic: triggerTopic.trim(),
           scriptSource,
+          uiSource: uiSource || undefined,
         }),
       });
       const data = await res.json();
@@ -245,7 +344,7 @@ export function AutomationPane({ config, paneId }: Props) {
     } finally {
       setSaving(false);
     }
-  }, [name, triggerTopic, scriptSource, saving, ruleId, fetchRule]);
+  }, [name, triggerTopic, scriptSource, uiSource, saving, ruleId, fetchRule]);
 
   // ── Toggle handler ──
   const handleToggle = useCallback(async () => {
@@ -288,12 +387,13 @@ export function AutomationPane({ config, paneId }: Props) {
     setTimeout(() => setFiring(false), 600);
   }, [rule, firing]);
 
-  // ── Enter editing mode ──
+  // ── Enter editing mode — populate uiSource from rule (15.4) ──
   const handleEdit = useCallback(() => {
     if (!rule) return;
     setName(rule.name);
     setTriggerTopic(rule.topic);
     setScriptSource(rule.scriptSource || DEFAULT_SCRIPT);
+    setUiSource(rule.uiSource || "");
     setErrors([]);
     setMode("editing");
   }, [rule]);
@@ -308,18 +408,98 @@ export function AutomationPane({ config, paneId }: Props) {
     setName("");
     setTriggerTopic("");
     setScriptSource(DEFAULT_SCRIPT);
+    setUiSource("");
     setErrors([]);
   }, [paneId, config, updatePaneConfig]);
 
   const saveDisabled = !name.trim() || !triggerTopic.trim() || saving;
 
-  // Ctrl+S handler for ScriptEditor
+  // Ctrl+S handler for editors
   const handleEditorSave = useCallback(
     (_value: string) => {
       if (mode === "setup") handleSave();
       else if (mode === "editing") handleUpdate();
     },
     [mode, handleSave, handleUpdate],
+  );
+
+  // ── Rebuild Frontend (15.7) ──
+  const handleRebuild = useCallback(async () => {
+    if (rebuilding) return;
+    setRebuilding(true);
+    setRebuildStatus("rebuilding");
+    setRebuildStartTime(Date.now());
+    try {
+      await fetch(`${API_URL}/api/system/rebuild-frontend`, { method: "POST" });
+    } catch {
+      // Still track status via polling
+    }
+    // Start polling rebuild status
+    if (rebuildPollRef.current) clearInterval(rebuildPollRef.current);
+    rebuildPollRef.current = setInterval(async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/system/rebuild-status`);
+        if (!res.ok) return;
+        const data = await res.json();
+        setRebuildStatus(data.status);
+        if (data.status === "ready" || data.status === "idle") {
+          if (rebuildPollRef.current) {
+            clearInterval(rebuildPollRef.current);
+            rebuildPollRef.current = null;
+          }
+          if (data.status === "ready") {
+            setRebuilding(false);
+          }
+          if (data.status === "idle") {
+            setRebuilding(false);
+            setRebuildStatus("idle");
+          }
+        }
+      } catch {
+        // Keep polling
+      }
+    }, 3000);
+  }, [rebuilding]);
+
+  // Cleanup rebuild polling on unmount
+  useEffect(() => {
+    return () => {
+      if (rebuildPollRef.current) {
+        clearInterval(rebuildPollRef.current);
+      }
+    };
+  }, []);
+
+  const rebuildElapsed = rebuildStartTime ? (Date.now() - rebuildStartTime) / 1000 : 0;
+
+  // Device action helper for custom components
+  const deviceAction = useCallback(
+    async (deviceId: string, actionType: string, params?: Record<string, unknown>) => {
+      await fetch(`${API_URL}/api/devices/${deviceId}/action`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: actionType, params }),
+      });
+    },
+    [],
+  );
+
+  // MQTT publish helper for custom components
+  const mqttPublish = useCallback((topic: string, payload: string) => {
+    fetch(`${API_URL}/api/mqtt/publish`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ topic, payload }),
+    }).catch(() => {});
+  }, []);
+
+  // Convert plain object state to Map for custom component props
+  const stateMap = new Map(Object.entries(ruleState));
+
+  // stateSet helper bound to current ruleId
+  const stateSet = useCallback(
+    (key: string, value: unknown) => sendStateUpdate(ruleId, key, value),
+    [ruleId],
   );
 
   // ═══════════════════════════════════════════════════════════════════
@@ -372,6 +552,12 @@ export function AutomationPane({ config, paneId }: Props) {
     }
 
     if (!rule) return null;
+
+    // Check for custom component (15.5)
+    const CustomComponent = CUSTOM_COMPONENTS[ruleId];
+    const hasUiSource = !!rule.uiSource;
+    const showCustom = hasUiSource && CustomComponent && !customFallback;
+    const showRebuildBanner = hasUiSource && !CustomComponent && !customFallback;
 
     return (
       <div className="h-full flex flex-col p-4 gap-3 overflow-auto">
@@ -426,9 +612,34 @@ export function AutomationPane({ config, paneId }: Props) {
           </div>
         </div>
 
-        {/* Visual: FlowDiagram or ActivityFeed */}
+        {/* Rebuild banner (15.5) */}
+        {showRebuildBanner && (
+          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#F59E0B]/10 border border-[#F59E0B]/30">
+            <AlertTriangle size={14} className="text-[#F59E0B] shrink-0" />
+            <span className="text-xs text-[#F59E0B]">
+              Custom UI saved — rebuild frontend to activate
+            </span>
+          </div>
+        )}
+
+        {/* Visual: Custom component, FlowDiagram, or ActivityFeed */}
         <div className="flex-1 min-h-0 overflow-auto">
-          {rule.structured ? (
+          {showCustom ? (
+            <CustomComponentBoundary onFallback={() => setCustomFallback(true)}>
+              <CustomComponent
+                devices={Object.values(devices)}
+                ruleId={ruleId}
+                ruleName={rule.name}
+                lastFired={lastFired}
+                enabled={rule.enabled}
+                deviceAction={deviceAction}
+                mqttPublish={mqttPublish}
+                executionHistory={executionHistory}
+                state={stateMap}
+                stateSet={stateSet}
+              />
+            </CustomComponentBoundary>
+          ) : rule.structured ? (
             <FlowDiagram
               trigger={rule.structured.trigger}
               conditions={rule.structured.conditions}
@@ -444,6 +655,9 @@ export function AutomationPane({ config, paneId }: Props) {
 
   // ── Setup Mode / Editing Mode ──
   const isEditing = mode === "editing";
+
+  // Populate default UI template if uiSource is empty
+  const effectiveUiSource = uiSource || DEFAULT_UI_TEMPLATE;
 
   return (
     <div className="h-full flex flex-col p-4 gap-3">
@@ -465,40 +679,35 @@ export function AutomationPane({ config, paneId }: Props) {
         className="w-full px-3 py-2 text-sm rounded-lg bg-[#0B0F14] border border-[#2A3441] text-[#E6EDF3] placeholder-[#6B7785] focus:outline-none focus:border-primary transition-colors font-mono"
       />
 
-      {/* Editing tabs (Logic / UI) — only in editing mode */}
-      {isEditing && (
-        <div className="flex items-center gap-1 border-b border-[#2A3441]">
-          <button
-            onClick={() => setEditingTab("logic")}
-            className={`px-3 py-1.5 text-xs font-medium rounded-t-lg transition-colors ${
-              editingTab === "logic"
-                ? "text-[#E6EDF3] border-b-2 border-primary"
-                : "text-[#6B7785] hover:text-[#9AA6B2]"
-            }`}
-          >
-            Logic
-          </button>
-          <button
-            onClick={() => setEditingTab("ui")}
-            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-t-lg transition-colors ${
-              editingTab === "ui"
-                ? "text-[#E6EDF3] border-b-2 border-primary"
-                : "text-[#6B7785] hover:text-[#9AA6B2]"
-            }`}
-          >
-            UI
-            <span className="px-1.5 py-0.5 text-[9px] font-semibold rounded bg-[#F59E0B]/15 text-[#F59E0B] border border-[#F59E0B]/30">
-              Experimental
-            </span>
-          </button>
-        </div>
-      )}
+      {/* Tab bar — visible in BOTH setup and editing modes (15.1) */}
+      <div className="flex items-center gap-1 border-b border-[#2A3441]">
+        <button
+          onClick={() => setEditingTab("logic")}
+          className={`px-3 py-1.5 text-xs font-medium rounded-t-lg transition-colors ${
+            editingTab === "logic"
+              ? "text-[#E6EDF3] border-b-2 border-primary"
+              : "text-[#6B7785] hover:text-[#9AA6B2]"
+          }`}
+        >
+          Logic
+        </button>
+        <button
+          onClick={() => setEditingTab("ui")}
+          className={`px-3 py-1.5 text-xs font-medium rounded-t-lg transition-colors ${
+            editingTab === "ui"
+              ? "text-[#E6EDF3] border-b-2 border-primary"
+              : "text-[#6B7785] hover:text-[#9AA6B2]"
+          }`}
+        >
+          UI
+        </button>
+      </div>
 
-      {/* Script editor + snippet panel — fills remaining space */}
+      {/* Editor + snippet panel — fills remaining space */}
       <div className="flex-1 min-h-0 flex gap-2">
         {/* Editor */}
         <div className="flex-1 min-w-0">
-          {(!isEditing || editingTab === "logic") ? (
+          {editingTab === "logic" ? (
             <ScriptEditor
               initialValue={scriptSource}
               onChange={setScriptSource}
@@ -507,22 +716,23 @@ export function AutomationPane({ config, paneId }: Props) {
               onEditorReady={(api) => { editorApiRef.current = api; }}
             />
           ) : (
-            <div className="h-full flex flex-col items-center justify-center gap-2 text-center">
-              <div className="text-sm text-[#6B7785]">Custom UI — coming soon</div>
-              <span className="px-2 py-0.5 text-[10px] font-semibold rounded bg-[#F59E0B]/15 text-[#F59E0B] border border-[#F59E0B]/30">
-                Experimental
-              </span>
-            </div>
+            <UiEditor
+              initialValue={effectiveUiSource}
+              onChange={(val) => setUiSource(val)}
+              onSave={handleEditorSave}
+              onEditorReady={(api) => { uiEditorApiRef.current = api; }}
+            />
           )}
         </div>
 
-        {/* Snippet panel — collapsible */}
-        {showSnippets && (!isEditing || editingTab === "logic") && (
+        {/* Snippet panel — collapsible, available in both tabs */}
+        {showSnippets && (
           <div className="w-56 shrink-0 rounded-xl border border-[#2A3441] bg-[#121821] overflow-hidden">
             <SnippetPicker
               onInsert={(code) => {
-                if (editorApiRef.current) {
-                  editorApiRef.current.insertText(code);
+                const ref = editingTab === "logic" ? editorApiRef.current : uiEditorApiRef.current;
+                if (ref) {
+                  ref.insertText(code);
                 }
               }}
             />
@@ -544,6 +754,32 @@ export function AutomationPane({ config, paneId }: Props) {
         </div>
       )}
 
+      {/* Rebuild status indicator (15.7) */}
+      {rebuildStatus === "rebuilding" && (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#3BA4FF]/10 border border-[#3BA4FF]/30">
+          <Loader2 size={14} className="animate-spin text-[#3BA4FF] shrink-0" />
+          <span className="text-xs text-[#3BA4FF]">Rebuilding…</span>
+          {rebuildElapsed > 120 && (
+            <span className="text-xs text-[#F59E0B] ml-2">
+              Taking longer than expected — check system logs
+            </span>
+          )}
+        </div>
+      )}
+      {rebuildStatus === "ready" && (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#22C55E]/10 border border-[#22C55E]/30">
+          <CheckCircle size={14} className="text-[#22C55E] shrink-0" />
+          <span className="text-xs text-[#22C55E]">Rebuild complete</span>
+          <button
+            onClick={() => window.location.reload()}
+            className="flex items-center gap-1 ml-auto px-2 py-1 text-[10px] font-medium rounded bg-[#22C55E]/20 text-[#22C55E] border border-[#22C55E]/30 hover:bg-[#22C55E]/30 transition-colors"
+          >
+            <RefreshCw size={10} />
+            Refresh Now
+          </button>
+        </div>
+      )}
+
       {/* Action buttons */}
       <div className="flex items-center gap-2 shrink-0">
         <button
@@ -559,17 +795,27 @@ export function AutomationPane({ config, paneId }: Props) {
           Save
         </button>
 
-        {(!isEditing || editingTab === "logic") && (
+        <button
+          onClick={() => setShowSnippets((v) => !v)}
+          className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-lg border transition-colors ${
+            showSnippets
+              ? "bg-primary/20 text-primary border-primary/30"
+              : "text-[#9AA6B2] hover:text-[#E6EDF3] hover:bg-elevated/50 border-[#2A3441]"
+          }`}
+        >
+          <Blocks size={12} />
+          Snippets
+        </button>
+
+        {/* Rebuild Frontend button — shown on UI tab (15.7) */}
+        {editingTab === "ui" && (
           <button
-            onClick={() => setShowSnippets((v) => !v)}
-            className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-lg border transition-colors ${
-              showSnippets
-                ? "bg-primary/20 text-primary border-primary/30"
-                : "text-[#9AA6B2] hover:text-[#E6EDF3] hover:bg-elevated/50 border-[#2A3441]"
-            }`}
+            onClick={handleRebuild}
+            disabled={rebuilding}
+            className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-lg border transition-colors text-[#F59E0B] hover:text-[#E6EDF3] border-[#F59E0B]/30 hover:bg-[#F59E0B]/15 disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            <Blocks size={12} />
-            Snippets
+            <Hammer size={12} />
+            Rebuild Frontend
           </button>
         )}
 

@@ -145,24 +145,24 @@ This plan implements the custom automation UI feature in a backend-first order: 
     - Generate random sequences of health check results, drive the state machine, verify correct transitions (idle→rebuilding→ready→idle)
     - **Validates: Requirements 13.1, 13.3, 13.4, 13.5**
 
-- [-] 9. Add UI types endpoint
-  - [~] 9.1 Add `GET /api/automations/ui-types` endpoint
+- [x] 9. Add UI types endpoint
+  - [x] 9.1 Add `GET /api/automations/ui-types` endpoint
     - Create a `ui-types.d.ts` file in `src/automations/` with `CustomComponentProps`, `ExecutionEntry`, React.FC, useState, useEffect, useCallback type declarations
     - Serve it as `text/plain` from the new endpoint, similar to the existing `/api/automations/types` endpoint
     - _Requirements: 11.1, 11.2, 11.3_
 
-- [ ] 10. Create custom component types file and empty registry scaffold
-  - [~] 10.1 Create `frontend/src/components/panes/custom/types.ts`
+- [x] 10. Create custom component types file and empty registry scaffold
+  - [x] 10.1 Create `frontend/src/components/panes/custom/types.ts`
     - Define `ExecutionEntry` and `CustomComponentProps` interfaces as specified in the design
     - Include `state: Map<string, unknown>` and `stateSet: (key: string, value: unknown) => void` fields
     - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 3.10_
-  - [~] 10.2 Create `frontend/src/components/panes/custom/index.ts`
+  - [x] 10.2 Create `frontend/src/components/panes/custom/index.ts`
     - Create the empty registry scaffold with auto-generated header comment
     - Export `CUSTOM_COMPONENTS: Record<string, ComponentType<CustomComponentProps>> = {}`
     - _Requirements: 5.1, 5.2, 5.3, 5.5_
 
-- [ ] 11. Implement UiEditor component
-  - [~] 11.1 Create `frontend/src/components/UiEditor.tsx`
+- [x] 11. Implement UiEditor component
+  - [x] 11.1 Create `frontend/src/components/UiEditor.tsx`
     - Wrap Monaco editor with language `typescriptreact`
     - Reuse `aeolus-dark` theme definition from ScriptEditor (extract to shared util or duplicate)
     - Load type definitions from `GET /api/automations/ui-types` and register with Monaco TS language service
@@ -170,8 +170,8 @@ This plan implements the custom automation UI feature in a backend-first order: 
     - Use same Monaco options as ScriptEditor: JetBrains Mono 13px, no minimap, word wrap, bracket pair colorization, automatic layout
     - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5_
 
-- [ ] 12. Implement CustomComponentBoundary error boundary
-  - [~] 12.1 Create `frontend/src/components/CustomComponentBoundary.tsx`
+- [x] 12. Implement CustomComponentBoundary error boundary
+  - [x] 12.1 Create `frontend/src/components/CustomComponentBoundary.tsx`
     - React class component implementing `componentDidCatch` and `getDerivedStateFromError`
     - State: `{ hasError: boolean, error: Error | null }`
     - Props: `{ children: React.ReactNode, onFallback: () => void }`
@@ -179,10 +179,10 @@ This plan implements the custom automation UI feature in a backend-first order: 
     - Use Aeolus design system colors (red for error, standard text colors)
     - _Requirements: 6.4, 6.5_
 
-- [ ] 13. Checkpoint — Ensure all tests pass
+- [x] 13. Checkpoint — Ensure all tests pass
   - Ensure all tests pass, ask the user if questions arise.
 
-- [ ] 14. Create frontend automation state store
+- [-] 14. Create frontend automation state store
   - [~] 14.1 Create `frontend/src/store/automation-state-store.ts`
     - Zustand store with `stateByRule: Map<string, Map<string, unknown>>`
     - Actions: `setRuleState(ruleId, key, value)` — merge into existing map, `initRuleState(ruleId, state)` — set full state from API, `clearRuleState(ruleId)`

@@ -229,6 +229,72 @@ automation({
     ],
   },
   {
+    category: "UI Components",
+    icon: "layout",
+    snippets: [
+      {
+        id: "ui-device-status-card",
+        name: "Device Status Card",
+        description: "Display a device's name, type, and current state",
+        code: `function DeviceStatusCard({ device }: { device: { id: string; name: string; type: string; state: Record<string, unknown> } }) {
+  return (
+    <div className="p-3 rounded-lg bg-[#0B0F14] border border-[#2A3441]">
+      <div className="text-xs font-semibold text-[#E6EDF3]">{device.name}</div>
+      <div className="text-[10px] text-[#6B7785] mt-1">{device.type}</div>
+      <div className="text-[10px] text-[#9AA6B2] mt-1 font-mono">
+        {JSON.stringify(device.state, null, 2)}
+      </div>
+    </div>
+  );
+}`,
+      },
+      {
+        id: "ui-toggle-button",
+        name: "Toggle Button",
+        description: "Button that calls props.deviceAction to toggle a device",
+        code: `function ToggleButton({ deviceId, label, deviceAction }: {
+  deviceId: string;
+  label: string;
+  deviceAction: (id: string, action: string) => Promise<void>;
+}) {
+  return (
+    <button
+      onClick={() => deviceAction(deviceId, "toggle")}
+      className="px-3 py-1.5 text-xs font-medium rounded-lg bg-[#3BA4FF]/20 text-[#3BA4FF] border border-[#3BA4FF]/30 hover:bg-[#3BA4FF]/30 transition-colors"
+    >
+      {label}
+    </button>
+  );
+}`,
+      },
+      {
+        id: "ui-execution-history",
+        name: "Execution History",
+        description: "Render execution history entries with timestamps and status",
+        code: `function ExecutionHistoryList({ entries }: { entries: Array<{ id: string; timestamp: number; actions: Array<{ type: string; target: string; success: boolean }> }> }) {
+  if (entries.length === 0) return <div className="text-xs text-[#6B7785]">No executions yet</div>;
+  return (
+    <div className="space-y-1">
+      {entries.map((entry) => (
+        <div key={entry.id} className="flex items-center gap-2 px-2 py-1 rounded bg-[#0B0F14] border border-[#2A3441]">
+          <span className="text-[10px] text-[#6B7785]">
+            {new Date(entry.timestamp).toLocaleTimeString()}
+          </span>
+          <span className="text-[10px]">
+            {entry.actions.every((a) => a.success) ? "✅" : "❌"}
+          </span>
+          <span className="text-[10px] text-[#9AA6B2] truncate">
+            {entry.actions.map((a) => a.type).join(", ")}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}`,
+      },
+    ],
+  },
+  {
     category: "Templates",
     icon: "file-code",
     snippets: [

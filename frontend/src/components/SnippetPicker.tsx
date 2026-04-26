@@ -15,6 +15,7 @@ import {
   FileCode,
   Lightbulb,
   Plug,
+  LayoutDashboard,
 } from "lucide-react";
 
 const API_URL =
@@ -47,6 +48,7 @@ const ICON_MAP: Record<string, typeof Radio> = {
   "file-code": FileCode,
   lightbulb: Lightbulb,
   plug: Plug,
+  layout: LayoutDashboard,
 };
 
 function CategoryIcon({ name }: { name: string }) {
