@@ -30,7 +30,7 @@ services:
       NODE_ENV: ${NODE_ENV:-development}
       PORT: ${API_PORT:-3001}
       MQTT_BROKER_URL: mqtt://localhost:1883
-      MQTT_TOPICS: ${MQTT_TOPICS:-sensor/#,switch/#,motion/#,light/#}
+      MQTT_TOPICS: "${MQTT_TOPICS:-#}"
       DB_PATH: /app/data/aeolus.db
       LOG_LEVEL: ${LOG_LEVEL:-info}
       AEOLUS_PROJECT_DIR: /aeolus-host
