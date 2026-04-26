@@ -30,42 +30,44 @@ export function DeviceCard({ device, onClick }: DeviceCardProps) {
     }
   };
 
+  // Pick the primary display value
+  const primaryValue = device.state.value ?? device.state.brightness ?? device.state.on;
+  const primaryLabel = device.state.value !== undefined ? "value"
+    : device.state.brightness !== undefined ? "brightness"
+    : device.state.on !== undefined ? "on" : null;
+
   return (
     <motion.div
-      className="bg-surface border border-[#2A3441] rounded-xl p-4 flex flex-col gap-3 cursor-pointer"
-      whileHover={{ y: -2, boxShadow: "0 4px 20px rgba(59, 164, 255, 0.08)" }}
+      className="bg-surface border border-[#2A3441] rounded-xl p-3 flex flex-col gap-2 cursor-pointer"
+      whileHover={{ y: -1, boxShadow: "0 4px 20px rgba(59, 164, 255, 0.08)" }}
       transition={{ duration: 0.2, ease: "easeOut" }}
       onClick={onClick}
     >
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Icon
-            size={18}
-            className={isOn ? "text-primary" : "text-[#6B7785]"}
-          />
-          <span className="text-sm font-medium text-[#E6EDF3]">{device.name}</span>
-        </div>
-        <span className="text-[10px] uppercase tracking-wider text-[#6B7785]">
+      <div className="flex items-center gap-2">
+        <Icon
+          size={16}
+          className={isOn ? "text-primary" : "text-[#6B7785]"}
+        />
+        <span className="text-xs font-medium text-[#E6EDF3] truncate flex-1">{device.name}</span>
+        <span className="text-[9px] uppercase tracking-wider text-[#6B7785] shrink-0">
           {device.type}
         </span>
       </div>
 
-      {/* State values */}
-      <div className="flex flex-wrap gap-2">
-        {Object.entries(device.state).map(([key, value]) => (
-          <div key={key} className="text-xs">
-            <span className="text-[#6B7785]">{key}: </span>
-            <span className="font-mono text-[#9AA6B2]">{String(value)}</span>
-          </div>
-        ))}
-      </div>
+      {/* Primary value */}
+      {primaryLabel && (
+        <div className="text-lg font-mono font-semibold text-[#E6EDF3]">
+          {String(primaryValue)}
+          {primaryLabel === "brightness" && <span className="text-xs text-[#6B7785] ml-1">bri</span>}
+        </div>
+      )}
 
       {/* Toggle control */}
       {showToggle && (
         <button
           onClick={(e) => { e.stopPropagation(); handleToggle(); }}
-          className={`mt-auto self-start px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 ${
+          className={`self-start px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all duration-200 ${
             isOn
               ? "bg-primary/20 text-primary border border-primary/30"
               : "bg-elevated text-[#6B7785] border border-[#2A3441] hover:text-[#9AA6B2]"

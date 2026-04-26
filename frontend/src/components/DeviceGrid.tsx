@@ -43,19 +43,19 @@ export function DeviceGrid({ onSelectDevice }: DeviceGridProps) {
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       {Array.from(rooms.entries()).map(([room, deviceIds]) => (
-        <div key={room} className="bg-surface border border-[#2A3441] rounded-xl overflow-hidden">
+        <div key={room}>
           <button
             onClick={() => toggleRoom(room)}
-            className="w-full flex items-center gap-2 px-4 py-3 text-sm font-semibold text-[#E6EDF3] hover:bg-elevated/50 transition-colors"
+            className="flex items-center gap-2 mb-3 text-xs font-semibold text-[#9AA6B2] uppercase tracking-wider hover:text-[#E6EDF3] transition-colors"
           >
-            {collapsed.has(room) ? <ChevronRight size={14} className="text-[#6B7785]" /> : <ChevronDown size={14} className="text-[#6B7785]" />}
+            {collapsed.has(room) ? <ChevronRight size={12} className="text-[#6B7785]" /> : <ChevronDown size={12} className="text-[#6B7785]" />}
             {room}
-            <span className="text-[10px] text-[#6B7785] font-normal ml-1">({deviceIds.length})</span>
+            <span className="text-[10px] text-[#6B7785] font-normal">({deviceIds.length})</span>
           </button>
           {!collapsed.has(room) && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 p-3 pt-0">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
               {deviceIds.map((id) => {
                 const device = devices[id];
                 return device ? (
