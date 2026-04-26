@@ -770,7 +770,10 @@ export function AutomationPane({ config, paneId }: Props) {
           <CheckCircle size={14} className="text-[#22C55E] shrink-0" />
           <span className="text-xs text-[#22C55E]">Rebuild complete</span>
           <button
-            onClick={() => window.location.reload()}
+            onClick={() => {
+              // Cache-busting reload — append timestamp to force fresh index.html
+              window.location.href = window.location.pathname + "?_t=" + Date.now();
+            }}
             className="flex items-center gap-1 ml-auto px-2 py-1 text-[10px] font-medium rounded bg-[#22C55E]/20 text-[#22C55E] border border-[#22C55E]/30 hover:bg-[#22C55E]/30 transition-colors"
           >
             <RefreshCw size={10} />
