@@ -95,6 +95,14 @@ function initSchema(database: Database): void {
       updated_at INTEGER NOT NULL
     );
   `);
+  database.run(`
+    CREATE TABLE IF NOT EXISTS automation_state (
+      rule_id TEXT NOT NULL,
+      key TEXT NOT NULL,
+      value TEXT NOT NULL,
+      PRIMARY KEY (rule_id, key)
+    );
+  `);
 }
 
 function saveToFile(database: Database): void {
