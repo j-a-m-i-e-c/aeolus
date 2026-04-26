@@ -1,104 +1,98 @@
-# 🌬️ Aeolus
+<p align="center">
+  <img src="logo.png" alt="Aeolus" width="120" />
+</p>
 
-A local-first, developer-centric IoT automation platform. Aeolus unifies communication between microcontrollers, smart home devices, and external APIs through a clean, event-driven architecture.
+<h3 align="center">Local-first IoT automation for developers who'd rather write code than tap apps.</h3>
 
-> "All devices communicate through the wind."
+<p align="center">
+  <img src="https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white" />
+  <img src="https://img.shields.io/badge/React-61DAFB?logo=react&logoColor=black" />
+  <img src="https://img.shields.io/badge/MQTT-660066?logo=eclipsemosquitto&logoColor=white" />
+  <img src="https://img.shields.io/badge/Docker-2496ED?logo=docker&logoColor=white" />
+  <img src="https://img.shields.io/badge/SQLite-003B57?logo=sqlite&logoColor=white" />
+  <img src="https://img.shields.io/badge/Raspberry_Pi-C51A4A?logo=raspberrypi&logoColor=white" />
+  <img src="https://img.shields.io/badge/License-MIT-22C55E" />
+</p>
 
-## What It Does
+---
 
-- Ingests MQTT messages from IoT devices and sensors
-- Maintains a persistent device registry with real-time state (SQLite)
-- Executes automations using a TypeScript DSL (`when/if/then`) or the dashboard editor
-- Exposes a REST API and WebSocket server for device control
-- Provides a modular React dashboard with dynamic tabs, configurable panes, device monitoring, MQTT inspector, automation editor, and system diagnostics
-- Pluggable connector framework — add new device integrations (Philips Hue, TP-Link Kasa, etc.) without modifying core code
-- Application log viewer and one-click self-update from the System page
-- Runs on Raspberry Pi with one-line Docker install and auto-start on boot
-- Built-in device simulator for development without hardware
+## What is Aeolus?
 
-## Tech Stack
+Aeolus is a self-hosted IoT platform that talks to your devices over MQTT and lets you automate them with a TypeScript DSL. It ships with a modular React dashboard, pluggable connectors for Philips Hue and TP-Link Kasa, and runs on a Raspberry Pi with one command. No cloud, no subscriptions — just your LAN.
 
-**Backend:** Express.js · TypeScript · SQLite (sql.js) · MQTT (mqtt.js) · WebSocket (ws) · pino
+<!-- screenshot: dashboard -->
 
-**Frontend:** React · Vite · Zustand · Tailwind CSS · Lucide icons · Framer Motion
+## Features
 
-**Infrastructure:** Docker Compose · Eclipse Mosquitto · Node.js 20
+- 🌐 **MQTT-first** — ingest messages from any device that speaks MQTT
+- ⚡ **TypeScript automations** — `when/if/then` DSL or visual editor in the dashboard
+- 🎛️ **Modular dashboard** — drag-and-drop tabs & panes, MQTT inspector, topic tree, event log
+- 💡 **Philips Hue** — toggle, brightness, colour picker with presets
+- 🔌 **TP-Link Kasa** — smart plugs with energy monitoring
+- 🧩 **Connector framework** — add new integrations without touching core code
+- 🍓 **Raspberry Pi ready** — one-line install, auto-start on boot
+- 🧪 **Built-in simulator** — demo the platform without any hardware
+- 🔒 **Local-first** — everything stays on your network
+
+<!-- screenshot: automations -->
 
 ## Quick Start
-
-### Prerequisites
-
-- Node.js 20+
-- Docker (for Mosquitto MQTT broker)
-
-### 1. Clone and install
 
 ```bash
 git clone https://github.com/j-a-m-i-e-c/aeolus.git
 cd aeolus
-npm install
-cd frontend && npm install && cd ..
-```
-
-### 2. Configure environment
-
-```bash
-cp .env.example .env
-# Defaults work for local dev — edit if needed
-```
-
-### 3. Start with Docker Compose (recommended)
-
-```bash
 docker compose up
 ```
 
-This starts Mosquitto (port 1883), the backend (port 3001), and the frontend (port 3000).
+Open **http://localhost:3000** — that's it. No `npm install`, no `.env` setup. Defaults just work.
 
-### 4. Or start services individually
+<!-- screenshot: quick-start -->
 
-```bash
-# Start Mosquitto
-docker run -d --name aeolus-mosquitto -p 1883:1883 \
-  -v "$(pwd)/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf" \
-  eclipse-mosquitto:2
-
-# Start backend
-npx tsx src/index.ts
-
-# Start frontend
-cd frontend && npm run dev
-```
-
-### 5. Open the dashboard
-
-Visit http://localhost:3000
-
-### 6. Test with MQTT messages
+## Raspberry Pi
 
 ```bash
-docker exec aeolus-mosquitto mosquitto_pub -t "sensor/kitchen/temp" -m "22.5"
-docker exec aeolus-mosquitto mosquitto_pub -t "switch/bedroom" -m '{"on":true}'
-docker exec aeolus-mosquitto mosquitto_pub -t "light/living-room" -m '{"on":true,"brightness":200}'
+curl -sSL https://raw.githubusercontent.com/j-a-m-i-e-c/aeolus/main/scripts/setup-pi.sh | bash
 ```
 
-Or use the built-in simulator — toggle it from the sidebar or set `SIMULATOR=true` in `.env`.
+Installs Docker, clones Aeolus, builds containers, starts everything. Auto-starts on boot.
 
 ## Dashboard
 
-The dashboard uses a modular tab-and-pane layout. On a fresh install, the sidebar shows 4 pinned system tabs: Dashboard, Automations, Connectors, and System. No custom tabs or panes are created by default — users add their own via the sidebar and PanePicker. Layout is persisted to SQLite automatically.
+See the dashboard in action — create custom tabs, add panes, control devices, inspect MQTT traffic, and manage automations all from one place.
 
-**Dashboard** — Device grid grouped by room, sensor panel with sparkline charts, MQTT inspector with publish form, topic tree, event log, system health, and command palette (Ctrl+K).
+<!-- screenshot: device-grid -->
+<!-- screenshot: mqtt-inspector -->
+<!-- screenshot: connectors -->
 
-**Automations** — Create automation rules with a when/if/then form editor, live DSL preview, enable/disable/delete rules, toggle visibility of code-based rules.
+## Automation DSL
 
-**Connectors** — Manage device integrations from the dashboard. View available connector types, enable/disable connectors with dynamic config forms, monitor health status (connected/degraded/disconnected), and run a generic setup wizard for connectors that require pairing (e.g. Hue bridge). The wizard fetches steps from the backend — no hardcoded flows in the frontend.
+```typescript
+import { when } from "./src/automations/dsl.js";
 
-**System** — Host diagnostics including CPU load, temperature, memory, disk, and network interfaces. Collapsible application log viewer with level filtering and auto-refresh. One-click "Update & Restart" button for self-update via git pull + Docker rebuild.
+export default when("sensor/+/light")
+  .if((ctx) => {
+    const lux = ctx.state.value as number;
+    const hour = new Date(ctx.timestamp).getHours();
+    return typeof lux === "number" && lux < 200 && hour >= 16 && hour < 23;
+  })
+  .then((ctx) => {
+    console.log(`[Evening Mode] Low light: ${ctx.state.value} lux — activating evening mode`);
+  }, "Smart Evening Mode");
+```
 
-**Custom Tabs** — Create your own tabs with a name and icon, then add any combination of panes: device grid, sensor panel, MQTT inspector, Hue light control (toggle, brightness slider, colour picker with 10 presets), Kasa device control (toggle, energy monitoring stats), automation rules, system stats, topic tree, event log, or connectors.
+Drop `.ts` files in `automations/` — they're loaded on startup. Or create rules from the dashboard editor.
 
-## API Endpoints
+## Architecture
+
+| Layer | Tech |
+|-------|------|
+| Backend | Express · TypeScript · SQLite (sql.js) · MQTT (mqtt.js) · WebSocket (ws) · pino |
+| Frontend | React · Vite · Zustand · Tailwind CSS · Lucide · Framer Motion |
+| Infra | Docker Compose · Eclipse Mosquitto · Node.js 20 |
+
+
+<details>
+<summary>📡 API Endpoints</summary>
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -121,114 +115,21 @@ The dashboard uses a modular tab-and-pane layout. On a fresh install, the sideba
 | PATCH | `/api/connectors/:id` | Update connector config |
 | DELETE | `/api/connectors/:id` | Disable a connector |
 | GET | `/api/connectors/:id/status` | Connector health status |
-| GET | `/api/connectors/:id/setup-steps` | Get setup step descriptors |
-| POST | `/api/connectors/:id/setup/:stepId` | Execute setup wizard step |
 | POST | `/api/connectors/:id/retry` | Retry connector connection |
 | GET | `/api/layout` | Get dashboard layout |
 | PUT | `/api/layout` | Save dashboard layout |
 | GET | `/api/system` | Host system diagnostics |
-| GET | `/api/system/logs` | Recent application log entries |
+| GET | `/api/system/logs` | Application log entries |
 | POST | `/api/system/update` | Trigger self-update + restart |
 | WS | `/ws` | Real-time state updates |
 
-## Automation DSL
-
-```typescript
-import { when } from "./src/automations/dsl.js";
-
-export default when("motion/living-room")
-  .if((ctx) => {
-    const hour = new Date(ctx.timestamp).getHours();
-    return hour >= 20 || hour < 6;
-  })
-  .then((ctx) => {
-    console.log("Motion detected at night — turning on light");
-  }, "Night motion → light on");
-```
-
-Place rule files in the `automations/` directory. They're loaded automatically on startup. Rules can also be created from the Automations page in the dashboard.
-
-## Connector Framework
-
-Aeolus uses a pluggable connector architecture for device integrations. Built-in connectors include Philips Hue (smart lighting) and TP-Link Kasa (smart plugs/switches). Connectors are managed entirely from the Connectors page in the dashboard — enable, configure, monitor health, and run a generic setup wizard that fetches its steps from the backend. No hardcoded setup flows in the frontend.
-
-### Adding a New Connector
-
-1. Copy `src/connectors/_template/` to `src/connectors/your-connector/`
-2. Implement the `Connector` interface and export `metadata`, `configSchema`, and `createConnector` from `index.ts`
-3. Register in `src/index.ts` or let auto-discovery find it
-
-See `src/connectors/README.md` for the full developer guide.
-
-## Philips Hue Integration
-
-Hue lights are managed through the Connectors page in the dashboard.
-
-1. Go to the Connectors tab in the sidebar
-2. Find "Philips Hue" in Available Connectors and click Enable
-3. The setup wizard launches automatically — discover bridges and press the link button to pair
-4. Once paired, Hue lights appear in the device grid and can be controlled via the Hue Control pane
-
-## Raspberry Pi Deployment
-
-### One-Line Install
-
-SSH into your Pi and run:
-
-```bash
-curl -sSL https://raw.githubusercontent.com/j-a-m-i-e-c/aeolus/main/scripts/setup-pi.sh | bash
-```
-
-This installs Docker, clones Aeolus, builds the containers, and starts everything. Aeolus auto-starts on boot via Docker's `restart: unless-stopped` policy.
-
-### Manual Setup
-
-```bash
-# Install Docker
-curl -fsSL https://get.docker.com | sh
-sudo usermod -aG docker $USER
-sudo systemctl enable docker
-
-# Clone and configure
-git clone https://github.com/j-a-m-i-e-c/aeolus.git
-cd aeolus
-cp .env.example .env
-
-# Build and start
-docker compose build
-docker compose up -d
-```
-
-### Access the Dashboard
-
-Open a browser on any device on the same network:
-
-```
-http://<pi-ip-address>:3000
-```
-
-### Management
-
-```bash
-docker compose logs -f        # View live logs
-docker compose restart        # Restart all services
-docker compose down           # Stop everything
-docker compose up -d --build  # Rebuild after updates
-```
-
-Or use the "Update & Restart" button on the System page to pull the latest code and rebuild from the dashboard.
-
-## Running Tests
-
-```bash
-npm test
-```
+</details>
 
 ## Documentation
 
-See `docs/COMPREHENSIVE_DOCUMENTATION.md` for full technical documentation including architecture, data models, WebSocket protocol, error handling, and design decisions.
+Full technical docs — architecture, data models, WebSocket protocol, connector development guide — live in [`docs/COMPREHENSIVE_DOCUMENTATION.md`](docs/COMPREHENSIVE_DOCUMENTATION.md).
 
-See `docs/ROADMAP.md` for the future development roadmap.
+Roadmap: [`docs/ROADMAP.md`](docs/ROADMAP.md)
 
 ## License
 
