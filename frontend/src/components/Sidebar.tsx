@@ -74,7 +74,6 @@ export function Sidebar() {
   const PINNED_ROUTES: Record<string, string> = {
     "default-dashboard": "/dashboard",
     "default-connectors": "/connectors",
-    "default-system": "/system",
   };
 
   const getTabRoute = (tab: { id: string; name: string; pinned: boolean }): string => {
@@ -119,7 +118,7 @@ export function Sidebar() {
   // ---- Add tab handlers ----
 
   const newTabSlug = tabNameToSlug(newTabName);
-  const RESERVED_SLUGS = new Set(["dashboard", "connectors", "system"]);
+  const RESERVED_SLUGS = new Set(["dashboard", "connectors"]);
   const existingSlugs = new Set(tabs.map((t) => tabNameToSlug(t.name)));
   const isNameTaken = !!newTabSlug && (existingSlugs.has(newTabSlug) || RESERVED_SLUGS.has(newTabSlug));
 

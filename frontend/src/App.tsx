@@ -35,6 +35,7 @@ function DashboardPage({ onSelectDevice }: { onSelectDevice: (id: string) => voi
     <div className="space-y-6">
       <SystemHealth />
       <DeviceGrid onSelectDevice={onSelectDevice} />
+      <SystemPage />
     </div>
   );
 }
@@ -108,7 +109,7 @@ export default function App() {
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
         <Route path="/dashboard" element={<DashboardPage onSelectDevice={setSelectedDeviceId} />} />
         <Route path="/connectors" element={<ConnectorsPage />} />
-        <Route path="/system" element={<SystemPage />} />
+        <Route path="/system" element={<Navigate to="/dashboard" replace />} />
         <Route path="/tab/:slug" element={<CustomTabPage />} />
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>

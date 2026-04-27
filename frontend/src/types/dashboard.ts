@@ -44,11 +44,10 @@ export interface LayoutPayload {
 
 const NOW = Date.now();
 
-/** Default tabs: 3 pinned system tabs */
+/** Default tabs: 2 pinned system tabs */
 export const DEFAULT_TABS: Tab[] = [
   { id: "default-dashboard",   name: "Dashboard",   icon: "cpu",       order: 0, pinned: true,  createdAt: NOW },
   { id: "default-connectors",  name: "Connectors",  icon: "plug",      order: 1, pinned: true,  createdAt: NOW },
-  { id: "default-system",      name: "System",      icon: "server",    order: 2, pinned: true,  createdAt: NOW },
 ];
 
 /** Default panes — empty, users add their own via PanePicker. */
