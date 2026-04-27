@@ -18,18 +18,20 @@
 
 ## What is Aeolus?
 
-Aeolus is a self-hosted IoT platform that talks to your devices over MQTT and lets you automate them with a TypeScript DSL. It ships with a modular React dashboard, pluggable connectors for Philips Hue and TP-Link Kasa, and runs on a Raspberry Pi with one command. No cloud, no subscriptions — just your LAN.
+Aeolus is a self-hosted IoT platform that talks to your devices over MQTT and lets you automate them with TypeScript. Write automation scripts in a Monaco editor with IntelliSense, build custom React dashboard components, and control Philips Hue and TP-Link Kasa devices — all running on a Raspberry Pi with one command. No cloud, no subscriptions — just your LAN.
 
 <!-- screenshot: dashboard -->
 
 ## Features
 
 - 🌐 **MQTT-first** — ingest messages from any device that speaks MQTT
-- ⚡ **TypeScript automations** — `when/if/then` DSL or visual editor in the dashboard
-- 🎛️ **Modular dashboard** — drag-and-drop tabs & panes, MQTT inspector, topic tree, event log
+- ⚡ **TypeScript automations** — write scripts in a Monaco editor with IntelliSense, flow diagrams, and code snippets
+- 🎨 **Custom UI components** — write React/TSX dashboard widgets for your automations
+- 🎛️ **Modular dashboard** — create custom tabs with drag-and-drop panes (MQTT inspector, device controls, automations, system stats)
 - 💡 **Philips Hue** — toggle, brightness, colour picker with presets
 - 🔌 **TP-Link Kasa** — smart plugs with energy monitoring
 - 🧩 **Connector framework** — add new integrations without touching core code
+- 🔗 **Automation state store** — per-rule key-value store for backend↔frontend communication via WebSocket
 - 🍓 **Raspberry Pi ready** — one-line install, auto-start on boot
 - 🧪 **Built-in simulator** — demo the platform without any hardware
 - 🔒 **Local-first** — everything stays on your network
@@ -58,29 +60,69 @@ Installs Docker, clones Aeolus, builds containers, starts everything. Auto-start
 
 ## Dashboard
 
-See the dashboard in action — create custom tabs, add panes, control devices, inspect MQTT traffic, and manage automations all from one place.
+Two pinned tabs — **System** (devices, health, diagnostics) and **Connectors** (manage integrations). Create custom tabs for your dashboards — add automation panes, MQTT inspectors, device controls, and more.
 
 <!-- screenshot: device-grid -->
 <!-- screenshot: mqtt-inspector -->
 <!-- screenshot: connectors -->
 
-## Automation DSL
+## Automations
+
+Each automation has two tabs: **Logic** (TypeScript that runs on the backend) and **UI** (React/TSX that renders in the dashboard).
+
+### Logic Tab — `automation()` helper
 
 ```typescript
-import { when } from "./src/automations/dsl.js";
-
-export default when("sensor/+/light")
-  .if((ctx) => {
-    const lux = ctx.state.value as number;
-    const hour = new Date(ctx.timestamp).getHours();
-    return typeof lux === "number" && lux < 200 && hour >= 16 && hour < 23;
-  })
-  .then((ctx) => {
-    console.log(`[Evening Mode] Low light: ${ctx.state.value} lux — activating evening mode`);
-  }, "Smart Evening Mode");
+// Runs in a secure V8 sandbox with access to devices, mqtt, http, state, and more
+automation({
+  conditions: [
+    function isLowLight(ctx) {
+      const lux = ctx.state.value as number;
+      return typeof lux === "number" && lux < 200;
+    },
+    function isEvening(ctx) {
+      const hour = new Date(ctx.timestamp).getHours();
+      return hour >= 16 && hour < 23;
+    },
+  ],
+  actions: [
+    function dimLights(ctx) {
+      const lights = devices.filter(d => d.integration === "hue");
+      for (const light of lights) {
+        devices.action(light.id, "brightness", { brightness: 60 });
+      }
+      state.set("mode", "evening");
+      log.info("Evening mode activated");
+    },
+  ],
+});
 ```
 
-Drop `.ts` files in `automations/` — they're loaded on startup. Or create rules from the dashboard editor.
+Named functions become labeled nodes in the flow diagram. The `state` global lets you share computed values with the UI tab.
+
+### UI Tab — Custom React Components
+
+```tsx
+// Renders in the automation pane's status mode after a frontend rebuild
+export default function EveningMode(props: CustomComponentProps) {
+  const mode = props.state.get("mode") as string;
+  return (
+    <div className="p-4 space-y-2">
+      <div className="text-lg font-bold text-[#E6EDF3]">
+        {mode === "evening" ? "🌙 Evening Mode" : "☀️ Day Mode"}
+      </div>
+      <button
+        onClick={() => props.deviceAction("hue-light-1", "toggle")}
+        className="px-3 py-1.5 rounded-lg bg-[#3BA4FF]/20 text-[#3BA4FF]"
+      >
+        Toggle Light
+      </button>
+    </div>
+  );
+}
+```
+
+Write TSX in the UI tab, save, click "Rebuild Frontend", and your component renders live in the dashboard pane.
 
 ## Architecture
 
@@ -121,6 +163,13 @@ Drop `.ts` files in `automations/` — they're loaded on startup. Or create rule
 | GET | `/api/system` | Host system diagnostics |
 | GET | `/api/system/logs` | Application log entries |
 | POST | `/api/system/update` | Trigger self-update + restart |
+| POST | `/api/system/rebuild-frontend` | Rebuild frontend (for custom UI components) |
+| GET | `/api/system/rebuild-status` | Frontend rebuild status (idle/rebuilding/ready) |
+| GET | `/api/automations/:id/state` | Get automation state key-value pairs |
+| PUT | `/api/automations/:id/state` | Set automation state key-value pair |
+| GET | `/api/automations/snippets` | Code snippet catalog |
+| GET | `/api/automations/ui-types` | Custom UI component type definitions |
+| POST | `/api/automations/:id/fire` | Manually fire an automation |
 | WS | `/ws` | Real-time state updates |
 
 </details>
