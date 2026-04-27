@@ -46,7 +46,7 @@ const NOW = Date.now();
 
 /** Default tabs: 2 pinned system tabs */
 export const DEFAULT_TABS: Tab[] = [
-  { id: "default-dashboard",   name: "Dashboard",   icon: "cpu",       order: 0, pinned: true,  createdAt: NOW },
+  { id: "default-dashboard",   name: "System",      icon: "server",    order: 0, pinned: true,  createdAt: NOW },
   { id: "default-connectors",  name: "Connectors",  icon: "plug",      order: 1, pinned: true,  createdAt: NOW },
 ];
 
