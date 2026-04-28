@@ -7,9 +7,10 @@ import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
 import { useDashboardStore } from "../store/dashboard-store";
 import { getPaneEntry } from "../lib/pane-registry";
-import { Settings, X, Plus } from "lucide-react";
+import { Settings, X, Plus, Zap } from "lucide-react";
 import { PanePicker } from "./PanePicker";
 import { PaneConfigPanel } from "./PaneConfigPanel";
+import { motion } from "framer-motion";
 
 const API_URL =
   (import.meta as any).env?.VITE_API_URL ||
@@ -30,6 +31,9 @@ export function TabLayout({ tabId }: TabLayoutProps) {
 
   // PaneConfigPanel state — tracks which pane is being configured
   const [configPaneId, setConfigPaneId] = useState<string | null>(null);
+
+  // Add pane helper
+  const addPane = useDashboardStore((s) => s.addPane);
 
   // Track container width for ResponsiveGridLayout
   const containerRef = useRef<HTMLDivElement>(null);
@@ -102,8 +106,20 @@ export function TabLayout({ tabId }: TabLayoutProps) {
 
   return (
     <div ref={containerRef} className="w-full">
-      {/* Header area with Add Pane button */}
-      <div className="flex items-center justify-end px-4 py-2">
+      {/* Header area with New Automation + Add Pane buttons */}
+      <div className="flex items-center justify-end gap-2 px-4 py-2">
+        <motion.button
+          whileHover={{ scale: 1.02 }}
+          whileTap={{ scale: 0.97 }}
+          onClick={() => addPane(tabId, "automation")}
+          className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold text-white border border-primary/40 transition-colors"
+          style={{
+            background: "linear-gradient(135deg, #3BA4FF, #5CE1E6)",
+          }}
+        >
+          <Zap size={13} />
+          New Automation
+        </motion.button>
         <button
           onClick={() => setShowPicker(true)}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-[#9AA6B2] hover:text-[#E6EDF3] hover:bg-elevated/50 border border-[#2A3441] transition-colors"
