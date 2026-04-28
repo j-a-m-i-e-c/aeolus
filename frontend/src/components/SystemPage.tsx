@@ -1,7 +1,10 @@
 // frontend/src/components/SystemPage.tsx — Host system diagnostics
 
 import { useState, useEffect, useCallback } from "react";
-import { Cpu, HardDrive, MemoryStick, Thermometer, Wifi, Server, RefreshCw, ScrollText, ChevronDown, Download, Loader2 } from "lucide-react";
+import { Cpu, HardDrive, MemoryStick, Thermometer, Wifi, Server, RefreshCw, ScrollText, ChevronDown, Download, Loader2, Activity, Zap } from "lucide-react";
+import { useDeviceStore } from "../store/device-store";
+import { fetchHealth } from "../lib/api-client";
+import type { HealthStatus } from "../store/device-store";
 
 const API_URL = (import.meta as any).env?.VITE_API_URL || `http://${window.location.hostname}:3001`;
 
@@ -50,6 +53,10 @@ export function SystemPage() {
   const [updating, setUpdating] = useState(false);
   const [updateMsg, setUpdateMsg] = useState("");
 
+  // Health polling (device count, rule count, uptime, MQTT status)
+  const health = useDeviceStore((s) => s.health);
+  const setHealth = useDeviceStore((s) => s.setHealth);
+
   const fetchInfo = useCallback(async () => {
     try {
       const res = await fetch(`${API_URL}/api/system`);
@@ -60,9 +67,22 @@ export function SystemPage() {
 
   useEffect(() => {
     fetchInfo();
-    const interval = setInterval(fetchInfo, 30000); // Refresh every 30s
+    const interval = setInterval(fetchInfo, 30000);
     return () => clearInterval(interval);
   }, [fetchInfo]);
+
+  // Poll health alongside system info
+  useEffect(() => {
+    const poll = async () => {
+      try {
+        const data = (await fetchHealth()) as unknown as HealthStatus;
+        setHealth(data);
+      } catch {}
+    };
+    poll();
+    const interval = setInterval(poll, 30000);
+    return () => clearInterval(interval);
+  }, [setHealth]);
 
   const triggerUpdate = async () => {
     if (!confirm("Pull latest code and rebuild? The system will restart and you'll need to refresh the page.")) return;
@@ -76,6 +96,12 @@ export function SystemPage() {
       setUpdateMsg("Failed to trigger update");
       setUpdating(false);
     }
+  };
+
+  const formatHealthUptime = (seconds: number) => {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    return h > 0 ? `${h}h ${m}m` : `${m}m`;
   };
 
   if (loading || !info) {
@@ -110,6 +136,42 @@ export function SystemPage() {
         <div className="bg-primary/10 border border-primary/20 rounded-xl px-4 py-3 text-sm text-primary">
           {updateMsg}
           {updating && <span className="text-[10px] text-[#6B7785] ml-2">Refresh the page in ~60 seconds</span>}
+        </div>
+      )}
+
+      {/* Health summary — device count, rule count, uptime, MQTT status */}
+      {health && (
+        <div className="bg-surface border border-[#2A3441] rounded-xl p-4">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <div className="flex items-center gap-2">
+              <Cpu size={14} className="text-primary" />
+              <div>
+                <div className="text-lg font-semibold text-[#E6EDF3]">{health.deviceCount}</div>
+                <div className="text-[10px] text-[#6B7785] uppercase">Devices</div>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Zap size={14} className="text-accent" />
+              <div>
+                <div className="text-lg font-semibold text-[#E6EDF3]">{health.ruleCount}</div>
+                <div className="text-[10px] text-[#6B7785] uppercase">Rules</div>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Activity size={14} className="text-[#22C55E]" />
+              <div>
+                <div className="text-lg font-semibold text-[#E6EDF3]">{formatHealthUptime(health.uptime)}</div>
+                <div className="text-[10px] text-[#6B7785] uppercase">Uptime</div>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Wifi size={14} className={health.mqtt === "connected" ? "text-[#22C55E]" : "text-[#EF4444]"} />
+              <div>
+                <div className="text-lg font-semibold text-[#E6EDF3] capitalize">{health.mqtt}</div>
+                <div className="text-[10px] text-[#6B7785] uppercase">MQTT</div>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 

@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { Routes, Route, Navigate, useParams } from "react-router-dom";
 import { Layout } from "./components/Layout";
 import { DeviceGrid } from "./components/DeviceGrid";
-import { SystemHealth } from "./components/SystemHealth";
 import { DeviceDetail } from "./components/DeviceDetail";
 import { ToastContainer } from "./components/ToastContainer";
 import { CommandPalette } from "./components/CommandPalette";
@@ -33,9 +32,8 @@ function DashboardPage({ onSelectDevice }: { onSelectDevice: (id: string) => voi
 
   return (
     <div className="space-y-6">
-      <SystemHealth />
-      <DeviceGrid onSelectDevice={onSelectDevice} />
       <SystemPage />
+      <DeviceGrid onSelectDevice={onSelectDevice} />
     </div>
   );
 }
