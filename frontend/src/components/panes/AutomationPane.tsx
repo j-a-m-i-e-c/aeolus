@@ -102,7 +102,7 @@ const DEFAULT_UI_TEMPLATE = `// Custom Automation UI Component
 //   props.state          — Live key-value state from the automation script
 //   props.stateSet       — Write state back: (key, value) => void
 
-import type { CustomComponentProps } from "./custom/types";
+import type { CustomComponentProps } from "./types";
 
 export default function AutomationUI(props: CustomComponentProps) {
   return (

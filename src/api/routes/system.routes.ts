@@ -188,7 +188,9 @@ export function createSystemRoutes(): Router {
 
     logger.info("Frontend rebuild triggered from dashboard");
 
-    const child = spawn("docker", ["compose", "up", "-d", "--build", "frontend"], {
+    // Use `docker compose build --no-cache` then `up -d` to ensure new custom
+    // component files are picked up (Docker's COPY cache can miss new files).
+    const child = spawn("sh", ["-c", "docker compose build --no-cache frontend && docker compose up -d frontend"], {
       detached: true,
       stdio: "ignore",
       cwd: projectDir,
