@@ -371,6 +371,19 @@ export class Sandbox {
   /** HTTP request timeout in milliseconds. */
   private static readonly HTTP_TIMEOUT_MS = 10_000;
 
+  /** Local/private network patterns where plain HTTP is expected. */
+  private static readonly LOCAL_HOSTS = /^https?:\/\/(localhost|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|192\.168\.\d+\.\d+|\[::1\])(:\d+)?(\/|$)/i;
+
+  /**
+   * Log a warning when plain HTTP is used for non-local URLs.
+   * Local/private network addresses (localhost, 10.x, 172.16-31.x, 192.168.x) are fine over HTTP.
+   */
+  private static warnInsecureUrl(ruleId: string, method: string, url: string): void {
+    if (url.startsWith("http://") && !Sandbox.LOCAL_HOSTS.test(url)) {
+      logger.warn({ ruleId, method, url }, "[sandbox] Plain HTTP used for external URL — consider using HTTPS");
+    }
+  }
+
   /**
    * Set HTTP references on the jail for the bootstrap script.
    * Provides `http.get(url, headers)` and `http.post(url, headers, body)` via host-side callbacks.
@@ -386,6 +399,7 @@ export class Sandbox {
       "__httpGetRef",
       new ivm.Reference(async function (url: string, headersJson: string) {
         try {
+          Sandbox.warnInsecureUrl(ruleId, "GET", url);
           const headers = JSON.parse(headersJson) as Record<string, string>;
           const controller = new AbortController();
           const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -409,6 +423,7 @@ export class Sandbox {
       "__httpPostRef",
       new ivm.Reference(async function (url: string, headersJson: string, body: string) {
         try {
+          Sandbox.warnInsecureUrl(ruleId, "POST", url);
           const headers = JSON.parse(headersJson) as Record<string, string>;
           const controller = new AbortController();
           const timer = setTimeout(() => controller.abort(), timeoutMs);

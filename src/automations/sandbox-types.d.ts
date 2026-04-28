@@ -141,11 +141,15 @@ declare function automation(config: {
  * Make HTTP requests to external APIs from your automation scripts.
  *
  * Both methods return a promise that resolves to a simplified response object.
- * Requests have a 10-second timeout. Only HTTPS and HTTP URLs are allowed.
+ * Requests have a 10-second timeout. Both HTTP and HTTPS URLs are allowed.
+ *
+ * **Security note:** Use HTTPS for external/internet APIs. Plain HTTP is fine
+ * for local LAN services (localhost, 192.168.x, 10.x, etc.) but a warning
+ * will be logged if plain HTTP is used for non-local URLs.
  *
  * @example
  * ```typescript
- * // GET a weather forecast
+ * // GET a weather forecast (use HTTPS for external APIs)
  * const weather = await http.get("https://api.weather.com/current?city=London");
  * log.info(`Temperature: ${weather.body}`);
  *
@@ -155,6 +159,9 @@ declare function automation(config: {
  *   body: JSON.stringify({ text: "Automation fired!" }),
  * });
  * log.info(`Webhook responded: ${result.status}`);
+ *
+ * // HTTP is fine for local LAN services
+ * const local = await http.get("http://192.168.1.50:8080/api/status");
  * ```
  */
 declare const http: {
