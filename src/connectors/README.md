@@ -1,6 +1,6 @@
 # Connector Developer Guide
 
-Build connectors to integrate external device ecosystems into Aeolus. A connector bridges the gap between a third-party protocol (Hue, Kasa, Zigbee, Z-Wave, etc.) and the Aeolus device model — no core file changes required.
+Build connectors to integrate external device ecosystems into Aeolus. A connector bridges the gap between a third-party protocol (Hue, Kasa, Zigbee, Z-Wave, etc.) and the Aeolus device model — no backend core file changes required. Connector devices automatically appear in the Device Grid and can be targeted by automations. For connector-specific controls (colour pickers, energy stats, etc.), you can optionally add a frontend pane component — see the [Frontend Control Pane](#frontend-control-pane-optional-but-recommended) section.
 
 ## Quick Start
 
@@ -297,10 +297,92 @@ See `src/connectors/hue/` — requires bridge discovery and button-press pairing
 
 ---
 
+## Frontend Control Pane (optional but recommended)
+
+The backend connector framework handles everything automatically — your devices appear in the Device Grid pane, the Connectors page shows enable/disable/config UI, and automations can target your devices. No frontend changes are required for a working connector.
+
+However, the built-in connectors each ship a dedicated control pane with connector-specific UI:
+
+- `HueControlPane.tsx` — brightness slider, colour picker with swatches, per-light toggle
+- `KasaControlPane.tsx` — toggle, device type badge, energy monitoring stats (voltage, current, power, kWh)
+
+If your connector has device-specific controls that don't fit the generic Device Grid (colour pickers, energy stats, thermostat setpoints, camera feeds, etc.), you should build a pane component.
+
+### How to add a control pane
+
+1. Create `frontend/src/components/panes/MyConnectorPane.tsx`
+2. Filter devices from the store by `integration === "my-connector"`
+3. Render connector-specific controls (use `HueControlPane.tsx` or `KasaControlPane.tsx` as reference)
+4. Register it in `frontend/src/lib/pane-registry.ts`:
+
+```typescript
+import { MyConnectorPane } from "../components/panes/MyConnectorPane";
+
+// Add to the PANE_REGISTRY object:
+"my-connector-control": {
+  component: MyConnectorPane,
+  displayName: "My Connector",
+  defaultIcon: "radio",           // lucide-react icon name
+  defaultConfig: {},
+  defaultSize: { w: 12, h: 6 },
+  category: "controls",
+},
+```
+
+5. The pane now appears in the Add Pane picker under the Controls category
+
+### Pane component pattern
+
+```tsx
+import type { PaneConfig } from "../../types/dashboard";
+import { useDeviceStore } from "../../store/device-store";
+import { sendAction } from "../../lib/api-client";
+
+interface Props {
+  config: PaneConfig;
+}
+
+export function MyConnectorPane({ config }: Props) {
+  const devices = useDeviceStore((s) => s.devices);
+
+  // Filter to only your connector's devices
+  const myDevices = Object.values(devices).filter(
+    (d) => d.integration === "my-connector",
+  );
+
+  if (myDevices.length === 0) {
+    return <div>No devices found. Enable the connector on the Connectors page.</div>;
+  }
+
+  return (
+    <div>
+      {myDevices.map((device) => (
+        <div key={device.id}>
+          <span>{device.name}</span>
+          <button onClick={() => sendAction(device.id, "toggle")}>
+            Toggle
+          </button>
+          {/* Add connector-specific controls here */}
+        </div>
+      ))}
+    </div>
+  );
+}
+```
+
+Key points:
+- Use `useDeviceStore` to get live device state (updated via WebSocket)
+- Use `sendAction(deviceId, actionType, params?)` from `lib/api-client.ts` to trigger actions
+- The store updates optimistically — update local state before the API call, revert on failure
+- Empty state should direct users to the Connectors page to enable your connector
+
+---
+
 ## Checklist
 
 Before shipping your connector:
 
+**Backend (required):**
 - [ ] `index.ts` exports `metadata`, `configSchema`, and `createConnector`
 - [ ] `index.ts` exports `snippets` array with at least 2-3 useful code templates
 - [ ] `metadata.id` is unique and URL-safe
@@ -312,3 +394,10 @@ Before shipping your connector:
 - [ ] `getHealthStatus()` accurately reflects connectivity
 - [ ] `dispose()` cleans up all resources (no leaked timers or listeners)
 - [ ] Unit tests cover core functionality and error paths
+
+**Frontend (optional but recommended):**
+- [ ] Control pane component in `frontend/src/components/panes/`
+- [ ] Registered in `frontend/src/lib/pane-registry.ts` under the `"controls"` category
+- [ ] Filters devices by `integration === "your-connector-id"`
+- [ ] Empty state directs users to enable the connector
+- [ ] Uses optimistic UI updates for toggle/action controls

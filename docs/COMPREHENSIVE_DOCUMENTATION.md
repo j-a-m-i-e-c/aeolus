@@ -11,25 +11,57 @@ The system runs as three Docker services: a Mosquitto MQTT broker, an Express.js
 ## Architecture
 
 ```
-[ Custom Microcontrollers ]              [ Commercial Devices ]
-  ESP32 / Arduino / Pi Pico               Hue (Zigbee) / Kasa (Wi-Fi) / ...
-        ↕ MQTT pub/sub                          ↕ Connector APIs
-[ Mosquitto Broker :1883 ]               [ Connector Framework ]
-        ↓ subscribe                              ↓
-        ↓ publish commands ↑             ────────┘
-                    ↓
-        [ Internal EventEmitter Bus ]
-              ↓              ↓
-    [ Device Registry ]  [ Automation Engine ]
-              ↓              ↓ publish MQTT / trigger connectors / http calls
-    [ SQLite DB ]        [ Actions → devices / APIs ]
-              ↓
-    [ WebSocket Server ] → [ React Dashboard ]
-              ↑
-    [ REST API (Express) ]
+                        ┌──────── Event Sources ────────┐
+                        │                               │
+  [ MQTT Devices ]      │  [ Connectors ]               │  [ Services ]
+   ESP32 / Arduino      │   Hue / Kasa / ...            │   Cron · Triggers · System
+        ↕               │       ↕                       │       ↕
+  [ Mosquitto :1883 ]   │  [ Connector Manager ]        │  [ Service Manager ]
+        │               │       │                       │       │
+        │  sensor data  │  device state (synthetic      │  events (synthetic
+        │  + commands   │  connector/{id}/{device} )     │  service/{type}/{name} )
+        │               │       │                       │       │
+        └───────────────┴───────┴───────────────────────┴───────┘
+                                │
+                    ┌───────────▼───────────┐
+                    │   Internal Event Bus  │
+                    │   (DEVICE_STATE_CHANGE │
+                    │    + AUTOMATION_STATE)  │
+                    └───┬──────────────┬────┘
+                        │              │
+                        ▼              ▼
+              ┌─────────────┐  ┌────────────────┐
+              │   Device    │  │  Automation     │
+              │  Registry   │  │   Engine        │
+              │  (SQLite)   │  │  (V8 Sandbox)   │
+              └──────┬──────┘  └───────┬─────────┘
+                     │                 │
+                     │          ┌──────▼──────────┐
+                     │          │  Action Executor │
+                     │          │  MQTT publish    │
+                     │          │  Device actions  │
+                     │          │  HTTP webhooks   │
+                     │          │  Logging         │
+                     │          └─────────────────┘
+                     │
+              ┌──────▼──────┐
+              │  WebSocket  │
+              │   Server    │
+              └──────┬──────┘
+                     │
+              ┌──────▼──────┐      ┌──────────────┐
+              │  REST API   │◄────►│    React     │
+              │  (Express)  │      │  Dashboard   │
+              └─────────────┘      └──────────────┘
 ```
 
-MQTT devices are bidirectional: sensors publish data to topics like `sensor/tank/level`, and Aeolus publishes commands to topics like `valve/irrigation/command` that microcontrollers subscribe to. This enables the full IoT loop — sense, decide, act — across any combination of custom and commercial hardware.
+Three event source layers feed the same internal bus:
+
+- **MQTT devices** — bidirectional via Mosquitto. Sensors publish data to topics like `sensor/tank/level`, and Aeolus publishes commands to topics like `valve/irrigation/command` that microcontrollers subscribe to.
+- **Connectors** — commercial devices (Hue, Kasa, etc.) emit state through synthetic `connector/{integration}/{deviceId}` topics, unifying them with MQTT devices in the automation pipeline.
+- **Services** — non-device event producers (cron schedules, API triggers, system lifecycle) emit events through synthetic `service/{type}/{name}` topics.
+
+This enables the full IoT loop — sense, decide, act — across any combination of custom hardware, commercial devices, and time/event-based triggers.
 
 ## Tech Stack
 
@@ -135,7 +167,7 @@ aeolus/
 │   ├── websocket/
 │   │   └── ws-server.ts              # WebSocket server
 │   ├── db/
-│   │   └── database.ts              # sql.js setup + schema (devices, automation_rules, tabs, panes, connectors)
+│   │   └── database.ts              # sql.js setup + schema (devices, automation_rules, automation_state, tabs, panes, connectors, services)
 │   ├── types/
 │   │   └── sql.js.d.ts              # Type declarations for sql.js
 │   ├── config.ts                     # Environment variable loading
@@ -170,6 +202,7 @@ aeolus/
 │       │   ├── CustomComponentBoundary.tsx  # Error boundary for custom automation UI components
 │       │   ├── WelcomeScreen.tsx     # Onboarding screen for empty dashboard (no devices)
 │       │   ├── ConnectorsPage.tsx    # Connector management (enable/disable, config, generic setup wizard)
+│       │   ├── ServicesPage.tsx     # Service management dashboard (available but not routed as a pinned tab)
 │       │   ├── SystemPage.tsx        # Host diagnostics, application log viewer, self-update
 │       │   ├── CommandPalette.tsx    # Ctrl+K command palette
 │       │   ├── ToastContainer.tsx    # Animated toast notifications
@@ -267,7 +300,7 @@ Handles TypeScript → JavaScript compilation using the TypeScript compiler API 
 
 ### Sandbox (`src/automations/sandbox.ts`)
 
-Secure execution environment for user-authored TypeScript automation scripts using `isolated-vm`.
+Secure execution environment for user-authored automation scripts using `isolated-vm`. The Monaco editor runs in TypeScript mode for IntelliSense, but in practice most scripts are plain JavaScript — TypeScript annotations are optional and stripped at save time by the transpiler.
 
 - Creates a fresh V8 isolate per execution with a 32 MB memory limit
 - Enforces a 5-second execution timeout to prevent infinite loops
@@ -278,8 +311,8 @@ Secure execution environment for user-authored TypeScript automation scripts usi
 - `context` — frozen object with `topic`, `deviceId`, `state`, `timestamp` from the triggering event
 - `services.get(type)` — returns read-only snapshot of a service's state, or `undefined` if not running
 - `services.list()` — returns `[{ type, displayName, running }]` for all registered services
-- `http.get(url, opts?)` — async GET request via host-side `fetch()` with 10-second timeout, returns `{ status, body }`
-- `http.post(url, opts?)` — async POST request via host-side `fetch()` with 10-second timeout, returns `{ status, body }`
+- `http.get(url, opts?)` — async GET request via host-side `fetch()` with 10-second timeout, returns `{ status, body }`. Logs a warning if plain HTTP is used for non-local URLs (HTTPS recommended for external APIs)
+- `http.post(url, opts?)` — async POST request via host-side `fetch()` with 10-second timeout, returns `{ status, body }`. Logs a warning if plain HTTP is used for non-local URLs (HTTPS recommended for external APIs)
 - `automation({ conditions?, actions })` — structured helper that evaluates conditions (AND logic) and runs actions; supports arrays of named functions for flow diagram visualization
 - `state.get(key)` — read a value from the per-rule state store (from in-memory cache)
 - `state.set(key, value)` — write a JSON-serializable value; persists to SQLite and broadcasts via WebSocket
@@ -408,6 +441,7 @@ Philips Hue smart lighting via local bridge API.
 - Connectors with `requiresSetup` skip the config form and go straight to enable + wizard
 - Discovers lights and maps them to Aeolus Device format
 - Supports toggle, brightness, hue, and saturation actions
+- Frontend pane: `HueControlPane.tsx` — brightness slider, colour picker with 10 preset swatches, per-light toggle with optimistic UI
 
 #### Kasa Connector (`src/connectors/kasa/`)
 
@@ -417,6 +451,18 @@ TP-Link Kasa smart plugs and switches via local Wi-Fi.
 - Config schema: `broadcastAddress` (text, optional, default `"255.255.255.255"`), `discoveryTimeout` (number, optional, default `10000`)
 - Auto-discovers devices via UDP broadcast
 - Supports toggle and energy monitoring actions
+- Frontend pane: `KasaControlPane.tsx` — toggle, device type badge, energy monitoring stats (voltage, current, power, kWh)
+
+#### Connector Frontend Panes
+
+The backend connector framework is fully self-contained — connector devices appear in the Device Grid pane and the Connectors management page automatically with no frontend changes. However, each built-in connector also ships a dedicated control pane with connector-specific UI (colour pickers, energy stats, etc.) registered in the pane registry under the `"controls"` category.
+
+New connectors should consider building a frontend pane when they have device-specific controls that don't fit the generic Device Grid. The pattern is:
+1. Create a pane component in `frontend/src/components/panes/` that filters devices by `integration === "your-connector-id"`
+2. Register it in `frontend/src/lib/pane-registry.ts` under the `"controls"` category
+3. Use `useDeviceStore` for live state and `sendAction()` from `lib/api-client.ts` for device actions
+
+See `HueControlPane.tsx` and `KasaControlPane.tsx` for reference implementations, and `src/connectors/README.md` for the full developer guide including a pane component template.
 
 #### Legacy Migration (`src/connectors/migrate-legacy-hue.ts`)
 
@@ -568,7 +614,7 @@ Serve the custom UI component type definition bundle (`ui-types.d.ts`) as `text/
 
 **GET /api/automations/:id/state**
 Return all key-value state pairs for an automation rule from the AutomationStateStore.
-Returns `{ "state": { "key1": "value1", "key2": 42 } }`. 404 if rule not found.
+Returns `{ "key1": "value1", "key2": 42 }` — a flat object of key-value pairs.
 
 **PUT /api/automations/:id/state**
 Set a key-value pair in the automation state store. The value is persisted to SQLite and broadcast to all WebSocket clients via `AUTOMATION_STATE_CHANGE`.
@@ -1146,6 +1192,7 @@ The Dockerfile installs `git`, `docker-cli`, and `docker-cli-compose` in the pro
 | Sandbox | Script attempts forbidden API access | ReferenceError or undefined — caught by sandbox error handler |
 | Sandbox | `http.get/post` request fails (network error, timeout) | Returns `{ status: 0, body: errorMessage }` — logged with ruleId, never throws |
 | Sandbox | `http.get/post` exceeds 10-second timeout | AbortController cancels request, returns error response |
+| Sandbox | `http.get/post` uses plain HTTP for non-local URL | Logs warning with ruleId, method, and URL — request still proceeds (not blocked) |
 | Sandbox | isolated-vm not available (Windows dev) | Log warning, sandbox execution disabled, script rules skip |
 | Transpiler | Syntax error in TypeScript source | Return 400 with `{ error, details: [{ line, column, message }] }` |
 | Transpiler | Source contains import/require | Return 400 with descriptive error before transpilation |
@@ -1191,18 +1238,18 @@ The Dockerfile installs `git`, `docker-cli`, and `docker-cli-compose` in the pro
 - **EventEmitter over message queue:** Simple pub/sub is sufficient at MVP scale. No need for Redis/RabbitMQ for a local-first system.
 - **Zustand over Redux:** Lightweight, minimal boilerplate, matches the "clarity over decoration" design principle.
 - **Express over Fastify:** Broader ecosystem familiarity, easier WebSocket integration via ws library.
-- **Pluggable connector architecture over hardcoded integrations:** Each connector is a self-contained module with metadata, config schema, and factory function. The ConnectorRegistry discovers modules at startup, the ConnectorManager handles lifecycle (enable/disable/poll/action routing), and the ConnectorStore persists state to SQLite. This replaces the previous `src/integrations/` approach where each integration required its own route file and manual wiring. New connectors can be added by creating a directory in `src/connectors/` with the standard module exports — no changes to core code required. A `_template/` skeleton is provided for developers.
+- **Pluggable connector architecture over hardcoded integrations:** Each connector is a self-contained module with metadata, config schema, and factory function. The ConnectorRegistry discovers modules at startup, the ConnectorManager handles lifecycle (enable/disable/poll/action routing), and the ConnectorStore persists state to SQLite. This replaces the previous `src/integrations/` approach where each integration required its own route file and manual wiring. New connectors can be added by creating a directory in `src/connectors/` with the standard module exports — no changes to backend core code required. A `_template/` skeleton is provided for developers. Connector devices automatically appear in the Device Grid pane and can be targeted by automations. For connector-specific controls (colour pickers, energy stats, thermostat setpoints), a dedicated frontend pane component is recommended but optional — see `HueControlPane.tsx` and `KasaControlPane.tsx` as reference implementations.
 - **Host networking for LAN device discovery:** The backend container uses `network_mode: host` instead of the shared bridge network. This is required for Kasa's UDP broadcast discovery (which doesn't work across Docker bridge networks) and for direct LAN access to Hue bridges. The trade-off is that the backend port is exposed directly on the host rather than through Docker port mapping, and the MQTT broker URL must use `localhost` instead of the Docker service name.
-- **Pinned tabs render dedicated components:** Pinned system tabs (Dashboard, Automations, Connectors, Services, System) render their own full-page components directly via a `PINNED_PAGES` map in `App.tsx`, bypassing the modular pane grid. This gives each system page full control over its layout and styling. Custom (unpinned) tabs use the `TabLayout` component with the pane grid system. This separation keeps system pages polished while maintaining flexibility for user-created tabs.
+- **Pinned tabs render dedicated components:** Pinned system tabs (System, Connectors) render their own full-page components directly via React Router `<Route>` elements in `App.tsx`, bypassing the modular pane grid. The System tab (`/dashboard`) renders `SystemHealth`, `DeviceGrid`, and `SystemPage` inline. The Connectors tab (`/connectors`) renders the `ConnectorsPage` component. This gives each system page full control over its layout and styling. Custom (unpinned) tabs use the `TabLayout` component with the pane grid system. This separation keeps system pages polished while maintaining flexibility for user-created tabs.
 - **Services Framework mirrors Connector Framework architecture:** The Services Framework deliberately mirrors the Connector Framework's architecture (Module → Registry → Manager → Store) so that anyone familiar with the connector code can immediately understand the services code. Services differ in that they are event producers only — no device discovery, no polling, no action routing. They emit events through the existing `DEVICE_STATE_CHANGE` pipeline using synthetic `service/{type}/{name}` topics, requiring zero changes to the automation engine.
 - **`isolated-vm` over Node.js `vm` for sandbox execution:** The Node.js `vm` module is explicitly documented as "not a security mechanism" — it runs code in the same V8 isolate as the host process, allowing escape via prototype pollution and `Function` constructor access. The `vm2` library was deprecated after repeated critical sandbox escape CVEs. `isolated-vm` creates a separate V8 isolate with its own heap, no access to the host's global scope, and built-in support for memory limits (32 MB) and execution timeouts (5 seconds). This is the same isolation primitive used by Cloudflare Workers. For a Raspberry Pi deployment where the automation engine shares a process with the MQTT broker connection and device registry, true V8-level isolation is essential. The tradeoff is that `isolated-vm` is a native addon requiring C++ compilation — the Dockerfile includes `build-essential` and `python3` for ARM64 builds.
 - **Monaco over CodeMirror for the script editor:** Monaco is the editor engine behind VS Code. It provides native TypeScript language service integration — IntelliSense, type checking, and error squiggles work out of the box when you register `.d.ts` type definitions via `addExtraLib()`. CodeMirror 6 is lighter but requires significant custom work to achieve comparable TypeScript support. Since the code editor is the centrepiece of the automation overhaul and developer experience is paramount, Monaco is the right choice. The `@monaco-editor/react` wrapper provides clean React integration.
 - **TypeScript as a runtime dependency:** The TypeScript compiler API (`ts.transpileModule()`) is used at runtime to transpile user-authored automation scripts on save. This means `typescript` is a production dependency, not just a dev dependency. The tradeoff is a larger production bundle, but it enables on-the-fly transpilation without a separate build step or external service.
 - **Generic backend-driven setup wizard:** The ConnectorsPage setup wizard is fully generic — it fetches step descriptors from `GET /api/connectors/:id/setup-steps` and renders them dynamically. No connector-specific UI code exists in the frontend. Each step can include input fields, and the wizard accumulates data across steps, passing it to subsequent step executions and patching the connector config on completion. This means adding a new connector with a multi-step setup flow requires zero frontend changes.
-- **3 pinned tabs instead of 5:** Simplified from 5 pinned tabs (Dashboard, Automations, Connectors, Services, System) to 3 (Dashboard, Connectors, System). Automations moved to self-contained panes in custom tabs — each automation is one pane, reflecting the code-first philosophy. Services are infrastructure that auto-enable on startup and don't need a dedicated tab. Pinned tabs are hardcoded in the frontend, not stored in the database.
+- **2 pinned tabs instead of 5:** Simplified from 5 pinned tabs (Dashboard, Automations, Connectors, Services, System) to 2 (System, Connectors). The System tab renders the device grid, system health, and host diagnostics inline. Automations moved to self-contained panes in custom tabs — each automation is one pane, reflecting the code-first philosophy. Services are infrastructure that auto-enable on startup and don't need a dedicated tab. Pinned tabs are hardcoded in the frontend, not stored in the database.
 - **One-pane-one-automation pattern:** Each AutomationPane manages a single automation rule through a setup → status → editing state machine. This replaces the previous list-based approach where all automations lived in one page. The pane pattern means automations live alongside the controls they manage in custom tabs, and users can see the flow diagram or activity feed at a glance.
 - **Structured `automation()` helper with named function arrays:** The `automation({ conditions: [...], actions: [...] })` helper accepts arrays of named functions. Named functions become labeled nodes in the FlowDiagram SVG. This gives users the flexibility of free-form TypeScript while enabling automatic visualization. Backward compatible with single-function form.
-- **Host-side HTTP for sandbox `http` global:** The `http.get/post` sandbox globals delegate to host-side `fetch()` via `ivm.Reference` callbacks rather than allowing network access inside the isolate. This maintains the security boundary — the isolate has no network stack — while enabling external API calls with a 10-second timeout. Errors are caught and returned as `{ status: 0, body: errorMessage }` rather than throwing.
+- **Host-side HTTP for sandbox `http` global:** The `http.get/post` sandbox globals delegate to host-side `fetch()` via `ivm.Reference` callbacks rather than allowing network access inside the isolate. This maintains the security boundary — the isolate has no network stack — while enabling external API calls with a 10-second timeout. Errors are caught and returned as `{ status: 0, body: errorMessage }` rather than throwing. Both HTTP and HTTPS are allowed (local LAN services often don't have TLS), but a warning is logged when plain HTTP is used for non-local URLs to nudge users toward HTTPS for internet-facing requests. Local/private network addresses (localhost, 10.x, 172.16-31.x, 192.168.x) are exempt from the warning.
 - **Connector-provided code snippets:** Each connector module can optionally export a `snippets` array alongside `metadata`, `configSchema`, and `createConnector`. These snippets appear grouped under the connector's display name in the automation editor's snippet picker. This makes the snippet system extensible — new connectors automatically contribute code templates without any changes to the snippet catalog or frontend. Platform-level snippets (MQTT, HTTP, Conditions, Devices, Services, Templates) are always available regardless of which connectors are installed.
 - **Build-time compilation for custom UI components:** Custom automation UI components are written as TSX files and compiled at Vite build time, not evaluated at runtime with `eval()` or `new Function()`. The CustomUiManager writes `.tsx` files to the `frontend/src/components/panes/custom/` directory and regenerates a static import registry (`index.ts`). A frontend rebuild (`docker compose up -d --build frontend`) compiles the new components into the production bundle. This approach is safer (no runtime code execution in the browser), produces optimized output, and gives users full access to React, TypeScript, and the component ecosystem. The tradeoff is a rebuild step after saving UI source.
 - **Per-rule key-value state store for backend↔frontend communication:** The AutomationStateStore provides a simple key-value interface (`state.set/get/getAll/delete`) scoped per automation rule. Values are JSON-serialized to SQLite for persistence and kept in an in-memory cache for fast sandbox reads. State changes emit `AUTOMATION_STATE_CHANGE` events on the event bus, which the WebSocket server broadcasts to all clients. The frontend Zustand store (`automation-state-store.ts`) listens for `automation-state` WebSocket messages and updates reactively. This enables automation scripts to compute values (e.g. rolling averages, counters) that custom UI components can display in real time.
@@ -1214,10 +1261,10 @@ The Dockerfile installs `git`, `docker-cli`, and `docker-cli-compose` in the pro
 
 ## Dashboard Features
 
-The React dashboard provides a comprehensive developer-focused interface with a modular tab-and-pane layout. The sidebar displays dynamic tabs — 3 pinned system tabs (Dashboard, Connectors, System) plus user-created custom tabs. Pinned tabs are hardcoded in the frontend (not from DB) and render dedicated full-page components; custom tabs use the modular pane grid. Automations and services are accessed through panes in custom tabs rather than dedicated pinned tabs — this reflects the code-first philosophy where automations are self-contained units that live alongside the controls they manage.
+The React dashboard provides a comprehensive developer-focused interface with a modular tab-and-pane layout. The sidebar displays dynamic tabs — 2 pinned system tabs (System, Connectors) plus user-created custom tabs. Pinned tabs are hardcoded in the frontend (not from DB) and render dedicated full-page components via React Router routes; custom tabs use the modular pane grid. Automations and services are accessed through panes in custom tabs rather than dedicated pinned tabs — this reflects the code-first philosophy where automations are self-contained units that live alongside the controls they manage.
 
 ### Sidebar
-- **Pinned System Tabs** — Dashboard, Connectors, System (hardcoded, cannot be deleted or reordered)
+- **Pinned System Tabs** — System, Connectors (hardcoded, cannot be deleted or reordered)
 - **Custom Tabs** — User-created tabs with custom names and Lucide icons
 - **Add Tab** — Inline form with name input and icon picker (16 icon choices)
 - **Rename** — Double-click a custom tab to rename inline
@@ -1229,21 +1276,18 @@ The React dashboard provides a comprehensive developer-focused interface with a 
 ### Modular Pane System
 - **Pane Registry** — Maps pane type identifiers to React components with metadata (display name, icon, default size, category)
 - **Available Pane Types:** device-grid, sensor-panel, mqtt-inspector, hue-control, kasa-control, trigger-button, automation, automation-rules, system-stats, topic-tree, event-log, connectors-page
-- **PanePicker** — Grouped pane type selector organized into categories: Controls, Automations, Monitoring, System. Each category is a collapsible section with pane type cards
+- **New Automation Button** — Dedicated gradient-styled button in the tab header that directly creates an automation pane in setup mode, bypassing the pane picker. Automations are the core creative act in Aeolus and get first-class entry point treatment
+- **PanePicker** — Grouped pane type selector organized into categories: Controls, Automations, Monitoring, System. Each category is a collapsible section with pane type cards. The `automation` pane type is excluded from the picker since it has its own dedicated button
 - **PaneConfigPanel** — Per-pane configuration editor for type-specific settings
 - **TabLayout** — Renders all panes for the active tab (custom tabs only), passes `paneId` to pane components for state management
 - **Layout Persistence** — Dashboard layout (tabs + panes) is persisted to SQLite via `GET/PUT /api/layout`, with debounced auto-save (2s). Only custom (unpinned) tabs are persisted — pinned tabs are hardcoded
 
-### Dashboard Tab (pinned)
+### System Tab (pinned — route: `/dashboard`)
 - **Welcome Screen** — Shown when no devices exist. Three animated onboarding cards: Enable Simulator (starts the device simulator), Connect Devices (navigates to Connectors tab), Write Automations (navigates to create a custom tab). Uses framer-motion animations and Aeolus branding. Also shown in DeviceGrid when the device list is empty
+- **System Health** — MQTT connection status, device count, rule count, uptime (polls every 30s)
 - **Device Grid** — Cards grouped by room (parsed from MQTT topic), collapsible sections, click to open detail modal
 - **Device Detail Modal** — Full state view, capabilities, toggle/brightness controls, last seen timestamp
-- **Sensor Panel** — Live sensor values with sparkline SVG charts showing last 20 readings
-- **System Health** — MQTT connection status, device count, rule count, uptime (polls every 30s)
-- **Automations Panel** — Lists active rules with topic, name, and conditional/active badges
-- **MQTT Inspector** — Real-time message feed with topic filter, clear button, and inline publish form
-- **MQTT Topic Tree** — Hierarchical tree view of all topics seen, expandable with last payload values
-- **Event Log** — Automation rule fire events with rule name, trigger topic, and device ID
+- **System Page** — Host diagnostics (CPU, memory, disk, temperature, network), application log viewer, self-update and frontend rebuild controls (rendered inline below the device grid)
 
 ### Connectors Tab (pinned)
 - **Available Connectors** — Cards for each discovered connector type showing display name, icon, description, supported device types, and setup requirement badge
@@ -1351,7 +1395,7 @@ A React component wrapping `@monaco-editor/react` for editing custom automation 
 - Accepts `onChange`, `onSave`, `initialValue`, and `onEditorReady` props
 - `onEditorReady` exposes an `insertText` API for the snippet picker to insert code at cursor
 
-### System Tab (pinned)
+### System Diagnostics (rendered inline on System tab)
 - **Host Info** — Hostname, platform, architecture, Node.js version, uptime
 - **CPU** — Model, core count, 1m/5m/15m load averages
 - **Temperature** — CPU temperature with colour-coded status (Pi thermal zone)
@@ -1463,7 +1507,7 @@ Enable via `SIMULATOR=true` env var (auto-starts on boot) or toggle from the sid
 
 ---
 
-**Last Updated:** April 26, 2026
+**Last Updated:** April 28, 2026
 **Version:** 0.11.0
 **Status:** MVP Development
 
