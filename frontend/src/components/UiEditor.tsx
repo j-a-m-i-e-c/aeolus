@@ -13,12 +13,23 @@ export interface UiEditorProps {
   onEditorReady?: (api: { insertText: (text: string) => void }) => void;
 }
 
-/** Define the Aeolus dark theme for Monaco */
+/** Define the Aeolus dark theme for Monaco (reuses same theme as ScriptEditor) */
 function defineAeolusDarkTheme(monaco: Parameters<OnMount>[1]) {
-  monaco.editor.defineTheme("aeolus-dark-tsx", {
+  // Theme may already be registered by ScriptEditor — defining again is safe
+  monaco.editor.defineTheme("aeolus-dark", {
     base: "vs-dark",
     inherit: true,
-    rules: [],
+    rules: [
+      { token: "keyword", foreground: "3BA4FF" },
+      { token: "string", foreground: "5CE1E6" },
+      { token: "comment", foreground: "6B7785" },
+      { token: "identifier", foreground: "E6EDF3" },
+      { token: "type", foreground: "9AA6B2" },
+      { token: "type.identifier", foreground: "9AA6B2" },
+      { token: "number", foreground: "F59E0B" },
+      { token: "delimiter", foreground: "9AA6B2" },
+      { token: "operator", foreground: "3BA4FF" },
+    ],
     colors: {
       "editor.background": "#0B0F14",
       "editor.foreground": "#E6EDF3",
@@ -70,7 +81,7 @@ export function UiEditor({
     monacoRef.current = monaco;
 
     defineAeolusDarkTheme(monaco);
-    monaco.editor.setTheme("aeolus-dark-tsx");
+    monaco.editor.setTheme("aeolus-dark");
 
     // Configure TypeScript defaults for TSX components
     monaco.languages.typescript.typescriptDefaults.setCompilerOptions({
@@ -140,7 +151,7 @@ export function UiEditor({
         height="100%"
         defaultLanguage="typescriptreact"
         defaultValue={initialValue ?? ""}
-        theme="aeolus-dark-tsx"
+        theme="aeolus-dark"
         onMount={handleMount}
         onChange={handleChange}
         options={{
