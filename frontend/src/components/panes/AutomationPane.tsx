@@ -58,25 +58,51 @@ const DEFAULT_SCRIPT = `// Aeolus Automation Script
 // Write any logic you want using the globals below — no imports needed.
 //
 // Available globals:
-//   context   — { topic, deviceId, state, timestamp } of the triggering event
-//   devices   — .get(id), .list(), .filter(fn), .action(id, type, params?)
-//   mqtt      — .publish(topic, payload)
-//   log       — .info(msg), .warn(msg), .error(msg)
-//   state     — .get(key), .set(key, value), .getAll(), .delete(key)
-//   services  — .get(type), .list()
-//   http      — .get(url, opts?), .post(url, opts?)
+//   context   — the event that triggered this script
+//                context.topic     — MQTT topic (e.g. "sensor/kitchen/temp")
+//                context.deviceId  — device ID (e.g. "sensor-kitchen-temp")
+//                context.state     — device state (e.g. { value: 22.5 })
+//                context.timestamp — when the event fired (unix ms)
 //
-// The state global is how you send data to the UI tab.
-// Call state.set("key", value) here and read it with props.state.get("key") in the UI.
+//   devices   — query and control devices
+//                devices.get("light-bedroom")           — get one device
+//                devices.list()                          — all devices
+//                devices.filter(d => d.type === "light") — filter by type
+//                devices.action("light-1", "toggle")     — send an action
+//                devices.action("light-1", "brightness", { brightness: 120 })
+//
+//   mqtt      — publish MQTT messages
+//                mqtt.publish("valve/zone-1/command", '{"action":"open"}')
+//
+//   state     — per-rule key-value store (syncs to the UI tab via WebSocket)
+//                state.set("avgTemp", 22.5)  — write (shows in UI tab instantly)
+//                state.get("avgTemp")        — read
+//                state.getAll()              — all key-value pairs
+//                state.delete("avgTemp")     — remove
+//
+//   log       — structured logging
+//                log.info("message")  log.warn("message")  log.error("message")
+//
+//   http      — external API calls (10s timeout, use HTTPS for non-local URLs)
+//                const res = await http.get("https://api.example.com/data")
+//                const res = await http.post(url, { headers: {...}, body: "..." })
+//                // res = { status: 200, body: "..." }
+//
+//   services  — read-only access to running services
+//                services.get("cron")  — service state or undefined
+//                services.list()       — [{ type, displayName, running }]
 //
 // ─── Option 1: Free-form (use the globals however you like) ───
 //
 // const temp = context.state.value;
-// if (temp > 30) {
-//   log.warn("High temp: " + temp);
-//   devices.action("fan-1", "toggle");
+// const bedroom = devices.get("light-bedroom");
+// if (temp > 30 && bedroom && !bedroom.state.on) {
+//   devices.action("light-bedroom", "toggle");
+//   mqtt.publish("alerts/temp", JSON.stringify({ temp, room: "kitchen" }));
+//   log.warn("High temp — turned on bedroom fan");
 // }
 // state.set("lastTemp", temp);
+// state.set("lastCheck", Date.now());
 //
 // ─── Option 2: Structured helper (generates a flow diagram) ───
 //
