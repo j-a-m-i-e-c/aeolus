@@ -66,7 +66,7 @@ This enables the full IoT loop — sense, decide, act — across any combination
 ## Tech Stack
 
 ### Backend
-- **Runtime:** Node.js 20 + TypeScript (strict mode, ESM)
+- **Runtime:** Node.js 22 + TypeScript (strict mode, ESM)
 - **Framework:** Express.js
 - **Database:** SQLite via sql.js (pure JavaScript, no native deps)
 - **MQTT:** mqtt.js
@@ -77,7 +77,7 @@ This enables the full IoT loop — sense, decide, act — across any combination
 - **Testing:** Vitest + fast-check (property-based testing)
 
 ### Frontend
-- **Framework:** React 18 + TypeScript
+- **Framework:** React 19 + TypeScript
 - **Build:** Vite
 - **State:** Zustand
 - **Styling:** Tailwind CSS with Aeolus design tokens

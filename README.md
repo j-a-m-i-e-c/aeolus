@@ -303,8 +303,8 @@ Three event source layers feed the same internal bus: MQTT devices (bidirectiona
 | Layer | Tech |
 |-------|------|
 | Backend | Express · TypeScript · SQLite (sql.js) · MQTT (mqtt.js) · WebSocket (ws) · isolated-vm · pino |
-| Frontend | React 18 · Vite · Zustand · Tailwind CSS · Monaco Editor · Lucide · Framer Motion |
-| Infra | Docker Compose · Eclipse Mosquitto 2 · Node.js 20 |
+| Frontend | React 19 · Vite · Zustand · Tailwind CSS · Monaco Editor · Lucide · Framer Motion |
+| Infra | Docker Compose · Eclipse Mosquitto 2 · Node.js 22 |
 
 ### Three Docker Services
 
