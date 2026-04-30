@@ -48,7 +48,7 @@ cd aeolus
 docker compose up
 ```
 
-Open **http://localhost:3000** — that's it. No `npm install`, no `.env` setup. 
+Open **http://localhost:3000** — that's it.
 
 The built-in device simulator generates fake sensor data so you can explore aspects of the platform without any hardware.
 
@@ -71,7 +71,7 @@ Installs Docker, clones Aeolus, builds containers, and starts everything. Auto-s
 |---|---|---|
 | 🌐 | **MQTT-first** | Bidirectional communication with any MQTT device — ingest sensor data and publish commands back to actuators |
 | ⚡ | **Code-driven automations** | Write scripts in a Monaco editor with full IntelliSense, flow diagrams, and a code snippet library |
-| 🎨 | **Custom UI components** | Write React/TSX dashboard widgets for your automations — live preview after a one-click rebuild |
+| 🎨 | **Custom UI components** | Write React/TSX dashboard widgets for your automations — save and they render instantly, no rebuild needed |
 | 🎛️ | **Modular dashboard** | Create custom tabs with drag-and-drop panes |
 | 🧩 | **Connector framework** | Add new device integrations without touching core code — [developer guide included](src/connectors/README.md) |
 | 💡 | **Philips Hue (Connector)** | Toggle, brightness, colour picker with guided bridge pairing wizard |
@@ -170,7 +170,7 @@ Named functions become labeled nodes in the flow diagram. The `state.set()` call
 ### UI Tab — Custom React Components
 
 ```tsx
-// Renders in the automation pane after a frontend rebuild
+// Renders in the automation pane instantly after saving
 export default function EveningMode(props: CustomComponentProps) {
   const mode = props.state.get("mode") as string;
   return (
@@ -189,7 +189,7 @@ export default function EveningMode(props: CustomComponentProps) {
 }
 ```
 
-`props.state.get("mode")` reads the value the Logic tab wrote. `props.deviceAction` and `props.mqttPublish` let the UI tab control devices directly. Write TSX, save, click "Rebuild Frontend", and your component renders live in the pane.
+`props.state.get("mode")` reads the value the Logic tab wrote. `props.deviceAction` and `props.mqttPublish` let the UI tab control devices directly. Write TSX, save, and your component renders live in the pane — no rebuild or refresh needed.
 
 <!-- TODO: Add screenshot of the automation editor (Monaco + flow diagram) here -->
 <!-- ![Automation Editor](docs/screenshots/automation-editor.png) -->
@@ -341,6 +341,7 @@ Three event source layers feed the same internal bus: MQTT devices (bidirectiona
 | GET | `/api/automations/types` | Sandbox type definitions (for IntelliSense) |
 | GET | `/api/automations/ui-types` | Custom UI component type definitions |
 | GET | `/api/automations/history` | Execution log entries |
+| GET | `/api/automations/:id/ui-module` | Compiled UI module (JavaScript) |
 
 #### MQTT & Simulator
 | Method | Path | Description |
@@ -384,8 +385,6 @@ Three event source layers feed the same internal bus: MQTT devices (bidirectiona
 | GET | `/api/system` | Host system diagnostics |
 | GET | `/api/system/logs` | Application log entries |
 | POST | `/api/system/update` | Trigger self-update + restart |
-| POST | `/api/system/rebuild-frontend` | Rebuild frontend (for custom UI components) |
-| GET | `/api/system/rebuild-status` | Frontend rebuild status |
 | WS | `/ws` | Real-time state updates |
 
 </details>
@@ -431,7 +430,8 @@ aeolus/
 ├── frontend/                     # React + Vite dashboard
 │   └── src/
 │       ├── components/           # UI components + pane wrappers
-│       │   └── panes/custom/     # User-authored automation UI components
+│       │   └── panes/custom/     # Custom automation UI component types
+│       ├── hooks/                # React hooks (useDynamicComponent for runtime UI loading)
 │       ├── store/                # Zustand stores
 │       ├── lib/                  # API client, WebSocket client, pane registry
 │       └── types/                # Dashboard type definitions
@@ -488,12 +488,9 @@ The full roadmap lives in [`docs/ROADMAP.md`](docs/ROADMAP.md). Some highlights:
 - 🔐 **Authentication** — user accounts, sessions, role-based access
 - 🌍 **Cloudflare Tunnel** — secure HTTPS access without port forwarding
 - 📊 **State history & charts** — trend charts for sensor data over time
-- 🎨 **Visual flow editor** — drag-and-drop automation builder (Node-RED style)
-- ⚡ **Energy analytics** — per-device cost breakdowns and time-of-use scheduling
 - 📡 **More connectors** — Zigbee, Z-Wave, Tasmota, Shelly, BLE, LoRa
 - 📱 **Mobile app** — React Native companion for quick control and notifications
-- 🤖 **Local AI assistant** — on-device LLM for natural language device control
-
+- 🤖 **Local AI assistant** — on-device LLM for natural language device control-
 ---
 
 ## Contributing

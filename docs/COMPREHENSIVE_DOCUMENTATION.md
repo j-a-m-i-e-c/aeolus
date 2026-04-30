@@ -107,7 +107,7 @@ aeolus/
 │   │   │   ├── connector.routes.ts   # Generic connector REST API (replaces hue.routes.ts)
 │   │   │   ├── service.routes.ts     # Generic service REST API
 │   │   │   ├── layout.routes.ts      # GET/PUT /api/layout (tab + pane persistence)
-│   │   │   └── system.routes.ts      # Host diagnostics, application logs, self-update, frontend rebuild
+│   │   │   └── system.routes.ts      # Host diagnostics, application logs, self-update
 │   │   └── middleware/
 │   │       ├── error-handler.ts      # AppError hierarchy + global handler
 │   │       ├── request-logger.ts     # pino HTTP request logging
@@ -124,8 +124,7 @@ aeolus/
 │   │   ├── automation-engine.ts      # Rule evaluation engine (dispatches to Sandbox or ActionExecutor)
 │   │   ├── action-executor.ts        # Central dispatch service for all automation actions
 │   │   ├── automation-state-store.ts # Per-rule key-value store with SQLite persistence + in-memory cache
-│   │   ├── custom-ui-manager.ts      # Writes custom TSX files and regenerates component registry
-│   │   ├── transpiler.ts             # TypeScript → JavaScript transpilation with import rejection
+│   │   ├── transpiler.ts             # TypeScript → JavaScript transpilation (logic scripts + UI components)
 │   │   ├── sandbox.ts                # Secure isolated-vm sandbox for user-authored scripts
 │   │   ├── execution-log.ts          # In-memory ring buffer for execution history (200 entries)
 │   │   ├── sandbox-types.d.ts        # Type definition bundle for Monaco IntelliSense
@@ -220,8 +219,9 @@ aeolus/
 │       │       ├── EventLogPane.tsx
 │       │       ├── ConnectorsPane.tsx
 │       │       └── custom/              # Custom automation UI components
-│       │           ├── types.ts         # CustomComponentProps interface
-│       │           └── index.ts         # Auto-generated component registry (CUSTOM_COMPONENTS map)
+│       │           └── types.ts         # CustomComponentProps interface
+│       ├── hooks/
+│       │   └── useDynamicComponent.ts # Runtime loader for custom automation UI modules (blob URL + dynamic import)
 │       ├── store/
 │       │   ├── device-store.ts       # Zustand device state + WebSocket sync
 │       │   ├── dashboard-store.ts    # Zustand dashboard layout state (tabs, panes, persistence)
@@ -290,13 +290,22 @@ Central dispatch service for all automation actions. Every action — whether fr
 
 ### TypeScript Transpiler (`src/automations/transpiler.ts`)
 
-Handles TypeScript → JavaScript compilation using the TypeScript compiler API (`ts.transpileModule()`).
+Handles TypeScript → JavaScript compilation using the TypeScript compiler API (`ts.transpileModule()`). Provides two transpilation functions for different contexts.
 
+**`transpile(source)` — Automation logic scripts:**
 - Strips type annotations and produces ES2022-compatible JavaScript output
 - Rejects empty source strings with a descriptive error
 - Rejects source containing `import` or `require` statements via regex pre-check before transpilation
 - Returns structured errors with `line`, `column`, and `message` for the frontend to display inline
 - Does not perform full type checking — only syntactic transpilation (type checking happens in the Monaco editor via the `.d.ts` bundle)
+
+**`transpileUi(source)` — Custom UI components (TSX):**
+- Transpiles TSX source to ES module JavaScript with `jsx: react-jsx` and `jsxImportSource: "react"`
+- Allows `import` statements (unlike `transpile()` which rejects them) — UI components need to import React and JSX runtime
+- Produces ES2022 ESNext module output suitable for dynamic `import()` in the browser
+- Rejects empty source strings with a descriptive error
+- Returns structured errors with `line`, `column`, and `message` on syntax failures
+- Called by POST/PUT automation routes on save; the compiled output is stored in the `compiled_ui` column
 
 ### Sandbox (`src/automations/sandbox.ts`)
 
@@ -359,17 +368,23 @@ Per-rule key-value store enabling bidirectional communication between backend au
 - Exposed to automation scripts via the `state` sandbox global
 - State changes are broadcast to all WebSocket clients via the `AUTOMATION_STATE_CHANGE` event
 
-### Custom UI Manager (`src/automations/custom-ui-manager.ts`)
+### Runtime UI Module Loading
 
-Manages writing/deleting custom automation UI component `.tsx` files and regenerating the static import registry consumed by the Vite build.
+Custom automation UI components are transpiled on the backend at save time and loaded dynamically in the browser at runtime — no Docker rebuild or Vite recompilation required.
 
-- Writes user-authored TSX source to `frontend/src/components/panes/custom/automation-{ruleId}.tsx`
-- Auto-generates `frontend/src/components/panes/custom/index.ts` with static imports and a `CUSTOM_COMPONENTS` record mapping rule IDs to React components
-- `writeComponent(ruleId, uiSource)` — writes the TSX file and regenerates the registry
-- `deleteComponent(ruleId)` — deletes the TSX file (ENOENT silently ignored) and regenerates the registry
-- `regenerateRegistry()` — scans the `custom/` directory for `automation-*.tsx` files, generates PascalCase import names, and writes the registry file
-- `isAvailable()` — checks if the project directory and custom component subdirectory exist (creates the directory if needed)
-- The registry file includes a header comment warning against manual editing
+**Backend (`transpileUi()` + `compiled_ui` column):**
+- When a POST or PUT request includes `uiSource`, the route calls `transpileUi(uiSource)` to produce an ES module JavaScript string
+- The compiled output is stored in the `compiled_ui` column of the `automation_rules` table alongside the original `ui_source`
+- `GET /api/automations/:id/ui-module` serves the compiled JS with `Content-Type: application/javascript` and `Cache-Control: no-cache`
+- Returns 404 if the rule has no compiled UI module
+
+**Frontend (`useDynamicComponent` hook + `window.__AEOLUS_EXTERNALS__`):**
+- `main.tsx` registers `window.__AEOLUS_EXTERNALS__` with references to `React`, `ReactDOM`, and `react/jsx-runtime` so dynamically loaded modules can resolve React imports without bundling their own copy
+- The `useDynamicComponent(ruleId, hasUiSource)` hook fetches the compiled JS from `/api/automations/:id/ui-module`
+- `rewriteImports(source)` converts ES module import statements for `react`, `react-dom`, and `react/jsx-runtime` into destructuring assignments from `window.__AEOLUS_EXTERNALS__` (e.g. `import { jsx as _jsx } from "react/jsx-runtime"` becomes `const { jsx: _jsx } = window.__AEOLUS_EXTERNALS__["react/jsx-runtime"]`)
+- The rewritten source is loaded via a blob URL + dynamic `import()`, then the default export is validated as a React component
+- `AutomationPane` uses the `useDynamicComponent` hook via a `DynamicCustomSection` helper component (extracted to satisfy React's rules of hooks)
+- Components render inside a `CustomComponentBoundary` error boundary for crash isolation
 
 ### Execution Log (`src/automations/execution-log.ts`)
 
@@ -588,7 +603,7 @@ Create a new automation rule (form or script). For script rules, include `ruleTy
 Returns `{ "success": true, "id": "..." }`. 400 if transpilation fails (with `details` array of `{ line, column, message }`).
 
 **PUT /api/automations/:id**
-Update an existing automation rule. For script rules, re-transpiles the TypeScript source on save. Optionally update `uiSource` — the backend writes the TSX file via CustomUiManager and regenerates the component registry.
+Update an existing automation rule. For script rules, re-transpiles the TypeScript source on save. Optionally update `uiSource` — the backend transpiles the TSX via `transpileUi()` and stores the compiled output in the `compiled_ui` column for runtime loading.
 Returns `{ "success": true, "id": "..." }`. 404 if rule not found, 400 if transpilation fails.
 
 **DELETE /api/automations/:id**
@@ -637,6 +652,10 @@ Query parameters:
 - `limit` (optional) — number of entries to return
 
 Returns an array of `ExecutionLogEntry` objects.
+
+**GET /api/automations/:id/ui-module**
+Serve the compiled UI module JavaScript for a specific automation rule. The response is the transpiled ES module output from `transpileUi()`, served with `Content-Type: application/javascript` and `Cache-Control: no-cache`. The frontend's `useDynamicComponent` hook fetches this endpoint to load custom UI components at runtime.
+Returns the compiled JavaScript as a plain text response. 404 if the rule is not found or has no compiled UI module.
 
 ### Connector API
 
@@ -738,18 +757,6 @@ Returns an array of log entry objects with `level`, `levelLabel`, `msg`, `time`,
 Triggers a self-update: runs `git pull` followed by `docker compose up -d --build` in the mounted project directory. The process is fire-and-forget — the response is returned immediately and the container is replaced during rebuild.
 Returns `{ "success": true, "message": "Update started — the system will restart shortly" }`.
 Returns 400 if the project directory is not mounted (only works on deployed Pi).
-
-**POST /api/system/rebuild-frontend**
-Triggers a frontend-only rebuild: runs `docker compose up -d --build frontend` in the mounted project directory. Used after saving custom UI components to compile the new TSX into the Vite bundle. Starts the rebuild status tracking state machine.
-Returns `{ "success": true, "message": "Frontend rebuild started" }`.
-Returns 400 if the project directory is not mounted.
-
-**GET /api/system/rebuild-status**
-Returns the current frontend rebuild status. The state machine transitions: `idle` → `rebuilding` → `ready` → `idle` (auto-reset after 30 seconds).
-```json
-{ "status": "rebuilding" }
-```
-The tracking uses health-poll-based detection: polls the frontend container every 2 seconds, waits for an 8-second grace period (for Docker to tear down the old container), then transitions to `ready` when the frontend responds.
 
 ### Layout API
 
@@ -1085,6 +1092,7 @@ CREATE TABLE automation_rules (
   compiled_js TEXT DEFAULT NULL,
   structured_metadata TEXT DEFAULT NULL,
   ui_source TEXT DEFAULT NULL,
+  compiled_ui TEXT DEFAULT NULL,
   enabled INTEGER NOT NULL DEFAULT 1,
   created_at INTEGER NOT NULL
 );
@@ -1195,8 +1203,9 @@ The Dockerfile installs `git`, `docker-cli`, and `docker-cli-compose` in the pro
 | Sandbox | `http.get/post` uses plain HTTP for non-local URL | Logs warning with ruleId, method, and URL — request still proceeds (not blocked) |
 | Sandbox | isolated-vm not available (Windows dev) | Log warning, sandbox execution disabled, script rules skip |
 | Transpiler | Syntax error in TypeScript source | Return 400 with `{ error, details: [{ line, column, message }] }` |
-| Transpiler | Source contains import/require | Return 400 with descriptive error before transpilation |
-| Transpiler | Empty source string | Return 400 with "Script source cannot be empty" |
+| Transpiler | Source contains import/require (logic scripts only) | Return 400 with descriptive error before transpilation |
+| Transpiler | Empty source string | Return 400 with "Script source cannot be empty" or "UI source cannot be empty" |
+| Transpiler | TSX compilation error in `transpileUi()` | Return 400 with `{ error: "TSX compilation failed", details: [...] }` |
 | REST API | Device not found | 404 JSON error |
 | REST API | Invalid action payload | 400 JSON error |
 | Connector | connect() fails | Log error, set health to disconnected, keep instance |
@@ -1224,13 +1233,14 @@ The Dockerfile installs `git`, `docker-cli`, and `docker-cli-compose` in the pro
 | State Store | Non-serializable value in `state.set()` | Log warning with ruleId and key, silently skip the set operation |
 | State Store | Malformed JSON in `automation_state` table | Log warning, skip entry during `loadFromDb()`, continue with remaining entries |
 | State Store | Missing rule on state API request | 404 JSON error |
-| Custom UI | TSX syntax error in user-authored component | Caught at Vite build time during frontend rebuild — component not compiled |
+| Custom UI | TSX syntax error in user-authored component | Caught at transpile time by `transpileUi()` — returns 400 with structured errors (line, column, message) |
 | Custom UI | Component render error at runtime | Caught by `CustomComponentBoundary` error boundary — shows fallback UI, isolates crash from other panes |
-| Custom UI | Source saved but component not yet compiled | "Rebuild frontend to activate" banner shown in AutomationPane status mode |
-| Custom UI | CustomUiManager project directory not available | `isAvailable()` returns false, custom UI features gracefully disabled |
-| Rebuild | Docker compose rebuild fails | Fire-and-forget — rebuild status may remain in `rebuilding` state until 30-second auto-reset |
-| Rebuild | Frontend health check timeout | Poll continues every 2 seconds; 30-second auto-reset returns status to `idle` |
-| Rebuild | Project directory not mounted | 400 JSON error from `POST /api/system/rebuild-frontend` |
+| Custom UI | `useDynamicComponent` fetch fails (network error) | Hook sets error state with "Connection error — could not reach the server", pane shows error banner |
+| Custom UI | UI module endpoint returns 404 | Hook sets error state with "Failed to load UI module (404)", pane shows error banner |
+| Custom UI | Module has no default export | Hook sets error state with "Module does not export a default component" |
+| Custom UI | Module default export is not a function | Hook sets error state with "Module default export is not a valid React component" |
+| Custom UI | Dynamic `import()` fails (syntax error in rewritten module) | Hook catches error, sets error message, revokes blob URL to prevent memory leak |
+| Custom UI | `rewriteImports()` encounters unknown specifier | Leaves the import statement unchanged (only rewrites `react`, `react-dom`, `react/jsx-runtime`) |
 
 ## Design Decisions
 
@@ -1251,9 +1261,9 @@ The Dockerfile installs `git`, `docker-cli`, and `docker-cli-compose` in the pro
 - **Structured `automation()` helper with named function arrays:** The `automation({ conditions: [...], actions: [...] })` helper accepts arrays of named functions. Named functions become labeled nodes in the FlowDiagram SVG. This gives users the flexibility of free-form TypeScript while enabling automatic visualization. Backward compatible with single-function form.
 - **Host-side HTTP for sandbox `http` global:** The `http.get/post` sandbox globals delegate to host-side `fetch()` via `ivm.Reference` callbacks rather than allowing network access inside the isolate. This maintains the security boundary — the isolate has no network stack — while enabling external API calls with a 10-second timeout. Errors are caught and returned as `{ status: 0, body: errorMessage }` rather than throwing. Both HTTP and HTTPS are allowed (local LAN services often don't have TLS), but a warning is logged when plain HTTP is used for non-local URLs to nudge users toward HTTPS for internet-facing requests. Local/private network addresses (localhost, 10.x, 172.16-31.x, 192.168.x) are exempt from the warning.
 - **Connector-provided code snippets:** Each connector module can optionally export a `snippets` array alongside `metadata`, `configSchema`, and `createConnector`. These snippets appear grouped under the connector's display name in the automation editor's snippet picker. This makes the snippet system extensible — new connectors automatically contribute code templates without any changes to the snippet catalog or frontend. Platform-level snippets (MQTT, HTTP, Conditions, Devices, Services, Templates) are always available regardless of which connectors are installed.
-- **Build-time compilation for custom UI components:** Custom automation UI components are written as TSX files and compiled at Vite build time, not evaluated at runtime with `eval()` or `new Function()`. The CustomUiManager writes `.tsx` files to the `frontend/src/components/panes/custom/` directory and regenerates a static import registry (`index.ts`). A frontend rebuild (`docker compose up -d --build frontend`) compiles the new components into the production bundle. This approach is safer (no runtime code execution in the browser), produces optimized output, and gives users full access to React, TypeScript, and the component ecosystem. The tradeoff is a rebuild step after saving UI source.
+- **Runtime loading for custom UI components via blob URL + dynamic `import()`:** Custom automation UI components are transpiled on the backend at save time (via `transpileUi()`) and stored in the `compiled_ui` column. The frontend loads them at runtime by fetching the compiled JS from `/api/automations/:id/ui-module`, rewriting React import specifiers to reference `window.__AEOLUS_EXTERNALS__`, creating a blob URL, and using dynamic `import()`. This replaces the previous build-time approach (CustomUiManager writing `.tsx` files + Docker frontend rebuild) with instant activation — save and it renders immediately, no rebuild or refresh needed. The tradeoff is that dynamically loaded modules can't be tree-shaken or statically analyzed by Vite, but for small per-automation UI components this is negligible.
+- **`window.__AEOLUS_EXTERNALS__` for React dependency resolution:** Dynamically loaded UI modules need access to React, ReactDOM, and the JSX runtime without bundling their own copies (which would cause hook state mismatches). The solution registers these as globals on `window.__AEOLUS_EXTERNALS__` in `main.tsx`, and the `rewriteImports()` function rewrites ES module import statements into destructuring assignments from these globals. This is similar to Webpack's `externals` configuration but works at the source text level for blob URL imports.
 - **Per-rule key-value state store for backend↔frontend communication:** The AutomationStateStore provides a simple key-value interface (`state.set/get/getAll/delete`) scoped per automation rule. Values are JSON-serialized to SQLite for persistence and kept in an in-memory cache for fast sandbox reads. State changes emit `AUTOMATION_STATE_CHANGE` events on the event bus, which the WebSocket server broadcasts to all clients. The frontend Zustand store (`automation-state-store.ts`) listens for `automation-state` WebSocket messages and updates reactively. This enables automation scripts to compute values (e.g. rolling averages, counters) that custom UI components can display in real time.
-- **Health-poll-based rebuild tracking:** The rebuild status endpoint uses a state machine (`idle` → `rebuilding` → `ready` → `idle`) with health polling rather than Docker event streaming. After triggering `docker compose up -d --build frontend`, the backend polls `http://localhost:3000` every 2 seconds. An 8-second grace period prevents false positives from the old container still responding. Once the frontend responds after the grace period (or after the container was seen down), status transitions to `ready`. A 30-second auto-reset returns to `idle`. This is simpler than parsing Docker events and works reliably across Docker versions.
 - **Error boundary isolation for custom components:** Each custom automation UI component renders inside a `CustomComponentBoundary` React error boundary. If a component throws during render, the error boundary catches it and displays a fallback UI without crashing the entire pane or dashboard. This is essential because custom components are user-authored code — runtime errors are expected and must be contained.
 - **nginx cache-busting strategy:** `index.html` is served with `no-cache, no-store, must-revalidate` headers so the browser always fetches the latest version (which contains hashed asset references). Static assets under `/assets/` are served with `immutable` caching because Vite includes content hashes in filenames — when assets change, the filename changes, so stale caches are never served. The frontend "Refresh Now" button appends a `?_t=timestamp` query parameter for additional cache busting.
 - **MQTT subscribe to all topics (`#`):** Changed the default `MQTT_TOPICS` from `sensor/#,switch/#,motion/#,light/#` to `#` (all topics). This simplifies setup for new users — any MQTT device publishing to any topic is automatically discovered. The previous selective subscription required users to know their topic structure upfront and manually configure the filter. The tradeoff is slightly higher message throughput on busy brokers, but for a local-first Raspberry Pi deployment this is negligible.
@@ -1287,7 +1297,7 @@ The React dashboard provides a comprehensive developer-focused interface with a 
 - **System Health** — MQTT connection status, device count, rule count, uptime (polls every 30s)
 - **Device Grid** — Cards grouped by room (parsed from MQTT topic), collapsible sections, click to open detail modal
 - **Device Detail Modal** — Full state view, capabilities, toggle/brightness controls, last seen timestamp
-- **System Page** — Host diagnostics (CPU, memory, disk, temperature, network), application log viewer, self-update and frontend rebuild controls (rendered inline below the device grid)
+- **System Page** — Host diagnostics (CPU, memory, disk, temperature, network), application log viewer, self-update controls (rendered inline below the device grid)
 
 ### Connectors Tab (pinned)
 - **Available Connectors** — Cards for each discovered connector type showing display name, icon, description, supported device types, and setup requirement badge
@@ -1318,8 +1328,7 @@ Self-contained one-pane-one-automation component with a 3-mode state machine. Ea
 - "Fire Now" button (Zap icon) — directly executes the rule via `POST /api/automations/:id/fire`, bypassing topic matching
 - Last fired timestamp (polls every 10 seconds)
 - Visual: FlowDiagram for structured automations (using `automation()` helper), ActivityFeed for free-form scripts
-- Custom UI component rendering: if `CUSTOM_COMPONENTS[ruleId]` exists in the auto-generated registry, renders the custom component inside a `CustomComponentBoundary` error boundary with full `CustomComponentProps` (devices, state, stateSet, deviceAction, mqttPublish, executionHistory)
-- "Rebuild frontend to activate" banner: shown when `uiSource` exists on the rule but the compiled component is not yet in the registry (frontend rebuild needed)
+- Custom UI component rendering: if the rule has `uiSource`, the `useDynamicComponent` hook fetches the compiled module from `/api/automations/:id/ui-module`, rewrites React imports, loads via blob URL + dynamic `import()`, and renders the component inside a `CustomComponentBoundary` error boundary with full `CustomComponentProps` (devices, state, stateSet, deviceAction, mqttPublish, executionHistory). Components activate instantly on save — no rebuild or refresh needed
 
 **Editing Mode** (entered via Edit button):
 - Pre-filled name, topic, and script source
@@ -1387,10 +1396,11 @@ A React component wrapping `@monaco-editor/react` with Aeolus theming and sandbo
 
 A React component wrapping `@monaco-editor/react` for editing custom automation UI components in TSX.
 
-- Fetches type definitions from `GET /api/automations/ui-types` on mount
-- Registers types for `CustomComponentProps`, React hooks (`useState`, `useEffect`, `useCallback`, `useMemo`, `useRef`), and JSX intrinsic elements
+- Uses `defaultLanguage="typescript"` with `path="file:///aeolus-custom-ui.tsx"` for full JSX/TSX support
+- Registers type stubs at `file:///` paths for Monaco's module resolver: `react`, `react/jsx-runtime`, and `./types` (CustomComponentProps)
+- Fetches additional type definitions from `GET /api/automations/ui-types` on mount
+- Suppresses only specific diagnostic codes (2307 for module resolution, 2875 for JSX) to keep useful error squiggles while avoiding false positives
 - Uses the same `aeolus-dark` Monaco theme as the ScriptEditor
-- TSX language mode with full IntelliSense for component props
 - Ctrl+S / Cmd+S keyboard shortcut to save
 - Accepts `onChange`, `onSave`, `initialValue`, and `onEditorReady` props
 - `onEditorReady` exposes an `insertText` API for the snippet picker to insert code at cursor
@@ -1404,7 +1414,6 @@ A React component wrapping `@monaco-editor/react` for editing custom automation 
 - **Network** — Interface names and IP addresses
 - **Application Logs** — Collapsible log viewer section with level filter dropdown (all/error/warn/info/debug), auto-refresh toggle (10-second interval), colour-coded entries by level, and manual refresh button. Fetches from `GET /api/system/logs`
 - **Self-Update Button** — "Update & Restart" button that triggers `POST /api/system/update` with a confirmation dialog. Shows status message and instructs user to refresh after ~60 seconds
-- **Rebuild Frontend Button** — "Rebuild Frontend" button that triggers `POST /api/system/rebuild-frontend` for recompiling custom UI components. Shows rebuild status (idle/rebuilding/ready) with a "Refresh Now" button that appends a cache-busting `?_t=timestamp` query parameter
 
 ### Custom Tabs (unpinned)
 Custom tabs use the modular pane grid powered by `react-grid-layout`. Users create tabs from the sidebar, then add any combination of panes via the PanePicker.
@@ -1459,6 +1468,7 @@ Custom tabs use the modular pane grid powered by `react-grid-layout`. Users crea
 | DELETE | `/api/automations/:id/state/:key` | Delete a single key from the automation state store |
 | POST | `/api/automations/:id/fire` | Manually fire a specific automation rule (bypasses topic matching) |
 | GET | `/api/automations/history` | Execution log entries (optional limit param) |
+| GET | `/api/automations/:id/ui-module` | Serve compiled UI module as JavaScript (for runtime dynamic loading) |
 | POST | `/api/mqtt/publish` | Publish MQTT message `{ topic, payload }` |
 | GET | `/api/simulator` | Simulator running status |
 | POST | `/api/simulator/start` | Start device simulator |
@@ -1486,8 +1496,6 @@ Custom tabs use the modular pane grid powered by `react-grid-layout`. Users crea
 | GET | `/api/system` | Host system diagnostics (CPU, memory, disk, temp) |
 | GET | `/api/system/logs` | Recent application log entries (count, level filter) |
 | POST | `/api/system/update` | Trigger self-update (git pull + docker compose rebuild) |
-| POST | `/api/system/rebuild-frontend` | Trigger frontend-only rebuild (docker compose up --build frontend) |
-| GET | `/api/system/rebuild-status` | Frontend rebuild status (idle/rebuilding/ready) |
 
 ## Device Simulator
 
@@ -1507,8 +1515,8 @@ Enable via `SIMULATOR=true` env var (auto-starts on boot) or toggle from the sid
 
 ---
 
-**Last Updated:** April 28, 2026
-**Version:** 0.11.0
+**Last Updated:** April 29, 2026
+**Version:** 0.12.0
 **Status:** MVP Development
 
 ## Future Enhancements
