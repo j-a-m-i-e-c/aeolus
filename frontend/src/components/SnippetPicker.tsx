@@ -16,6 +16,7 @@ import {
   Lightbulb,
   Plug,
   LayoutDashboard,
+  X,
 } from "lucide-react";
 
 const API_URL =
@@ -37,6 +38,9 @@ interface SnippetGroup {
 
 interface SnippetPickerProps {
   onInsert: (code: string) => void;
+  onClose?: () => void;
+  /** Which editor tab is active — filters snippets to show relevant ones */
+  mode?: "logic" | "ui";
 }
 
 const ICON_MAP: Record<string, typeof Radio> = {
@@ -56,7 +60,75 @@ function CategoryIcon({ name }: { name: string }) {
   return <Icon size={14} />;
 }
 
-export function SnippetPicker({ onInsert }: SnippetPickerProps) {
+/** UI component snippets — shown when the UI tab is active */
+const UI_SNIPPETS: SnippetGroup[] = [
+  {
+    category: "UI Components",
+    icon: "layout",
+    snippets: [
+      {
+        id: "ui-status-card",
+        name: "Status Card",
+        description: "Card showing device state with toggle",
+        code: `<div className="bg-[#0B0F14] rounded-lg p-3 border border-[#2A3441]">
+  <div className="text-[10px] text-[#6B7785] uppercase mb-1">Status</div>
+  <div className="text-lg font-bold text-[#E6EDF3]">
+    {props.enabled ? "Active" : "Inactive"}
+  </div>
+</div>`,
+      },
+      {
+        id: "ui-device-toggle",
+        name: "Device Toggle Button",
+        description: "Button that toggles a device on/off",
+        code: `<button
+  onClick={() => props.deviceAction("device-id", "toggle")}
+  className="px-3 py-1.5 rounded-lg text-xs font-medium bg-[#3BA4FF]/20 text-[#3BA4FF] border border-[#3BA4FF]/30 hover:bg-[#3BA4FF]/30 transition-colors"
+>
+  Toggle Device
+</button>`,
+      },
+      {
+        id: "ui-state-value",
+        name: "Read State Value",
+        description: "Display a value from the automation state store",
+        code: `const myValue = props.state.get("myKey") as number || 0;`,
+      },
+      {
+        id: "ui-state-write",
+        name: "Write State Button",
+        description: "Button that writes to the state store",
+        code: `<button
+  onClick={() => props.stateSet("myKey", "newValue")}
+  className="px-3 py-1.5 rounded-lg text-xs font-medium bg-[#22C55E]/20 text-[#22C55E] border border-[#22C55E]/30"
+>
+  Update State
+</button>`,
+      },
+      {
+        id: "ui-mqtt-publish",
+        name: "MQTT Publish Button",
+        description: "Button that publishes an MQTT message",
+        code: `<button
+  onClick={() => props.mqttPublish("my/topic", JSON.stringify({ action: "start" }))}
+  className="px-3 py-1.5 rounded-lg text-xs font-medium bg-[#F59E0B]/20 text-[#F59E0B] border border-[#F59E0B]/30"
+>
+  Publish Message
+</button>`,
+      },
+      {
+        id: "ui-device-list",
+        name: "Device List",
+        description: "Render a list of devices filtered by type",
+        code: `const lights = props.devices.filter(d => d.type === "light");
+// In JSX:
+// {lights.map(d => <div key={d.id}>{d.name}: {d.state.on ? "On" : "Off"}</div>)}`,
+      },
+    ],
+  },
+];
+
+export function SnippetPicker({ onInsert, onClose, mode }: SnippetPickerProps) {
   const [groups, setGroups] = useState<SnippetGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -64,6 +136,14 @@ export function SnippetPicker({ onInsert }: SnippetPickerProps) {
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   useEffect(() => {
+    // In UI mode, show UI-specific snippets instead of logic snippets
+    if (mode === "ui") {
+      setGroups(UI_SNIPPETS);
+      setExpanded(new Set([UI_SNIPPETS[0].category]));
+      setLoading(false);
+      return;
+    }
+
     let cancelled = false;
     (async () => {
       try {
@@ -72,7 +152,6 @@ export function SnippetPicker({ onInsert }: SnippetPickerProps) {
         const data: SnippetGroup[] = await res.json();
         if (!cancelled) {
           setGroups(data);
-          // Expand first group by default
           if (data.length > 0) setExpanded(new Set([data[0].category]));
         }
       } catch {
@@ -82,7 +161,7 @@ export function SnippetPicker({ onInsert }: SnippetPickerProps) {
       }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [mode]);
 
   const filtered = useMemo(() => {
     if (!search.trim()) return groups;
@@ -127,7 +206,16 @@ export function SnippetPicker({ onInsert }: SnippetPickerProps) {
       {/* Header */}
       <div className="flex items-center gap-2 px-3 py-2 border-b border-[#2A3441]">
         <Blocks size={14} className="text-primary shrink-0" />
-        <span className="text-xs font-semibold text-[#E6EDF3]">Snippets</span>
+        <span className="text-xs font-semibold text-[#E6EDF3] flex-1">Snippets</span>
+        {onClose && (
+          <button
+            onClick={onClose}
+            className="p-0.5 rounded text-[#6B7785] hover:text-[#9AA6B2] hover:bg-[#1A2330] transition-colors"
+            title="Close snippets"
+          >
+            <X size={14} />
+          </button>
+        )}
       </div>
 
       {/* Search */}

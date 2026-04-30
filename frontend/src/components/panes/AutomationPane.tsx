@@ -203,7 +203,7 @@ export function AutomationPane({ config, paneId }: Props) {
   const [editingTab, setEditingTab] = useState<"logic" | "ui">("logic");
 
   // Snippet panel state
-  const [showSnippets, setShowSnippets] = useState(false);
+  const [showSnippets, setShowSnippets] = useState(true);
   const editorApiRef = useRef<{ insertText: (text: string) => void } | null>(null);
   const uiEditorApiRef = useRef<{ insertText: (text: string) => void } | null>(null);
 
@@ -685,6 +685,8 @@ export function AutomationPane({ config, paneId }: Props) {
         {showSnippets && (
           <div className="w-56 shrink-0 rounded-xl border border-[#2A3441] bg-[#121821] overflow-hidden">
             <SnippetPicker
+              mode={editingTab}
+              onClose={() => setShowSnippets(false)}
               onInsert={(code) => {
                 const ref = editingTab === "logic" ? editorApiRef.current : uiEditorApiRef.current;
                 if (ref) {
