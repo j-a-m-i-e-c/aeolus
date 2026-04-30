@@ -54,19 +54,35 @@ interface Props {
 
 const DEFAULT_SCRIPT = `// Aeolus Automation Script
 // ─────────────────────────────────────────────────────
-// Write your automation logic using the automation() helper.
-// The trigger topic is set above — this code runs when it fires.
+// This script runs every time the trigger topic fires.
+// You can write any JavaScript you want here — there are no restrictions.
 //
 // Available globals:
 //   context   — { topic, deviceId, state, timestamp } of the triggering event
 //   devices   — .get(id), .list(), .filter(fn), .action(id, type, params?)
 //   mqtt      — .publish(topic, payload)
 //   log       — .info(msg), .warn(msg), .error(msg)
+//   state     — .get(key), .set(key, value), .getAll(), .delete(key)
 //   services  — .get(type), .list()
 //   http      — .get(url, opts?), .post(url, opts?)
 //
-// Use named functions so the flow diagram can label each step.
-// All conditions must pass (AND logic) for actions to run.
+// The state global is how you send data to the UI tab.
+// Call state.set("key", value) here and read it with props.state.get("key") in the UI.
+//
+// ─── Option 1: Free-form (write whatever you want) ───
+//
+// const temp = context.state.value;
+// if (temp > 30) {
+//   log.warn("High temp: " + temp);
+//   devices.action("fan-1", "toggle");
+// }
+// state.set("lastTemp", temp);
+//
+// ─── Option 2: Structured helper (generates a flow diagram) ───
+//
+// The automation() helper is optional. If you use it with named functions,
+// the pane will render a visual flow diagram of your conditions and actions.
+// All conditions must pass (AND logic) for the actions to run.
 
 automation({
   conditions: [
