@@ -7,59 +7,6 @@ import { execSync, spawn } from "node:child_process";
 import { getRecentLogs } from "../../log-buffer.js";
 import logger from "../../logger.js";
 
-// --- Rebuild status state machine ---
-let rebuildStatus: "idle" | "rebuilding" | "ready" = "idle";
-let pollInterval: NodeJS.Timeout | null = null;
-let readyTimeout: NodeJS.Timeout | null = null;
-
-function startRebuildTracking(): void {
-  stopRebuildTracking();
-  rebuildStatus = "rebuilding";
-  let seenDown = false;
-  let graceElapsed = false;
-
-  // Give Docker 8 seconds to start tearing down the old container.
-  // After the grace period, if the frontend responds it means the new
-  // container is up (or the old one never went down — rolling replace).
-  setTimeout(() => { graceElapsed = true; }, 8000);
-
-  pollInterval = setInterval(async () => {
-    try {
-      await fetch("http://localhost:3000");
-      // Frontend responded
-      if (seenDown || graceElapsed) {
-        rebuildStatus = "ready";
-        if (pollInterval) {
-          clearInterval(pollInterval);
-          pollInterval = null;
-        }
-        // Auto-reset to idle after 30 seconds
-        readyTimeout = setTimeout(() => {
-          rebuildStatus = "idle";
-          readyTimeout = null;
-        }, 30_000);
-      }
-    } catch {
-      // Frontend not responding — container is down/rebuilding
-      seenDown = true;
-    }
-  }, 2000);
-}
-
-function stopRebuildTracking(): void {
-  if (pollInterval) {
-    clearInterval(pollInterval);
-    pollInterval = null;
-  }
-  if (readyTimeout) {
-    clearTimeout(readyTimeout);
-    readyTimeout = null;
-  }
-}
-
-// Exported for testing
-export { rebuildStatus, startRebuildTracking, stopRebuildTracking };
-
 function getCpuTemp(): number | null {
   try {
     // Raspberry Pi thermal zone
@@ -170,41 +117,6 @@ export function createSystemRoutes(): Router {
       stdio: "ignore",
     });
     child.unref();
-  });
-
-  /** POST /api/system/rebuild-frontend — rebuild the frontend container */
-  router.post("/rebuild-frontend", (_req, res) => {
-    if (rebuildStatus === "rebuilding") {
-      res.status(409).json({ error: "Rebuild already in progress" });
-      return;
-    }
-
-    const projectDir = process.env.AEOLUS_PROJECT_DIR || "/aeolus-host";
-
-    if (!fs.existsSync(projectDir)) {
-      res.status(400).json({ error: "Project directory not mounted — rebuild only works on deployed Pi" });
-      return;
-    }
-
-    logger.info("Frontend rebuild triggered from dashboard");
-
-    // Use `docker compose build --no-cache` then `up -d` to ensure new custom
-    // component files are picked up (Docker's COPY cache can miss new files).
-    const child = spawn("sh", ["-c", "docker compose build --no-cache frontend && docker compose up -d frontend"], {
-      detached: true,
-      stdio: "ignore",
-      cwd: projectDir,
-    });
-    child.unref();
-
-    startRebuildTracking();
-
-    res.json({ success: true, message: "Frontend rebuild started" });
-  });
-
-  /** GET /api/system/rebuild-status — current rebuild state */
-  router.get("/rebuild-status", (_req, res) => {
-    res.json({ status: rebuildStatus });
   });
 
   return router;

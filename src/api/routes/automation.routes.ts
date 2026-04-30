@@ -9,7 +9,7 @@ import type { DeviceRegistry } from "../../core/device-registry.js";
 import type { ActionExecutor, ActionDescriptor } from "../../automations/action-executor.js";
 import type { ExecutionLog } from "../../automations/execution-log.js";
 import type { EventContext } from "../../core/types.js";
-import { transpile } from "../../automations/transpiler.js";
+import { transpile, transpileUi } from "../../automations/transpiler.js";
 import { extractStructuredMetadata } from "../../automations/structured-metadata-extractor.js";
 import { buildSnippetCatalog } from "../../automations/snippet-catalog.js";
 import type { ConnectorRegistry } from "../../connectors/connector-registry.js";
@@ -17,7 +17,6 @@ import { BadRequestError, NotFoundError } from "../middleware/error-handler.js";
 import { persistDatabase } from "../../db/database.js";
 import { eventBus, AUTOMATION_STATE_CHANGE } from "../../core/event-bus.js";
 import type { AutomationStateStore } from "../../automations/automation-state-store.js";
-import type { CustomUiManager } from "../../automations/custom-ui-manager.js";
 import logger from "../../logger.js";
 
 interface StoredRule {
@@ -34,6 +33,7 @@ interface StoredRule {
   compiled_js: string | null;
   structured_metadata: string | null;
   ui_source: string | null;
+  compiled_ui: string | null;
   enabled: number;
   created_at: number;
 }
@@ -47,7 +47,6 @@ export function createAutomationRoutes(
   sandboxTypesPath: string,
   connectorRegistry?: ConnectorRegistry,
   stateStore?: AutomationStateStore,
-  customUiManager?: CustomUiManager,
 ): Router {
   const router = Router();
 
@@ -105,6 +104,23 @@ export function createAutomationRoutes(
     }
 
     res.json(entries);
+  });
+
+  /** GET /api/automations/:id/ui-module — serve compiled UI module as JavaScript */
+  router.get("/:id/ui-module", (req, res) => {
+    const id = req.params.id as string;
+    const rule = queryRuleById(db, id);
+    if (!rule) {
+      res.status(404).json({ error: "Automation rule not found" });
+      return;
+    }
+    if (!rule.compiled_ui) {
+      res.status(404).json({ error: "No compiled UI module" });
+      return;
+    }
+    res.set("Content-Type", "application/javascript");
+    res.set("Cache-Control", "no-cache");
+    res.send(rule.compiled_ui);
   });
 
   /** GET /api/automations — list all rules (file + UI) */
@@ -183,6 +199,22 @@ export function createAutomationRoutes(
       const id = randomUUID();
       const now = Date.now();
 
+      // Transpile uiSource if provided
+      const uiSourceValue = (typeof uiSource === "string" && uiSource.trim()) ? uiSource : null;
+      let compiledUiValue: string | null = null;
+      if (uiSourceValue) {
+        const uiResult = transpileUi(uiSourceValue);
+        if (!uiResult.success) {
+          res.status(400).json({
+            error: "TSX compilation failed",
+            statusCode: 400,
+            details: uiResult.errors,
+          });
+          return;
+        }
+        compiledUiValue = uiResult.js;
+      }
+
       if (ruleType === "script") {
         // Script rule — transpile and store
         if (!scriptSource) {
@@ -201,25 +233,19 @@ export function createAutomationRoutes(
         const structured = extractStructuredMetadata(result.js, triggerTopic);
         const structuredJson = structured ? JSON.stringify(structured) : null;
 
-        const uiSourceValue = (typeof uiSource === "string" && uiSource.trim()) ? uiSource : null;
-
         db.run(
-          `INSERT INTO automation_rules (id, name, trigger_topic, condition_type, condition_value, action_type, action_target, action_params, rule_type, script_source, compiled_js, structured_metadata, ui_source, enabled, created_at)
-           VALUES (?, ?, ?, ?, ?, 'script', '', '{}', 'script', ?, ?, ?, ?, 1, ?)`,
-          [id, name, triggerTopic, conditionType || null, conditionValue || null, scriptSource, result.js, structuredJson, uiSourceValue, now]
+          `INSERT INTO automation_rules (id, name, trigger_topic, condition_type, condition_value, action_type, action_target, action_params, rule_type, script_source, compiled_js, structured_metadata, ui_source, compiled_ui, enabled, created_at)
+           VALUES (?, ?, ?, ?, ?, 'script', '', '{}', 'script', ?, ?, ?, ?, ?, 1, ?)`,
+          [id, name, triggerTopic, conditionType || null, conditionValue || null, scriptSource, result.js, structuredJson, uiSourceValue, compiledUiValue, now]
         );
         persistDatabase();
-
-        if (uiSourceValue && customUiManager?.isAvailable()) {
-          customUiManager.writeComponent(id, uiSourceValue);
-        }
 
         registerUiRule(engine, registry, actionExecutor, {
           id, name, trigger_topic: triggerTopic,
           condition_type: conditionType || null, condition_value: conditionValue || null,
           action_type: "script", action_target: "", action_params: "{}",
           rule_type: "script", script_source: scriptSource, compiled_js: result.js,
-          structured_metadata: structuredJson, ui_source: uiSourceValue,
+          structured_metadata: structuredJson, ui_source: uiSourceValue, compiled_ui: compiledUiValue,
           enabled: 1, created_at: now,
         });
 
@@ -231,18 +257,12 @@ export function createAutomationRoutes(
           throw new BadRequestError("actionType and actionTarget are required for form rules");
         }
 
-        const uiSourceValue = (typeof uiSource === "string" && uiSource.trim()) ? uiSource : null;
-
         db.run(
-          `INSERT INTO automation_rules (id, name, trigger_topic, condition_type, condition_value, action_type, action_target, action_params, rule_type, ui_source, enabled, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'form', ?, 1, ?)`,
-          [id, name, triggerTopic, conditionType || null, conditionValue || null, actionType, actionTarget, JSON.stringify(actionParams || {}), uiSourceValue, now]
+          `INSERT INTO automation_rules (id, name, trigger_topic, condition_type, condition_value, action_type, action_target, action_params, rule_type, ui_source, compiled_ui, enabled, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'form', ?, ?, 1, ?)`,
+          [id, name, triggerTopic, conditionType || null, conditionValue || null, actionType, actionTarget, JSON.stringify(actionParams || {}), uiSourceValue, compiledUiValue, now]
         );
         persistDatabase();
-
-        if (uiSourceValue && customUiManager?.isAvailable()) {
-          customUiManager.writeComponent(id, uiSourceValue);
-        }
 
         registerUiRule(engine, registry, actionExecutor, {
           id, name, trigger_topic: triggerTopic,
@@ -250,7 +270,7 @@ export function createAutomationRoutes(
           action_type: actionType, action_target: actionTarget,
           action_params: JSON.stringify(actionParams || {}),
           rule_type: "form", script_source: null, compiled_js: null,
-          structured_metadata: null, ui_source: uiSourceValue,
+          structured_metadata: null, ui_source: uiSourceValue, compiled_ui: compiledUiValue,
           enabled: 1, created_at: now,
         });
 
@@ -304,20 +324,30 @@ export function createAutomationRoutes(
           uiSourceValue = existing.ui_source;
         }
 
+        // Transpile uiSource if updated, clear compiled_ui if uiSource cleared
+        let compiledUiValue: string | null;
+        if (uiSource === "" || uiSource === null) {
+          compiledUiValue = null;
+        } else if (typeof uiSource === "string" && uiSource.trim()) {
+          const uiResult = transpileUi(uiSourceValue!);
+          if (!uiResult.success) {
+            res.status(400).json({
+              error: "TSX compilation failed",
+              statusCode: 400,
+              details: uiResult.errors,
+            });
+            return;
+          }
+          compiledUiValue = uiResult.js;
+        } else {
+          compiledUiValue = existing.compiled_ui;
+        }
+
         db.run(
-          `UPDATE automation_rules SET name = ?, trigger_topic = ?, condition_type = ?, condition_value = ?, script_source = ?, compiled_js = ?, structured_metadata = ?, ui_source = ? WHERE id = ?`,
-          [name || existing.name, triggerTopic || existing.trigger_topic, conditionType ?? existing.condition_type, conditionValue ?? existing.condition_value, updatedSource, result.js, structuredJson, uiSourceValue, id]
+          `UPDATE automation_rules SET name = ?, trigger_topic = ?, condition_type = ?, condition_value = ?, script_source = ?, compiled_js = ?, structured_metadata = ?, ui_source = ?, compiled_ui = ? WHERE id = ?`,
+          [name || existing.name, triggerTopic || existing.trigger_topic, conditionType ?? existing.condition_type, conditionValue ?? existing.condition_value, updatedSource, result.js, structuredJson, uiSourceValue, compiledUiValue, id]
         );
         persistDatabase();
-
-        // Handle custom UI file writes/deletes
-        if (customUiManager?.isAvailable()) {
-          if (uiSourceValue) {
-            customUiManager.writeComponent(id, uiSourceValue);
-          } else if (uiSource === "" || uiSource === null) {
-            customUiManager.deleteComponent(id);
-          }
-        }
 
         // Re-register in engine
         engine.unregister(id);
@@ -340,8 +370,27 @@ export function createAutomationRoutes(
           uiSourceValue = existing.ui_source;
         }
 
+        // Transpile uiSource if updated, clear compiled_ui if uiSource cleared
+        let compiledUiValue: string | null;
+        if (uiSource === "" || uiSource === null) {
+          compiledUiValue = null;
+        } else if (typeof uiSource === "string" && uiSource.trim()) {
+          const uiResult = transpileUi(uiSourceValue!);
+          if (!uiResult.success) {
+            res.status(400).json({
+              error: "TSX compilation failed",
+              statusCode: 400,
+              details: uiResult.errors,
+            });
+            return;
+          }
+          compiledUiValue = uiResult.js;
+        } else {
+          compiledUiValue = existing.compiled_ui;
+        }
+
         db.run(
-          `UPDATE automation_rules SET name = ?, trigger_topic = ?, condition_type = ?, condition_value = ?, action_type = ?, action_target = ?, action_params = ?, ui_source = ? WHERE id = ?`,
+          `UPDATE automation_rules SET name = ?, trigger_topic = ?, condition_type = ?, condition_value = ?, action_type = ?, action_target = ?, action_params = ?, ui_source = ?, compiled_ui = ? WHERE id = ?`,
           [
             name || existing.name,
             triggerTopic || existing.trigger_topic,
@@ -351,19 +400,11 @@ export function createAutomationRoutes(
             actionTarget || existing.action_target,
             JSON.stringify(actionParams || JSON.parse(existing.action_params)),
             uiSourceValue,
+            compiledUiValue,
             id,
           ]
         );
         persistDatabase();
-
-        // Handle custom UI file writes/deletes
-        if (customUiManager?.isAvailable()) {
-          if (uiSourceValue) {
-            customUiManager.writeComponent(id, uiSourceValue);
-          } else if (uiSource === "" || uiSource === null) {
-            customUiManager.deleteComponent(id);
-          }
-        }
 
         // Re-register in engine
         engine.unregister(id);
@@ -390,9 +431,6 @@ export function createAutomationRoutes(
       }
       if (stateStore) {
         stateStore.deleteAll(id);
-      }
-      if (existing.ui_source && customUiManager?.isAvailable()) {
-        customUiManager.deleteComponent(id);
       }
       db.run("DELETE FROM automation_rules WHERE id = ?", [id]);
       persistDatabase();

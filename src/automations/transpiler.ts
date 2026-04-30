@@ -26,6 +26,56 @@ const IMPORT_REQUIRE_RE =
   /\b(?:import\s+[\s\S]*?\s+from\s|import\s*\(|import\s+['"]|require\s*\(|export\s+[\s\S]*?\s+from\s)/;
 
 /**
+ * Transpile TSX source to ES module JavaScript for custom UI components.
+ * Unlike transpile(), this allows import statements (for React/JSX runtime)
+ * and configures the JSX transform to emit react-jsx runtime calls.
+ */
+export function transpileUi(source: string): TranspileResult {
+  if (source.trim() === "") {
+    return {
+      success: false,
+      errors: [{ line: 1, column: 0, message: "UI source cannot be empty" }],
+    };
+  }
+
+  const result = ts.transpileModule(source, {
+    compilerOptions: {
+      target: ts.ScriptTarget.ES2022,
+      module: ts.ModuleKind.ESNext,
+      jsx: ts.JsxEmit.ReactJSX,
+      jsxImportSource: "react",
+      strict: false,
+      removeComments: false,
+      sourceMap: false,
+    },
+    reportDiagnostics: true,
+  });
+
+  const diagnostics = result.diagnostics ?? [];
+
+  if (diagnostics.length > 0) {
+    const errors: TranspileError[] = diagnostics.map((d) => {
+      let line = 1;
+      let column = 0;
+      if (d.file && d.start !== undefined) {
+        const pos = d.file.getLineAndCharacterOfPosition(d.start);
+        line = pos.line + 1;
+        column = pos.character;
+      }
+      return {
+        line,
+        column,
+        message: ts.flattenDiagnosticMessageText(d.messageText, "\n"),
+      };
+    });
+
+    return { success: false, errors };
+  }
+
+  return { success: true, js: result.outputText };
+}
+
+/**
  * Transpile TypeScript source to ES2022 JavaScript.
  *
  * - Strips type annotations via `ts.transpileModule()` (no full program creation)

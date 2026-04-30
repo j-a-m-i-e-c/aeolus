@@ -12,9 +12,6 @@ import {
   RotateCcw,
   Zap,
   Blocks,
-  Hammer,
-  CheckCircle,
-  RefreshCw,
 } from "lucide-react";
 import { ScriptEditor, type TranspileError } from "../ScriptEditor";
 import { UiEditor } from "../UiEditor";
@@ -22,7 +19,7 @@ import { FlowDiagram } from "../FlowDiagram";
 import { ActivityFeed } from "../ActivityFeed";
 import { SnippetPicker } from "../SnippetPicker";
 import { CustomComponentBoundary } from "../CustomComponentBoundary";
-import { CUSTOM_COMPONENTS } from "./custom/index";
+import { useDynamicComponent } from "../../hooks/useDynamicComponent";
 import type { ExecutionEntry } from "./custom/types";
 import { useDashboardStore } from "../../store/dashboard-store";
 import { useDeviceStore } from "../../store/device-store";
@@ -149,7 +146,6 @@ export function AutomationPane({ config, paneId }: Props) {
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [firing, setFiring] = useState(false);
-  const [customFallback, setCustomFallback] = useState(false);
   const [executionHistory, setExecutionHistory] = useState<ExecutionEntry[]>([]);
 
   // Track ruleId changes to switch modes
@@ -168,12 +164,6 @@ export function AutomationPane({ config, paneId }: Props) {
   const [showSnippets, setShowSnippets] = useState(false);
   const editorApiRef = useRef<{ insertText: (text: string) => void } | null>(null);
   const uiEditorApiRef = useRef<{ insertText: (text: string) => void } | null>(null);
-
-  // Rebuild status state
-  const [rebuilding, setRebuilding] = useState(false);
-  const [rebuildStatus, setRebuildStatus] = useState<"idle" | "rebuilding" | "ready">("idle");
-  const [rebuildStartTime, setRebuildStartTime] = useState<number | null>(null);
-  const rebuildPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Device store for custom component props
   const devices = useDeviceStore((s) => s.devices);
@@ -253,7 +243,6 @@ export function AutomationPane({ config, paneId }: Props) {
       fetchLastFired();
       fetchExecutionHistory();
       fetchInitialState();
-      setCustomFallback(false);
     }
   }, [mode, ruleId, fetchRule, fetchLastFired, fetchExecutionHistory, fetchInitialState]);
 
@@ -422,55 +411,6 @@ export function AutomationPane({ config, paneId }: Props) {
     [mode, handleSave, handleUpdate],
   );
 
-  // ── Rebuild Frontend (15.7) ──
-  const handleRebuild = useCallback(async () => {
-    if (rebuilding) return;
-    setRebuilding(true);
-    setRebuildStatus("rebuilding");
-    setRebuildStartTime(Date.now());
-    try {
-      await fetch(`${API_URL}/api/system/rebuild-frontend`, { method: "POST" });
-    } catch {
-      // Still track status via polling
-    }
-    // Start polling rebuild status
-    if (rebuildPollRef.current) clearInterval(rebuildPollRef.current);
-    rebuildPollRef.current = setInterval(async () => {
-      try {
-        const res = await fetch(`${API_URL}/api/system/rebuild-status`);
-        if (!res.ok) return;
-        const data = await res.json();
-        setRebuildStatus(data.status);
-        if (data.status === "ready" || data.status === "idle") {
-          if (rebuildPollRef.current) {
-            clearInterval(rebuildPollRef.current);
-            rebuildPollRef.current = null;
-          }
-          if (data.status === "ready") {
-            setRebuilding(false);
-          }
-          if (data.status === "idle") {
-            setRebuilding(false);
-            setRebuildStatus("idle");
-          }
-        }
-      } catch {
-        // Keep polling
-      }
-    }, 3000);
-  }, [rebuilding]);
-
-  // Cleanup rebuild polling on unmount
-  useEffect(() => {
-    return () => {
-      if (rebuildPollRef.current) {
-        clearInterval(rebuildPollRef.current);
-      }
-    };
-  }, []);
-
-  const rebuildElapsed = rebuildStartTime ? (Date.now() - rebuildStartTime) / 1000 : 0;
-
   // Device action helper for custom components
   const deviceAction = useCallback(
     async (deviceId: string, actionType: string, params?: Record<string, unknown>) => {
@@ -552,11 +492,8 @@ export function AutomationPane({ config, paneId }: Props) {
 
     if (!rule) return null;
 
-    // Check for custom component (15.5)
-    const CustomComponent = CUSTOM_COMPONENTS[ruleId];
+    // Dynamic component loading — replaces static CUSTOM_COMPONENTS registry
     const hasUiSource = !!rule.uiSource;
-    const showCustom = hasUiSource && CustomComponent && !customFallback;
-    const showRebuildBanner = hasUiSource && !CustomComponent && !customFallback;
 
     return (
       <div className="h-full flex flex-col p-4 gap-3 overflow-auto">
@@ -611,42 +548,20 @@ export function AutomationPane({ config, paneId }: Props) {
           </div>
         </div>
 
-        {/* Rebuild banner (15.5) */}
-        {showRebuildBanner && (
-          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#F59E0B]/10 border border-[#F59E0B]/30">
-            <AlertTriangle size={14} className="text-[#F59E0B] shrink-0" />
-            <span className="text-xs text-[#F59E0B]">
-              Custom UI saved — rebuild frontend to activate
-            </span>
-          </div>
-        )}
-
         {/* Visual: Custom component, FlowDiagram, or ActivityFeed */}
         <div className="flex-1 min-h-0 overflow-auto">
-          {showCustom ? (
-            <CustomComponentBoundary onFallback={() => setCustomFallback(true)}>
-              <CustomComponent
-                devices={Object.values(devices)}
-                ruleId={ruleId}
-                ruleName={rule.name}
-                lastFired={lastFired}
-                enabled={rule.enabled}
-                deviceAction={deviceAction}
-                mqttPublish={mqttPublish}
-                executionHistory={executionHistory}
-                state={stateMap}
-                stateSet={stateSet}
-              />
-            </CustomComponentBoundary>
-          ) : rule.structured ? (
-            <FlowDiagram
-              trigger={rule.structured.trigger}
-              conditions={rule.structured.conditions}
-              actions={rule.structured.actions}
-            />
-          ) : (
-            <ActivityFeed ruleId={rule.id} />
-          )}
+          <DynamicCustomSection
+            ruleId={ruleId}
+            rule={rule}
+            hasUiSource={hasUiSource}
+            lastFired={lastFired}
+            devices={devices}
+            deviceAction={deviceAction}
+            mqttPublish={mqttPublish}
+            executionHistory={executionHistory}
+            stateMap={stateMap}
+            stateSet={stateSet}
+          />
         </div>
       </div>
     );
@@ -753,35 +668,6 @@ export function AutomationPane({ config, paneId }: Props) {
         </div>
       )}
 
-      {/* Rebuild status indicator (15.7) */}
-      {rebuildStatus === "rebuilding" && (
-        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#3BA4FF]/10 border border-[#3BA4FF]/30">
-          <Loader2 size={14} className="animate-spin text-[#3BA4FF] shrink-0" />
-          <span className="text-xs text-[#3BA4FF]">Rebuilding…</span>
-          {rebuildElapsed > 120 && (
-            <span className="text-xs text-[#F59E0B] ml-2">
-              Taking longer than expected — check system logs
-            </span>
-          )}
-        </div>
-      )}
-      {rebuildStatus === "ready" && (
-        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#22C55E]/10 border border-[#22C55E]/30">
-          <CheckCircle size={14} className="text-[#22C55E] shrink-0" />
-          <span className="text-xs text-[#22C55E]">Rebuild complete</span>
-          <button
-            onClick={() => {
-              // Cache-busting reload — append timestamp to force fresh index.html
-              window.location.href = window.location.pathname + "?_t=" + Date.now();
-            }}
-            className="flex items-center gap-1 ml-auto px-2 py-1 text-[10px] font-medium rounded bg-[#22C55E]/20 text-[#22C55E] border border-[#22C55E]/30 hover:bg-[#22C55E]/30 transition-colors"
-          >
-            <RefreshCw size={10} />
-            Refresh Now
-          </button>
-        </div>
-      )}
-
       {/* Action buttons */}
       <div className="flex items-center gap-2 shrink-0">
         <button
@@ -809,18 +695,6 @@ export function AutomationPane({ config, paneId }: Props) {
           Snippets
         </button>
 
-        {/* Rebuild Frontend button — shown on UI tab (15.7) */}
-        {editingTab === "ui" && (
-          <button
-            onClick={handleRebuild}
-            disabled={rebuilding}
-            className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-lg border transition-colors text-[#F59E0B] hover:text-[#E6EDF3] border-[#F59E0B]/30 hover:bg-[#F59E0B]/15 disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            <Hammer size={12} />
-            Rebuild Frontend
-          </button>
-        )}
-
         {isEditing && (
           <button
             onClick={() => {
@@ -836,4 +710,87 @@ export function AutomationPane({ config, paneId }: Props) {
       </div>
     </div>
   );
+}
+
+// ── Helper component for dynamic custom UI loading ──
+// Extracted as a separate component so the useDynamicComponent hook
+// can be called unconditionally (hooks can't be called conditionally).
+
+import type { Device } from "../../store/device-store";
+
+interface DynamicCustomSectionProps {
+  ruleId: string;
+  rule: AutomationRule;
+  hasUiSource: boolean;
+  lastFired: number | null;
+  devices: Record<string, Device>;
+  deviceAction: (deviceId: string, actionType: string, params?: Record<string, unknown>) => Promise<void>;
+  mqttPublish: (topic: string, payload: string) => void;
+  executionHistory: ExecutionEntry[];
+  stateMap: Map<string, unknown>;
+  stateSet: (key: string, value: unknown) => void;
+}
+
+function DynamicCustomSection({
+  ruleId,
+  rule,
+  hasUiSource,
+  lastFired,
+  devices,
+  deviceAction,
+  mqttPublish,
+  executionHistory,
+  stateMap,
+  stateSet,
+}: DynamicCustomSectionProps) {
+  const { Component, loading: dynamicLoading, error: dynamicError } = useDynamicComponent(ruleId, hasUiSource);
+  const [customFallback, setCustomFallback] = useState(false);
+
+  if (hasUiSource && dynamicLoading) {
+    return (
+      <div className="h-full flex items-center justify-center">
+        <Loader2 size={18} className="animate-spin text-[#6B7785]" />
+      </div>
+    );
+  }
+
+  if (hasUiSource && dynamicError) {
+    return (
+      <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#EF4444]/10 border border-[#EF4444]/30">
+        <AlertTriangle size={14} className="text-[#EF4444] shrink-0" />
+        <span className="text-xs text-[#EF4444]">{dynamicError}</span>
+      </div>
+    );
+  }
+
+  if (hasUiSource && Component && !customFallback) {
+    return (
+      <CustomComponentBoundary onFallback={() => setCustomFallback(true)}>
+        <Component
+          devices={Object.values(devices)}
+          ruleId={ruleId}
+          ruleName={rule.name}
+          lastFired={lastFired}
+          enabled={rule.enabled}
+          deviceAction={deviceAction}
+          mqttPublish={mqttPublish}
+          executionHistory={executionHistory}
+          state={stateMap}
+          stateSet={stateSet}
+        />
+      </CustomComponentBoundary>
+    );
+  }
+
+  if (rule.structured) {
+    return (
+      <FlowDiagram
+        trigger={rule.structured.trigger}
+        conditions={rule.structured.conditions}
+        actions={rule.structured.actions}
+      />
+    );
+  }
+
+  return <ActivityFeed ruleId={rule.id} />;
 }

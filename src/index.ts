@@ -27,7 +27,6 @@ import { createStateRoutes } from "./api/routes/state.routes.js";
 import { createHealthRoutes } from "./api/routes/health.routes.js";
 import { createMqttRoutes } from "./api/routes/mqtt.routes.js";
 import { createAutomationRoutes, loadUiRules } from "./api/routes/automation.routes.js";
-import { CustomUiManager } from "./automations/custom-ui-manager.js";
 import { createConnectorRoutes } from "./api/routes/connector.routes.js";
 import { createServiceRoutes } from "./api/routes/service.routes.js";
 import { ServiceRegistry } from "./services/service-registry.js";
@@ -140,8 +139,7 @@ async function main(): Promise<void> {
   app.use("/api/health", createHealthRoutes(mqttService, registry, engine, startTime));
   app.use("/api/mqtt", createMqttRoutes(mqttService));
   const sandboxTypesPath = path.resolve(import.meta.dirname, "automations/sandbox-types.d.ts");
-  const customUiManager = new CustomUiManager(process.env.AEOLUS_PROJECT_DIR || "/aeolus-host");
-  app.use("/api/automations", createAutomationRoutes(engine, db, registry, actionExecutor, executionLog, sandboxTypesPath, connectorRegistry, stateStore, customUiManager));
+  app.use("/api/automations", createAutomationRoutes(engine, db, registry, actionExecutor, executionLog, sandboxTypesPath, connectorRegistry, stateStore));
   app.use("/api/simulator", createSimulatorRoutes(simulator));
   app.use("/api/connectors", createConnectorRoutes(connectorManager, connectorRegistry));
   app.use("/api/services", createServiceRoutes(serviceManager, serviceRegistry));
