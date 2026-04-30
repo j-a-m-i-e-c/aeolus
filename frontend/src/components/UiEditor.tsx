@@ -54,7 +54,9 @@ function defineAeolusDarkTheme(monaco: Parameters<OnMount>[1]) {
 
 /** Fetch UI component type definitions and register with Monaco TS language service */
 async function loadUiTypeDefinitions(monaco: Parameters<OnMount>[1]) {
-  // Register React JSX runtime stub so Monaco doesn't complain about missing module
+  // Register React JSX runtime stub so the TS service understands JSX syntax.
+  // Semantic validation is disabled (backend transpiler catches real errors on save)
+  // so we only need the minimal module declaration for JSX to parse correctly.
   monaco.languages.typescript.typescriptDefaults.addExtraLib(
     `declare module "react/jsx-runtime" {
   export function jsx(type: any, props: any, key?: any): any;
@@ -62,11 +64,23 @@ async function loadUiTypeDefinitions(monaco: Parameters<OnMount>[1]) {
   export const Fragment: any;
 }
 declare module "react" {
-  export function useState<T>(initial: T | (() => T)): [T, (v: T | ((prev: T) => T)) => void];
-  export function useEffect(effect: () => void | (() => void), deps?: any[]): void;
-  export function useCallback<T extends (...args: any[]) => any>(fn: T, deps: any[]): T;
-  export function useMemo<T>(fn: () => T, deps: any[]): T;
-  export function useRef<T>(initial: T): { current: T };
+  const React: any;
+  export = React;
+  export default React;
+}
+declare module "./types" {
+  export interface CustomComponentProps {
+    devices: any[];
+    ruleId: string;
+    ruleName: string;
+    lastFired: number | null;
+    enabled: boolean;
+    deviceAction: (deviceId: string, actionType: string, params?: Record<string, unknown>) => Promise<void>;
+    mqttPublish: (topic: string, payload: string) => void;
+    executionHistory: any[];
+    state: Map<string, unknown>;
+    stateSet: (key: string, value: unknown) => void;
+  }
 }`,
     "react-stubs.d.ts"
   );
@@ -111,7 +125,7 @@ export function UiEditor({
     });
 
     monaco.languages.typescript.typescriptDefaults.setDiagnosticsOptions({
-      noSemanticValidation: false,
+      noSemanticValidation: true,
       noSyntaxValidation: false,
     });
 
