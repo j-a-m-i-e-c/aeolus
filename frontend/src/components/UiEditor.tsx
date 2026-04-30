@@ -150,6 +150,7 @@ export function UiEditor({
       <Editor
         height="100%"
         defaultLanguage="typescript"
+        path="aeolus-custom-ui.tsx"
         defaultValue={initialValue ?? ""}
         theme="aeolus-dark"
         onMount={handleMount}
