@@ -54,35 +54,46 @@ function defineAeolusDarkTheme(monaco: Parameters<OnMount>[1]) {
 
 /** Fetch UI component type definitions and register with Monaco TS language service */
 async function loadUiTypeDefinitions(monaco: Parameters<OnMount>[1]) {
-  // Register React JSX runtime stub so the TS service understands JSX syntax.
-  // Semantic validation is disabled (backend transpiler catches real errors on save)
-  // so we only need the minimal module declaration for JSX to parse correctly.
+  // Register type stubs at file paths that Monaco's module resolver can find.
+  // The model URI is "aeolus-custom-ui.tsx" so relative imports resolve from the root.
+
+  // react/jsx-runtime — needed for JSX transform
   monaco.languages.typescript.typescriptDefaults.addExtraLib(
-    `declare module "react/jsx-runtime" {
-  export function jsx(type: any, props: any, key?: any): any;
-  export function jsxs(type: any, props: any, key?: any): any;
-  export const Fragment: any;
-}
-declare module "react" {
-  const React: any;
-  export = React;
-  export default React;
-}
-declare module "./types" {
-  export interface CustomComponentProps {
-    devices: any[];
-    ruleId: string;
-    ruleName: string;
-    lastFired: number | null;
-    enabled: boolean;
-    deviceAction: (deviceId: string, actionType: string, params?: Record<string, unknown>) => Promise<void>;
-    mqttPublish: (topic: string, payload: string) => void;
-    executionHistory: any[];
-    state: Map<string, unknown>;
-    stateSet: (key: string, value: unknown) => void;
-  }
+    `export function jsx(type: any, props: any, key?: any): any;
+export function jsxs(type: any, props: any, key?: any): any;
+export const Fragment: any;`,
+    "file:///node_modules/react/jsx-runtime/index.d.ts"
+  );
+
+  // react — hooks and core API
+  monaco.languages.typescript.typescriptDefaults.addExtraLib(
+    `export function useState<T>(initial: T | (() => T)): [T, (v: T | ((prev: T) => T)) => void];
+export function useEffect(effect: () => void | (() => void), deps?: any[]): void;
+export function useCallback<T extends (...args: any[]) => any>(fn: T, deps: any[]): T;
+export function useMemo<T>(fn: () => T, deps: any[]): T;
+export function useRef<T>(initial: T): { current: T };
+export function useContext<T>(context: any): T;
+export function useReducer<S, A>(reducer: (state: S, action: A) => S, initial: S): [S, (action: A) => void];
+declare const React: any;
+export default React;`,
+    "file:///node_modules/react/index.d.ts"
+  );
+
+  // ./types — CustomComponentProps (relative to the model URI)
+  monaco.languages.typescript.typescriptDefaults.addExtraLib(
+    `export interface CustomComponentProps {
+  devices: any[];
+  ruleId: string;
+  ruleName: string;
+  lastFired: number | null;
+  enabled: boolean;
+  deviceAction: (deviceId: string, actionType: string, params?: Record<string, unknown>) => Promise<void>;
+  mqttPublish: (topic: string, payload: string) => void;
+  executionHistory: any[];
+  state: Map<string, unknown>;
+  stateSet: (key: string, value: unknown) => void;
 }`,
-    "react-stubs.d.ts"
+    "file:///types.ts"
   );
 
   try {
@@ -127,9 +138,6 @@ export function UiEditor({
     monaco.languages.typescript.typescriptDefaults.setDiagnosticsOptions({
       noSemanticValidation: false,
       noSyntaxValidation: false,
-      // Suppress "Cannot find module" errors — the stubs handle what we need,
-      // and the backend transpiler catches real import errors on save
-      diagnosticCodesToIgnore: [2307, 2875],
     });
 
     loadUiTypeDefinitions(monaco);
@@ -184,7 +192,7 @@ export function UiEditor({
       <Editor
         height="100%"
         defaultLanguage="typescript"
-        path="aeolus-custom-ui.tsx"
+        path="file:///aeolus-custom-ui.tsx"
         defaultValue={initialValue ?? ""}
         theme="aeolus-dark"
         onMount={handleMount}
