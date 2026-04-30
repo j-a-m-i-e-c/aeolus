@@ -15,43 +15,10 @@ export interface UiEditorProps {
 
 /** Define the Aeolus dark theme for Monaco */
 function defineAeolusDarkTheme(monaco: Parameters<OnMount>[1]) {
-  monaco.editor.defineTheme("aeolus-dark", {
+  monaco.editor.defineTheme("aeolus-dark-tsx", {
     base: "vs-dark",
     inherit: true,
-    rules: [
-      { token: "keyword", foreground: "3BA4FF" },
-      { token: "keyword.ts", foreground: "3BA4FF" },
-      { token: "keyword.tsx", foreground: "3BA4FF" },
-      { token: "string", foreground: "5CE1E6" },
-      { token: "string.ts", foreground: "5CE1E6" },
-      { token: "string.tsx", foreground: "5CE1E6" },
-      { token: "comment", foreground: "6B7785" },
-      { token: "comment.ts", foreground: "6B7785" },
-      { token: "comment.tsx", foreground: "6B7785" },
-      { token: "identifier", foreground: "E6EDF3" },
-      { token: "identifier.ts", foreground: "E6EDF3" },
-      { token: "identifier.tsx", foreground: "E6EDF3" },
-      { token: "type", foreground: "9AA6B2" },
-      { token: "type.identifier", foreground: "9AA6B2" },
-      { token: "type.identifier.ts", foreground: "9AA6B2" },
-      { token: "type.identifier.tsx", foreground: "9AA6B2" },
-      { token: "number", foreground: "F59E0B" },
-      { token: "number.ts", foreground: "F59E0B" },
-      { token: "number.tsx", foreground: "F59E0B" },
-      { token: "delimiter", foreground: "9AA6B2" },
-      { token: "delimiter.tsx", foreground: "9AA6B2" },
-      { token: "operator", foreground: "3BA4FF" },
-      { token: "operator.tsx", foreground: "3BA4FF" },
-      // JSX-specific tokens
-      { token: "tag", foreground: "3BA4FF" },
-      { token: "tag.tsx", foreground: "3BA4FF" },
-      { token: "attribute.name", foreground: "5CE1E6" },
-      { token: "attribute.name.tsx", foreground: "5CE1E6" },
-      { token: "attribute.value", foreground: "5CE1E6" },
-      { token: "attribute.value.tsx", foreground: "5CE1E6" },
-      { token: "delimiter.html", foreground: "6B7785" },
-      { token: "delimiter.html.tsx", foreground: "6B7785" },
-    ],
+    rules: [],
     colors: {
       "editor.background": "#0B0F14",
       "editor.foreground": "#E6EDF3",
@@ -103,7 +70,7 @@ export function UiEditor({
     monacoRef.current = monaco;
 
     defineAeolusDarkTheme(monaco);
-    monaco.editor.setTheme("aeolus-dark");
+    monaco.editor.setTheme("aeolus-dark-tsx");
 
     // Configure TypeScript defaults for TSX components
     monaco.languages.typescript.typescriptDefaults.setCompilerOptions({
@@ -173,7 +140,7 @@ export function UiEditor({
         height="100%"
         defaultLanguage="typescriptreact"
         defaultValue={initialValue ?? ""}
-        theme="aeolus-dark"
+        theme="aeolus-dark-tsx"
         onMount={handleMount}
         onChange={handleChange}
         options={{
