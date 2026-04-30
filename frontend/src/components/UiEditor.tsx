@@ -54,6 +54,23 @@ function defineAeolusDarkTheme(monaco: Parameters<OnMount>[1]) {
 
 /** Fetch UI component type definitions and register with Monaco TS language service */
 async function loadUiTypeDefinitions(monaco: Parameters<OnMount>[1]) {
+  // Register React JSX runtime stub so Monaco doesn't complain about missing module
+  monaco.languages.typescript.typescriptDefaults.addExtraLib(
+    `declare module "react/jsx-runtime" {
+  export function jsx(type: any, props: any, key?: any): any;
+  export function jsxs(type: any, props: any, key?: any): any;
+  export const Fragment: any;
+}
+declare module "react" {
+  export function useState<T>(initial: T | (() => T)): [T, (v: T | ((prev: T) => T)) => void];
+  export function useEffect(effect: () => void | (() => void), deps?: any[]): void;
+  export function useCallback<T extends (...args: any[]) => any>(fn: T, deps: any[]): T;
+  export function useMemo<T>(fn: () => T, deps: any[]): T;
+  export function useRef<T>(initial: T): { current: T };
+}`,
+    "react-stubs.d.ts"
+  );
+
   try {
     const res = await fetch(`${API_URL}/api/automations/ui-types`);
     if (!res.ok) return;
