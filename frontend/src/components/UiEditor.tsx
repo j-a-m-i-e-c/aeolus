@@ -125,8 +125,11 @@ export function UiEditor({
     });
 
     monaco.languages.typescript.typescriptDefaults.setDiagnosticsOptions({
-      noSemanticValidation: true,
+      noSemanticValidation: false,
       noSyntaxValidation: false,
+      // Suppress "Cannot find module" errors — the stubs handle what we need,
+      // and the backend transpiler catches real import errors on save
+      diagnosticCodesToIgnore: [2307, 2875],
     });
 
     loadUiTypeDefinitions(monaco);
