@@ -76,7 +76,7 @@ automation({
   ],
   actions: [
     function logEvent(ctx) {
-      log.info(\\\`Triggered on \\\${ctx.topic}: \\\${JSON.stringify(ctx.state)}\\\`);
+      log.info("Triggered on " + ctx.topic + ": " + JSON.stringify(ctx.state));
     },
   ],
 });
