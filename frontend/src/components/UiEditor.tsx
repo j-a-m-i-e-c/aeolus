@@ -149,7 +149,7 @@ export function UiEditor({
     >
       <Editor
         height="100%"
-        defaultLanguage="typescriptreact"
+        defaultLanguage="typescript"
         defaultValue={initialValue ?? ""}
         theme="aeolus-dark"
         onMount={handleMount}
