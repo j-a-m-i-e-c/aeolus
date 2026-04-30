@@ -191,6 +191,8 @@ export default function EveningMode(props: CustomComponentProps) {
 
 `props.state.get("mode")` reads the value the Logic tab wrote. `props.deviceAction` and `props.mqttPublish` let the UI tab control devices directly. Write TSX, save, and your component renders live in the pane — no rebuild or refresh needed.
 
+**How it works under the hood:** When you save, the backend transpiles your TSX into an ES module using the TypeScript compiler API with the React JSX transform. The compiled JavaScript is stored in the database and served via a dedicated API endpoint. The frontend fetches it, rewrites the React imports to reference the host app's shared React instance, loads it as a module via a blob URL and dynamic `import()`, and renders it inside an error boundary. The whole round-trip happens in milliseconds — no Docker rebuild, no Vite recompilation, no page refresh.
+
 <!-- TODO: Add screenshot of the automation editor (Monaco + flow diagram) here -->
 <!-- ![Automation Editor](docs/screenshots/automation-editor.png) -->
 
