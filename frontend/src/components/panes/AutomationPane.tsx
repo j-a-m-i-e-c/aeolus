@@ -54,8 +54,8 @@ interface Props {
 
 const DEFAULT_SCRIPT = `// Aeolus Automation Script
 // ─────────────────────────────────────────────────────
-// This script runs every time the trigger topic fires.
-// You can write any JavaScript you want here — there are no restrictions.
+// This script runs in a secure sandbox every time the trigger topic fires.
+// Write any logic you want using the globals below — no imports needed.
 //
 // Available globals:
 //   context   — { topic, deviceId, state, timestamp } of the triggering event
@@ -69,7 +69,7 @@ const DEFAULT_SCRIPT = `// Aeolus Automation Script
 // The state global is how you send data to the UI tab.
 // Call state.set("key", value) here and read it with props.state.get("key") in the UI.
 //
-// ─── Option 1: Free-form (write whatever you want) ───
+// ─── Option 1: Free-form (use the globals however you like) ───
 //
 // const temp = context.state.value;
 // if (temp > 30) {
