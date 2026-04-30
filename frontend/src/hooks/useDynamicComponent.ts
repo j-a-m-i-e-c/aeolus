@@ -59,8 +59,11 @@ export function rewriteImports(source: string): string {
     }
 
     if (namedMatch) {
+      // Convert import alias syntax (as) to destructuring syntax (:)
+      // e.g. "jsx as _jsx" → "jsx: _jsx"
+      const destructured = namedMatch[1].replace(/\b(\w+)\s+as\s+(\w+)\b/g, "$1: $2");
       parts.push(
-        `const {${namedMatch[1]}} = window.__AEOLUS_EXTERNALS__["${specifier}"];`,
+        `const {${destructured}} = window.__AEOLUS_EXTERNALS__["${specifier}"];`,
       );
     }
 
