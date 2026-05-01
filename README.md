@@ -61,7 +61,7 @@ The built-in device simulator generates fake sensor data so you can explore aspe
 curl -sSL https://raw.githubusercontent.com/j-a-m-i-e-c/aeolus/main/scripts/setup-pi.sh | bash
 ```
 
-Installs Docker, clones Aeolus, builds containers, and starts everything. Auto-starts on boot.
+Installs Docker, clones Aeolus, builds containers, and starts everything. Auto-starts on boot. Sets the Pi's hostname to `aeolus` so you can access the dashboard at **http://aeolus.local:3000** from any device on your network.
 
 ---
 

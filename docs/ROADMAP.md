@@ -71,6 +71,20 @@ React Native companion app for quick device control, push notifications when aut
 ### Plugin Marketplace
 Community-contributed connectors and pane types installable from the dashboard. A registry of published plugins with one-click install, automatic dependency resolution, and version management. Would lower the barrier for extending Aeolus without writing code.
 
+### Browser-Based Code Editor (code-server Add-on)
+Embed a full VS Code instance ([code-server](https://github.com/coder/code-server)) into the Aeolus stack as an additional Docker Compose service, accessible from the dashboard via an ingress proxy — similar to Home Assistant's VS Code add-on. The backend (or nginx frontend) would reverse-proxy requests from a path like `/addon/code-server/` into the code-server container, including WebSocket traffic, so the editor works seamlessly within the Aeolus UI.
+
+**Why not for automations?** Aeolus already has purpose-built Monaco editors for automation logic scripts and custom UI components (TSX). These editors are tightly integrated with the automation context — IntelliSense powered by `sandbox-types.d.ts`, a snippet picker pulling from platform and connector catalogs, instant transpile-on-save, live execution feedback in the activity feed and flow diagram, and the automation state store bridging scripts and UI components over WebSocket. A full VS Code instance would lose all of that context and be a downgrade for the automation editing workflow.
+
+**Where it shines — platform development from the Pi:**
+- **Editing Aeolus source code** — working on backend services, connectors, the frontend, Docker configs, and infrastructure directly from the Pi's browser without needing SSH or a separate development machine
+- **Building new connectors** — the `_template/` scaffold, implementing `connector.interface.ts`, testing against live devices on the LAN. This is real multi-file TypeScript work where a full IDE with project-wide navigation, refactoring, and terminal access makes a meaningful difference
+- **Writing file-based automation rules** — the `automations/` directory DSL rules that live as `.ts` files on disk, where git integration and multi-file awareness help
+- **System administration** — reading logs, inspecting the SQLite database, running diagnostic scripts, managing Docker containers, all from the browser
+- **Remote development** — when combined with the Cloudflare Tunnel roadmap item, developers could work on the Aeolus platform from anywhere without SSH tunnels or VPN setup
+
+**Implementation approach:** Add a `code-server` service to `docker-compose.yml` mounting the Aeolus project directory, proxy it through Express using `http-proxy-middleware` (with WebSocket support), and add a new dashboard pane type or sidebar link that renders the editor in an iframe. The backend container already has `docker-cli` and the Docker socket mounted, so orchestration is straightforward. Estimated effort: 1-2 days for a working MVP.
+
 ---
 
 ## Untapped Opportunities

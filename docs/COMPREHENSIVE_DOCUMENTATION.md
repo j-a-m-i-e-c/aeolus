@@ -1515,7 +1515,7 @@ Enable via `SIMULATOR=true` env var (auto-starts on boot) or toggle from the sid
 
 ---
 
-**Last Updated:** April 29, 2026
+**Last Updated:** May 2, 2026
 **Version:** 0.12.0
 **Status:** MVP Development
 

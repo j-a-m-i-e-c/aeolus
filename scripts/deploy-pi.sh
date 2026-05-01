@@ -14,4 +14,4 @@ docker compose build
 echo "🚀 Restarting services..."
 docker compose up -d
 
-echo "✓ Deployed! Dashboard at http://$(hostname -I | awk '{print $1}'):3000"
+echo "✓ Deployed! Dashboard at http://aeolus.local:3000"

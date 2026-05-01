@@ -8,7 +8,27 @@ set -e
 echo "🌬️  Aeolus — Raspberry Pi Setup"
 echo "================================"
 
-# 1. Install Docker if not present
+# 1. Set hostname to 'aeolus' for local network access (http://aeolus.local)
+CURRENT_HOSTNAME=$(hostname)
+if [ "$CURRENT_HOSTNAME" != "aeolus" ]; then
+  echo "🏷️  Setting hostname to 'aeolus'..."
+  sudo hostnamectl set-hostname aeolus
+  # Update /etc/hosts so localhost resolution still works
+  sudo sed -i "s/127\.0\.1\.1.*$CURRENT_HOSTNAME/127.0.1.1\taeolus/" /etc/hosts
+  # Ensure avahi-daemon is installed and running for mDNS (.local resolution)
+  if ! command -v avahi-daemon &> /dev/null; then
+    echo "📦 Installing Avahi for mDNS..."
+    sudo apt-get update -qq
+    sudo apt-get install -y -qq avahi-daemon
+  fi
+  sudo systemctl enable avahi-daemon
+  sudo systemctl restart avahi-daemon
+  echo "✓ Hostname set to 'aeolus' — reachable at http://aeolus.local"
+else
+  echo "✓ Hostname already set to 'aeolus'"
+fi
+
+# 2. Install Docker if not present
 if ! command -v docker &> /dev/null; then
   echo "📦 Installing Docker..."
   curl -fsSL https://get.docker.com | sh
@@ -18,13 +38,13 @@ else
   echo "✓ Docker already installed"
 fi
 
-# 2. Enable Docker to start on boot
+# 3. Enable Docker to start on boot
 echo "⚙️  Enabling Docker on boot..."
 sudo systemctl enable docker
 sudo systemctl start docker
 echo "✓ Docker enabled on boot"
 
-# 2b. Stop native Mosquitto if running (Docker will provide its own)
+# 3b. Stop native Mosquitto if running (Docker will provide its own)
 if systemctl is-active --quiet mosquitto 2>/dev/null; then
   echo "⚙️  Stopping native Mosquitto (Docker will provide MQTT broker)..."
   sudo systemctl stop mosquitto
@@ -32,7 +52,7 @@ if systemctl is-active --quiet mosquitto 2>/dev/null; then
   echo "✓ Native Mosquitto stopped and disabled"
 fi
 
-# 3. Install Docker Compose plugin if not present
+# 4. Install Docker Compose plugin if not present
 if ! docker compose version &> /dev/null; then
   echo "📦 Installing Docker Compose..."
   sudo apt-get update -qq
@@ -42,7 +62,7 @@ else
   echo "✓ Docker Compose already installed"
 fi
 
-# 4. Clone Aeolus
+# 5. Clone Aeolus
 INSTALL_DIR="$HOME/aeolus"
 if [ -d "$INSTALL_DIR" ]; then
   echo "📂 Updating existing installation..."
@@ -54,13 +74,13 @@ else
   cd "$INSTALL_DIR"
 fi
 
-# 5. Create .env from example if not exists
+# 6. Create .env from example if not exists
 if [ ! -f .env ]; then
   cp .env.example .env
   echo "✓ Created .env from template"
 fi
 
-# 6. Build and start
+# 7. Build and start
 echo "🔨 Building containers (this may take a few minutes on first run)..."
 docker compose build
 echo "🚀 Starting Aeolus..."
@@ -70,9 +90,11 @@ echo ""
 echo "================================"
 echo "🌬️  Aeolus is running!"
 echo ""
-echo "  Dashboard:  http://$(hostname -I | awk '{print $1}'):3000"
-echo "  Backend:    http://$(hostname -I | awk '{print $1}'):3001"
-echo "  MQTT:       $(hostname -I | awk '{print $1}'):1883"
+echo "  Dashboard:  http://aeolus.local:3000"
+echo "  Backend:    http://aeolus.local:3001"
+echo "  MQTT:       aeolus.local:1883"
+echo ""
+echo "  IP address: $(hostname -I | awk '{print $1}')"
 echo ""
 echo "  Logs:       docker compose logs -f"
 echo "  Stop:       docker compose down"
