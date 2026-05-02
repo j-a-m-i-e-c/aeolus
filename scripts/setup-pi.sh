@@ -13,20 +13,36 @@ CURRENT_HOSTNAME=$(hostname)
 if [ "$CURRENT_HOSTNAME" != "aeolus" ]; then
   echo "🏷️  Setting hostname to 'aeolus'..."
   sudo hostnamectl set-hostname aeolus
-  # Update /etc/hosts so localhost resolution still works
-  sudo sed -i "s/127\.0\.1\.1.*$CURRENT_HOSTNAME/127.0.1.1\taeolus/" /etc/hosts
-  # Ensure avahi-daemon is installed and running for mDNS (.local resolution)
-  if ! command -v avahi-daemon &> /dev/null; then
-    echo "📦 Installing Avahi for mDNS..."
-    sudo apt-get update -qq
-    sudo apt-get install -y -qq avahi-daemon
+  # Update /etc/hosts so sudo can resolve the new hostname immediately
+  if grep -q "127\.0\.1\.1" /etc/hosts; then
+    sudo sed -i "s/^127\.0\.1\.1.*/127.0.1.1\taeolus/" /etc/hosts
+  else
+    echo "127.0.1.1	aeolus" | sudo tee -a /etc/hosts > /dev/null
   fi
-  sudo systemctl enable avahi-daemon
-  sudo systemctl restart avahi-daemon
-  echo "✓ Hostname set to 'aeolus' — reachable at http://aeolus.local"
+  echo "✓ Hostname set to 'aeolus'"
 else
   echo "✓ Hostname already set to 'aeolus'"
 fi
+
+# 1b. Configure Avahi mDNS so http://aeolus.local resolves on the LAN
+# Docker creates virtual bridge interfaces (docker0, br-*, veth*) that cause
+# Avahi to detect name conflicts and fall back to aeolus-2.local. We restrict
+# Avahi to only advertise on physical interfaces (eth0 for wired, wlan0 for Wi-Fi).
+if ! command -v avahi-daemon &> /dev/null; then
+  echo "📦 Installing Avahi for mDNS..."
+  sudo apt-get update -qq
+  sudo apt-get install -y -qq avahi-daemon
+fi
+AVAHI_CONF="/etc/avahi/avahi-daemon.conf"
+if ! grep -q "^allow-interfaces=" "$AVAHI_CONF" 2>/dev/null; then
+  echo "⚙️  Configuring Avahi to ignore Docker interfaces..."
+  sudo sed -i '/^\[server\]/a allow-interfaces=eth0,wlan0' "$AVAHI_CONF"
+elif ! grep -q "allow-interfaces=eth0,wlan0" "$AVAHI_CONF" 2>/dev/null; then
+  sudo sed -i "s/^allow-interfaces=.*/allow-interfaces=eth0,wlan0/" "$AVAHI_CONF"
+fi
+sudo systemctl enable avahi-daemon
+sudo systemctl restart avahi-daemon
+echo "✓ Avahi configured — reachable at http://aeolus.local"
 
 # 2. Install Docker if not present
 if ! command -v docker &> /dev/null; then
