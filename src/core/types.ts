@@ -1,7 +1,7 @@
 // src/core/types.ts — Shared TypeScript interfaces for Aeolus
 
-/** Valid device type categories — extended with "plug" for smart plugs */
-export type DeviceType = "light" | "sensor" | "switch" | "climate" | "plug";
+/** Device type — open string, not restricted to a fixed set */
+export type DeviceType = string;
 
 /** Core domain entity representing any IoT device */
 export interface Device {

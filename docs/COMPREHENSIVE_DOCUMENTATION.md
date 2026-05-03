@@ -250,16 +250,32 @@ aeolus/
 
 Connects to the Mosquitto broker for bidirectional communication with custom IoT devices.
 
-**Inbound (sensor data):** Subscribes to configurable topic patterns, normalises incoming messages, and emits `device:state-change` events on the internal bus. Supports exponential backoff retry (max 5 attempts), topic parsing (`{type}/{location}/{metric}` → device ID + type), and multiple payload formats (JSON objects, primitives, plain numbers, strings).
+**Inbound (sensor data):** Subscribes to configurable topic patterns, normalises incoming messages, and emits `device:state-change` events on the internal bus. Supports exponential backoff retry (max 5 attempts), universal topic parsing via `parseTopic()` (any valid MQTT topic is accepted — see Topic Parser below), and multiple payload formats (JSON objects, primitives, plain numbers, strings).
 
 **Outbound (device commands):** Publishes MQTT messages to command topics via `POST /api/mqtt/publish` and the dashboard's MQTT Inspector. This enables Aeolus to send commands to custom microcontroller devices — e.g. publishing `{"action": "open"}` to `valve/irrigation/command` where an ESP32 with a solenoid valve is subscribed. The roadmap includes making outbound MQTT publish a first-class automation action type so rules can trigger device commands directly.
+
+### Topic Parser (`src/mqtt/topic-parser.ts`)
+
+A single universal `parseTopic()` function that always succeeds for any valid MQTT topic. There is no gate, no registry, and no fallback layers — every non-empty topic string produces a `ParsedTopic` with a deterministic device ID, a device type, and a human-readable name.
+
+- **Device ID:** all topic segments joined with hyphens, casing preserved (e.g. `sensor/kitchen/temp` → `sensor-kitchen-temp`)
+- **Device type:** first segment, lowercased (e.g. `Valve/garden` → `valve`). This is an open `string`, not a fixed union — any value is accepted.
+- **Name derivation:**
+  - Known type with ≥2 segments → title-case remaining segments, join with spaces (e.g. `sensor/kitchen/temp` → `Kitchen Temp`)
+  - Unknown type with ≥2 segments → title-case all segments, join with spaces (e.g. `thermostat/living/temp` → `Thermostat Living Temp`)
+  - Single segment → title-case that segment (e.g. `heartbeat` → `Heartbeat`)
+- Returns `null` only for truly invalid inputs: empty string, non-string, or all-empty segments after splitting on `/`
+
+**`KNOWN_TYPES`** is a `ReadonlySet<string>` containing commonly recognized device types (`sensor`, `switch`, `light`, `climate`, `plug`, `valve`, `pump`, `motion`, `fan`, `lock`, `cover`). It is used as a heuristic hint for name derivation and capability inference — not as a gate. Topics with types outside this set are still fully parsed and accepted.
+
+**`prettyPrintTopic(parsed)`** reconstructs a canonical MQTT topic string from a `ParsedTopic` by splitting the `deviceId` on hyphens and joining with `/`. Useful for round-trip verification and debugging.
 
 ### Device Registry (`src/core/device-registry.ts`)
 
 In-memory device cache backed by SQLite for persistence across restarts.
 
 - Upsert: creates new device on first message, updates state on subsequent
-- Infers capabilities by device type (light → on/off + brightness, sensor → temperature, plug → on/off + energy, etc.)
+- Infers capabilities from the device type string using a `KNOWN_TYPES`-based heuristic (light → on/off + brightness, sensor → temperature, plug → on/off + energy, valve → on/off, fan → on/off + speed, etc.). Unknown device types get an empty capabilities array — they are still stored and tracked, just without inferred capabilities.
 - Emits `ws:state-change` events for WebSocket broadcast
 - Serialize/deserialize round-trip for SQLite storage
 

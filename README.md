@@ -221,7 +221,7 @@ The Monaco editor provides full IntelliSense for all globals — autocomplete, p
 
 ## Microcontrollers
 
-Aeolus communicates with custom hardware (ESP32, Arduino, etc.) over MQTT. Your microcontroller connects to the Mosquitto broker on the Pi (`aeolus.local:1883`), publishes sensor data, and optionally subscribes to command topics. Devices appear in the dashboard automatically — no registration needed.
+Aeolus communicates with custom hardware (ESP32, Arduino, etc.) over MQTT. Your microcontroller connects to the Mosquitto broker on the Pi (`aeolus.local:1883`), publishes sensor data, and optionally subscribes to command topics. Devices appear in the dashboard automatically — no registration needed. Any MQTT topic is accepted; the recommended convention is `{type}/{location}/{metric}` for cleaner auto-generated names, but it's not required.
 
 **Full guide with templates: [`docs/MICROCONTROLLERS.md`](docs/MICROCONTROLLERS.md)**
 

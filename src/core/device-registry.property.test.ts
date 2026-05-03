@@ -1,3 +1,4 @@
+// Feature: mqtt-topic-overhaul, Property 8: Registry Accepts Any Device Type
 // Feature: mvp-core-platform, Property 4: Device Registry Upsert Invariant
 // Feature: mvp-core-platform, Property 20: Device Serialization Round-Trip
 // Feature: mvp-core-platform, Property 21: Malformed JSON Deserialization Safety
@@ -7,6 +8,21 @@ import { serializeDevice, deserializeDevice, DeviceRegistry } from "./device-reg
 import type { Device, NormalizedEvent, DeviceType } from "./types.js";
 import { EventEmitter } from "node:events";
 import initSqlJs from "sql.js";
+
+// Mock persistDatabase to no-op in tests
+vi.mock("../db/database.js", () => ({
+  persistDatabase: vi.fn(),
+}));
+
+// Mock logger
+vi.mock("../logger.js", () => ({
+  default: {
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+  },
+}));
 
 const deviceTypeArb = fc.constantFrom<DeviceType>("light", "sensor", "switch", "climate");
 const deviceArb = fc.record({
@@ -102,6 +118,45 @@ describe("Property: Device Registry Upsert Invariant", () => {
       }
 
       expect(registry.size).toBe(seenIds.size);
+      db.close();
+    }
+  );
+});
+
+// --- Property 8: Registry Accepts Any Device Type ---
+// **Validates: Requirements 4.2, 4.3**
+describe("Feature: mqtt-topic-overhaul — Property 8: Registry Accepts Any Device Type", () => {
+  /** Arbitrary non-empty device type string (any printable chars, 1–30 length) */
+  const deviceTypeStringArb = fc.stringMatching(/^[a-zA-Z0-9_-]{1,30}$/);
+
+  test.prop([deviceTypeStringArb, fc.stringMatching(/^[a-z]+-[a-z]+$/)], { numRuns: 100 })(
+    "Property 8: Registry stores any device type and retrieves it with the exact type string",
+    async (deviceType, deviceId) => {
+      const SQL = await initSqlJs();
+      const db = new SQL.Database();
+      db.run(`CREATE TABLE IF NOT EXISTS devices (
+        id TEXT PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL,
+        capabilities TEXT NOT NULL DEFAULT '[]', state TEXT NOT NULL DEFAULT '{}',
+        integration TEXT NOT NULL DEFAULT 'mqtt', last_seen INTEGER NOT NULL
+      )`);
+      const bus = new EventEmitter();
+      const registry = new DeviceRegistry(db, bus);
+
+      const event: NormalizedEvent = {
+        deviceId,
+        deviceType,
+        state: { value: 42 },
+        topic: `${deviceType}/${deviceId}`,
+        timestamp: Date.now(),
+      };
+
+      registry.upsert(event);
+
+      const device = registry.getById(deviceId);
+      expect(device).toBeDefined();
+      expect(device!.type).toBe(deviceType);
+      expect(device!.id).toBe(deviceId);
+
       db.close();
     }
   );

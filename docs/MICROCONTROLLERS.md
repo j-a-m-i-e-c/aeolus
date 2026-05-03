@@ -76,24 +76,38 @@ void loop() {
 
 ## MQTT Topic Convention
 
-Aeolus recommends the format `{type}/{location}/{metric}` but accepts any topic structure — messages on any topic are visible in the MQTT Inspector and can trigger automations.
+Aeolus accepts **any** MQTT topic structure — every valid topic is parsed, and the device appears in the dashboard automatically. The recommended format is `{type}/{location}/{metric}`, which gives you better auto-generated device names, but it is not required.
 
 | Segment | Purpose | Examples |
 |---------|---------|----------|
-| `type` | Device category | `sensor`, `light`, `switch`, `motion`, `valve`, `climate` |
+| `type` | Device category (recommended first segment) | `sensor`, `light`, `switch`, `motion`, `valve`, `climate` |
 | `location` | Where the device is | `kitchen`, `garage`, `outdoor`, `tank` |
 | `metric` | What's being measured (optional) | `temp`, `humidity`, `level`, `light` |
 
-**Examples:**
+> **Not required.** The convention above is a recommendation for cleaner device names. Aeolus will parse and accept any topic — single-segment, multi-segment, or with device types it has never seen before.
 
-| Topic | What It Represents |
-|-------|--------------------|
-| `sensor/kitchen/temp` | Kitchen temperature sensor |
-| `sensor/outdoor/humidity` | Outdoor humidity sensor |
-| `light/bedroom` | Bedroom light |
-| `motion/hallway` | Hallway motion detector |
-| `sensor/tank/level` | Water tank level |
-| `valve/irrigation/command` | Irrigation valve command channel |
+**Standard examples (recommended format):**
+
+| Topic | Auto-Generated Name |
+|-------|---------------------|
+| `sensor/kitchen/temp` | Kitchen Temp |
+| `sensor/outdoor/humidity` | Outdoor Humidity |
+| `light/bedroom` | Bedroom |
+| `motion/hallway` | Hallway |
+| `sensor/tank/level` | Tank Level |
+| `valve/irrigation/command` | Irrigation Command |
+
+**Non-standard examples (also work):**
+
+| Topic | Auto-Generated Name |
+|-------|---------------------|
+| `thermostat/living/temp` | Thermostat Living Temp |
+| `mydevice/room1/status` | Mydevice Room1 Status |
+| `heartbeat` | Heartbeat |
+| `status` | Status |
+| `custom-sensor/zone-a/co2` | Custom-Sensor Zone-A Co2 |
+
+For topics that start with a recognized type (`sensor`, `switch`, `light`, `climate`, `plug`, `valve`, `pump`, `motion`, `fan`, `lock`, `cover`), the type is stripped from the display name. For all other topics, every segment is included in the name. Either way, the device is fully functional.
 
 ## Payload Format
 

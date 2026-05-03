@@ -147,13 +147,18 @@ export class DeviceRegistry {
     }
   }
 
-  private inferCapabilities(type: Device["type"]): string[] {
+  private inferCapabilities(type: string): string[] {
     switch (type) {
       case "light": return ["on/off", "brightness"];
       case "switch": return ["on/off"];
       case "sensor": return ["temperature"];
       case "climate": return ["temperature", "humidity"];
       case "plug": return ["on/off", "energy-monitoring"];
+      case "valve": return ["on/off"];
+      case "pump": return ["on/off"];
+      case "fan": return ["on/off", "speed"];
+      case "lock": return ["lock/unlock"];
+      case "motion": return ["motion-detection"];
       default: return [];
     }
   }
