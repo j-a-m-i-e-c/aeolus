@@ -72,6 +72,11 @@ React Native companion app for quick device control, push notifications when aut
 Community-contributed connectors and pane types installable from the dashboard. A registry of published plugins with one-click install, automatic dependency resolution, and version management. Would lower the barrier for extending Aeolus without writing code.
 
 ### Browser-Based Code Editor (code-server Add-on)
+
+### OTA Firmware Management
+Manage microcontroller firmware updates from the Aeolus dashboard. Upload compiled binaries (.bin files) and push them to ESP32/ESP8266 devices over Wi-Fi using the ArduinoOTA or ESP-IDF OTA protocols. Track firmware versions per device, roll back to previous versions, and schedule updates during low-activity windows. This would close the loop on the microcontroller workflow — currently users need the Arduino IDE or PlatformIO on a separate machine to flash their boards. With OTA support, the entire lifecycle (write automation → deploy firmware → monitor device) happens from the Aeolus dashboard. The microcontroller templates in [`docs/MICROCONTROLLERS.md`](MICROCONTROLLERS.md) would be extended with OTA-ready variants that include the update client library.
+
+### Browser-Based Code Editor (code-server Add-on)
 Embed a full VS Code instance ([code-server](https://github.com/coder/code-server)) into the Aeolus stack as an additional Docker Compose service, accessible from the dashboard via an ingress proxy — similar to Home Assistant's VS Code add-on. The backend (or nginx frontend) would reverse-proxy requests from a path like `/addon/code-server/` into the code-server container, including WebSocket traffic, so the editor works seamlessly within the Aeolus UI.
 
 **Why not for automations?** Aeolus already has purpose-built Monaco editors for automation logic scripts and custom UI components (TSX). These editors are tightly integrated with the automation context — IntelliSense powered by `sandbox-types.d.ts`, a snippet picker pulling from platform and connector catalogs, instant transpile-on-save, live execution feedback in the activity feed and flow diagram, and the automation state store bridging scripts and UI components over WebSocket. A full VS Code instance would lose all of that context and be a downgrade for the automation editing workflow.
