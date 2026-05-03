@@ -15,6 +15,8 @@ import type {
 } from "./connector.interface.js";
 import type { ConnectorRegistry } from "./connector-registry.js";
 import type { ConnectorStore } from "./connector-store.js";
+import type { ActionExecutor } from "../automations/action-executor.js";
+import type { ConditionRegistry } from "../automations/condition-registry.js";
 import logger from "../logger.js";
 
 /** Default polling interval in milliseconds for device discovery. */
@@ -40,6 +42,12 @@ interface ManagedInstance {
  */
 export class ConnectorManager {
   private instances = new Map<string, ManagedInstance>();
+  /** Tracks which action handler types each instance contributed, for cleanup on disable. */
+  private contributedHandlers = new Map<string, string[]>();
+  /** Tracks which condition types each instance contributed, for cleanup on disable. */
+  private contributedConditions = new Map<string, string[]>();
+  private actionExecutor?: ActionExecutor;
+  private conditionRegistry?: ConditionRegistry;
 
   constructor(
     private readonly registry: ConnectorRegistry,
@@ -47,6 +55,18 @@ export class ConnectorManager {
     private readonly deviceRegistry: DeviceRegistry,
     private readonly eventBus: EventEmitter,
   ) {}
+
+  /**
+   * Set the ActionExecutor and ConditionRegistry dependencies.
+   *
+   * Called after construction to break the circular dependency between
+   * ConnectorManager and ActionExecutor. Must be called before
+   * `restoreFromStore()` so contributed handlers are registered on startup.
+   */
+  setRegistries(actionExecutor: ActionExecutor, conditionRegistry: ConditionRegistry): void {
+    this.actionExecutor = actionExecutor;
+    this.conditionRegistry = conditionRegistry;
+  }
 
   /**
    * Enable a connector: validate type, instantiate via factory, connect,
@@ -101,6 +121,24 @@ export class ConnectorManager {
       );
     }
 
+    // Register contributed action handlers
+    if (mod.actionHandlers && this.actionExecutor) {
+      const types = Object.keys(mod.actionHandlers);
+      for (const [type, handler] of Object.entries(mod.actionHandlers)) {
+        this.actionExecutor.registerHandler(type, handler);
+      }
+      this.contributedHandlers.set(instanceId, types);
+    }
+
+    // Register contributed condition factories
+    if (mod.conditions && this.conditionRegistry) {
+      const types = Object.keys(mod.conditions);
+      for (const [type, factory] of Object.entries(mod.conditions)) {
+        this.conditionRegistry.registerCondition(type, factory);
+      }
+      this.contributedConditions.set(instanceId, types);
+    }
+
     // Persist to store
     this.store.save(record);
 
@@ -129,6 +167,24 @@ export class ConnectorManager {
 
     // Stop polling
     clearInterval(instance.pollingTimer);
+
+    // Unregister contributed action handlers
+    const handlerTypes = this.contributedHandlers.get(instanceId);
+    if (handlerTypes && this.actionExecutor) {
+      for (const type of handlerTypes) {
+        this.actionExecutor.unregisterHandler(type);
+      }
+      this.contributedHandlers.delete(instanceId);
+    }
+
+    // Unregister contributed condition factories
+    const conditionTypes = this.contributedConditions.get(instanceId);
+    if (conditionTypes && this.conditionRegistry) {
+      for (const type of conditionTypes) {
+        this.conditionRegistry.unregisterCondition(type);
+      }
+      this.contributedConditions.delete(instanceId);
+    }
 
     // Disconnect and dispose
     try {
@@ -396,6 +452,24 @@ export class ConnectorManager {
           { connectorType: record.connectorType, instanceId: record.id, error: (err as Error).message },
           "discoverDevices() failed during restore",
         );
+      }
+
+      // Register contributed action handlers
+      if (mod.actionHandlers && this.actionExecutor) {
+        const types = Object.keys(mod.actionHandlers);
+        for (const [type, handler] of Object.entries(mod.actionHandlers)) {
+          this.actionExecutor.registerHandler(type, handler);
+        }
+        this.contributedHandlers.set(record.id, types);
+      }
+
+      // Register contributed condition factories
+      if (mod.conditions && this.conditionRegistry) {
+        const types = Object.keys(mod.conditions);
+        for (const [type, factory] of Object.entries(mod.conditions)) {
+          this.conditionRegistry.registerCondition(type, factory);
+        }
+        this.contributedConditions.set(record.id, types);
       }
 
       const pollingTimer = this.startPolling(record.id, connector, devices);

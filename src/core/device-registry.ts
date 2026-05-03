@@ -93,7 +93,7 @@ export class DeviceRegistry {
         }
       : {
           id: event.deviceId,
-          name: event.deviceId.split("-").slice(1).map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(" ") || event.deviceId,
+          name: event.name ?? this.deriveNameFromId(event.deviceId),
           type: event.deviceType,
           capabilities: this.inferCapabilities(event.deviceType),
           state: event.state,
@@ -145,6 +145,13 @@ export class DeviceRegistry {
     } catch (err) {
       logger.error({ deviceId: device.id, error: (err as Error).message }, "Failed to persist device");
     }
+  }
+
+  /** Derive a human-readable name from a hyphen-separated device ID.
+   *  Strips the first segment (assumed to be the type) and title-cases the rest.
+   *  Falls back to the raw deviceId if nothing remains after stripping. */
+  private deriveNameFromId(deviceId: string): string {
+    return deviceId.split("-").slice(1).map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(" ") || deviceId;
   }
 
   private inferCapabilities(type: string): string[] {

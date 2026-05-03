@@ -7,7 +7,7 @@ import path from "node:path";
 import { config } from "./config.js";
 import logger from "./logger.js";
 import { getDatabase, persistDatabase } from "./db/database.js";
-import { eventBus, DEVICE_STATE_CHANGE, AUTOMATION_STATE_CHANGE } from "./core/event-bus.js";
+import { eventBus, DEVICE_STATE_CHANGE, AUTOMATION_STATE_CHANGE, WS_STATE_CHANGE, MQTT_RAW_MESSAGE, AUTOMATION_FIRED } from "./core/event-bus.js";
 import { DeviceRegistry } from "./core/device-registry.js";
 import { MqttService } from "./mqtt/mqtt-service.js";
 import { AutomationEngine } from "./automations/automation-engine.js";
@@ -17,11 +17,13 @@ import { ConnectorStore } from "./connectors/connector-store.js";
 import * as hueModule from "./connectors/hue/index.js";
 import * as kasaModule from "./connectors/kasa/index.js";
 import { migrateLegacyHueCredentials } from "./connectors/migrate-legacy-hue.js";
-import { ActionExecutor } from "./automations/action-executor.js";
+import { ActionExecutor, handlePublish, handleToggle, handleDeviceAction, handleLog, handleDelay, handleWebhook } from "./automations/action-executor.js";
+import { ConditionRegistry } from "./automations/condition-registry.js";
 import { ExecutionLog } from "./automations/execution-log.js";
 import { Sandbox } from "./automations/sandbox.js";
 import { AutomationStateStore } from "./automations/automation-state-store.js";
 import { WsServer } from "./websocket/ws-server.js";
+import type { WsEventMapping } from "./websocket/ws-server.js";
 import { createDeviceRoutes } from "./api/routes/device.routes.js";
 import { createStateRoutes } from "./api/routes/state.routes.js";
 import { createHealthRoutes } from "./api/routes/health.routes.js";
@@ -70,7 +72,6 @@ async function main(): Promise<void> {
   connectorRegistry.register(kasaModule);
 
   migrateLegacyHueCredentials(connectorStore);
-  await connectorManager.restoreFromStore();
 
   // 5. Services Framework
   const serviceStore = new ServiceStore(db);
@@ -96,6 +97,25 @@ async function main(): Promise<void> {
     connectorManager,
     logger,
   });
+
+  // Register built-in action handlers
+  actionExecutor.registerHandler("publish", handlePublish);
+  actionExecutor.registerHandler("toggle", handleToggle);
+  actionExecutor.registerHandler("device_action", handleDeviceAction);
+  actionExecutor.registerHandler("log", handleLog);
+  actionExecutor.registerHandler("delay", handleDelay);
+  actionExecutor.registerHandler("webhook", handleWebhook);
+
+  // Condition Registry — register built-in condition factories
+  const conditionRegistry = new ConditionRegistry();
+  conditionRegistry.registerCondition("value_above", (v) => (ctx) => Number((ctx.state as any).value) > Number(v));
+  conditionRegistry.registerCondition("value_below", (v) => (ctx) => Number((ctx.state as any).value) < Number(v));
+  conditionRegistry.registerCondition("equals", (v) => (ctx) => String((ctx.state as any).value) === v);
+
+  // Wire registries into ConnectorManager so contributed handlers are registered on restore
+  connectorManager.setRegistries(actionExecutor, conditionRegistry);
+  await connectorManager.restoreFromStore();
+
   const executionLog = new ExecutionLog();
   const stateStore = new AutomationStateStore(db);
   stateStore.loadFromDb();
@@ -107,7 +127,7 @@ async function main(): Promise<void> {
   const engine = new AutomationEngine(eventBus, { sandbox, actionExecutor, executionLog });
   const automationsDir = path.resolve(process.cwd(), "automations");
   await engine.loadRulesFromDirectory(automationsDir);
-  loadUiRules(engine, db, registry, actionExecutor);
+  loadUiRules(engine, db, registry, actionExecutor, conditionRegistry);
 
 
   // 7. Wire MQTT events to device registry
@@ -116,7 +136,8 @@ async function main(): Promise<void> {
   });
 
   // 8. Simulator (always available, auto-starts if SIMULATOR=true)
-  const simulator = new DeviceSimulator(eventBus);
+  const simulatorConfigPath = path.resolve(process.cwd(), "data/simulator-devices.json");
+  const simulator = new DeviceSimulator(eventBus, simulatorConfigPath);
   if (config.simulator) {
     simulator.start();
   }
@@ -139,7 +160,7 @@ async function main(): Promise<void> {
   app.use("/api/health", createHealthRoutes(mqttService, registry, engine, startTime));
   app.use("/api/mqtt", createMqttRoutes(mqttService));
   const sandboxTypesPath = path.resolve(import.meta.dirname, "automations/sandbox-types.d.ts");
-  app.use("/api/automations", createAutomationRoutes(engine, db, registry, actionExecutor, executionLog, sandboxTypesPath, connectorRegistry, stateStore));
+  app.use("/api/automations", createAutomationRoutes(engine, db, registry, actionExecutor, executionLog, sandboxTypesPath, connectorRegistry, stateStore, conditionRegistry));
   app.use("/api/simulator", createSimulatorRoutes(simulator));
   app.use("/api/connectors", createConnectorRoutes(connectorManager, connectorRegistry));
   app.use("/api/services", createServiceRoutes(serviceManager, serviceRegistry));
@@ -151,7 +172,15 @@ async function main(): Promise<void> {
 
   // 11. HTTP + WebSocket server
   const server = createServer(app);
-  const wsServer = new WsServer(server, registry, eventBus);
+
+  const WS_MAPPINGS: WsEventMapping[] = [
+    { eventName: WS_STATE_CHANGE, messageType: "state-change" },
+    { eventName: MQTT_RAW_MESSAGE, messageType: "mqtt-message" },
+    { eventName: AUTOMATION_FIRED, messageType: "automation-fired" },
+    { eventName: AUTOMATION_STATE_CHANGE, messageType: "automation-state" },
+  ];
+
+  const wsServer = new WsServer(server, registry, eventBus, WS_MAPPINGS);
 
   server.listen(config.port, () => {
     logger.info(

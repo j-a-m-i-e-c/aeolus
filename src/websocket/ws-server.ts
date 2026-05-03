@@ -5,14 +5,19 @@ import type { Server } from "node:http";
 import type { EventEmitter } from "node:events";
 import type { DeviceRegistry } from "../core/device-registry.js";
 import type { Device } from "../core/types.js";
-import { WS_STATE_CHANGE, MQTT_RAW_MESSAGE, AUTOMATION_FIRED, AUTOMATION_STATE_CHANGE } from "../core/event-bus.js";
 import logger from "../logger.js";
+
+/** Maps an internal event bus event to a WebSocket message type string */
+export interface WsEventMapping {
+  eventName: string;
+  messageType: string;
+}
 
 export class WsServer {
   private wss: WebSocketServer;
   private clients = new Set<WebSocket>();
 
-  constructor(server: Server, registry: DeviceRegistry, eventBus: EventEmitter) {
+  constructor(server: Server, registry: DeviceRegistry, eventBus: EventEmitter, mappings: WsEventMapping[]) {
     this.wss = new WebSocketServer({ server, path: "/ws" });
 
     this.wss.on("connection", (ws) => {
@@ -38,25 +43,12 @@ export class WsServer {
       });
     });
 
-    // Broadcast state changes
-    eventBus.on(WS_STATE_CHANGE, (data: { deviceId: string; state: Record<string, unknown>; timestamp: number }) => {
-      this.broadcast({ type: "state-change", data });
-    });
-
-    // Broadcast raw MQTT messages for inspector
-    eventBus.on(MQTT_RAW_MESSAGE, (data: { topic: string; payload: string; timestamp: number }) => {
-      this.broadcast({ type: "mqtt-message", data });
-    });
-
-    // Broadcast automation fired events
-    eventBus.on(AUTOMATION_FIRED, (data: { ruleId: string; ruleName: string; topic: string; deviceId: string; timestamp: number }) => {
-      this.broadcast({ type: "automation-fired", data });
-    });
-
-    // Broadcast automation state changes
-    eventBus.on(AUTOMATION_STATE_CHANGE, (data: { ruleId: string; key: string; value: unknown }) => {
-      this.broadcast({ type: "automation-state", data });
-    });
+    // Data-driven broadcast registration
+    for (const { eventName, messageType } of mappings) {
+      eventBus.on(eventName, (data: unknown) => {
+        this.broadcast({ type: messageType, data });
+      });
+    }
   }
 
   private send(ws: WebSocket, message: unknown): void {

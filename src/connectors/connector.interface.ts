@@ -1,6 +1,8 @@
 // src/connectors/connector.interface.ts — Core TypeScript interfaces for the Connector Framework
 
 import type { DeviceType, Device, Action } from "../core/types.js";
+import type { ActionHandler } from "../automations/action-executor.js";
+import type { ConditionFactory } from "../automations/condition-registry.js";
 
 /**
  * Static metadata descriptor for a Connector module.
@@ -419,6 +421,24 @@ export interface ConnectorModule {
    * code template that can be inserted at the cursor position.
    */
   snippets?: SnippetDescriptor[];
+
+  /**
+   * Optional action handlers contributed by this connector.
+   *
+   * When provided, the ConnectorManager registers these handlers with
+   * the ActionExecutor when the connector is enabled, and unregisters
+   * them when the connector is disabled. Keys are action type strings.
+   */
+  actionHandlers?: Record<string, ActionHandler>;
+
+  /**
+   * Optional condition factories contributed by this connector.
+   *
+   * When provided, the ConnectorManager registers these factories with
+   * the ConditionRegistry when the connector is enabled, and unregisters
+   * them when the connector is disabled. Keys are condition type strings.
+   */
+  conditions?: Record<string, ConditionFactory>;
 }
 
 /**

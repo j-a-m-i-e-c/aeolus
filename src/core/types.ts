@@ -23,6 +23,8 @@ export interface NormalizedEvent {
   timestamp: number;
   /** Source integration identifier. Defaults to "mqtt" if not provided. */
   integration?: string;
+  /** Human-readable device name populated from ParsedTopic.name */
+  name?: string;
 }
 
 /** Automation rule registered in the Rule Registry */

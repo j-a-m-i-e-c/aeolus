@@ -131,6 +131,7 @@ aeolus/
 │   │   ├── ui-types.d.ts             # Type definition bundle for custom UI component editor
 │   │   ├── structured-metadata-extractor.ts  # Best-effort extraction of automation() call metadata for flow diagrams
 │   │   ├── snippet-catalog.ts        # Platform + connector code snippet aggregation
+│   │   ├── condition-registry.ts     # Factory registry for condition predicates
 │   │   ├── dsl.ts                    # when/if/then builder
 │   │   └── rule-registry.ts          # In-memory rule store
 │   ├── connectors/                   # Pluggable connector framework
@@ -150,7 +151,7 @@ aeolus/
 │   │   │   └── connector.ts         # Template connector class
 │   │   └── README.md                 # Developer guide for creating new connectors
 │   ├── simulator/
-│   │   └── device-simulator.ts       # Fake device data generator (7 devices)
+│   │   └── device-simulator.ts       # Fake device data generator (loads from data/simulator-devices.json)
 │   ├── services/                     # Pluggable service framework (non-device event producers)
 │   │   ├── service.interface.ts      # Core TypeScript interfaces (ServiceModule, ServiceInstance, etc.)
 │   │   ├── service-registry.ts       # Manual registration and lookup of service modules
@@ -275,6 +276,7 @@ A single universal `parseTopic()` function that always succeeds for any valid MQ
 In-memory device cache backed by SQLite for persistence across restarts.
 
 - Upsert: creates new device on first message, updates state on subsequent
+- For new devices, uses `event.name` from the NormalizedEvent when present (populated by the MQTT service from `ParsedTopic.name`). Falls back to `deriveNameFromId(deviceId)` — splitting on hyphens and title-casing segments — for non-MQTT event sources (connectors, services) that don't provide a name
 - Infers capabilities from the device type string using a `KNOWN_TYPES`-based heuristic (light → on/off + brightness, sensor → temperature, plug → on/off + energy, valve → on/off, fan → on/off + speed, etc.). Unknown device types get an empty capabilities array — they are still stored and tracked, just without inferred capabilities.
 - Emits `ws:state-change` events for WebSocket broadcast
 - Serialize/deserialize round-trip for SQLite storage
@@ -291,15 +293,35 @@ Evaluates code-driven rules against incoming device events. Supports three rule 
 - Form rules are dispatched through the ActionExecutor pipeline
 - Records every execution in the ExecutionLog with duration and success/failure status
 
+### Condition Registry (`src/automations/condition-registry.ts`)
+
+Factory registry for condition predicates, keyed by condition type string. Replaces the previous inline if/else chain in `registerUiRule()` with a uniform registration pattern — adding a new condition type means calling `registerCondition()` and nothing else.
+
+- `ConditionFactory` type: `(conditionValue: string) => (ctx: EventContext) => boolean`
+- `registerCondition(type, factory)` — register a factory for a condition type (overwrites if already registered)
+- `unregisterCondition(type)` — remove a factory (no-op if not registered)
+- `buildCondition(type, value)` — looks up the factory by type, calls it with the value, and returns the predicate. Returns `undefined` and logs a warning if the type is unregistered or if type/value are null
+- At bootstrap, the three built-in condition types are registered via the same `registerCondition()` API that connectors use:
+  - `value_above` — `(v) => (ctx) => Number(ctx.state.value) > Number(v)`
+  - `value_below` — `(v) => (ctx) => Number(ctx.state.value) < Number(v)`
+  - `equals` — `(v) => (ctx) => String(ctx.state.value) === v`
+- `registerUiRule()` in `automation.routes.ts` uses `conditionRegistry.buildCondition()` to build condition predicates from stored rule data
+
 ### Action Executor (`src/automations/action-executor.ts`)
 
-Central dispatch service for all automation actions. Every action — whether from a form rule, script rule, or file-based rule — flows through this single pipeline.
+Central dispatch service for all automation actions. Every action — whether from a form rule, script rule, or file-based rule — flows through this single pipeline. Uses a **handler registry** pattern — a `Map<string, ActionHandler>` — instead of a switch statement, so adding a new action type means calling `registerHandler()` and nothing else.
 
-- Dispatches `publish` actions to `MqttService.publish()`
-- Dispatches `toggle` and `device_action` to `ConnectorManager.executeAction()`
-- Dispatches `log` to the application logger
-- Dispatches `delay` as a `setTimeout` wrapper
-- Dispatches `webhook` via `fetch()` with configurable method, headers, and body
+- `ActionDescriptor.type` is an open `string`, not a fixed union — any action type is accepted
+- `registerHandler(type, handler)` — register a handler for an action type (overwrites if already registered)
+- `unregisterHandler(type)` — remove a handler (no-op if not registered)
+- At bootstrap, the six built-in handlers are registered via the same `registerHandler()` API that connectors use:
+  - `publish` — publishes an MQTT message via `MqttService.publish()`
+  - `toggle` — toggles a device via `ConnectorManager.executeAction()`
+  - `device_action` — executes an arbitrary device action via `ConnectorManager.executeAction()`
+  - `log` — logs a message from an automation rule
+  - `delay` — pauses execution for a specified duration (`setTimeout` wrapper)
+  - `webhook` — sends an HTTP request via `fetch()` with configurable method, headers, and body
+- `execute()` looks up the handler by `action.type` in the registry; if no handler is found, logs a warning with the unrecognised type and rule ID
 - Each action is wrapped in try/catch — errors are logged with the rule ID, never thrown
 - Emits `AUTOMATION_FIRED` on the event bus after each successful action
 - `executeSequence()` runs actions in order, continuing on individual failures
@@ -422,13 +444,30 @@ In-memory circular buffer that captures recent application log entries for the d
 - Strips pino internals (pid, hostname) for cleaner UI display
 - Served via `GET /api/system/logs` with optional count and level filter parameters
 
+### WebSocket Server (`src/websocket/ws-server.ts`)
+
+Real-time push layer that broadcasts internal event bus events to connected browser clients. Uses a **data-driven event mapping** pattern — event-to-message-type mappings are passed at construction as a `WsEventMapping[]` array, with no hardcoded event listeners in the source.
+
+```typescript
+interface WsEventMapping {
+  eventName: string;   // Internal event bus event name
+  messageType: string; // WebSocket message type sent to clients
+}
+```
+
+- At construction, iterates over the provided mappings and registers a broadcast listener on the event bus for each entry
+- Adding a new real-time event type means adding an entry to the mapping list at the construction site — no changes to `ws-server.ts` required
+- The four current mappings are: `WS_STATE_CHANGE` → `"state-change"`, `MQTT_RAW_MESSAGE` → `"mqtt-message"`, `AUTOMATION_FIRED` → `"automation-fired"`, `AUTOMATION_STATE_CHANGE` → `"automation-state"`
+- On client connection, sends an initial snapshot of all devices from the DeviceRegistry
+- Tracks connected clients and broadcasts JSON messages to all open connections
+
 ### Connector Framework
 
-The connector framework is a pluggable architecture that replaces the previous hardcoded integration system. Each connector is a self-contained module in `src/connectors/{name}/` that exports metadata, a config schema, and a factory function.
+The connector framework is a pluggable architecture that replaces the previous hardcoded integration system. Each connector is a self-contained module in `src/connectors/{name}/` that exports metadata, a config schema, a factory function, and optionally `actionHandlers` and `conditions` to extend the automation system.
 
 Connector devices flow through the same `DEVICE_STATE_CHANGE` event bus as MQTT devices, using synthetic topics in the format `connector/{integration}/{deviceId}`. This unifies the device pipeline so automations can match on connector device events using the standard topic pattern system.
 
-Each connector module optionally exports a `snippets: SnippetDescriptor[]` array — code templates for the automation script editor that appear grouped under the connector's display name in the snippet picker. This is part of the connector developer contract: when building a new connector, ship snippets alongside it so users can quickly write automations for your devices.
+Each connector module optionally exports a `snippets: SnippetDescriptor[]` array — code templates for the automation script editor that appear grouped under the connector's display name in the snippet picker. Connectors can also optionally export `actionHandlers: Record<string, ActionHandler>` and `conditions: Record<string, ConditionFactory>` to contribute custom action handlers and condition factories to the automation system. When a connector is enabled, the ConnectorManager registers these with the ActionExecutor and ConditionRegistry respectively; when disabled, they are unregistered. This is part of the connector developer contract: when building a new connector, ship snippets, action handlers, and condition factories alongside it so users can write automations for your devices.
 
 #### ConnectorRegistry (`src/connectors/connector-registry.ts`)
 
@@ -443,13 +482,14 @@ Auto-discovery and manual registration of connector modules.
 
 Lifecycle management for enabled connector instances.
 
-- Enable: validate type → instantiate via factory → connect → discover devices → persist → start polling
-- Disable: stop polling → disconnect → dispose → remove devices → update store
+- Enable: validate type → instantiate via factory → connect → discover devices → register contributed action handlers and condition factories → persist → start polling
+- Disable: unregister contributed action handlers and condition factories → stop polling → disconnect → dispose → remove devices → update store
+- Tracks which action handler types and condition types each connector instance contributed (via internal `contributedHandlers` and `contributedConditions` maps) for cleanup on disable
 - Config update: apply new config at runtime without full reconnect
 - Retry: re-attempt connection for disconnected connectors
 - Setup steps: `getSetupSteps(instanceId)` returns setup step descriptors for a connector; `executeSetupStep()` delegates multi-step setup flows (e.g. Hue button-press pairing)
 - Action routing: route device actions to the correct connector by `integration` field; emits an immediate `DEVICE_STATE_CHANGE` event with optimistic state after action succeeds (for toggle actions, flips the `on` state; for other actions, merges params) — no waiting for the 60-second polling cycle
-- Restore: re-enable previously enabled connectors from SQLite on startup
+- Restore: re-enable previously enabled connectors from SQLite on startup, including re-registering contributed handlers and conditions
 - Periodic device discovery via 60-second polling interval
 
 #### ConnectorStore (`src/connectors/connector-store.ts`)
@@ -472,6 +512,8 @@ Philips Hue smart lighting via local bridge API.
 - Connectors with `requiresSetup` skip the config form and go straight to enable + wizard
 - Discovers lights and maps them to Aeolus Device format
 - Supports toggle, brightness, hue, and saturation actions
+- Contributed action handlers: `hue_scene` (activate a Hue scene by name), `hue_color_loop` (start/stop a color loop on a light)
+- Contributed condition factories: `brightness_above` (check if a light's brightness exceeds a threshold)
 - Frontend pane: `HueControlPane.tsx` — brightness slider, colour picker with 10 preset swatches, per-light toggle with optimistic UI
 
 #### Kasa Connector (`src/connectors/kasa/`)
@@ -482,6 +524,8 @@ TP-Link Kasa smart plugs and switches via local Wi-Fi.
 - Config schema: `broadcastAddress` (text, optional, default `"255.255.255.255"`), `discoveryTimeout` (number, optional, default `10000`)
 - Auto-discovers devices via UDP broadcast
 - Supports toggle and energy monitoring actions
+- Contributed action handlers: `kasa_energy_report` (log current energy usage for a device)
+- Contributed condition factories: `power_above` (check if a plug's power draw exceeds a threshold)
 - Frontend pane: `KasaControlPane.tsx` — toggle, device type badge, energy monitoring stats (voltage, current, power, kWh)
 
 #### Connector Frontend Panes
@@ -847,6 +891,8 @@ interface NormalizedEvent {
   timestamp: number;
   /** Source integration identifier. Defaults to "mqtt" if not provided. */
   integration?: string;
+  /** Human-readable device name from ParsedTopic. Populated by the MQTT service. */
+  name?: string;
 }
 ```
 
@@ -903,8 +949,8 @@ interface LogEntry {
 ### ActionDescriptor
 ```typescript
 interface ActionDescriptor {
-  type: "publish" | "toggle" | "device_action" | "log" | "delay" | "webhook";
-  target: string;           // topic for publish, deviceId for toggle/device_action, URL for webhook
+  type: string;                 // Open string — any registered action type (e.g. "publish", "toggle", "hue_scene")
+  target: string;               // topic for publish, deviceId for toggle/device_action, URL for webhook
   params: Record<string, unknown>;
 }
 ```
@@ -1087,7 +1133,7 @@ interface ServiceRecord {
 CREATE TABLE devices (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
-  type TEXT NOT NULL CHECK(type IN ('light','sensor','switch','climate','plug')),
+  type TEXT NOT NULL,
   capabilities TEXT NOT NULL DEFAULT '[]',
   state TEXT NOT NULL DEFAULT '{}',
   integration TEXT NOT NULL DEFAULT 'mqtt',
@@ -1515,7 +1561,21 @@ Custom tabs use the modular pane grid powered by `react-grid-layout`. Users crea
 
 ## Device Simulator
 
-Built-in simulator generates realistic fake data for 7 devices without requiring an MQTT broker:
+Built-in simulator generates realistic fake data for development and demos without requiring an MQTT broker. Device definitions are loaded from `data/simulator-devices.json` at startup — adding a new simulated device means editing the JSON file, nothing else.
+
+**JSON schema:** Each entry in the `devices` array has:
+- `topic` — MQTT topic string (e.g. `"sensor/kitchen/temp"`)
+- `deviceId` — device identifier (e.g. `"sensor-kitchen-temp"`)
+- `deviceType` — device type string (e.g. `"sensor"`)
+- `intervalMs` — emission interval in milliseconds
+- `generator` — state value generator configuration with `type` and type-specific fields:
+  - `drift` — numeric value that drifts within bounds (`min`, `max`, `step`, `initial`, optional `key`)
+  - `toggle` — boolean that flips on each interval (optional `key`)
+  - `random_boolean` — boolean with configurable `probability` (default 0.5, optional `key`)
+
+If the config file is missing or contains invalid JSON, the simulator logs a warning and starts with zero devices. Invalid generator types within the config are skipped with a warning.
+
+The default config ships 7 devices:
 
 | Device | Topic | Type | Interval | Behavior |
 |--------|-------|------|----------|----------|

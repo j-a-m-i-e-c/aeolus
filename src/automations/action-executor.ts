@@ -7,7 +7,7 @@ import { eventBus, AUTOMATION_FIRED } from "../core/event-bus.js";
 
 /** Descriptor for a single automation action to be dispatched. */
 export interface ActionDescriptor {
-  type: "publish" | "toggle" | "device_action" | "log" | "delay" | "webhook";
+  type: string;
   target: string;
   params: Record<string, unknown>;
 }
@@ -19,6 +19,13 @@ export interface ActionExecutorDeps {
   logger: Logger;
 }
 
+/** A handler function that executes a single action type. */
+export type ActionHandler = (
+  action: ActionDescriptor,
+  ruleId: string,
+  deps: ActionExecutorDeps,
+) => void | Promise<void>;
+
 /**
  * Dispatches automation action descriptors to the appropriate service.
  *
@@ -27,45 +34,36 @@ export interface ActionExecutorDeps {
  * errors are logged with the rule ID and never thrown.
  */
 export class ActionExecutor {
-  private mqttService: MqttService;
-  private connectorManager: ConnectorManager;
-  private logger: Logger;
+  private handlers = new Map<string, ActionHandler>();
+  private deps: ActionExecutorDeps;
 
   constructor(deps: ActionExecutorDeps) {
-    this.mqttService = deps.mqttService;
-    this.connectorManager = deps.connectorManager;
-    this.logger = deps.logger;
+    this.deps = deps;
+  }
+
+  /** Register a handler for an action type. Overwrites if already registered. */
+  registerHandler(type: string, handler: ActionHandler): void {
+    this.handlers.set(type, handler);
+  }
+
+  /** Unregister a handler for an action type. No-op if not registered. */
+  unregisterHandler(type: string): void {
+    this.handlers.delete(type);
   }
 
   /** Execute a single action descriptor. Never throws — logs errors and continues. */
   async execute(action: ActionDescriptor, ruleId: string): Promise<void> {
     try {
-      switch (action.type) {
-        case "publish":
-          this.handlePublish(action, ruleId);
-          break;
-        case "toggle":
-          await this.handleToggle(action, ruleId);
-          break;
-        case "device_action":
-          await this.handleDeviceAction(action, ruleId);
-          break;
-        case "log":
-          this.handleLog(action, ruleId);
-          break;
-        case "delay":
-          await this.handleDelay(action, ruleId);
-          break;
-        case "webhook":
-          await this.handleWebhook(action, ruleId);
-          break;
-        default:
-          this.logger.warn(
-            { ruleId, actionType: (action as { type: string }).type },
-            `Unknown action type: ${(action as { type: string }).type}`,
-          );
-          return;
+      const handler = this.handlers.get(action.type);
+      if (!handler) {
+        this.deps.logger.warn(
+          { ruleId, actionType: action.type },
+          `No handler for action type: ${action.type}`,
+        );
+        return;
       }
+
+      await handler(action, ruleId, this.deps);
 
       eventBus.emit(AUTOMATION_FIRED, {
         ruleId,
@@ -74,7 +72,7 @@ export class ActionExecutor {
         timestamp: Date.now(),
       });
     } catch (err) {
-      this.logger.error(
+      this.deps.logger.error(
         { ruleId, actionType: action.type, target: action.target, error: (err as Error).message },
         `Action execution failed for rule ${ruleId}`,
       );
@@ -87,64 +85,72 @@ export class ActionExecutor {
       await this.execute(action, ruleId);
     }
   }
-
-  private handlePublish(action: ActionDescriptor, ruleId: string): void {
-    if (!this.mqttService.isConnected()) {
-      this.logger.error(
-        { ruleId, topic: action.target },
-        "MQTT not connected, skipping publish action",
-      );
-      throw new Error("MQTT client not connected");
-    }
-    const payload = typeof action.params.payload === "string"
-      ? action.params.payload
-      : JSON.stringify(action.params.payload);
-    this.mqttService.publish(action.target, payload);
-  }
-
-  private async handleToggle(action: ActionDescriptor, _ruleId: string): Promise<void> {
-    await this.connectorManager.executeAction(action.target, {
-      type: "toggle",
-      deviceId: action.target,
-      params: action.params,
-    });
-  }
-
-  private async handleDeviceAction(action: ActionDescriptor, _ruleId: string): Promise<void> {
-    const actionType = typeof action.params.actionType === "string"
-      ? action.params.actionType
-      : "unknown";
-    await this.connectorManager.executeAction(action.target, {
-      type: actionType,
-      deviceId: action.target,
-      params: action.params,
-    });
-  }
-
-  private handleLog(action: ActionDescriptor, ruleId: string): void {
-    const message = typeof action.params.message === "string"
-      ? action.params.message
-      : JSON.stringify(action.params.message);
-    this.logger.info({ ruleId, message }, `Automation log: ${message}`);
-  }
-
-  private async handleDelay(action: ActionDescriptor, ruleId: string): Promise<void> {
-    const duration = typeof action.params.duration === "number" ? action.params.duration : 0;
-    if (duration <= 0) {
-      this.logger.warn({ ruleId, duration }, "Delay with zero/negative duration, treating as no-op");
-      return;
-    }
-    await new Promise<void>((resolve) => setTimeout(resolve, duration));
-  }
-
-  private async handleWebhook(action: ActionDescriptor, ruleId: string): Promise<void> {
-    const method = typeof action.params.method === "string" ? action.params.method : "POST";
-    const headers = (action.params.headers as Record<string, string>) ?? {};
-    const body = action.params.body !== undefined ? String(action.params.body) : undefined;
-
-    const response = await fetch(action.target, { method, headers, body });
-    if (!response.ok) {
-      throw new Error(`Webhook returned ${response.status} ${response.statusText}`);
-    }
-  }
 }
+
+// ── Built-in action handlers ────────────────────────────────────────────────
+
+/** Publish an MQTT message. */
+export const handlePublish: ActionHandler = (action, ruleId, deps) => {
+  if (!deps.mqttService.isConnected()) {
+    deps.logger.error(
+      { ruleId, topic: action.target },
+      "MQTT not connected, skipping publish action",
+    );
+    throw new Error("MQTT client not connected");
+  }
+  const payload = typeof action.params.payload === "string"
+    ? action.params.payload
+    : JSON.stringify(action.params.payload);
+  deps.mqttService.publish(action.target, payload);
+};
+
+/** Toggle a device via the connector manager. */
+export const handleToggle: ActionHandler = async (action, _ruleId, deps) => {
+  await deps.connectorManager.executeAction(action.target, {
+    type: "toggle",
+    deviceId: action.target,
+    params: action.params,
+  });
+};
+
+/** Execute an arbitrary device action via the connector manager. */
+export const handleDeviceAction: ActionHandler = async (action, _ruleId, deps) => {
+  const actionType = typeof action.params.actionType === "string"
+    ? action.params.actionType
+    : "unknown";
+  await deps.connectorManager.executeAction(action.target, {
+    type: actionType,
+    deviceId: action.target,
+    params: action.params,
+  });
+};
+
+/** Log a message from an automation rule. */
+export const handleLog: ActionHandler = (action, ruleId, deps) => {
+  const message = typeof action.params.message === "string"
+    ? action.params.message
+    : JSON.stringify(action.params.message);
+  deps.logger.info({ ruleId, message }, `Automation log: ${message}`);
+};
+
+/** Delay execution for a specified duration in milliseconds. */
+export const handleDelay: ActionHandler = async (action, ruleId, deps) => {
+  const duration = typeof action.params.duration === "number" ? action.params.duration : 0;
+  if (duration <= 0) {
+    deps.logger.warn({ ruleId, duration }, "Delay with zero/negative duration, treating as no-op");
+    return;
+  }
+  await new Promise<void>((resolve) => setTimeout(resolve, duration));
+};
+
+/** Send an HTTP webhook request. */
+export const handleWebhook: ActionHandler = async (action, ruleId, deps) => {
+  const method = typeof action.params.method === "string" ? action.params.method : "POST";
+  const headers = (action.params.headers as Record<string, string>) ?? {};
+  const body = action.params.body !== undefined ? String(action.params.body) : undefined;
+
+  const response = await fetch(action.target, { method, headers, body });
+  if (!response.ok) {
+    throw new Error(`Webhook returned ${response.status} ${response.statusText}`);
+  }
+};

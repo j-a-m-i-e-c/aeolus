@@ -6,6 +6,8 @@ import type {
   Connector,
   SnippetDescriptor,
 } from "../connector.interface.js";
+import type { ActionHandler } from "../../automations/action-executor.js";
+import type { ConditionFactory } from "../../automations/condition-registry.js";
 import { HueConnector } from "./hue-connector.js";
 
 export const metadata: ConnectorMetadata = {
@@ -94,3 +96,48 @@ export const snippets: SnippetDescriptor[] = [
 }`,
   },
 ];
+
+// ── Contributed action handlers ─────────────────────────────────────────────
+
+export const actionHandlers: Record<string, ActionHandler> = {
+  /** Activate a Hue scene by name. */
+  hue_scene: async (action, ruleId, deps) => {
+    const sceneName = typeof action.params.sceneName === "string"
+      ? action.params.sceneName
+      : "unknown";
+    deps.logger.info(
+      { ruleId, sceneName },
+      `Activating Hue scene: ${sceneName}`,
+    );
+    await deps.connectorManager.executeAction(action.target, {
+      type: "scene",
+      deviceId: action.target,
+      params: { sceneName },
+    });
+  },
+
+  /** Start or stop a color loop on a Hue light. */
+  hue_color_loop: async (action, ruleId, deps) => {
+    const enable = action.params.enable === true;
+    const deviceId = action.target;
+    deps.logger.info(
+      { ruleId, deviceId, enable },
+      `${enable ? "Starting" : "Stopping"} color loop on Hue light: ${deviceId}`,
+    );
+    await deps.connectorManager.executeAction(deviceId, {
+      type: "color_loop",
+      deviceId,
+      params: { enable },
+    });
+  },
+};
+
+// ── Contributed condition factories ─────────────────────────────────────────
+
+export const conditions: Record<string, ConditionFactory> = {
+  /** Check if a Hue light's brightness exceeds a threshold. */
+  brightness_above: (conditionValue: string) => {
+    const threshold = Number(conditionValue);
+    return (ctx) => Number(ctx.state.brightness) > threshold;
+  },
+};

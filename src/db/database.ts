@@ -8,13 +8,13 @@ import logger from "../logger.js";
 
 let db: Database | null = null;
 
-function initSchema(database: Database): void {
+export function initSchema(database: Database): void {
   database.run("PRAGMA foreign_keys = ON;");
   database.run(`
     CREATE TABLE IF NOT EXISTS devices (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
-      type TEXT NOT NULL CHECK(type IN ('light', 'sensor', 'switch', 'climate', 'plug')),
+      type TEXT NOT NULL,
       capabilities TEXT NOT NULL DEFAULT '[]',
       state TEXT NOT NULL DEFAULT '{}',
       integration TEXT NOT NULL DEFAULT 'mqtt',
@@ -104,6 +104,62 @@ function initSchema(database: Database): void {
       PRIMARY KEY (rule_id, key)
     );
   `);
+
+  migrateRemoveTypeCheck(database);
+}
+
+/**
+ * Migrate existing databases that have the old CHECK(type IN (...)) constraint
+ * on the devices table. SQLite doesn't support ALTER TABLE DROP CONSTRAINT,
+ * so we recreate the table without it: rename → create → copy → drop old.
+ */
+function migrateRemoveTypeCheck(database: Database): void {
+  const result = database.exec(
+    `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'devices'`
+  );
+
+  if (result.length === 0 || result[0].values.length === 0) {
+    return; // No devices table found — nothing to migrate
+  }
+
+  const createSql = result[0].values[0][0] as string;
+
+  if (!/CHECK\s*\(/i.test(createSql)) {
+    return; // No CHECK constraint — already migrated or fresh database
+  }
+
+  logger.info("Migrating devices table to remove CHECK constraint on type column");
+
+  database.run("PRAGMA foreign_keys = OFF;");
+  database.run("BEGIN TRANSACTION;");
+  try {
+    database.run("ALTER TABLE devices RENAME TO devices_old;");
+    database.run(`
+      CREATE TABLE devices (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        type TEXT NOT NULL,
+        capabilities TEXT NOT NULL DEFAULT '[]',
+        state TEXT NOT NULL DEFAULT '{}',
+        integration TEXT NOT NULL DEFAULT 'mqtt',
+        last_seen INTEGER NOT NULL
+      );
+    `);
+    database.run(`
+      INSERT INTO devices (id, name, type, capabilities, state, integration, last_seen)
+      SELECT id, name, type, capabilities, state, integration, last_seen
+      FROM devices_old;
+    `);
+    database.run("DROP TABLE devices_old;");
+    database.run("COMMIT;");
+    logger.info("Successfully migrated devices table — CHECK constraint removed");
+  } catch (err) {
+    database.run("ROLLBACK;");
+    logger.error({ err }, "Failed to migrate devices table — rolling back");
+    throw err;
+  } finally {
+    database.run("PRAGMA foreign_keys = ON;");
+  }
 }
 
 function saveToFile(database: Database): void {

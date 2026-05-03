@@ -9,6 +9,7 @@ import type { DeviceRegistry } from "../../core/device-registry.js";
 import type { ActionExecutor, ActionDescriptor } from "../../automations/action-executor.js";
 import type { ExecutionLog } from "../../automations/execution-log.js";
 import type { EventContext } from "../../core/types.js";
+import type { ConditionRegistry } from "../../automations/condition-registry.js";
 import { transpile, transpileUi } from "../../automations/transpiler.js";
 import { extractStructuredMetadata } from "../../automations/structured-metadata-extractor.js";
 import { buildSnippetCatalog } from "../../automations/snippet-catalog.js";
@@ -47,6 +48,7 @@ export function createAutomationRoutes(
   sandboxTypesPath: string,
   connectorRegistry?: ConnectorRegistry,
   stateStore?: AutomationStateStore,
+  conditionRegistry?: ConditionRegistry,
 ): Router {
   const router = Router();
 
@@ -247,7 +249,7 @@ export function createAutomationRoutes(
           rule_type: "script", script_source: scriptSource, compiled_js: result.js,
           structured_metadata: structuredJson, ui_source: uiSourceValue, compiled_ui: compiledUiValue,
           enabled: 1, created_at: now,
-        });
+        }, conditionRegistry);
 
         logger.info({ ruleId: id, name, triggerTopic, ruleType: "script" }, "Script automation rule created");
         res.json({ success: true, id });
@@ -272,7 +274,7 @@ export function createAutomationRoutes(
           rule_type: "form", script_source: null, compiled_js: null,
           structured_metadata: null, ui_source: uiSourceValue, compiled_ui: compiledUiValue,
           enabled: 1, created_at: now,
-        });
+        }, conditionRegistry);
 
         logger.info({ ruleId: id, name, triggerTopic }, "Form automation rule created");
         res.json({ success: true, id });
@@ -353,7 +355,7 @@ export function createAutomationRoutes(
         engine.unregister(id);
         const updated = queryRuleById(db, id)!;
         if (updated.enabled) {
-          registerUiRule(engine, registry, actionExecutor, updated);
+          registerUiRule(engine, registry, actionExecutor, updated, conditionRegistry);
         }
 
         logger.info({ ruleId: id, name: updated.name }, "Script automation rule updated");
@@ -410,7 +412,7 @@ export function createAutomationRoutes(
         engine.unregister(id);
         const updated = queryRuleById(db, id)!;
         if (updated.enabled) {
-          registerUiRule(engine, registry, actionExecutor, updated);
+          registerUiRule(engine, registry, actionExecutor, updated, conditionRegistry);
         }
 
         logger.info({ ruleId: id, name: updated.name }, "Form automation rule updated");
@@ -459,7 +461,7 @@ export function createAutomationRoutes(
       if (enabled) {
         // Re-register — reload from DB to get latest state
         const updated = queryRuleById(db, id)!;
-        registerUiRule(engine, registry, actionExecutor, updated);
+        registerUiRule(engine, registry, actionExecutor, updated, conditionRegistry);
       } else {
         engine.unregister(id);
       }
@@ -565,18 +567,12 @@ function registerUiRule(
   registry: DeviceRegistry,
   actionExecutor: ActionExecutor,
   stored: StoredRule,
+  conditionRegistry?: ConditionRegistry,
 ): void {
-  // Build condition
-  let condition: ((ctx: EventContext) => boolean) | undefined;
-  if (stored.condition_type === "value_above" && stored.condition_value) {
-    const threshold = Number(stored.condition_value);
-    condition = (ctx) => Number(ctx.state.value) > threshold;
-  } else if (stored.condition_type === "value_below" && stored.condition_value) {
-    const threshold = Number(stored.condition_value);
-    condition = (ctx) => Number(ctx.state.value) < threshold;
-  } else if (stored.condition_type === "equals" && stored.condition_value) {
-    condition = (ctx) => String(ctx.state.value) === stored.condition_value;
-  }
+  // Build condition via the registry (falls back to undefined if type/value are null or unregistered)
+  const condition = conditionRegistry
+    ? conditionRegistry.buildCondition(stored.condition_type, stored.condition_value)
+    : undefined;
 
   if (stored.rule_type === "script" && stored.compiled_js) {
     // Script rule — action runs compiled JS through the Sandbox
@@ -602,7 +598,7 @@ function registerUiRule(
     const params = JSON.parse(stored.action_params);
     const action = async (ctx: EventContext) => {
       const descriptor: ActionDescriptor = {
-        type: stored.action_type as ActionDescriptor["type"],
+        type: stored.action_type,
         target: stored.action_target,
         params,
       };
@@ -625,6 +621,7 @@ export function loadUiRules(
   db: Database,
   registry: DeviceRegistry,
   actionExecutor: ActionExecutor,
+  conditionRegistry?: ConditionRegistry,
 ): void {
   const results = db.exec("SELECT * FROM automation_rules WHERE enabled = 1");
   if (results.length === 0) return;
@@ -634,7 +631,7 @@ export function loadUiRules(
   for (const values of results[0].values) {
     const row: Record<string, unknown> = {};
     cols.forEach((col: string, i: number) => { row[col] = values[i]; });
-    registerUiRule(engine, registry, actionExecutor, row as unknown as StoredRule);
+    registerUiRule(engine, registry, actionExecutor, row as unknown as StoredRule, conditionRegistry);
     loaded++;
   }
   logger.info({ loaded }, "Loaded UI automation rules from database");

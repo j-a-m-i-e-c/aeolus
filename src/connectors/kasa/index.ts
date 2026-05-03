@@ -6,6 +6,8 @@ import type {
   Connector,
   SnippetDescriptor,
 } from "../connector.interface.js";
+import type { ActionHandler } from "../../automations/action-executor.js";
+import type { ConditionFactory } from "../../automations/condition-registry.js";
 import { KasaConnector } from "./kasa-connector.js";
 
 export const metadata: ConnectorMetadata = {
@@ -93,3 +95,27 @@ export const snippets: SnippetDescriptor[] = [
 }`,
   },
 ];
+
+// ── Contributed action handlers ─────────────────────────────────────────────
+
+export const actionHandlers: Record<string, ActionHandler> = {
+  /** Log current energy usage for a Kasa device. */
+  kasa_energy_report: (action, ruleId, deps) => {
+    const deviceId = action.target;
+    const energy = action.params.energy ?? "no energy data available";
+    deps.logger.info(
+      { ruleId, deviceId, energy },
+      `Kasa energy report for ${deviceId}: ${JSON.stringify(energy)}`,
+    );
+  },
+};
+
+// ── Contributed condition factories ─────────────────────────────────────────
+
+export const conditions: Record<string, ConditionFactory> = {
+  /** Check if a Kasa plug's power draw exceeds a threshold. */
+  power_above: (conditionValue: string) => {
+    const threshold = Number(conditionValue);
+    return (ctx) => Number(ctx.state.power) > threshold;
+  },
+};

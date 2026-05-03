@@ -170,6 +170,7 @@ export class MqttService {
       state,
       topic,
       timestamp: Date.now(),
+      name: parsed.name,
     };
 
     this.eventBus.emit(DEVICE_STATE_CHANGE, event);
