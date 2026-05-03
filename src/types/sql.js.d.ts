@@ -1,7 +1,7 @@
 declare module "sql.js" {
   interface Database {
     run(sql: string, params?: unknown[]): void;
-    exec(sql: string): QueryExecResult[];
+    exec(sql: string, params?: unknown[]): QueryExecResult[];
     export(): Uint8Array;
     close(): void;
   }

@@ -10,6 +10,8 @@ export interface Config {
   logLevel: string;
   nodeEnv: string;
   simulator: boolean;
+  stateHistoryMax: number;
+  historyRecordInterval: number;
 }
 
 export const config: Config = {
@@ -22,4 +24,6 @@ export const config: Config = {
   logLevel: process.env.LOG_LEVEL || "debug",
   nodeEnv: process.env.NODE_ENV || "development",
   simulator: process.env.SIMULATOR === "true",
+  stateHistoryMax: parseInt(process.env.STATE_HISTORY_MAX || "100", 10),
+  historyRecordInterval: parseInt(process.env.HISTORY_RECORD_INTERVAL || "5000", 10),
 };

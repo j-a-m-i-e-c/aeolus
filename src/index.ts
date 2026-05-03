@@ -43,6 +43,7 @@ import { DeviceSimulator } from "./simulator/device-simulator.js";
 import { createSimulatorRoutes } from "./api/routes/simulator.routes.js";
 import { createSystemRoutes } from "./api/routes/system.routes.js";
 import { createLayoutRoutes } from "./api/routes/layout.routes.js";
+import { StateHistory } from "./core/state-history.js";
 
 
 const startTime = Date.now();
@@ -56,6 +57,9 @@ async function main(): Promise<void> {
   // 2. Device Registry
   const registry = new DeviceRegistry(db, eventBus);
   registry.loadFromDb();
+
+  // 2b. State History
+  const stateHistory = new StateHistory(db, config.stateHistoryMax, config.historyRecordInterval);
 
   // 3. MQTT Service
   const mqttService = new MqttService(
@@ -133,6 +137,7 @@ async function main(): Promise<void> {
   // 7. Wire MQTT events to device registry
   eventBus.on(DEVICE_STATE_CHANGE, (event) => {
     registry.upsert(event);
+    stateHistory.record(event.deviceId, event.state, event.timestamp);
   });
 
   // 8. Simulator (always available, auto-starts if SIMULATOR=true)
@@ -155,7 +160,7 @@ async function main(): Promise<void> {
   app.use(express.json());
   app.use(requestLogger);
 
-  app.use("/api/devices", createDeviceRoutes(registry, connectorManager));
+  app.use("/api/devices", createDeviceRoutes(registry, connectorManager, stateHistory));
   app.use("/api/state", createStateRoutes(registry));
   app.use("/api/health", createHealthRoutes(mqttService, registry, engine, startTime));
   app.use("/api/mqtt", createMqttRoutes(mqttService));

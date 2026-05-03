@@ -104,6 +104,18 @@ export function initSchema(database: Database): void {
       PRIMARY KEY (rule_id, key)
     );
   `);
+  database.run(`
+    CREATE TABLE IF NOT EXISTS device_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      device_id TEXT NOT NULL,
+      state TEXT NOT NULL,
+      timestamp INTEGER NOT NULL
+    );
+  `);
+  database.run(`
+    CREATE INDEX IF NOT EXISTS idx_device_history_device_ts
+    ON device_history(device_id, timestamp DESC);
+  `);
 
   migrateRemoveTypeCheck(database);
 }

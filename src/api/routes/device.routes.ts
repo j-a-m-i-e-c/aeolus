@@ -3,13 +3,15 @@
 import { Router } from "express";
 import type { DeviceRegistry } from "../../core/device-registry.js";
 import type { ConnectorManager } from "../../connectors/connector-manager.js";
+import type { StateHistory } from "../../core/state-history.js";
 import { NotFoundError } from "../middleware/error-handler.js";
 import { validateAction } from "../middleware/validators.js";
 import logger from "../../logger.js";
 
 export function createDeviceRoutes(
   registry: DeviceRegistry,
-  connectorManager: ConnectorManager
+  connectorManager: ConnectorManager,
+  stateHistory?: StateHistory,
 ): Router {
   const router = Router();
 
@@ -26,6 +28,29 @@ export function createDeviceRoutes(
       return next(new NotFoundError(`Device not found: ${id}`));
     }
     res.json(device);
+  });
+
+  /** GET /api/devices/:id/history — get state history for a device */
+  router.get("/:id/history", (req, res, next) => {
+    if (!stateHistory) {
+      return res.json([]);
+    }
+
+    const id = req.params.id as string;
+    const device = registry.getById(id);
+    if (!device) {
+      return next(new NotFoundError(`Device not found: ${id}`));
+    }
+
+    const from = req.query.from ? Number(req.query.from) : undefined;
+    const to = req.query.to ? Number(req.query.to) : undefined;
+
+    if (from !== undefined && to !== undefined) {
+      return res.json(stateHistory.getHistoryRange(id, from, to));
+    }
+
+    const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 500);
+    res.json(stateHistory.getHistory(id, limit));
   });
 
   /** POST /api/devices/:id/action — execute action on device */
