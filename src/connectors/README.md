@@ -150,6 +150,44 @@ Include snippets for:
 - Useful conditions (device online, threshold checks, state comparisons)
 - Multi-device patterns (filter by integration, loop and control)
 
+### 5. `actionHandlers: Record<string, ActionHandler>` (optional)
+
+Custom action handlers that extend the automation system. These are registered with the `ActionExecutor` when your connector is enabled and unregistered when it's disabled. They become available as action types in form-based and script-based automations.
+
+```typescript
+import type { ActionHandler } from "../../automations/action-executor.js";
+
+export const actionHandlers: Record<string, ActionHandler> = {
+  zigbee_group_action: async (action, ruleId, deps) => {
+    deps.logger.info({ ruleId, group: action.params.group }, "Executing Zigbee group action");
+    await deps.connectorManager.executeAction(action.target, {
+      type: "group",
+      deviceId: action.target,
+      params: action.params,
+    });
+  },
+};
+```
+
+Prefix handler names with your connector ID to avoid collisions (e.g. `zigbee_group_action`, not just `group_action`).
+
+### 6. `conditions: Record<string, ConditionFactory>` (optional)
+
+Custom condition factories that extend the form-based automation builder. These are registered with the `ConditionRegistry` when your connector is enabled and unregistered when it's disabled.
+
+```typescript
+import type { ConditionFactory } from "../../automations/condition-registry.js";
+
+export const conditions: Record<string, ConditionFactory> = {
+  zigbee_battery_below: (conditionValue: string) => {
+    const threshold = Number(conditionValue);
+    return (ctx) => Number(ctx.state.battery) < threshold;
+  },
+};
+```
+
+Each factory receives the `conditionValue` string from the rule config and returns a predicate function `(ctx: EventContext) => boolean`.
+
 ---
 
 ## Connector Lifecycle
@@ -385,6 +423,8 @@ Before shipping your connector:
 **Backend (required):**
 - [ ] `index.ts` exports `metadata`, `configSchema`, and `createConnector`
 - [ ] `index.ts` exports `snippets` array with at least 2-3 useful code templates
+- [ ] `index.ts` exports `actionHandlers` with connector-specific action types (optional but recommended)
+- [ ] `index.ts` exports `conditions` with connector-specific condition factories (optional but recommended)
 - [ ] `metadata.id` is unique and URL-safe
 - [ ] `metadata.id` matches the `integration` field on all discovered devices
 - [ ] Required config fields are validated (the REST API handles this via your schema)
