@@ -25,9 +25,9 @@ else
 fi
 
 # 1b. Configure Avahi mDNS so http://aeolus.local resolves on the LAN
-# Docker creates virtual bridge interfaces (docker0, br-*, veth*) that cause
-# Avahi to detect name conflicts and fall back to aeolus-2.local. We restrict
-# Avahi to only advertise on physical interfaces (eth0 for wired, wlan0 for Wi-Fi).
+# Restrict Avahi to physical interfaces only (eth0 for wired, wlan0 for Wi-Fi).
+# Without this, Docker's virtual bridge interfaces (docker0, br-*, veth*) can
+# cause Avahi to see phantom name conflicts and fall back to aeolus-2.local.
 if ! command -v avahi-daemon &> /dev/null; then
   echo "📦 Installing Avahi for mDNS..."
   sudo apt-get update -qq
