@@ -223,38 +223,23 @@ The Monaco editor provides full IntelliSense for all globals — autocomplete, p
 
 Aeolus communicates with custom hardware (ESP32, Arduino, etc.) over MQTT. Your microcontroller connects to the Mosquitto broker on the Pi (`aeolus.local:1883`), publishes sensor data, and optionally subscribes to command topics. Devices appear in the dashboard automatically — no registration needed.
 
-**Full guide with copy-paste templates: [`docs/MICROCONTROLLERS.md`](docs/MICROCONTROLLERS.md)**
+**Full guide with templates: [`docs/MICROCONTROLLERS.md`](docs/MICROCONTROLLERS.md)**
 
-The guide includes three ready-to-flash ESP32 templates:
-
-| Template | Use Case | Example |
-|----------|----------|---------|
-| **Sensor** | Publish readings to Aeolus | DHT22 temperature + humidity every 5s |
-| **Actuator** | Receive commands from Aeolus | Relay-controlled solenoid valve |
-| **Combined** | Both sensor + actuator | Soil moisture sensor + irrigation valve |
-
-### Quick example — publish a temperature reading
+### Publish a sensor reading
 
 ```cpp
-// Topic follows {type}/{location}/{metric} convention
 mqtt.publish("sensor/kitchen/temp", "{\"value\":23.5,\"unit\":\"°C\"}");
 ```
 
-That single line creates a device in Aeolus, shows it on the dashboard, and makes it available to automations.
-
-### Quick example — receive a command
+### Receive a command
 
 ```cpp
-// Subscribe to a command topic
 mqtt.subscribe("valve/irrigation/command");
-
-// Handle incoming commands
-void onMessage(char* topic, byte* payload, unsigned int length) {
-  String msg = String((char*)payload).substring(0, length);
-  if (msg == "{\"action\":\"open\"}") digitalWrite(RELAY_PIN, HIGH);
-  if (msg == "{\"action\":\"close\"}") digitalWrite(RELAY_PIN, LOW);
-}
+// In your callback:
+if (msg == "{\"action\":\"open\"}") digitalWrite(RELAY_PIN, HIGH);
 ```
+
+The guide includes a minimal publish example, a minimal subscribe example, and a full production-style combined template with reconnection handling.
 
 > **Note:** Aeolus doesn't handle compiling or uploading firmware to your boards — you'll need the [Arduino IDE](https://www.arduino.cc/en/software) or [PlatformIO](https://platformio.org/) for that. OTA firmware management from the dashboard is on the [roadmap](docs/ROADMAP.md).
 
