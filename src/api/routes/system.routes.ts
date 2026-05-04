@@ -31,6 +31,45 @@ function getDiskUsage(): { total: number; used: number; free: number } | null {
   }
 }
 
+function getDockerDiskUsage(): { images: number; buildCache: number; containers: number; volumes: number; total: number; reclaimable: number } | null {
+  try {
+    const output = execSync("docker system df --format '{{.Type}}|{{.Size}}|{{.Reclaimable}}'", { encoding: "utf-8", timeout: 5000 });
+    const result = { images: 0, buildCache: 0, containers: 0, volumes: 0, total: 0, reclaimable: 0 };
+
+    for (const line of output.trim().split("\n")) {
+      const [type, sizeStr, reclaimStr] = line.split("|");
+      const size = parseDockerSize(sizeStr?.trim() ?? "0B");
+      const reclaimable = parseDockerSize((reclaimStr?.trim() ?? "0B").replace(/\s*\(.*\)/, ""));
+
+      if (type === "Images") result.images = size;
+      else if (type === "Build Cache") result.buildCache = size;
+      else if (type === "Containers") result.containers = size;
+      else if (type === "Local Volumes") result.volumes = size;
+
+      result.total += size;
+      result.reclaimable += reclaimable;
+    }
+    return result;
+  } catch {
+    return null;
+  }
+}
+
+function parseDockerSize(str: string): number {
+  const match = str.match(/^([\d.]+)\s*(B|KB|MB|GB|TB|kB)$/i);
+  if (!match) return 0;
+  const value = parseFloat(match[1]);
+  const unit = match[2].toUpperCase();
+  switch (unit) {
+    case "B": return value;
+    case "KB": case "KB": return value * 1024;
+    case "MB": return value * 1024 * 1024;
+    case "GB": return value * 1024 * 1024 * 1024;
+    case "TB": return value * 1024 * 1024 * 1024 * 1024;
+    default: return value;
+  }
+}
+
 export function createSystemRoutes(): Router {
   const router = Router();
 
@@ -45,6 +84,7 @@ export function createSystemRoutes(): Router {
     const cpuLoad = os.loadavg();
 
     const disk = getDiskUsage();
+    const dockerDisk = getDockerDiskUsage();
     const cpuTemp = getCpuTemp();
 
     const networkInterfaces = os.networkInterfaces();
@@ -82,6 +122,7 @@ export function createSystemRoutes(): Router {
         free: disk.free,
         usagePercent: Math.round((disk.used / disk.total) * 100),
       } : null,
+      docker: dockerDisk,
       network: ips,
       uptime: os.uptime(),
     });

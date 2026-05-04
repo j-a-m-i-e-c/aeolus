@@ -19,6 +19,7 @@ interface SystemInfo {
   loadAvg: { "1m": number; "5m": number; "15m": number };
   memory: { total: number; used: number; free: number; usagePercent: number };
   disk: { total: number; used: number; free: number; usagePercent: number } | null;
+  docker: { images: number; buildCache: number; containers: number; volumes: number; total: number; reclaimable: number } | null;
   network: { name: string; address: string }[];
   uptime: number;
 }
@@ -337,7 +338,63 @@ export function SystemPage() {
                 <span className="text-[#6B7785]">{formatBytes(info.disk.used)} / {formatBytes(info.disk.total)}</span>
                 <span style={{ color: diskColor }} className="font-semibold">{info.disk.usagePercent}%</span>
               </div>
-              <UsageBar percent={info.disk.usagePercent} color={diskColor} />
+              {/* Stacked bar showing Docker vs other usage */}
+              {info.docker ? (
+                <div className="w-full h-2 bg-background rounded-full overflow-hidden flex">
+                  <div
+                    className="h-full transition-all duration-300"
+                    style={{
+                      width: `${Math.round(((info.disk.used - info.docker.total) / info.disk.total) * 100)}%`,
+                      backgroundColor: diskColor,
+                    }}
+                    title={`System: ${formatBytes(info.disk.used - info.docker.total)}`}
+                  />
+                  <div
+                    className="h-full transition-all duration-300"
+                    style={{
+                      width: `${Math.round((info.docker.total / info.disk.total) * 100)}%`,
+                      backgroundColor: "#F59E0B",
+                    }}
+                    title={`Docker: ${formatBytes(info.docker.total)}`}
+                  />
+                </div>
+              ) : (
+                <UsageBar percent={info.disk.usagePercent} color={diskColor} />
+              )}
+              {/* Docker breakdown */}
+              {info.docker && (
+                <div className="mt-3 space-y-1.5">
+                  <div className="flex items-center gap-2 text-[10px] text-[#6B7785]">
+                    <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: diskColor }} />
+                    System: {formatBytes(info.disk.used - info.docker.total)}
+                    <span className="inline-block w-2 h-2 rounded-full ml-2" style={{ backgroundColor: "#F59E0B" }} />
+                    Docker: {formatBytes(info.docker.total)}
+                  </div>
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[10px]">
+                    <div className="flex justify-between">
+                      <span className="text-[#6B7785]">Images</span>
+                      <span className="text-[#9AA6B2] font-mono">{formatBytes(info.docker.images)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-[#6B7785]">Build Cache</span>
+                      <span className="text-[#9AA6B2] font-mono">{formatBytes(info.docker.buildCache)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-[#6B7785]">Containers</span>
+                      <span className="text-[#9AA6B2] font-mono">{formatBytes(info.docker.containers)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-[#6B7785]">Volumes</span>
+                      <span className="text-[#9AA6B2] font-mono">{formatBytes(info.docker.volumes)}</span>
+                    </div>
+                  </div>
+                  {info.docker.reclaimable > 1024 * 1024 && (
+                    <div className="text-[10px] text-[#F59E0B]">
+                      {formatBytes(info.docker.reclaimable)} reclaimable via docker prune
+                    </div>
+                  )}
+                </div>
+              )}
             </>
           ) : (
             <div className="text-center text-[#6B7785] text-sm py-2">Not available</div>
