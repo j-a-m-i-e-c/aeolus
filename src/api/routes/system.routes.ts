@@ -153,9 +153,9 @@ export function createSystemRoutes(): Router {
 
     // Run git pull + docker compose rebuild in the background
     // This is fire-and-forget — the container will be replaced during rebuild
-    // --build forces image rebuild, --force-recreate ensures new containers even if image hash matches
+    // Uses --build (with cache) instead of --no-cache for speed on Pi (~2-3 min vs ~15 min)
     // Docker prune runs after rebuild to prevent build cache from filling the SD card
-    const child = spawn("sh", ["-c", `cd ${projectDir} && git pull && docker compose build --no-cache && docker compose up -d --force-recreate && docker system prune -f --filter "until=24h" > /dev/null 2>&1`], {
+    const child = spawn("sh", ["-c", `cd ${projectDir} && git pull && docker compose up -d --build && docker system prune -f --filter "until=24h" > /dev/null 2>&1`], {
       detached: true,
       stdio: "ignore",
     });
