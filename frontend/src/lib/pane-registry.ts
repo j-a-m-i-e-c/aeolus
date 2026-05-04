@@ -14,6 +14,7 @@ import { TopicTreePane } from "../components/panes/TopicTreePane";
 import { EventLogPane } from "../components/panes/EventLogPane";
 import { ConnectorsPane } from "../components/panes/ConnectorsPane";
 import { TriggerButtonPane } from "../components/panes/TriggerButtonPane";
+import { StateHistoryPane } from "../components/panes/StateHistoryPane";
 
 export interface PaneRegistryEntry {
   component: ComponentType<{ config: PaneConfig; paneId?: string }>;
@@ -107,6 +108,14 @@ export const PANE_REGISTRY: Record<string, PaneRegistryEntry> = {
     defaultIcon: "scroll-text",
     defaultConfig: {},
     defaultSize: { w: 12, h: 4 },
+    category: "monitoring",
+  },
+  "state-history": {
+    component: StateHistoryPane,
+    displayName: "State History",
+    defaultIcon: "line-chart",
+    defaultConfig: { timeRange: "1h" },
+    defaultSize: { w: 6, h: 5 },
     category: "monitoring",
   },
 
