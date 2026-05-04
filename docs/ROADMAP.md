@@ -52,11 +52,14 @@ Drag-and-drop canvas for building automations visually (Node-RED style). Nodes f
 ### Automation Pipelines & Linkage Pane
 Visual chaining of automations with transform steps — connect the output of one automation to the input of another with a mapper function in between. A dedicated "Linkage" pane type would show the connection graph and let users write transform code in a Monaco editor. The underlying mechanism already exists (automations can chain via the state store or MQTT topics), but a visual linkage pane would make the connections discoverable and the transforms explicit. Think Unix pipes for IoT: `sensor → compute average → threshold check → device action → notification`.
 
-### State History & Charts
-Store the last N values per device in SQLite and display trend charts in the device detail modal and as a dedicated pane type. Line charts for sensor data (temperature, humidity over time), bar charts for energy usage, and event timelines for switches and motion sensors.
+### ~~State History & Charts~~ ✅ Implemented
+Store the last N values per device in SQLite and display trend charts as a dedicated pane type. Implemented with throttled recording (configurable interval), auto-pruning, a pure SVG line chart with Catmull-Rom spline interpolation, multi-series support, hover tooltips, time range picker (15m/1h/6h/24h), auto-refresh, and per-device or global history clearing. Available as the "State History" pane in the monitoring category.
 
 ### Device Offline Detection
-Mark devices as offline if no message is received within a configurable timeout. Show offline status in the device grid with a visual indicator, and optionally trigger automations when a device goes offline (e.g. send a notification if a critical sensor stops reporting).
+~~Mark devices as offline if no message is received within a configurable timeout.~~ The timeout-based approach was rejected because many MQTT devices (motion sensors, door sensors, leak detectors) only emit when they sense something — silence is normal, not a failure. A global timeout would generate constant false positives for event-driven devices. The correct approach is **MQTT Last Will and Testament (LWT)**: the device tells the broker "if I disconnect unexpectedly, publish this message to a death topic." Aeolus would listen for LWT messages and mark the device offline based on that — reliable regardless of how often a device publishes. This requires device-side configuration (setting a will topic/payload in the MQTT connect options) and Aeolus subscribing to a convention like `{deviceId}/status` or `aeolus/lwt/{deviceId}`.
+
+### Anomaly Detection
+Detect unusual patterns in device state history and surface them as alerts or automation triggers. Examples: "temperature rose more than 5°C in the last hour", "power draw is 40% above the 7-day average", "humidity has been above 80% for 3 hours straight." Requires the state history feature (now implemented) as a foundation. The design needs decisions around what constitutes an "anomaly" — rate of change thresholds, statistical deviation from rolling averages, absolute bounds, or time-in-state duration. Could be implemented as a set of built-in condition factories for the automation system (e.g. `rate_of_change_above`, `rolling_avg_deviation`, `sustained_above`) so users write automations like "when sensor/bathroom/humidity sustained_above 80 for 3h, send notification."
 
 ---
 
@@ -70,8 +73,6 @@ React Native companion app for quick device control, push notifications when aut
 
 ### Plugin Marketplace
 Community-contributed connectors and pane types installable from the dashboard. A registry of published plugins with one-click install, automatic dependency resolution, and version management. Would lower the barrier for extending Aeolus without writing code.
-
-### Browser-Based Code Editor (code-server Add-on)
 
 ### OTA Firmware Management
 Manage microcontroller firmware updates from the Aeolus dashboard. Upload compiled binaries (.bin files) and push them to ESP32/ESP8266 devices over Wi-Fi using the ArduinoOTA or ESP-IDF OTA protocols. Track firmware versions per device, roll back to previous versions, and schedule updates during low-activity windows. This would close the loop on the microcontroller workflow — currently users need the Arduino IDE or PlatformIO on a separate machine to flash their boards. With OTA support, the entire lifecycle (write automation → deploy firmware → monitor device) happens from the Aeolus dashboard. The microcontroller templates in [`docs/MICROCONTROLLERS.md`](MICROCONTROLLERS.md) would be extended with OTA-ready variants that include the update client library.
