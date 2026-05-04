@@ -1,7 +1,7 @@
 // frontend/src/components/SystemPage.tsx — Host system diagnostics
 
 import { useState, useEffect, useCallback } from "react";
-import { Cpu, HardDrive, MemoryStick, Thermometer, Wifi, Server, RefreshCw, ScrollText, ChevronDown, Download, Loader2, Activity, Zap, Power, RotateCcw } from "lucide-react";
+import { Cpu, HardDrive, MemoryStick, Thermometer, Wifi, Server, RefreshCw, ScrollText, ChevronDown, Download, Loader2, Activity, Zap, Power, RotateCcw, Trash2 } from "lucide-react";
 import { useDeviceStore } from "../store/device-store";
 import { fetchHealth } from "../lib/api-client";
 import type { HealthStatus } from "../store/device-store";
@@ -389,9 +389,24 @@ export function SystemPage() {
                     </div>
                   </div>
                   {info.docker.reclaimable > 1024 * 1024 && (
-                    <div className="text-[10px] text-[#F59E0B]">
-                      {formatBytes(info.docker.reclaimable)} reclaimable via docker prune
-                    </div>
+                    <button
+                      onClick={async () => {
+                        if (!confirm(`Free up ${formatBytes(info.docker!.reclaimable)} by removing unused Docker images and build cache?`)) return;
+                        try {
+                          const res = await fetch(`${API_URL}/api/system/docker-prune`, { method: "POST" });
+                          const data = await res.json();
+                          if (data.docker) {
+                            // Update the info with fresh docker stats
+                            setInfo((prev) => prev ? { ...prev, docker: data.docker } : prev);
+                          }
+                          fetchInfo(); // Refresh disk stats too
+                        } catch {}
+                      }}
+                      className="flex items-center gap-1.5 text-[10px] text-[#F59E0B] hover:text-[#E6EDF3] transition-colors"
+                    >
+                      <Trash2 size={10} />
+                      {formatBytes(info.docker.reclaimable)} reclaimable — clean up
+                    </button>
                   )}
                 </div>
               )}

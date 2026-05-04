@@ -162,6 +162,20 @@ export function createSystemRoutes(): Router {
     child.unref();
   });
 
+  /** POST /api/system/docker-prune — remove unused Docker images and build cache */
+  router.post("/docker-prune", async (_req, res) => {
+    try {
+      logger.info("Docker prune triggered from dashboard");
+      const output = execSync("docker system prune -af --filter 'until=1h'", { encoding: "utf-8", timeout: 60000 });
+      // Re-fetch docker disk usage after prune
+      const docker = getDockerDiskUsage();
+      res.json({ success: true, output: output.trim(), docker });
+    } catch (err) {
+      logger.error({ error: (err as Error).message }, "Docker prune failed");
+      res.status(500).json({ error: "Docker prune failed", message: (err as Error).message });
+    }
+  });
+
   /** POST /api/system/shutdown — gracefully shut down the host Pi */
   router.post("/shutdown", (_req, res) => {
     logger.info("Host shutdown triggered from dashboard");
