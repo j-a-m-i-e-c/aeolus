@@ -286,7 +286,7 @@ export function SystemPage() {
                 <div key={label}>
                   <div className="flex items-center justify-between text-xs mb-1">
                     <span className="text-[#6B7785]">{label} load</span>
-                    <span className="font-mono" style={{ color }}>{value.toFixed(2)} <span className="text-[#6B7785]">/ {info.cpuCores}</span></span>
+                    <span className="font-mono font-semibold" style={{ color }}>{Math.round(percent)}%</span>
                   </div>
                   <UsageBar percent={percent} color={color} />
                 </div>
