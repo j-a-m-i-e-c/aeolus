@@ -250,10 +250,9 @@ export function createSystemRoutes(): Router {
     logger.info("Host shutdown triggered from dashboard");
     res.json({ success: true, message: "Shutting down — the Pi will power off in a few seconds" });
 
-    // nsenter runs the command in the host's PID/mount namespace (not inside the container)
-    // This requires the Docker socket to be mounted and the container to run as root
+    // Use docker to run shutdown on the host via a temporary privileged container
     setTimeout(() => {
-      const child = spawn("nsenter", ["-t", "1", "-m", "-u", "-i", "-n", "--", "shutdown", "-h", "now"], {
+      const child = spawn("docker", ["run", "--rm", "--privileged", "--pid=host", "alpine", "nsenter", "-t", "1", "-m", "-u", "-i", "-n", "--", "shutdown", "-h", "now"], {
         detached: true,
         stdio: "ignore",
       });
@@ -267,7 +266,7 @@ export function createSystemRoutes(): Router {
     res.json({ success: true, message: "Rebooting — the Pi will restart in a few seconds" });
 
     setTimeout(() => {
-      const child = spawn("nsenter", ["-t", "1", "-m", "-u", "-i", "-n", "--", "shutdown", "-r", "now"], {
+      const child = spawn("docker", ["run", "--rm", "--privileged", "--pid=host", "alpine", "nsenter", "-t", "1", "-m", "-u", "-i", "-n", "--", "shutdown", "-r", "now"], {
         detached: true,
         stdio: "ignore",
       });
