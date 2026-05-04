@@ -112,7 +112,8 @@ export function createSystemRoutes(): Router {
 
     // Run git pull + docker compose rebuild in the background
     // This is fire-and-forget — the container will be replaced during rebuild
-    const child = spawn("sh", ["-c", `cd ${projectDir} && git pull && docker compose up -d --build`], {
+    // Docker prune runs after rebuild to prevent build cache from filling the SD card
+    const child = spawn("sh", ["-c", `cd ${projectDir} && git pull && docker compose up -d --build && docker system prune -f --filter "until=24h" > /dev/null 2>&1`], {
       detached: true,
       stdio: "ignore",
     });

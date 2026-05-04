@@ -16,5 +16,7 @@ COPY --from=builder /app/dist ./dist/
 COPY src/automations/sandbox-types.d.ts ./dist/automations/sandbox-types.d.ts
 COPY automations/ ./automations/
 RUN mkdir -p /app/data
+# Allow git to operate on the mounted host project directory (different owner)
+RUN git config --global --add safe.directory /aeolus-host
 EXPOSE 3001
 CMD ["node", "dist/index.js"]

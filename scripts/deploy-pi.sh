@@ -14,4 +14,7 @@ docker compose build
 echo "🚀 Restarting services..."
 docker compose up -d
 
+echo "🧹 Cleaning up old Docker images and build cache..."
+docker system prune -f --filter "until=24h" > /dev/null 2>&1 || true
+
 echo "✓ Deployed! Dashboard at http://aeolus.local:3000"
