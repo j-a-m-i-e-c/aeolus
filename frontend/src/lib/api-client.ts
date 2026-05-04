@@ -132,3 +132,16 @@ export async function patchConnectorConfig(connectorId: string, config: Record<s
     body: JSON.stringify({ config }),
   });
 }
+
+// ---- Device state history ----
+
+export interface HistoryEntry {
+  deviceId: string;
+  state: Record<string, unknown>;
+  timestamp: number;
+}
+
+export async function fetchDeviceHistory(deviceId: string, limit?: number): Promise<HistoryEntry[]> {
+  const params = limit ? `?limit=${limit}` : '';
+  return request<HistoryEntry[]>(`/api/devices/${deviceId}/history${params}`);
+}
