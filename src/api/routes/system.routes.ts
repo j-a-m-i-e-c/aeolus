@@ -120,5 +120,35 @@ export function createSystemRoutes(): Router {
     child.unref();
   });
 
+  /** POST /api/system/shutdown — gracefully shut down the host Pi */
+  router.post("/shutdown", (_req, res) => {
+    logger.info("Host shutdown triggered from dashboard");
+    res.json({ success: true, message: "Shutting down — the Pi will power off in a few seconds" });
+
+    // nsenter runs the command in the host's PID/mount namespace (not inside the container)
+    // This requires the Docker socket to be mounted and the container to run as root
+    setTimeout(() => {
+      const child = spawn("nsenter", ["-t", "1", "-m", "-u", "-i", "-n", "--", "shutdown", "-h", "now"], {
+        detached: true,
+        stdio: "ignore",
+      });
+      child.unref();
+    }, 1000);
+  });
+
+  /** POST /api/system/reboot — gracefully reboot the host Pi */
+  router.post("/reboot", (_req, res) => {
+    logger.info("Host reboot triggered from dashboard");
+    res.json({ success: true, message: "Rebooting — the Pi will restart in a few seconds" });
+
+    setTimeout(() => {
+      const child = spawn("nsenter", ["-t", "1", "-m", "-u", "-i", "-n", "--", "shutdown", "-r", "now"], {
+        detached: true,
+        stdio: "ignore",
+      });
+      child.unref();
+    }, 1000);
+  });
+
   return router;
 }

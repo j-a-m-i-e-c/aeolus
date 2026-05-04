@@ -1,7 +1,7 @@
 // frontend/src/components/SystemPage.tsx — Host system diagnostics
 
 import { useState, useEffect, useCallback } from "react";
-import { Cpu, HardDrive, MemoryStick, Thermometer, Wifi, Server, RefreshCw, ScrollText, ChevronDown, Download, Loader2, Activity, Zap } from "lucide-react";
+import { Cpu, HardDrive, MemoryStick, Thermometer, Wifi, Server, RefreshCw, ScrollText, ChevronDown, Download, Loader2, Activity, Zap, Power, RotateCcw } from "lucide-react";
 import { useDeviceStore } from "../store/device-store";
 import { fetchHealth } from "../lib/api-client";
 import type { HealthStatus } from "../store/device-store";
@@ -98,6 +98,26 @@ export function SystemPage() {
     }
   };
 
+  const triggerShutdown = async () => {
+    if (!confirm("Shut down the Pi? You will need physical access to turn it back on.")) return;
+    try {
+      await fetch(`${API_URL}/api/system/shutdown`, { method: "POST" });
+      setUpdateMsg("Shutting down — the Pi will power off in a few seconds");
+    } catch {
+      setUpdateMsg("Failed to trigger shutdown");
+    }
+  };
+
+  const triggerReboot = async () => {
+    if (!confirm("Reboot the Pi? The dashboard will be unavailable for about a minute.")) return;
+    try {
+      await fetch(`${API_URL}/api/system/reboot`, { method: "POST" });
+      setUpdateMsg("Rebooting — refresh the page in about a minute");
+    } catch {
+      setUpdateMsg("Failed to trigger reboot");
+    }
+  };
+
   const formatHealthUptime = (seconds: number) => {
     const h = Math.floor(seconds / 3600);
     const m = Math.floor((seconds % 3600) / 60);
@@ -125,6 +145,22 @@ export function SystemPage() {
           >
             {updating ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
             {updating ? "Updating..." : "Update & Restart"}
+          </button>
+          <button
+            onClick={triggerReboot}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-[#F59E0B]/10 text-[#F59E0B] border border-[#F59E0B]/30 hover:bg-[#F59E0B]/20 transition-colors"
+            title="Reboot the Pi"
+          >
+            <RotateCcw size={12} />
+            Reboot
+          </button>
+          <button
+            onClick={triggerShutdown}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-[#EF4444]/10 text-[#EF4444] border border-[#EF4444]/30 hover:bg-[#EF4444]/20 transition-colors"
+            title="Shut down the Pi"
+          >
+            <Power size={12} />
+            Shutdown
           </button>
           <button onClick={fetchInfo} className="text-[#6B7785] hover:text-primary transition-colors" title="Refresh">
             <RefreshCw size={16} />

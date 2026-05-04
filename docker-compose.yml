@@ -26,6 +26,7 @@ services:
     # Host networking allows UDP broadcast for Kasa device discovery
     # and direct LAN access for Hue bridge communication
     network_mode: host
+    pid: host
     environment:
       NODE_ENV: ${NODE_ENV:-development}
       PORT: ${API_PORT:-3001}
