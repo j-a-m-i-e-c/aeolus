@@ -85,13 +85,41 @@ export function SystemPage() {
   }, [setHealth]);
 
   const triggerUpdate = async () => {
-    if (!confirm("Pull latest code and rebuild? The system will restart and you'll need to refresh the page.")) return;
+    if (!confirm("Pull latest code and rebuild? The system will restart automatically.")) return;
     setUpdating(true);
     setUpdateMsg("");
     try {
       const res = await fetch(`${API_URL}/api/system/update`, { method: "POST" });
       const data = await res.json();
-      setUpdateMsg(data.message || "Update started");
+      setUpdateMsg(data.message || "Update started — waiting for restart...");
+
+      // Poll until the backend comes back, then auto-refresh
+      const pollStart = Date.now();
+      const maxWait = 180_000; // 3 minutes max
+      const pollInterval = 3_000; // check every 3 seconds
+
+      const poll = async () => {
+        if (Date.now() - pollStart > maxWait) {
+          setUpdateMsg("Update is taking longer than expected. Try refreshing manually.");
+          setUpdating(false);
+          return;
+        }
+
+        try {
+          const healthRes = await fetch(`${API_URL}/api/health`, { signal: AbortSignal.timeout(2000) });
+          if (healthRes.ok) {
+            // Backend is back — reload the page
+            window.location.reload();
+            return;
+          }
+        } catch {
+          // Still down — keep polling
+        }
+        setTimeout(poll, pollInterval);
+      };
+
+      // Wait a few seconds for the rebuild to start before polling
+      setTimeout(poll, 10_000);
     } catch (err) {
       setUpdateMsg("Failed to trigger update");
       setUpdating(false);
@@ -171,7 +199,7 @@ export function SystemPage() {
       {updateMsg && (
         <div className="bg-primary/10 border border-primary/20 rounded-xl px-4 py-3 text-sm text-primary">
           {updateMsg}
-          {updating && <span className="text-[10px] text-[#6B7785] ml-2">Refresh the page in ~60 seconds</span>}
+          {updating && <span className="text-[10px] text-[#6B7785] ml-2">The page will refresh automatically when ready</span>}
         </div>
       )}
 
@@ -367,7 +395,7 @@ function LogViewer() {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [filter, setFilter] = useState<string>("all");
   const [autoRefresh, setAutoRefresh] = useState(true);
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(true);
 
   const fetchLogs = useCallback(async () => {
     try {

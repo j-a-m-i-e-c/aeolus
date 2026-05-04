@@ -287,23 +287,23 @@ export function Sidebar() {
   };
 
   return (
-    <aside className="w-64 min-h-screen bg-surface border-r border-[#2A3441] flex flex-col p-4 gap-6">
+    <aside className="w-64 h-screen bg-surface border-r border-[#2A3441] flex flex-col p-4 gap-6 sticky top-0">
       {/* Logo */}
-      <div className="flex items-center gap-3 px-2">
+      <div className="flex items-center gap-3 px-2 shrink-0">
         <AeolusLogo size={40} />
         <span className="text-xl font-semibold text-primary">Aeolus</span>
       </div>
 
       {/* Pinned system tabs */}
-      <nav className="flex flex-col gap-1">
+      <nav className="flex flex-col gap-1 shrink-0">
         {pinnedTabs.map((tab) => tabButton(tab, true))}
       </nav>
 
       {/* Separator */}
-      <div className="border-t border-[#2A3441]" />
+      <div className="border-t border-[#2A3441] shrink-0" />
 
-      {/* Custom tabs */}
-      <nav className="flex flex-col gap-1 flex-1">
+      {/* Custom tabs — scrollable */}
+      <nav className="flex flex-col gap-1 flex-1 overflow-y-auto min-h-0">
         {customTabs.map((tab) => tabButton(tab, false))}
 
         {/* Add Tab button / inline form */}
@@ -368,8 +368,8 @@ export function Sidebar() {
         )}
       </nav>
 
-      {/* Simulator toggle */}
-      <div className="px-2">
+      {/* Simulator toggle — pinned to bottom */}
+      <div className="px-2 shrink-0">
         <button
           onClick={toggleSimulator}
           disabled={simLoading}
@@ -384,8 +384,8 @@ export function Sidebar() {
         </button>
       </div>
 
-      {/* System status */}
-      <div className="mt-auto px-2 space-y-2">
+      {/* System status — pinned to bottom */}
+      <div className="px-2 space-y-2 shrink-0">
         <div className="flex items-center gap-2 text-xs">
           {health?.mqtt === "connected" ? (
             <Wifi size={14} className="text-[#22C55E]" />
