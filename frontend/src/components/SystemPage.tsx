@@ -368,7 +368,7 @@ export function SystemPage() {
                     <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: diskColor }} />
                     System: {formatBytes(info.disk.used - info.docker.total)}
                     <span className="inline-block w-2 h-2 rounded-full ml-2" style={{ backgroundColor: "#F59E0B" }} />
-                    Docker: {formatBytes(info.docker.total)}
+                    Aeolus Docker: {formatBytes(info.docker.total)}
                   </div>
                   <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[10px]">
                     <div className="flex justify-between">
