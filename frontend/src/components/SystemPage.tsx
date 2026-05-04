@@ -176,22 +176,19 @@ export function SystemPage() {
           </button>
           <button
             onClick={triggerReboot}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-[#F59E0B]/10 text-[#F59E0B] border border-[#F59E0B]/30 hover:bg-[#F59E0B]/20 transition-colors"
+            className="group flex items-center gap-0 p-1.5 text-xs font-medium rounded-lg bg-[#F59E0B]/10 text-[#F59E0B] border border-[#F59E0B]/30 hover:bg-[#F59E0B]/20 hover:gap-1.5 hover:px-3 transition-all duration-200 overflow-hidden"
             title="Reboot the Pi"
           >
-            <RotateCcw size={12} />
-            Reboot
+            <RotateCcw size={12} className="shrink-0" />
+            <span className="max-w-0 group-hover:max-w-[4rem] overflow-hidden whitespace-nowrap transition-all duration-200">Reboot</span>
           </button>
           <button
             onClick={triggerShutdown}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-[#EF4444]/10 text-[#EF4444] border border-[#EF4444]/30 hover:bg-[#EF4444]/20 transition-colors"
+            className="group flex items-center gap-0 p-1.5 text-xs font-medium rounded-lg bg-[#EF4444]/10 text-[#EF4444] border border-[#EF4444]/30 hover:bg-[#EF4444]/20 hover:gap-1.5 hover:px-3 transition-all duration-200 overflow-hidden"
             title="Shut down the Pi"
           >
-            <Power size={12} />
-            Shutdown
-          </button>
-          <button onClick={fetchInfo} className="text-[#6B7785] hover:text-primary transition-colors" title="Refresh">
-            <RefreshCw size={16} />
+            <Power size={12} className="shrink-0" />
+            <span className="max-w-0 group-hover:max-w-[5rem] overflow-hidden whitespace-nowrap transition-all duration-200">Shutdown</span>
           </button>
         </div>
       </div>
