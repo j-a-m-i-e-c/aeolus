@@ -33,7 +33,7 @@ function getDiskUsage(): { total: number; used: number; free: number } | null {
 
 function getDockerDiskUsage(): { images: number; buildCache: number; containers: number; volumes: number; total: number; reclaimable: number } | null {
   try {
-    const output = execSync("docker system df --format '{{.Type}}|{{.Size}}|{{.Reclaimable}}'", { encoding: "utf-8", timeout: 5000 });
+    const output = execSync("docker system df --format '{{.Type}}|{{.Size}}|{{.Reclaimable}}'", { encoding: "utf-8", timeout: 15000 });
     const result = { images: 0, buildCache: 0, containers: 0, volumes: 0, total: 0, reclaimable: 0 };
 
     for (const line of output.trim().split("\n")) {
@@ -56,16 +56,16 @@ function getDockerDiskUsage(): { images: number; buildCache: number; containers:
 }
 
 function parseDockerSize(str: string): number {
-  const match = str.match(/^([\d.]+)\s*(B|KB|MB|GB|TB|kB)$/i);
+  const match = str.match(/^([\d.]+)\s*(B|kB|KB|MB|GB|TB)$/i);
   if (!match) return 0;
   const value = parseFloat(match[1]);
-  const unit = match[2].toUpperCase();
+  const unit = match[2].toLowerCase();
   switch (unit) {
-    case "B": return value;
-    case "KB": case "KB": return value * 1024;
-    case "MB": return value * 1024 * 1024;
-    case "GB": return value * 1024 * 1024 * 1024;
-    case "TB": return value * 1024 * 1024 * 1024 * 1024;
+    case "b": return value;
+    case "kb": return value * 1000;
+    case "mb": return value * 1000 * 1000;
+    case "gb": return value * 1000 * 1000 * 1000;
+    case "tb": return value * 1000 * 1000 * 1000 * 1000;
     default: return value;
   }
 }
