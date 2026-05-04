@@ -15,6 +15,8 @@ import type {
   Connector,
   SnippetDescriptor,
 } from "../connector.interface.js";
+import type { ActionHandler } from "../../automations/action-executor.js";
+import type { ConditionFactory } from "../../automations/condition-registry.js";
 import { TemplateConnector } from "./connector.js";
 
 /**
@@ -85,3 +87,51 @@ export const snippets: SnippetDescriptor[] = [
   //   code: `function toggleMyDevice(ctx) {\n  devices.action("my-connector-device-1", "toggle");\n  log.info("Toggled device");\n}`,
   // },
 ];
+
+/**
+ * Custom action handlers contributed by this connector.
+ *
+ * These are registered with the ActionExecutor when the connector is enabled
+ * and unregistered when it is disabled. They become available as action types
+ * in form-based and script-based automations.
+ *
+ * Each key is the action type string (e.g. "my_connector_special_action").
+ * Prefix with your connector name to avoid collisions with other connectors.
+ *
+ * The handler receives:
+ *   - action: { type, target (deviceId), params }
+ *   - ruleId: the automation rule that triggered this action
+ *   - deps: { mqttService, connectorManager, logger }
+ */
+export const actionHandlers: Record<string, ActionHandler> = {
+  // ← Add action handlers for your connector, e.g.:
+  // my_connector_special_action: async (action, ruleId, deps) => {
+  //   deps.logger.info({ ruleId, deviceId: action.target }, "Executing special action");
+  //   await deps.connectorManager.executeAction(action.target, {
+  //     type: "special",
+  //     deviceId: action.target,
+  //     params: action.params,
+  //   });
+  // },
+};
+
+/**
+ * Custom condition factories contributed by this connector.
+ *
+ * These are registered with the ConditionRegistry when the connector is enabled
+ * and unregistered when it is disabled. They become available as condition types
+ * in form-based automations.
+ *
+ * Each key is the condition type string (e.g. "my_connector_value_check").
+ * Prefix with your connector name to avoid collisions.
+ *
+ * A ConditionFactory receives the condition_value string from the rule config
+ * and returns a predicate function: (ctx: EventContext) => boolean.
+ */
+export const conditions: Record<string, ConditionFactory> = {
+  // ← Add condition factories for your connector, e.g.:
+  // my_connector_value_check: (conditionValue: string) => {
+  //   const threshold = Number(conditionValue);
+  //   return (ctx) => Number(ctx.state.someField) > threshold;
+  // },
+};
