@@ -268,25 +268,32 @@ export function SystemPage() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* CPU */}
         <div className="bg-surface border border-[#2A3441] rounded-xl p-4">
-          <div className="flex items-center gap-2 mb-3">
-            <Cpu size={14} className="text-primary" />
-            <span className="text-sm font-semibold text-[#9AA6B2] uppercase tracking-wider">CPU</span>
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <Cpu size={14} className="text-primary" />
+              <span className="text-sm font-semibold text-[#9AA6B2] uppercase tracking-wider">CPU</span>
+            </div>
+            <span className="text-[10px] text-[#6B7785] font-mono">{info.cpuCores} cores</span>
           </div>
-          <div className="text-xs text-[#E6EDF3] font-mono mb-2">{info.cpuModel}</div>
-          <div className="text-xs text-[#6B7785] mb-2">{info.cpuCores} cores</div>
-          <div className="grid grid-cols-3 gap-2 text-center">
-            <div>
-              <div className="text-lg font-semibold text-[#E6EDF3]">{info.loadAvg["1m"].toFixed(2)}</div>
-              <div className="text-[10px] text-[#6B7785]">1m load</div>
-            </div>
-            <div>
-              <div className="text-lg font-semibold text-[#E6EDF3]">{info.loadAvg["5m"].toFixed(2)}</div>
-              <div className="text-[10px] text-[#6B7785]">5m load</div>
-            </div>
-            <div>
-              <div className="text-lg font-semibold text-[#E6EDF3]">{info.loadAvg["15m"].toFixed(2)}</div>
-              <div className="text-[10px] text-[#6B7785]">15m load</div>
-            </div>
+          <div className="text-xs text-[#E6EDF3] font-mono mb-4">{info.cpuModel}</div>
+          <div className="space-y-3">
+            {([
+              { label: "1m", value: info.loadAvg["1m"] },
+              { label: "5m", value: info.loadAvg["5m"] },
+              { label: "15m", value: info.loadAvg["15m"] },
+            ] as const).map(({ label, value }) => {
+              const percent = Math.min((value / info.cpuCores) * 100, 100);
+              const color = percent > 85 ? "#EF4444" : percent > 60 ? "#F59E0B" : "#3BA4FF";
+              return (
+                <div key={label}>
+                  <div className="flex items-center justify-between text-xs mb-1">
+                    <span className="text-[#6B7785]">{label} load</span>
+                    <span className="font-mono" style={{ color }}>{value.toFixed(2)} <span className="text-[#6B7785]">/ {info.cpuCores}</span></span>
+                  </div>
+                  <UsageBar percent={percent} color={color} />
+                </div>
+              );
+            })}
           </div>
         </div>
 
