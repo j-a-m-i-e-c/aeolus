@@ -1,10 +1,10 @@
 // frontend/src/components/panes/StateHistoryPane.tsx — Dashboard pane for device state history
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { LineChart, RefreshCw } from "lucide-react";
+import { LineChart, RefreshCw, Trash2 } from "lucide-react";
 import type { PaneConfig } from "../../types/dashboard";
 import { useDeviceStore } from "../../store/device-store";
-import { fetchDeviceHistory, type HistoryEntry } from "../../lib/api-client";
+import { fetchDeviceHistory, clearDeviceHistory, clearAllDeviceHistory, type HistoryEntry } from "../../lib/api-client";
 import { StateHistoryChart } from "../StateHistoryChart";
 
 interface StateHistoryPaneConfig {
@@ -87,6 +87,28 @@ export function StateHistoryPane({ config }: Props) {
 
   const selectedDevice = selectedDeviceId ? devices[selectedDeviceId] : null;
 
+  const handleClearDevice = useCallback(async () => {
+    if (!selectedDeviceId) return;
+    const name = selectedDevice?.name ?? selectedDeviceId;
+    if (!confirm(`Clear all history for ${name}?`)) return;
+    try {
+      await clearDeviceHistory(selectedDeviceId);
+      setHistory([]);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }, [selectedDeviceId, selectedDevice]);
+
+  const handleClearAll = useCallback(async () => {
+    if (!confirm("Clear history for ALL devices? This cannot be undone.")) return;
+    try {
+      await clearAllDeviceHistory();
+      setHistory([]);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }, []);
+
   return (
     <div className="flex flex-col h-full gap-3">
       {/* Controls bar */}
@@ -132,6 +154,29 @@ export function StateHistoryPane({ config }: Props) {
           title="Refresh"
         >
           <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
+        </button>
+
+        {/* Clear device history */}
+        {selectedDeviceId && history.length > 0 && (
+          <button
+            onClick={handleClearDevice}
+            className="p-1.5 rounded-lg border border-[#2A3441] text-[#9AA6B2] hover:text-[#EF4444] hover:border-[#EF4444] transition-all duration-200"
+            title={`Clear history for ${selectedDevice?.name ?? selectedDeviceId}`}
+          >
+            <Trash2 size={14} />
+          </button>
+        )}
+
+        {/* Spacer pushes clear-all to the right */}
+        <div className="flex-1" />
+
+        {/* Clear all history */}
+        <button
+          onClick={handleClearAll}
+          className="text-[10px] px-2 py-1 rounded-lg border border-[#2A3441] text-[#6B7785] hover:text-[#EF4444] hover:border-[#EF4444] transition-all duration-200"
+          style={{ fontFamily: "Inter, sans-serif" }}
+        >
+          Clear All
         </button>
 
         {/* Device type badge */}

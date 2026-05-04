@@ -145,3 +145,15 @@ export async function fetchDeviceHistory(deviceId: string, limit?: number): Prom
   const params = limit ? `?limit=${limit}` : '';
   return request<HistoryEntry[]>(`/api/devices/${deviceId}/history${params}`);
 }
+
+export async function clearDeviceHistory(deviceId: string): Promise<{ success: boolean; deleted: number }> {
+  return request<{ success: boolean; deleted: number }>(`/api/devices/${deviceId}/history`, {
+    method: "DELETE",
+  });
+}
+
+export async function clearAllDeviceHistory(): Promise<{ success: boolean; deleted: number }> {
+  return request<{ success: boolean; deleted: number }>("/api/devices/history/all", {
+    method: "DELETE",
+  });
+}

@@ -53,6 +53,34 @@ export function createDeviceRoutes(
     res.json(stateHistory.getHistory(id, limit));
   });
 
+  /** DELETE /api/devices/:id/history — clear history for a specific device */
+  router.delete("/:id/history", (req, res, next) => {
+    if (!stateHistory) {
+      return res.json({ success: true, deleted: 0 });
+    }
+
+    const id = req.params.id as string;
+    const device = registry.getById(id);
+    if (!device) {
+      return next(new NotFoundError(`Device not found: ${id}`));
+    }
+
+    const deleted = stateHistory.clearDevice(id);
+    logger.info({ deviceId: id, deleted }, "Cleared device state history");
+    res.json({ success: true, deleted });
+  });
+
+  /** DELETE /api/devices/history/all — clear all device history */
+  router.delete("/history/all", (_req, res) => {
+    if (!stateHistory) {
+      return res.json({ success: true, deleted: 0 });
+    }
+
+    const deleted = stateHistory.clearAll();
+    logger.info({ deleted }, "Cleared all device state history");
+    res.json({ success: true, deleted });
+  });
+
   /** POST /api/devices/:id/action — execute action on device */
   router.post("/:id/action", validateAction, async (req, res, next) => {
     try {

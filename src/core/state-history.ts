@@ -99,4 +99,29 @@ export class StateHistory {
       timestamp: row[timestampIdx] as number,
     }));
   }
+
+  /** Clear all history for a specific device */
+  clearDevice(deviceId: string): number {
+    const countResult = this.db.exec(
+      "SELECT COUNT(*) as cnt FROM device_history WHERE device_id = ?",
+      [deviceId],
+    );
+    const deleted = countResult.length > 0 ? (countResult[0].values[0][0] as number) : 0;
+
+    this.db.run("DELETE FROM device_history WHERE device_id = ?", [deviceId]);
+    this.lastRecordTime.delete(deviceId);
+    persistDatabase();
+    return deleted;
+  }
+
+  /** Clear all history for all devices */
+  clearAll(): number {
+    const countResult = this.db.exec("SELECT COUNT(*) as cnt FROM device_history");
+    const deleted = countResult.length > 0 ? (countResult[0].values[0][0] as number) : 0;
+
+    this.db.run("DELETE FROM device_history");
+    this.lastRecordTime.clear();
+    persistDatabase();
+    return deleted;
+  }
 }

@@ -176,4 +176,52 @@ describe("StateHistory", () => {
       expect(entries[0].timestamp).toBeGreaterThanOrEqual(entries[entries.length - 1].timestamp);
     });
   });
+
+  describe("clearDevice()", () => {
+    it("clears all history for a specific device", () => {
+      const history = new StateHistory(db, 100, 0);
+      history.record("sensor-1", { v: 1 }, 1000);
+      history.record("sensor-1", { v: 2 }, 2000);
+      history.record("sensor-2", { v: 10 }, 1000);
+
+      const deleted = history.clearDevice("sensor-1");
+      expect(deleted).toBe(2);
+      expect(history.getHistory("sensor-1")).toEqual([]);
+      expect(history.getHistory("sensor-2")).toHaveLength(1);
+    });
+
+    it("returns 0 for a device with no history", () => {
+      const history = new StateHistory(db, 100, 0);
+      expect(history.clearDevice("nonexistent")).toBe(0);
+    });
+
+    it("resets throttle so new records are accepted immediately", () => {
+      const history = new StateHistory(db, 100, 5000);
+      history.record("sensor-1", { v: 1 }, 1000);
+      history.clearDevice("sensor-1");
+      // Should record immediately since throttle was reset
+      expect(history.record("sensor-1", { v: 2 }, 1500)).toBe(true);
+    });
+  });
+
+  describe("clearAll()", () => {
+    it("clears history for all devices", () => {
+      const history = new StateHistory(db, 100, 0);
+      history.record("sensor-1", { v: 1 }, 1000);
+      history.record("sensor-1", { v: 2 }, 2000);
+      history.record("sensor-2", { v: 10 }, 1000);
+      history.record("sensor-3", { v: 20 }, 1000);
+
+      const deleted = history.clearAll();
+      expect(deleted).toBe(4);
+      expect(history.getHistory("sensor-1")).toEqual([]);
+      expect(history.getHistory("sensor-2")).toEqual([]);
+      expect(history.getHistory("sensor-3")).toEqual([]);
+    });
+
+    it("returns 0 when no history exists", () => {
+      const history = new StateHistory(db, 100, 0);
+      expect(history.clearAll()).toBe(0);
+    });
+  });
 });
