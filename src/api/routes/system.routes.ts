@@ -33,23 +33,82 @@ function getDiskUsage(): { total: number; used: number; free: number } | null {
 
 function getDockerDiskUsage(): { images: number; buildCache: number; containers: number; volumes: number; total: number; reclaimable: number } | null {
   try {
-    const output = execSync("docker system df --format '{{.Type}}|{{.Size}}|{{.Reclaimable}}'", { encoding: "utf-8", timeout: 15000 });
-    const result = { images: 0, buildCache: 0, containers: 0, volumes: 0, total: 0, reclaimable: 0 };
+    // Get Aeolus-specific image sizes (aeolus-backend, aeolus-frontend, eclipse-mosquitto)
+    let images = 0;
+    let reclaimableImages = 0;
+    try {
+      // Size of currently used Aeolus images
+      const imgOutput = execSync(
+        "docker images --format '{{.Repository}}|{{.Size}}' | grep -E '^(aeolus|eclipse-mosquitto)'",
+        { encoding: "utf-8", timeout: 10000 },
+      );
+      for (const line of imgOutput.trim().split("\n")) {
+        if (!line) continue;
+        const [, sizeStr] = line.split("|");
+        images += parseDockerSize(sizeStr?.trim() ?? "0B");
+      }
+      // Dangling images from old Aeolus builds
+      const danglingOutput = execSync(
+        "docker images -f 'dangling=true' --format '{{.Size}}'",
+        { encoding: "utf-8", timeout: 10000 },
+      );
+      for (const line of danglingOutput.trim().split("\n")) {
+        if (!line) continue;
+        reclaimableImages += parseDockerSize(line.trim());
+      }
+    } catch { /* no matching images */ }
 
-    for (const line of output.trim().split("\n")) {
-      const [type, sizeStr, reclaimStr] = line.split("|");
-      const size = parseDockerSize(sizeStr?.trim() ?? "0B");
-      const reclaimable = parseDockerSize((reclaimStr?.trim() ?? "0B").replace(/\s*\(.*\)/, ""));
+    // Build cache (shared across all projects but mostly Aeolus on a dedicated Pi)
+    let buildCache = 0;
+    let reclaimableBuildCache = 0;
+    try {
+      const dfOutput = execSync(
+        "docker system df --format '{{.Type}}|{{.Size}}|{{.Reclaimable}}'",
+        { encoding: "utf-8", timeout: 15000 },
+      );
+      for (const line of dfOutput.trim().split("\n")) {
+        const [type, sizeStr, reclaimStr] = line.split("|");
+        if (type === "Build Cache") {
+          buildCache = parseDockerSize(sizeStr?.trim() ?? "0B");
+          reclaimableBuildCache = parseDockerSize((reclaimStr?.trim() ?? "0B").replace(/\s*\(.*\)/, ""));
+        }
+      }
+    } catch { /* docker df failed */ }
 
-      if (type === "Images") result.images = size;
-      else if (type === "Build Cache") result.buildCache = size;
-      else if (type === "Containers") result.containers = size;
-      else if (type === "Local Volumes") result.volumes = size;
+    // Aeolus container sizes
+    let containers = 0;
+    try {
+      const ctrOutput = execSync(
+        "docker ps -s --format '{{.Names}}|{{.Size}}' | grep -E '^aeolus-'",
+        { encoding: "utf-8", timeout: 10000 },
+      );
+      for (const line of ctrOutput.trim().split("\n")) {
+        if (!line) continue;
+        const [, sizeStr] = line.split("|");
+        // Container size format: "0B (virtual 1.23GB)" — we want the first part
+        const actualSize = sizeStr?.trim().split(" ")[0] ?? "0B";
+        containers += parseDockerSize(actualSize);
+      }
+    } catch { /* no matching containers */ }
 
-      result.total += size;
-      result.reclaimable += reclaimable;
-    }
-    return result;
+    // Aeolus volumes
+    let volumes = 0;
+    try {
+      const volOutput = execSync(
+        "docker system df -v --format '{{.Name}}|{{.Size}}' 2>/dev/null | grep -E 'aeolus' || true",
+        { encoding: "utf-8", timeout: 10000 },
+      );
+      for (const line of volOutput.trim().split("\n")) {
+        if (!line) continue;
+        const [, sizeStr] = line.split("|");
+        volumes += parseDockerSize(sizeStr?.trim() ?? "0B");
+      }
+    } catch { /* volume query failed */ }
+
+    const total = images + buildCache + containers + volumes;
+    const reclaimable = reclaimableImages + reclaimableBuildCache;
+
+    return { images, buildCache, containers, volumes, total, reclaimable };
   } catch {
     return null;
   }
@@ -155,21 +214,31 @@ export function createSystemRoutes(): Router {
     // This is fire-and-forget — the container will be replaced during rebuild
     // Uses --build (with cache) instead of --no-cache for speed on Pi (~2-3 min vs ~15 min)
     // Docker prune runs after rebuild to prevent build cache from filling the SD card
-    const child = spawn("sh", ["-c", `cd ${projectDir} && git pull && docker compose up -d --build && docker system prune -f --filter "until=24h" > /dev/null 2>&1`], {
+    const child = spawn("sh", ["-c", `cd ${projectDir} && git pull && docker compose up -d --build && docker image prune -f > /dev/null 2>&1 && docker builder prune -f > /dev/null 2>&1`], {
       detached: true,
       stdio: "ignore",
     });
     child.unref();
   });
 
-  /** POST /api/system/docker-prune — remove unused Docker images and build cache */
+  /** POST /api/system/docker-prune — remove unused Aeolus Docker images and build cache */
   router.post("/docker-prune", async (_req, res) => {
     try {
-      logger.info("Docker prune triggered from dashboard");
-      const output = execSync("docker system prune -af --filter 'until=1h'", { encoding: "utf-8", timeout: 60000 });
+      logger.info("Docker prune (Aeolus-scoped) triggered from dashboard");
+      // Remove dangling images (old build layers)
+      execSync("docker image prune -f", { encoding: "utf-8", timeout: 30000 });
+      // Remove old Aeolus images that aren't currently running
+      try {
+        execSync(
+          "docker images --format '{{.ID}} {{.Repository}}' | grep -E 'aeolus' | grep '<none>' | awk '{print $1}' | xargs -r docker rmi -f",
+          { encoding: "utf-8", timeout: 30000 },
+        );
+      } catch { /* no dangling aeolus images */ }
+      // Prune build cache (shared, but on a dedicated Pi this is mostly Aeolus)
+      execSync("docker builder prune -f", { encoding: "utf-8", timeout: 60000 });
       // Re-fetch docker disk usage after prune
       const docker = getDockerDiskUsage();
-      res.json({ success: true, output: output.trim(), docker });
+      res.json({ success: true, docker });
     } catch (err) {
       logger.error({ error: (err as Error).message }, "Docker prune failed");
       res.status(500).json({ error: "Docker prune failed", message: (err as Error).message });
