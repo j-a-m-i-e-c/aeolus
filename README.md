@@ -81,6 +81,7 @@ Installs Docker, clones Aeolus, builds containers, and starts everything. Auto-s
 | ⏱️ | **Services framework** | Cron schedules, API triggers, and system events as automation triggers |
 | 🍓 | **Raspberry Pi ready** | One-line install, auto-start on boot, runs on a Pi 4/5 |
 | 🧪 | **Built-in simulator** | Demo the full platform without any hardware |
+| 📊 | **State history & charts** | Per-device state history with SVG trend charts, time range filtering, and data cleanup |
 | 🔒 | **100% local** | Everything stays on your network — no cloud dependency |
 
 ---
@@ -100,7 +101,7 @@ Custom tabs are where the real work happens. Each tab has two buttons in the hea
 |----------|-------|
 | Controls | Device Grid · Hue Lights · Kasa Devices · Trigger Button |
 | Automations | Automation (one-pane-one-rule) · Automation List |
-| Monitoring | Sensor Panel · MQTT Inspector · Topic Tree · Event Log |
+| Monitoring | Sensor Panel · MQTT Inspector · Topic Tree · Event Log · State History |
 | System | System Stats · Connectors |
 
 Every pane is draggable and resizable. Layout persists to SQLite automatically.
@@ -351,6 +352,9 @@ Three event source layers feed the same internal bus: MQTT devices (bidirectiona
 | GET | `/api/devices` | List all devices |
 | GET | `/api/devices/:id` | Get single device |
 | POST | `/api/devices/:id/action` | Execute action on device |
+| GET | `/api/devices/:id/history` | Device state history (limit, from, to) |
+| DELETE | `/api/devices/:id/history` | Clear history for a device |
+| DELETE | `/api/devices/history/all` | Clear all device history |
 | GET | `/api/state` | All devices keyed by ID |
 | GET | `/api/health` | System health status |
 
@@ -414,6 +418,9 @@ Three event source layers feed the same internal bus: MQTT devices (bidirectiona
 | GET | `/api/system` | Host system diagnostics |
 | GET | `/api/system/logs` | Application log entries |
 | POST | `/api/system/update` | Trigger self-update + restart |
+| POST | `/api/system/shutdown` | Gracefully shut down the host Pi |
+| POST | `/api/system/reboot` | Gracefully reboot the host Pi |
+| POST | `/api/system/docker-prune` | Clean up unused Aeolus Docker resources |
 | WS | `/ws` | Real-time state updates |
 
 </details>

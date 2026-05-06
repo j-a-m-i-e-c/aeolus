@@ -115,6 +115,7 @@ aeolus/
 │   ├── core/
 │   │   ├── device-registry.ts        # In-memory cache + SQLite persistence
 │   │   ├── event-bus.ts              # Internal EventEmitter pub/sub
+│   │   ├── state-history.ts          # Per-device state history with throttling + pruning
 │   │   └── types.ts                  # All shared TypeScript interfaces
 │   ├── mqtt/
 │   │   ├── mqtt-service.ts           # Broker connection + message handling
@@ -204,6 +205,7 @@ aeolus/
 │       │   ├── ConnectorsPage.tsx    # Connector management (enable/disable, config, generic setup wizard)
 │       │   ├── ServicesPage.tsx     # Service management dashboard (available but not routed as a pinned tab)
 │       │   ├── SystemPage.tsx        # Host diagnostics, application log viewer, self-update
+│       │   ├── StateHistoryChart.tsx  # SVG trend chart for device state history
 │       │   ├── CommandPalette.tsx    # Ctrl+K command palette
 │       │   ├── ToastContainer.tsx    # Animated toast notifications
 │       │   └── panes/               # Pane wrapper components for modular dashboard
@@ -218,6 +220,7 @@ aeolus/
 │       │       ├── SystemStatsPane.tsx
 │       │       ├── TopicTreePane.tsx
 │       │       ├── EventLogPane.tsx
+│       │       ├── StateHistoryPane.tsx  # Per-device state history pane
 │       │       ├── ConnectorsPane.tsx
 │       │       └── custom/              # Custom automation UI components
 │       │           └── types.ts         # CustomComponentProps interface
@@ -1218,6 +1221,8 @@ CREATE TABLE automation_state (
 | NODE_ENV | development | Environment |
 | SIMULATOR | false | Enable device simulator (generates fake data without MQTT) |
 | AEOLUS_PROJECT_DIR | /aeolus-host | Host project directory mounted into the backend container (used by self-update) |
+| STATE_HISTORY_MAX | 100 | Maximum history entries stored per device |
+| HISTORY_RECORD_INTERVAL | 5000 | Minimum ms between history records per device |
 
 **Note:** MQTT_TOPICS must be quoted in `.env` files because `#` is treated as a comment character by dotenv. The default is `#` (all topics) — this subscribes to every MQTT topic on the broker.
 
@@ -1347,7 +1352,7 @@ The React dashboard provides a comprehensive developer-focused interface with a 
 
 ### Modular Pane System
 - **Pane Registry** — Maps pane type identifiers to React components with metadata (display name, icon, default size, category)
-- **Available Pane Types:** device-grid, sensor-panel, mqtt-inspector, hue-control, kasa-control, trigger-button, automation, automation-rules, system-stats, topic-tree, event-log, connectors-page
+- **Available Pane Types:** device-grid, sensor-panel, mqtt-inspector, hue-control, kasa-control, trigger-button, automation, automation-rules, system-stats, topic-tree, event-log, state-history, connectors-page
 - **New Automation Button** — Dedicated gradient-styled button in the tab header that directly creates an automation pane in setup mode, bypassing the pane picker. Automations are the core creative act in Aeolus and get first-class entry point treatment
 - **PanePicker** — Grouped pane type selector organized into categories: Controls, Automations, Monitoring, System. Each category is a collapsible section with pane type cards. The `automation` pane type is excluded from the picker since it has its own dedicated button
 - **PaneConfigPanel** — Per-pane configuration editor for type-specific settings
@@ -1558,6 +1563,23 @@ Custom tabs use the modular pane grid powered by `react-grid-layout`. Users crea
 | GET | `/api/system` | Host system diagnostics (CPU, memory, disk, temp) |
 | GET | `/api/system/logs` | Recent application log entries (count, level filter) |
 | POST | `/api/system/update` | Trigger self-update (git pull + docker compose rebuild) |
+| GET | `/api/devices/:id/history` | Device state history (limit, from, to params) |
+| DELETE | `/api/devices/:id/history` | Clear history for a specific device |
+| DELETE | `/api/devices/history/all` | Clear all device history |
+| POST | `/api/system/shutdown` | Gracefully shut down the host Pi |
+| POST | `/api/system/reboot` | Gracefully reboot the host Pi |
+| POST | `/api/system/docker-prune` | Remove unused Aeolus Docker images and build cache |
+
+### State History (`src/core/state-history.ts`)
+
+Records device state snapshots to SQLite for historical trend analysis. Each state change is throttled per-device (configurable interval, default 5 seconds) to prevent flooding from fast sensors. Oldest entries are automatically pruned when the per-device cap is exceeded (configurable, default 100 entries).
+
+- `record(deviceId, state, timestamp)` — store a snapshot (returns false if throttled)
+- `getHistory(deviceId, limit?)` — retrieve entries newest-first (default 50, max 500)
+- `getHistoryRange(deviceId, from, to)` — retrieve entries within a time range
+- `clearDevice(deviceId)` — delete all history for one device
+- `clearAll()` — delete all history for all devices
+- Served via `GET /api/devices/:id/history`, `DELETE /api/devices/:id/history`, `DELETE /api/devices/history/all`
 
 ## Device Simulator
 
@@ -1591,7 +1613,7 @@ Enable via `SIMULATOR=true` env var (auto-starts on boot) or toggle from the sid
 
 ---
 
-**Last Updated:** May 3, 2026
+**Last Updated:** May 6, 2026
 **Version:** 0.12.0
 **Status:** MVP Development
 
