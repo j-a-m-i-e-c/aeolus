@@ -78,6 +78,7 @@ Installs Docker, clones Aeolus, builds containers, and starts everything. Auto-s
 | 💡 | **Philips Hue (Connector)** | Toggle, brightness, colour picker with guided bridge pairing wizard |
 | 🔌 | **TP-Link Kasa (Connector)** | Smart plugs with auto-discovery and energy monitoring |
 | 🔗 | **Automation state store** | Per-rule key-value store for backend↔frontend communication via WebSocket |
+| 📡 | **Internal event bus** | Typed pub/sub bus decouples MQTT ingestion, device state changes, automation triggers, and WebSocket pushes |
 | ⏱️ | **Services framework** | Cron schedules, API triggers, and system events as automation triggers |
 | 🍓 | **Raspberry Pi ready** | One-line install, auto-start on boot, runs on a Pi 4/5 |
 | 🧪 | **Built-in simulator** | Demo the full platform without any hardware |
