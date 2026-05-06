@@ -650,19 +650,24 @@ export function AutomationPane({ config, paneId }: Props) {
 
         {/* Docs panel — context-aware: Logic globals vs UI props */}
         {showDocs && (
-          <div className="w-72 shrink-0 rounded-xl border border-[#2A3441] bg-[#121821] overflow-auto p-3">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-semibold text-[#9AA6B2]">
+          <div className="w-72 shrink-0 rounded-xl border border-[#2A3441] bg-[#121821] overflow-hidden flex flex-col">
+            {/* Header — matches SnippetPicker style */}
+            <div className="flex items-center gap-2 px-3 py-2 border-b border-[#2A3441]">
+              <BookOpen size={14} className="text-primary shrink-0" />
+              <span className="text-xs font-semibold text-[#E6EDF3] flex-1">
                 {editingTab === "logic" ? "Logic API" : "Component Props"}
               </span>
               <button
                 onClick={() => setShowDocs(false)}
-                className="p-0.5 rounded text-[#6B7785] hover:text-[#9AA6B2] transition-colors"
+                className="p-0.5 rounded text-[#6B7785] hover:text-[#9AA6B2] hover:bg-[#1A2330] transition-colors"
+                title="Close docs"
               >
-                <X size={12} />
+                <X size={14} />
               </button>
             </div>
 
+            {/* Content */}
+            <div className="flex-1 overflow-auto px-3 py-2">
             {editingTab === "logic" ? (
               <div className="space-y-3 text-[11px] font-mono">
                 {/* automation() helper */}
@@ -807,6 +812,7 @@ export function AutomationPane({ config, paneId }: Props) {
                 </div>
               </div>
             )}
+            </div>
           </div>
         )}
       </div>
