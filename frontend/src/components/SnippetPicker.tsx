@@ -91,8 +91,16 @@ const UI_SNIPPETS: SnippetGroup[] = [
       {
         id: "ui-state-value",
         name: "Read State Value",
-        description: "Display a value from the automation state store",
-        code: `const myValue = props.state.get("myKey") as number || 0;`,
+        description: "Display a value pushed from the logic tab via state.set()",
+        code: `const lastEvent = props.state.get("lastEvent") as { topic: string; value: number; time: number } | undefined;
+// In JSX:
+// {lastEvent && (
+//   <div className="bg-[#0B0F14] rounded-lg p-3 border border-[#2A3441]">
+//     <div className="text-[10px] text-[#6B7785] uppercase mb-1">Last Event</div>
+//     <div className="text-sm text-[#E6EDF3]">{lastEvent.topic}</div>
+//     <div className="text-xs text-[#9AA6B2]">Value: {lastEvent.value}</div>
+//   </div>
+// )}`,
       },
       {
         id: "ui-state-write",

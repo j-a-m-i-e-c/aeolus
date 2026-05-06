@@ -47,34 +47,37 @@ export const snippets: SnippetDescriptor[] = [
     id: "toggle-plug",
     name: "Toggle Kasa Plug",
     description: "Toggle a specific Kasa smart plug on or off",
-    code: `function toggleKasaPlug(ctx) {
+    code: `function toggleKasaPlug(context) {
   devices.action("kasa-my-plug", "toggle");
   log.info("Toggled Kasa plug");
+  state.set("lastToggled", "kasa-my-plug");
 }`,
   },
   {
     id: "turn-on-plug",
     name: "Turn On Kasa Plug",
     description: "Turn on a specific Kasa smart plug",
-    code: `function turnOnKasaPlug(ctx) {
+    code: `function turnOnKasaPlug(context) {
   devices.action("kasa-my-plug", "on");
   log.info("Turned on Kasa plug");
+  state.set("plugState", "on");
 }`,
   },
   {
     id: "turn-off-plug",
     name: "Turn Off Kasa Plug",
     description: "Turn off a specific Kasa smart plug",
-    code: `function turnOffKasaPlug(ctx) {
+    code: `function turnOffKasaPlug(context) {
   devices.action("kasa-my-plug", "off");
   log.info("Turned off Kasa plug");
+  state.set("plugState", "off");
 }`,
   },
   {
     id: "check-energy",
     name: "Condition: High Power Draw",
     description: "Check if a Kasa plug is drawing more than a threshold wattage",
-    code: `function isHighPowerDraw(ctx) {
+    code: `function isHighPowerDraw(context) {
   const plug = devices.get("kasa-my-plug");
   const power = (plug?.state?.power as number) ?? 0;
   return power > 100; // watts
@@ -84,7 +87,7 @@ export const snippets: SnippetDescriptor[] = [
     id: "all-plugs-off",
     name: "All Kasa Plugs Off",
     description: "Turn off every Kasa plug in the system",
-    code: `function allKasaPlugsOff(ctx) {
+    code: `function allKasaPlugsOff(context) {
   const plugs = devices.filter(d => d.integration === "kasa" && d.type === "plug");
   for (const plug of plugs) {
     if (plug.state.on) {
@@ -92,6 +95,8 @@ export const snippets: SnippetDescriptor[] = [
     }
   }
   log.info(\`Turned off \${plugs.length} Kasa plugs\`);
+  state.set("allPlugsOff", true);
+  state.set("plugsControlled", plugs.length);
 }`,
   },
   // ── UI snippets ──

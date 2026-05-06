@@ -27,7 +27,7 @@ const PLATFORM_SNIPPETS: SnippetGroup[] = [
         id: "mqtt-publish",
         name: "Publish MQTT Message",
         description: "Publish a message to an MQTT topic",
-        code: `function publishMessage(ctx) {
+        code: `function publishMessage(context) {
   mqtt.publish("home/living-room/command", JSON.stringify({ action: "notify" }));
   log.info("Published MQTT message");
 }`,
@@ -36,9 +36,9 @@ const PLATFORM_SNIPPETS: SnippetGroup[] = [
         id: "mqtt-forward",
         name: "Forward Event to Topic",
         description: "Re-publish the triggering event to another topic",
-        code: `function forwardEvent(ctx) {
-  mqtt.publish("alerts/" + ctx.deviceId, JSON.stringify(ctx.state));
-  log.info(\`Forwarded \${ctx.topic} to alerts/\${ctx.deviceId}\`);
+        code: `function forwardEvent(context) {
+  mqtt.publish("alerts/" + context.deviceId, JSON.stringify(context.state));
+  log.info(\`Forwarded \${context.topic} to alerts/\${context.deviceId}\`);
 }`,
       },
     ],
@@ -51,37 +51,39 @@ const PLATFORM_SNIPPETS: SnippetGroup[] = [
         id: "http-get",
         name: "HTTP GET Request",
         description: "Fetch data from an external API",
-        code: `async function fetchData(ctx) {
+        code: `async function fetchData(context) {
   const res = await http.get("https://api.example.com/data");
-  log.info(\`API responded: \${res.status} — \${res.body.slice(0, 100)}\`);
+  log.info(\`API responded: \${res.status}\`);
+  state.set("lastApiResponse", res.body.slice(0, 200));
 }`,
       },
       {
         id: "http-post-webhook",
         name: "POST Webhook",
         description: "Send a POST request to a webhook URL",
-        code: `async function postWebhook(ctx) {
+        code: `async function postWebhook(context) {
   const res = await http.post("https://hooks.example.com/webhook", {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      event: ctx.topic,
-      device: ctx.deviceId,
-      state: ctx.state,
-      timestamp: new Date(ctx.timestamp).toISOString(),
+      event: context.topic,
+      device: context.deviceId,
+      state: context.state,
+      timestamp: new Date(context.timestamp).toISOString(),
     }),
   });
   log.info(\`Webhook responded: \${res.status}\`);
+  state.set("lastWebhookStatus", res.status);
 }`,
       },
       {
         id: "http-slack-notify",
         name: "Slack Notification",
         description: "Send a notification to a Slack channel via webhook",
-        code: `async function notifySlack(ctx) {
+        code: `async function notifySlack(context) {
   await http.post("https://hooks.slack.com/services/YOUR/WEBHOOK/URL", {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      text: \`🏠 Aeolus: \${ctx.deviceId} triggered on \${ctx.topic}\`,
+      text: \`🏠 Aeolus: \${context.deviceId} triggered on \${context.topic}\`,
     }),
   });
   log.info("Sent Slack notification");
@@ -91,11 +93,11 @@ const PLATFORM_SNIPPETS: SnippetGroup[] = [
         id: "http-discord-notify",
         name: "Discord Notification",
         description: "Send a notification to a Discord channel via webhook",
-        code: `async function notifyDiscord(ctx) {
+        code: `async function notifyDiscord(context) {
   await http.post("https://discord.com/api/webhooks/YOUR/WEBHOOK", {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      content: \`🏠 **Aeolus**: \\\`\${ctx.deviceId}\\\` triggered on \\\`\${ctx.topic}\\\`\`,
+      content: \`🏠 **Aeolus**: \\\`\${context.deviceId}\\\` triggered on \\\`\${context.topic}\\\`\`,
     }),
   });
   log.info("Sent Discord notification");
@@ -111,8 +113,8 @@ const PLATFORM_SNIPPETS: SnippetGroup[] = [
         id: "cond-threshold",
         name: "Value Threshold",
         description: "Check if a state value exceeds a threshold",
-        code: `function aboveThreshold(ctx) {
-  const value = ctx.state.value as number;
+        code: `function aboveThreshold(context) {
+  const value = context.state.value as number;
   return typeof value === "number" && value > 25;
 }`,
       },
@@ -120,8 +122,8 @@ const PLATFORM_SNIPPETS: SnippetGroup[] = [
         id: "cond-time-window",
         name: "Time Window",
         description: "Only allow execution during specific hours",
-        code: `function isDuringHours(ctx) {
-  const hour = new Date(ctx.timestamp).getHours();
+        code: `function isDuringHours(context) {
+  const hour = new Date(context.timestamp).getHours();
   return hour >= 8 && hour < 22; // 8am to 10pm
 }`,
       },
@@ -129,7 +131,7 @@ const PLATFORM_SNIPPETS: SnippetGroup[] = [
         id: "cond-device-online",
         name: "Device Is Online",
         description: "Check if a specific device is currently online",
-        code: `function isDeviceOnline(ctx) {
+        code: `function isDeviceOnline(context) {
   const device = devices.get("my-device-id");
   return device !== undefined && device.state.online === true;
 }`,
@@ -138,8 +140,8 @@ const PLATFORM_SNIPPETS: SnippetGroup[] = [
         id: "cond-state-changed",
         name: "State Value Changed",
         description: "Check that the triggering event has a specific state key",
-        code: `function hasStateKey(ctx) {
-  return ctx.state.value !== undefined;
+        code: `function hasStateKey(context) {
+  return context.state.value !== undefined;
 }`,
       },
     ],
@@ -152,32 +154,36 @@ const PLATFORM_SNIPPETS: SnippetGroup[] = [
         id: "device-toggle",
         name: "Toggle Device",
         description: "Toggle any device on or off by ID",
-        code: `function toggleDevice(ctx) {
+        code: `function toggleDevice(context) {
   devices.action("my-device-id", "toggle");
   log.info("Toggled device");
+  state.set("lastToggled", context.deviceId);
+  state.set("lastToggleTime", Date.now());
 }`,
       },
       {
         id: "device-filter-type",
         name: "Filter Devices by Type",
         description: "Get all devices of a specific type",
-        code: `function controlByType(ctx) {
+        code: `function controlByType(context) {
   const lights = devices.filter(d => d.type === "light");
   for (const light of lights) {
     devices.action(light.id, "toggle");
   }
   log.info(\`Toggled \${lights.length} lights\`);
+  state.set("lightsControlled", lights.length);
 }`,
       },
       {
         id: "device-log-all",
         name: "Log All Devices",
         description: "Log the current state of all registered devices",
-        code: `function logAllDevices(ctx) {
+        code: `function logAllDevices(context) {
   const all = devices.list();
   for (const d of all) {
     log.info(\`\${d.name} (\${d.id}): \${JSON.stringify(d.state)}\`);
   }
+  state.set("deviceCount", all.length);
 }`,
       },
     ],
@@ -193,8 +199,9 @@ const PLATFORM_SNIPPETS: SnippetGroup[] = [
         code: `// Trigger topic: service/cron/every-5m
 automation({
   actions: [
-    function onSchedule(ctx) {
-      log.info(\`Cron fired: \${ctx.state.scheduleName} at \${new Date(ctx.timestamp).toISOString()}\`);
+    function onSchedule(context) {
+      log.info(\`Cron fired: \${context.state.scheduleName} at \${new Date(context.timestamp).toISOString()}\`);
+      state.set("lastRun", Date.now());
     },
   ],
 });`,
@@ -206,9 +213,11 @@ automation({
         code: `// Trigger topic: service/trigger/my-trigger
 automation({
   actions: [
-    function onTrigger(ctx) {
-      const payload = ctx.state.payload;
+    function onTrigger(context) {
+      const payload = context.state.payload;
       log.info(\`API trigger fired with payload: \${JSON.stringify(payload)}\`);
+      state.set("lastTriggerPayload", payload);
+      state.set("lastTriggerTime", Date.now());
     },
   ],
 });`,
@@ -217,7 +226,7 @@ automation({
         id: "svc-check-service",
         name: "Check Service State",
         description: "Read the current state of a running service",
-        code: `function checkServiceState(ctx) {
+        code: `function checkServiceState(context) {
   const cronState = services.get("cron");
   if (cronState) {
     log.info(\`Cron service state: \${JSON.stringify(cronState)}\`);
@@ -238,13 +247,14 @@ automation({
         description: "Complete automation with conditions and actions",
         code: `automation({
   conditions: [
-    function checkCondition(ctx) {
-      return ctx.state.value !== undefined;
+    function checkCondition(context) {
+      return context.state.value !== undefined;
     },
   ],
   actions: [
-    function executeAction(ctx) {
-      log.info(\`Event on \${ctx.topic}: \${JSON.stringify(ctx.state)}\`);
+    function executeAction(context) {
+      log.info(\`Event on \${context.topic}: \${JSON.stringify(context.state)}\`);
+      state.set("lastEvent", { topic: context.topic, value: context.state.value, time: Date.now() });
     },
   ],
 });`,
@@ -255,23 +265,25 @@ automation({
         description: "Control multiple devices based on a sensor reading",
         code: `automation({
   conditions: [
-    function isAboveThreshold(ctx) {
-      return (ctx.state.value as number) > 30;
+    function isAboveThreshold(context) {
+      return (context.state.value as number) > 30;
     },
   ],
   actions: [
-    function controlDevices(ctx) {
+    function controlDevices(context) {
       const plugs = devices.filter(d => d.type === "plug");
       for (const plug of plugs) {
         devices.action(plug.id, "off");
       }
       log.info(\`Turned off \${plugs.length} plugs — threshold exceeded\`);
+      state.set("lastAction", "plugs_off");
+      state.set("triggerValue", context.state.value);
     },
-    function notifyMqtt(ctx) {
+    function notifyMqtt(context) {
       mqtt.publish("alerts/threshold", JSON.stringify({
-        value: ctx.state.value,
+        value: context.state.value,
         action: "plugs_off",
-        timestamp: new Date(ctx.timestamp).toISOString(),
+        timestamp: new Date(context.timestamp).toISOString(),
       }));
     },
   ],
