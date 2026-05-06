@@ -53,9 +53,10 @@ export function createAutomationRoutes(
   const router = Router();
 
   /** GET /api/automations/snippets — return the snippet catalog */
-  router.get("/snippets", (_req, res) => {
+  router.get("/snippets", (req, res) => {
+    const mode = req.query.mode === "ui" ? "ui" : "logic";
     const catalog = connectorRegistry
-      ? buildSnippetCatalog(connectorRegistry)
+      ? buildSnippetCatalog(connectorRegistry, mode)
       : [];
     res.json(catalog);
   });

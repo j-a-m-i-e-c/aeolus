@@ -63,7 +63,7 @@ function CategoryIcon({ name }: { name: string }) {
 /** UI component snippets — shown when the UI tab is active */
 const UI_SNIPPETS: SnippetGroup[] = [
   {
-    category: "UI Components",
+    category: "General",
     icon: "layout",
     snippets: [
       {
@@ -124,6 +124,50 @@ const UI_SNIPPETS: SnippetGroup[] = [
 // In JSX:
 // {lights.map(d => <div key={d.id}>{d.name}: {d.state.on ? "On" : "Off"}</div>)}`,
       },
+      {
+        id: "ui-execution-history",
+        name: "Execution History",
+        description: "Render recent execution log entries with timestamps",
+        code: `{props.executionHistory.map((entry) => (
+  <div key={entry.id} className="flex items-center gap-2 px-2 py-1 rounded bg-[#0B0F14] border border-[#2A3441]">
+    <span className="text-[10px] text-[#6B7785]">
+      {new Date(entry.timestamp).toLocaleTimeString()}
+    </span>
+    <span className="text-[10px] text-[#9AA6B2]">
+      {entry.actions.map((a) => a.type).join(", ")}
+    </span>
+  </div>
+))}`,
+      },
+    ],
+  },
+  {
+    category: "Services",
+    icon: "clock",
+    snippets: [
+      {
+        id: "ui-cron-status",
+        name: "Cron Schedule Display",
+        description: "Show the last fired time and schedule name",
+        code: `<div className="bg-[#0B0F14] rounded-lg p-3 border border-[#2A3441]">
+  <div className="text-[10px] text-[#6B7785] uppercase mb-1">Schedule</div>
+  <div className="text-sm text-[#E6EDF3]">{props.ruleName}</div>
+  <div className="text-[10px] text-[#9AA6B2] mt-1">
+    Last fired: {props.lastFired ? new Date(props.lastFired).toLocaleString() : "Never"}
+  </div>
+</div>`,
+      },
+      {
+        id: "ui-trigger-button",
+        name: "Manual Trigger Button",
+        description: "Button that publishes to a service trigger topic",
+        code: `<button
+  onClick={() => props.mqttPublish("service/trigger/my-trigger", JSON.stringify({ payload: {} }))}
+  className="px-4 py-2 rounded-lg text-sm font-medium bg-primary/20 text-primary border border-primary/30 hover:bg-primary/30 transition-colors"
+>
+  Run Now
+</button>`,
+      },
     ],
   },
 ];
@@ -136,26 +180,35 @@ export function SnippetPicker({ onInsert, onClose, mode }: SnippetPickerProps) {
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   useEffect(() => {
-    // In UI mode, show UI-specific snippets instead of logic snippets
-    if (mode === "ui") {
-      setGroups(UI_SNIPPETS);
-      setExpanded(new Set([UI_SNIPPETS[0].category]));
-      setLoading(false);
-      return;
-    }
-
     let cancelled = false;
+    setLoading(true);
     (async () => {
       try {
-        const res = await fetch(`${API_URL}/api/automations/snippets`);
-        if (!res.ok) return;
+        const url = mode === "ui"
+          ? `${API_URL}/api/automations/snippets?mode=ui`
+          : `${API_URL}/api/automations/snippets`;
+        const res = await fetch(url);
+        if (!res.ok) {
+          // Fallback to hardcoded UI snippets if API fails
+          if (mode === "ui" && !cancelled) {
+            setGroups(UI_SNIPPETS);
+            setExpanded(new Set([UI_SNIPPETS[0].category]));
+          }
+          return;
+        }
         const data: SnippetGroup[] = await res.json();
         if (!cancelled) {
-          setGroups(data);
-          if (data.length > 0) setExpanded(new Set([data[0].category]));
+          // For UI mode, merge API results with hardcoded UI snippets
+          const finalGroups = mode === "ui" ? [...UI_SNIPPETS, ...data] : data;
+          setGroups(finalGroups);
+          if (finalGroups.length > 0) setExpanded(new Set([finalGroups[0].category]));
         }
       } catch {
-        // Snippets unavailable — picker just shows empty
+        // Fallback to hardcoded UI snippets if API fails
+        if (mode === "ui" && !cancelled) {
+          setGroups(UI_SNIPPETS);
+          setExpanded(new Set([UI_SNIPPETS[0].category]));
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }

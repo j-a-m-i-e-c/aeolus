@@ -72,19 +72,32 @@ export function createConnector(config: Record<string, unknown>): Connector {
 }
 
 /**
- * Code snippets for the automation script editor.
+ * Code snippets for the automation editor.
  *
  * These appear grouped under your connector's display name in the snippet picker.
- * Include snippets for common actions, conditions, and patterns specific to your
- * connector's devices. Use named functions so they work as automation() blocks.
+ * Include both logic snippets (for the Logic tab) and UI snippets (for the UI tab).
+ *
+ * - Logic snippets: use sandbox globals (devices, mqtt, log, state, etc.)
+ * - UI snippets: use props.* (deviceAction, mqttPublish, devices, state, etc.)
+ *
+ * Set `mode: "ui"` for UI snippets. Logic snippets default to "logic" when omitted.
  */
 export const snippets: SnippetDescriptor[] = [
-  // ← Add snippets for your connector's devices, e.g.:
+  // ← Add logic snippets for your connector's devices, e.g.:
   // {
   //   id: "toggle-device",
   //   name: "Toggle My Device",
   //   description: "Toggle a device managed by this connector",
   //   code: `function toggleMyDevice(ctx) {\n  devices.action("my-connector-device-1", "toggle");\n  log.info("Toggled device");\n}`,
+  // },
+  //
+  // ← Add UI snippets for custom component controls, e.g.:
+  // {
+  //   id: "ui-device-card",
+  //   name: "Device Status Card",
+  //   description: "Card showing device state with toggle button",
+  //   mode: "ui",
+  //   code: `const myDevices = props.devices.filter(d => d.integration === "my-connector");\n// In JSX:\n// {myDevices.map(d => <div key={d.id}>{d.name}</div>)}`,
   // },
 ];
 

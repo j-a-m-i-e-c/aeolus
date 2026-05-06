@@ -119,10 +119,15 @@ The `config` object contains values matching your `configSchema` field ids, with
 
 ### 4. `snippets: SnippetDescriptor[]` (optional but recommended)
 
-Code snippets for the automation script editor. These appear grouped under your connector's display name in the snippet picker, helping users write automations for your devices.
+Code snippets for the automation editor. These appear grouped under your connector's display name in the snippet picker, helping users write automations for your devices.
+
+Connectors should provide **both logic and UI snippets**:
+- **Logic snippets** (`mode: "logic"` or omitted) — shown in the Logic tab. Use sandbox globals (`devices`, `mqtt`, `log`, `state`, etc.) to control devices and react to events.
+- **UI snippets** (`mode: "ui"`) — shown in the UI tab. Use `props.*` to render connector-specific controls (toggles, sliders, status displays) in the custom component.
 
 ```typescript
 export const snippets: SnippetDescriptor[] = [
+  // Logic snippet (mode defaults to "logic" when omitted)
   {
     id: "toggle-device",
     name: "Toggle Zigbee Device",
@@ -135,6 +140,14 @@ export const snippets: SnippetDescriptor[] = [
     description: "Check if a Zigbee sensor has low battery",
     code: `function isLowBattery(ctx) {\n  const sensor = devices.get("zigbee-sensor-1");\n  return (sensor?.state?.battery as number) < 20;\n}`,
   },
+  // UI snippet — shown in the UI tab
+  {
+    id: "ui-device-card",
+    name: "Device Status Card",
+    description: "Card showing Zigbee device state with toggle",
+    mode: "ui",
+    code: `const zigbeeDevices = props.devices.filter(d => d.integration === "zigbee");\n// In JSX:\n// {zigbeeDevices.map(d => (\n//   <div key={d.id}>{d.name}: {d.state.on ? "On" : "Off"}</div>\n// ))}`,
+  },
 ];
 ```
 
@@ -144,11 +157,19 @@ export const snippets: SnippetDescriptor[] = [
 | `name` | `string` | Short display name shown in the snippet picker. |
 | `description` | `string` | One-line description of what the snippet does. |
 | `code` | `string` | TypeScript code inserted at the cursor position. Use named functions so they work as `automation()` condition/action blocks. |
+| `mode` | `"logic" \| "ui"` | Which editor tab this snippet appears in. Defaults to `"logic"` if omitted. |
 
 Include snippets for:
+
+**Logic tab:**
 - Common device actions (toggle, set brightness, set temperature, etc.)
 - Useful conditions (device online, threshold checks, state comparisons)
 - Multi-device patterns (filter by integration, loop and control)
+
+**UI tab:**
+- Device status cards (show state, name, type for your connector's devices)
+- Control buttons (toggle, sliders, colour pickers using `props.deviceAction`)
+- Data displays (energy stats, sensor readings, battery levels)
 
 ### 5. `actionHandlers: Record<string, ActionHandler>` (optional)
 
@@ -422,7 +443,7 @@ Before shipping your connector:
 
 **Backend (required):**
 - [ ] `index.ts` exports `metadata`, `configSchema`, and `createConnector`
-- [ ] `index.ts` exports `snippets` array with at least 2-3 useful code templates
+- [ ] `index.ts` exports `snippets` array with logic snippets (device actions, conditions) and UI snippets (component controls, status displays)
 - [ ] `index.ts` exports `actionHandlers` with connector-specific action types (optional but recommended)
 - [ ] `index.ts` exports `conditions` with connector-specific condition factories (optional but recommended)
 - [ ] `metadata.id` is unique and URL-safe

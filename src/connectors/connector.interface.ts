@@ -368,6 +368,14 @@ export interface SnippetDescriptor {
   description: string;
   /** The TypeScript code to insert at the cursor position. */
   code: string;
+  /**
+   * Which editor tab this snippet belongs to.
+   * - `"logic"` (default) — shown in the Logic tab (automation script globals)
+   * - `"ui"` — shown in the UI tab (custom component props/JSX)
+   *
+   * If omitted, defaults to `"logic"`.
+   */
+  mode?: "logic" | "ui";
 }
 
 /**

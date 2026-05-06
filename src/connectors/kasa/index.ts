@@ -94,6 +94,67 @@ export const snippets: SnippetDescriptor[] = [
   log.info(\`Turned off \${plugs.length} Kasa plugs\`);
 }`,
   },
+  // ── UI snippets ──
+  {
+    id: "ui-plug-toggle",
+    name: "Plug Toggle Card",
+    description: "Card with on/off toggle for a Kasa plug",
+    mode: "ui",
+    code: `const kasaPlugs = props.devices.filter(d => d.integration === "kasa" && d.type === "plug");
+// In JSX:
+// {kasaPlugs.map(plug => (
+//   <div key={plug.id} className="flex items-center justify-between p-3 rounded-lg bg-[#0B0F14] border border-[#2A3441]">
+//     <span className="text-sm text-[#E6EDF3]">{plug.name}</span>
+//     <button
+//       onClick={() => props.deviceAction(plug.id, "toggle")}
+//       className={\`px-3 py-1 rounded text-xs font-medium \${plug.state.on ? "bg-[#22C55E]/20 text-[#22C55E]" : "bg-[#6B7785]/20 text-[#6B7785]"}\`}
+//     >
+//       {plug.state.on ? "On" : "Off"}
+//     </button>
+//   </div>
+// ))}`,
+  },
+  {
+    id: "ui-energy-stats",
+    name: "Energy Stats Display",
+    description: "Show power, voltage, and current for a Kasa plug",
+    mode: "ui",
+    code: `const plug = props.devices.find(d => d.id === "kasa-my-plug");
+// In JSX:
+// {plug && (
+//   <div className="grid grid-cols-3 gap-2">
+//     <div className="bg-[#0B0F14] rounded-lg p-2 border border-[#2A3441] text-center">
+//       <div className="text-[10px] text-[#6B7785]">Power</div>
+//       <div className="text-sm font-bold text-[#E6EDF3]">{plug.state.power ?? 0}W</div>
+//     </div>
+//     <div className="bg-[#0B0F14] rounded-lg p-2 border border-[#2A3441] text-center">
+//       <div className="text-[10px] text-[#6B7785]">Voltage</div>
+//       <div className="text-sm font-bold text-[#E6EDF3]">{plug.state.voltage ?? 0}V</div>
+//     </div>
+//     <div className="bg-[#0B0F14] rounded-lg p-2 border border-[#2A3441] text-center">
+//       <div className="text-[10px] text-[#6B7785]">Current</div>
+//       <div className="text-sm font-bold text-[#E6EDF3]">{plug.state.current ?? 0}A</div>
+//     </div>
+//   </div>
+// )}`,
+  },
+  {
+    id: "ui-all-plugs-off",
+    name: "All Plugs Off Button",
+    description: "Button to turn off all Kasa plugs at once",
+    mode: "ui",
+    code: `<button
+  onClick={() => {
+    const plugs = props.devices.filter(d => d.integration === "kasa" && d.type === "plug");
+    plugs.forEach(plug => {
+      if (plug.state.on) props.deviceAction(plug.id, "off");
+    });
+  }}
+  className="px-4 py-2 rounded-lg text-xs font-medium bg-[#EF4444]/20 text-[#EF4444] border border-[#EF4444]/30 hover:bg-[#EF4444]/30 transition-colors"
+>
+  All Plugs Off
+</button>`,
+  },
 ];
 
 // ── Contributed action handlers ─────────────────────────────────────────────

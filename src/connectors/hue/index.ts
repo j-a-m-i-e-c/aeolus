@@ -95,6 +95,57 @@ export const snippets: SnippetDescriptor[] = [
   return light !== undefined && light.state.on === true;
 }`,
   },
+  // ── UI snippets ──
+  {
+    id: "ui-light-toggle",
+    name: "Light Toggle Card",
+    description: "Card with on/off toggle for a Hue light",
+    mode: "ui",
+    code: `const hueLights = props.devices.filter(d => d.integration === "hue");
+// In JSX:
+// {hueLights.map(light => (
+//   <div key={light.id} className="flex items-center justify-between p-3 rounded-lg bg-[#0B0F14] border border-[#2A3441]">
+//     <span className="text-sm text-[#E6EDF3]">{light.name}</span>
+//     <button
+//       onClick={() => props.deviceAction(light.id, "toggle")}
+//       className={\`px-3 py-1 rounded text-xs font-medium \${light.state.on ? "bg-[#F59E0B]/20 text-[#F59E0B]" : "bg-[#6B7785]/20 text-[#6B7785]"}\`}
+//     >
+//       {light.state.on ? "On" : "Off"}
+//     </button>
+//   </div>
+// ))}`,
+  },
+  {
+    id: "ui-brightness-slider",
+    name: "Brightness Slider",
+    description: "Range input to control Hue light brightness",
+    mode: "ui",
+    code: `<input
+  type="range"
+  min={0}
+  max={254}
+  defaultValue={128}
+  onChange={(e) => props.deviceAction("hue-light-1", "brightness", { brightness: Number(e.target.value) })}
+  className="w-full accent-[#F59E0B]"
+/>`,
+  },
+  {
+    id: "ui-all-lights-off",
+    name: "All Lights Off Button",
+    description: "Button to turn off all Hue lights at once",
+    mode: "ui",
+    code: `<button
+  onClick={() => {
+    const hueLights = props.devices.filter(d => d.integration === "hue");
+    hueLights.forEach(light => {
+      if (light.state.on) props.deviceAction(light.id, "toggle");
+    });
+  }}
+  className="px-4 py-2 rounded-lg text-xs font-medium bg-[#EF4444]/20 text-[#EF4444] border border-[#EF4444]/30 hover:bg-[#EF4444]/30 transition-colors"
+>
+  All Lights Off
+</button>`,
+  },
 ];
 
 // ── Contributed action handlers ─────────────────────────────────────────────
