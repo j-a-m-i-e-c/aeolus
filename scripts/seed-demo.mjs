@@ -735,7 +735,8 @@ const layout = {
     // Home tab
     { id: "p-energy", tabId: homeTab, paneType: "automation", config: { ruleId: energy?.id || "" }, x: 0, y: 0, w: 6, h: 9, createdAt: now },
     { id: "p-security", tabId: homeTab, paneType: "automation", config: { ruleId: security?.id || "" }, x: 6, y: 0, w: 6, h: 9, createdAt: now },
-    { id: "p-devices", tabId: homeTab, paneType: "device-grid", config: {}, x: 0, y: 9, w: 12, h: 5, createdAt: now },
+    { id: "p-hue", tabId: homeTab, paneType: "hue-control", config: {}, x: 0, y: 9, w: 6, h: 6, createdAt: now },
+    { id: "p-kasa", tabId: homeTab, paneType: "kasa-control", config: {}, x: 6, y: 9, w: 6, h: 6, createdAt: now },
 
     // Monitoring tab
     { id: "p-climate", tabId: monitorTab, paneType: "automation", config: { ruleId: climate?.id || "" }, x: 0, y: 0, w: 6, h: 9, createdAt: now },
