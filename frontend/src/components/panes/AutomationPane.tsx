@@ -89,18 +89,7 @@ const DEFAULT_UI_TEMPLATE = `// Custom Automation UI Component
 // ─────────────────────────────────────────────────────
 // This component renders in the automation pane's status mode.
 // It receives live data from the Aeolus runtime as props.
-//
-// Available props:
-//   props.devices        — All devices from the registry (live via WebSocket)
-//   props.ruleId         — This automation's unique ID
-//   props.ruleName       — This automation's display name
-//   props.lastFired      — Unix timestamp of last execution (or null)
-//   props.enabled        — Whether this automation is enabled
-//   props.deviceAction   — Trigger a device action: (deviceId, actionType, params?) => Promise
-//   props.mqttPublish    — Publish MQTT message: (topic, payload) => void
-//   props.executionHistory — Last 10 execution log entries
-//   props.state          — Live key-value state from the automation script
-//   props.stateSet       — Write state back: (key, value) => void
+// Open the Docs panel to see all available props.
 
 import type { CustomComponentProps } from "./types";
 
