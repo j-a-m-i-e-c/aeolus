@@ -62,6 +62,9 @@ const DEFAULT_SCRIPT = `// ─── Option 1: Free-form (use the globals howeve
 //   mqtt.publish("alerts/temp", JSON.stringify({ temp, room: "kitchen" }));
 //   log.warn("High temp — turned on bedroom fan");
 // }
+//
+// Push data to your custom UI component via the state store:
+// Anything you state.set() here appears as props.state.get() in the UI tab.
 // state.set("lastTemp", temp);
 // state.set("lastCheck", Date.now());
 //
