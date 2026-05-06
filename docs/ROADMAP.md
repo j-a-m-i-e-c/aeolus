@@ -52,6 +52,9 @@ Drag-and-drop canvas for building automations visually (Node-RED style). Nodes f
 ### Automation Pipelines & Linkage Pane
 Visual chaining of automations with transform steps — connect the output of one automation to the input of another with a mapper function in between. A dedicated "Linkage" pane type would show the connection graph and let users write transform code in a Monaco editor. The underlying mechanism already exists (automations can chain via the state store or MQTT topics), but a visual linkage pane would make the connections discoverable and the transforms explicit. Think Unix pipes for IoT: `sensor → compute average → threshold check → device action → notification`.
 
+### Automation & Panel Export/Import
+Persist user-created automations and custom panes as portable JSON files that can be exported, version-controlled, and imported on another Aeolus instance. This enables backup/restore workflows, sharing automation recipes between users, and migrating setups between Pis without manually recreating everything. The export format would include the script source, UI source, state store snapshot, and pane layout metadata — everything needed to reconstruct the automation or panel on a fresh install.
+
 ### ~~State History & Charts~~ ✅ Implemented
 Store the last N values per device in SQLite and display trend charts as a dedicated pane type. Implemented with throttled recording (configurable interval), auto-pruning, a pure SVG line chart with Catmull-Rom spline interpolation, multi-series support, hover tooltips, time range picker (15m/1h/6h/24h), auto-refresh, and per-device or global history clearing. Available as the "State History" pane in the monitoring category.
 
