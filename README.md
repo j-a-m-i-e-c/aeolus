@@ -81,7 +81,6 @@ Installs Docker, clones Aeolus, builds containers, and starts everything. Auto-s
 | 📡 | **Internal event bus** | Typed pub/sub bus decouples MQTT ingestion, device state changes, automation triggers, and WebSocket pushes |
 | ⏱️ | **Services framework** | Cron schedules, API triggers, and system events as automation triggers |
 | 🍓 | **Raspberry Pi ready** | One-line install, auto-start on boot, runs on a Pi 4/5 |
-| 🧪 | **Built-in simulator** | Demo the full platform without any hardware |
 | 📊 | **State history & charts** | Per-device state history with SVG trend charts, time range filtering, and data cleanup |
 | 🔒 | **100% local** | Everything stays on your network — no cloud dependency |
 
