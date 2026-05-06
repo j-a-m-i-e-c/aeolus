@@ -615,23 +615,47 @@ export function AutomationPane({ config, paneId }: Props) {
 
       {/* Editor + snippet panel — fills remaining space */}
       <div className="flex-1 min-h-0 flex gap-2">
-        {/* Editor */}
-        <div className="flex-1 min-w-0">
-          {editingTab === "logic" ? (
-            <ScriptEditor
-              initialValue={scriptSource}
-              onChange={setScriptSource}
-              onSave={handleEditorSave}
-              errors={errors}
-              onEditorReady={(api) => { editorApiRef.current = api; }}
-            />
-          ) : (
-            <UiEditor
-              initialValue={effectiveUiSource}
-              onChange={(val) => setUiSource(val)}
-              onSave={handleEditorSave}
-              onEditorReady={(api) => { uiEditorApiRef.current = api; }}
-            />
+        {/* Editor + state keys bar */}
+        <div className="flex-1 min-w-0 flex flex-col">
+          <div className="flex-1 min-h-0">
+            {editingTab === "logic" ? (
+              <ScriptEditor
+                initialValue={scriptSource}
+                onChange={setScriptSource}
+                onSave={handleEditorSave}
+                errors={errors}
+                onEditorReady={(api) => { editorApiRef.current = api; }}
+              />
+            ) : (
+              <UiEditor
+                initialValue={effectiveUiSource}
+                onChange={(val) => setUiSource(val)}
+                onSave={handleEditorSave}
+                onEditorReady={(api) => { uiEditorApiRef.current = api; }}
+              />
+            )}
+          </div>
+
+          {/* Live state keys — shown in UI tab when there's state data */}
+          {editingTab === "ui" && Object.keys(ruleState).length > 0 && (
+            <div className="shrink-0 mt-1 rounded-lg bg-[#0B0F14] border border-[#2A3441] px-3 py-2 max-h-24 overflow-auto">
+              <div className="text-[10px] text-[#6B7785] uppercase tracking-wider mb-1">
+                props.state <span className="normal-case tracking-normal">— live from logic tab</span>
+              </div>
+              <div className="flex flex-wrap gap-x-4 gap-y-0.5">
+                {Object.entries(ruleState).map(([key, value]) => (
+                  <div key={key} className="text-[11px] font-mono">
+                    <span className="text-[#9AA6B2]">.get(</span>
+                    <span className="text-[#5CE1E6]">"{key}"</span>
+                    <span className="text-[#9AA6B2]">)</span>
+                    <span className="text-[#6B7785] ml-1">→</span>
+                    <span className="text-[#E6EDF3] ml-1">
+                      {typeof value === "string" ? `"${value}"` : JSON.stringify(value)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
           )}
         </div>
 
