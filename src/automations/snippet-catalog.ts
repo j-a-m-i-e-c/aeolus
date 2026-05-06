@@ -290,7 +290,8 @@ automation({
  *   "ui" returns UI component snippets. Snippets without a mode field default to "logic".
  */
 export function buildSnippetCatalog(connectorRegistry: ConnectorRegistry, mode: "logic" | "ui" = "logic"): SnippetGroup[] {
-  const groups: SnippetGroup[] = [...PLATFORM_SNIPPETS];
+  // Platform snippets are logic-only; UI mode starts with an empty array
+  const groups: SnippetGroup[] = mode === "logic" ? [...PLATFORM_SNIPPETS] : [];
 
   // Aggregate snippets from all registered connectors
   for (const { metadata } of connectorRegistry.listAvailable()) {
