@@ -2,6 +2,7 @@
 
 import { useDeviceStore } from "../store/device-store";
 import { useAutomationStateStore } from "../store/automation-state-store";
+import { usePanelStateStore } from "../store/panel-state-store";
 
 const WS_URL = import.meta.env.VITE_WS_URL || `ws://${window.location.hostname}:3001/ws`;
 const RECONNECT_DELAY = 3000;
@@ -38,6 +39,9 @@ export function connectWebSocket(): void {
       } else if (msg.type === "automation-state") {
         const { ruleId, key, value } = msg.data;
         useAutomationStateStore.getState().setRuleState(ruleId, key, value);
+      } else if (msg.type === "panel-state") {
+        const { panelId, key, value } = msg.data;
+        usePanelStateStore.getState().setPanelState(panelId, key, value);
       }
     } catch {
       // Ignore malformed messages

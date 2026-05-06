@@ -9,6 +9,7 @@ import { HueControlPane } from "../components/panes/HueControlPane";
 import { KasaControlPane } from "../components/panes/KasaControlPane";
 import { AutomationRulesPane } from "../components/panes/AutomationRulesPane";
 import { AutomationPane } from "../components/panes/AutomationPane";
+import { CustomPanelPane } from "../components/panes/CustomPanelPane";
 import { SystemStatsPane } from "../components/panes/SystemStatsPane";
 import { TopicTreePane } from "../components/panes/TopicTreePane";
 import { EventLogPane } from "../components/panes/EventLogPane";
@@ -67,6 +68,14 @@ export const PANE_REGISTRY: Record<string, PaneRegistryEntry> = {
     defaultIcon: "code",
     defaultConfig: { ruleId: "" },
     defaultSize: { w: 6, h: 9 },
+    category: "automations",
+  },
+  "custom-panel": {
+    component: CustomPanelPane,
+    displayName: "Custom Panel",
+    defaultIcon: "layout-dashboard",
+    defaultConfig: { panelId: "" },
+    defaultSize: { w: 6, h: 8 },
     category: "automations",
   },
   "automation-rules": {

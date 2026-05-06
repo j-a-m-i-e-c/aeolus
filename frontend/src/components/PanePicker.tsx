@@ -39,7 +39,7 @@ const CATEGORY_LABELS: Record<string, { label: string; icon: string }> = {
 const CATEGORY_ORDER = ["controls", "automations", "monitoring", "system"];
 
 /** Pane types that have their own dedicated entry point and should be excluded from the picker */
-const EXCLUDED_FROM_PICKER = new Set(["automation"]);
+const EXCLUDED_FROM_PICKER = new Set(["automation", "custom-panel"]);
 
 function groupByCategory() {
   const groups: Record<string, Array<[string, (typeof PANE_REGISTRY)[string]]>> = {};
@@ -89,7 +89,7 @@ export function PanePicker({ tabId, onClose }: PanePickerProps) {
       >
         {/* Header */}
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-sm font-semibold text-[#E6EDF3]">Add Pane</h3>
+          <h3 className="text-sm font-semibold text-[#E6EDF3]">Browse Panes</h3>
           <button
             onClick={onClose}
             className="p-1 rounded text-[#6B7785] hover:text-[#9AA6B2] hover:bg-elevated transition-colors"

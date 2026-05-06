@@ -7,7 +7,7 @@ import path from "node:path";
 import { config } from "./config.js";
 import logger from "./logger.js";
 import { getDatabase, persistDatabase } from "./db/database.js";
-import { eventBus, DEVICE_STATE_CHANGE, AUTOMATION_STATE_CHANGE, WS_STATE_CHANGE, MQTT_RAW_MESSAGE, AUTOMATION_FIRED } from "./core/event-bus.js";
+import { eventBus, DEVICE_STATE_CHANGE, AUTOMATION_STATE_CHANGE, WS_STATE_CHANGE, MQTT_RAW_MESSAGE, AUTOMATION_FIRED, PANEL_STATE_CHANGE } from "./core/event-bus.js";
 import { DeviceRegistry } from "./core/device-registry.js";
 import { MqttService } from "./mqtt/mqtt-service.js";
 import { AutomationEngine } from "./automations/automation-engine.js";
@@ -43,6 +43,8 @@ import { DeviceSimulator } from "./simulator/device-simulator.js";
 import { createSimulatorRoutes } from "./api/routes/simulator.routes.js";
 import { createSystemRoutes } from "./api/routes/system.routes.js";
 import { createLayoutRoutes } from "./api/routes/layout.routes.js";
+import { createPanelRoutes } from "./api/routes/panel.routes.js";
+import { PanelStateStore } from "./panels/panel-state-store.js";
 import { StateHistory } from "./core/state-history.js";
 
 
@@ -123,6 +125,8 @@ async function main(): Promise<void> {
   const executionLog = new ExecutionLog();
   const stateStore = new AutomationStateStore(db);
   stateStore.loadFromDb();
+  const panelStateStore = new PanelStateStore(db);
+  panelStateStore.loadFromDb();
   const sandbox = new Sandbox({ actionExecutor, deviceRegistry: registry, serviceManager, stateStore, onStateChange: (ruleId, key, value) => {
     eventBus.emit(AUTOMATION_STATE_CHANGE, { ruleId, key, value });
   } });
@@ -171,6 +175,7 @@ async function main(): Promise<void> {
   app.use("/api/services", createServiceRoutes(serviceManager, serviceRegistry));
   app.use("/api/system", createSystemRoutes());
   app.use("/api/layout", createLayoutRoutes(db));
+  app.use("/api/panels", createPanelRoutes(db, panelStateStore, eventBus));
 
   app.use(errorHandler);
 
@@ -183,6 +188,7 @@ async function main(): Promise<void> {
     { eventName: MQTT_RAW_MESSAGE, messageType: "mqtt-message" },
     { eventName: AUTOMATION_FIRED, messageType: "automation-fired" },
     { eventName: AUTOMATION_STATE_CHANGE, messageType: "automation-state" },
+    { eventName: PANEL_STATE_CHANGE, messageType: "panel-state" },
   ];
 
   const wsServer = new WsServer(server, registry, eventBus, WS_MAPPINGS);

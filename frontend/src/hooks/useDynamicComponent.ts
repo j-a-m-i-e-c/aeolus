@@ -89,10 +89,17 @@ export interface DynamicComponentState {
  * React hook that fetches a compiled UI module from the backend,
  * rewrites React import specifiers, loads it via blob URL + dynamic import(),
  * and returns the default-exported component.
+ *
+ * @param entityId - The rule or panel ID used to fetch the module
+ * @param hasUiSource - Whether the entity has a compiled UI source to load
+ * @param moduleUrl - Optional URL override for the module endpoint.
+ *   Defaults to the automation UI module URL for backward compatibility.
+ *   For panels, pass: `/api/panels/${panelId}/ui-module`
  */
 export function useDynamicComponent(
-  ruleId: string,
+  entityId: string,
   hasUiSource: boolean,
+  moduleUrl?: string,
 ): DynamicComponentState {
   const [Component, setComponent] = useState<ComponentType<CustomComponentProps> | null>(null);
   const [loading, setLoading] = useState(false);
@@ -100,7 +107,7 @@ export function useDynamicComponent(
   const versionRef = useRef(0);
 
   useEffect(() => {
-    if (!ruleId || !hasUiSource) {
+    if (!entityId || !hasUiSource) {
       setComponent(null);
       setLoading(false);
       setError(null);
@@ -116,7 +123,8 @@ export function useDynamicComponent(
       setComponent(null);
 
       try {
-        const res = await fetch(`${API_URL}/api/automations/${ruleId}/ui-module`);
+        const url = moduleUrl || `${API_URL}/api/automations/${entityId}/ui-module`;
+        const res = await fetch(url);
 
         // Check if this request is still current
         if (currentVersion !== versionRef.current) return;
@@ -182,7 +190,7 @@ export function useDynamicComponent(
     }
 
     loadModule();
-  }, [ruleId, hasUiSource]);
+  }, [entityId, hasUiSource, moduleUrl]);
 
   return { Component, loading, error };
 }

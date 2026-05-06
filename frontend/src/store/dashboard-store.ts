@@ -32,7 +32,7 @@ interface DashboardState {
   setActiveTab: (tabId: string) => void;
 
   // Pane actions
-  addPane: (tabId: string, paneType: string) => void;
+  addPane: (tabId: string, paneType: string, config?: PaneConfig) => void;
   updatePanePosition: (paneId: string, x: number, y: number) => void;
   updatePaneSize: (paneId: string, w: number, h: number) => void;
   updatePaneConfig: (paneId: string, config: PaneConfig) => void;
@@ -163,7 +163,7 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
 
   // ---- Pane actions ----
 
-  addPane: (tabId, paneType) => {
+  addPane: (tabId, paneType, config) => {
     const entry = PANE_REGISTRY[paneType];
     const defaultSize = entry?.defaultSize ?? { w: 6, h: 4 };
     const defaultConfig = entry?.defaultConfig ?? {};
@@ -172,7 +172,7 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
       id: generateId(),
       tabId,
       paneType,
-      config: { ...defaultConfig },
+      config: { ...defaultConfig, ...config },
       x: 0,
       y: 0,
       w: defaultSize.w,
