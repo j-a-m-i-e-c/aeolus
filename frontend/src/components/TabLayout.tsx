@@ -152,7 +152,7 @@ export function TabLayout({ tabId }: TabLayoutProps) {
           return (
             <div
               key={pane.id}
-              className="bg-surface border border-[#2A3441] rounded-xl overflow-hidden flex flex-col"
+              className="relative bg-surface border border-[#2A3441] rounded-xl overflow-hidden flex flex-col"
             >
               {/* Header bar */}
               <div className="pane-drag-handle flex items-center justify-between px-3 py-2 border-b border-[#2A3441] cursor-grab bg-elevated/50">
@@ -188,6 +188,15 @@ export function TabLayout({ tabId }: TabLayoutProps) {
                     Unknown pane type: {pane.paneType}
                   </div>
                 )}
+              </div>
+
+              {/* Resize grip indicator */}
+              <div className="absolute bottom-1 right-1 text-[#2A3441] hover:text-[#6B7785] transition-colors pointer-events-none">
+                <svg width="12" height="12" viewBox="0 0 12 12">
+                  <circle cx="9" cy="9" r="1.5" fill="currentColor" />
+                  <circle cx="5" cy="9" r="1.5" fill="currentColor" />
+                  <circle cx="9" cy="5" r="1.5" fill="currentColor" />
+                </svg>
               </div>
             </div>
           );

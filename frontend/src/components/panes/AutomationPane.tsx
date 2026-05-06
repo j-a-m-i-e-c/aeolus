@@ -12,6 +12,7 @@ import {
   RotateCcw,
   Zap,
   Blocks,
+  BookOpen,
 } from "lucide-react";
 import { ScriptEditor, type TranspileError } from "../ScriptEditor";
 import { UiEditor } from "../UiEditor";
@@ -52,73 +53,15 @@ interface Props {
   paneId?: string;
 }
 
-const DEFAULT_SCRIPT = `// Aeolus Automation Script
-// ─────────────────────────────────────────────────────
-// This script runs in a secure sandbox every time the trigger topic fires.
-// Write any logic you want using the globals below — no imports needed.
-//
-// Available globals:
-//   context   — the event that triggered this script
-//                context.topic     — MQTT topic (e.g. "sensor/kitchen/temp")
-//                context.deviceId  — device ID (e.g. "sensor-kitchen-temp")
-//                context.state     — device state (e.g. { value: 22.5 })
-//                context.timestamp — when the event fired (unix ms)
-//
-//   devices   — query and control devices
-//                devices.get("light-bedroom")           — get one device
-//                devices.list()                          — all devices
-//                devices.filter(d => d.type === "light") — filter by type
-//                devices.action("light-1", "toggle")     — send an action
-//                devices.action("light-1", "brightness", { brightness: 120 })
-//
-//   mqtt      — publish MQTT messages
-//                mqtt.publish("valve/zone-1/command", '{"action":"open"}')
-//
-//   state     — per-rule key-value store (syncs to the UI tab via WebSocket)
-//                state.set("avgTemp", 22.5)  — write (shows in UI tab instantly)
-//                state.get("avgTemp")        — read
-//                state.getAll()              — all key-value pairs
-//                state.delete("avgTemp")     — remove
-//
-//   log       — structured logging
-//                log.info("message")  log.warn("message")  log.error("message")
-//
-//   http      — external API calls (10s timeout, use HTTPS for non-local URLs)
-//                const res = await http.get("https://api.example.com/data")
-//                const res = await http.post(url, { headers: {...}, body: "..." })
-//                // res = { status: 200, body: "..." }
-//
-//   services  — read-only access to running services
-//                services.get("cron")  — service state or undefined
-//                services.list()       — [{ type, displayName, running }]
-//
-// ─── Option 1: Free-form (use the globals however you like) ───
-//
-// const temp = context.state.value;
-// const bedroom = devices.get("light-bedroom");
-// if (temp > 30 && bedroom && !bedroom.state.on) {
-//   devices.action("light-bedroom", "toggle");
-//   mqtt.publish("alerts/temp", JSON.stringify({ temp, room: "kitchen" }));
-//   log.warn("High temp — turned on bedroom fan");
-// }
-// state.set("lastTemp", temp);
-// state.set("lastCheck", Date.now());
-//
-// ─── Option 2: Structured helper (generates a flow diagram) ───
-//
-// The automation() helper is optional. If you use it with named functions,
-// the pane will render a visual flow diagram of your conditions and actions.
-// All conditions must pass (AND logic) for the actions to run.
-
-automation({
+const DEFAULT_SCRIPT = `automation({
   conditions: [
-    function hasValue(ctx) {
+    function check(ctx) {
       return ctx.state.value !== undefined;
     },
   ],
   actions: [
-    function logEvent(ctx) {
-      log.info("Triggered on " + ctx.topic + ": " + JSON.stringify(ctx.state));
+    function act(ctx) {
+      log.info(\`Event: \${ctx.topic} → \${JSON.stringify(ctx.state)}\`);
     },
   ],
 });
@@ -204,6 +147,7 @@ export function AutomationPane({ config, paneId }: Props) {
 
   // Snippet panel state
   const [showSnippets, setShowSnippets] = useState(true);
+  const [showDocs, setShowDocs] = useState(false);
   const editorApiRef = useRef<{ insertText: (text: string) => void } | null>(null);
   const uiEditorApiRef = useRef<{ insertText: (text: string) => void } | null>(null);
 
@@ -696,6 +640,32 @@ export function AutomationPane({ config, paneId }: Props) {
             />
           </div>
         )}
+
+        {/* Docs panel — collapsible API reference */}
+        {showDocs && (
+          <div className="w-64 shrink-0 rounded-xl border border-[#2A3441] bg-[#121821] overflow-auto p-3">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-semibold text-[#9AA6B2]">API Reference</span>
+              <button
+                onClick={() => setShowDocs(false)}
+                className="p-0.5 rounded text-[#6B7785] hover:text-[#9AA6B2] transition-colors"
+              >
+                <X size={12} />
+              </button>
+            </div>
+            <pre className="text-[10px] leading-relaxed font-mono text-[#E6EDF3] whitespace-pre-wrap">
+{`context — { topic, deviceId, state, timestamp }
+devices — .get(id), .list(), .filter(fn), .action(id, type, params?)
+mqtt    — .publish(topic, payload)
+log     — .info(msg), .warn(msg), .error(msg)
+state   — .get(key), .set(key, value), .getAll(), .delete(key)
+services — .get(type), .list()
+http    — .get(url, opts?), .post(url, opts?)
+
+automation({ conditions: [...], actions: [...] })`}
+            </pre>
+          </div>
+        )}
       </div>
 
       {/* Error summary panel */}
@@ -737,6 +707,18 @@ export function AutomationPane({ config, paneId }: Props) {
         >
           <Blocks size={12} />
           Snippets
+        </button>
+
+        <button
+          onClick={() => setShowDocs((v) => !v)}
+          className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-lg border transition-colors ${
+            showDocs
+              ? "bg-primary/20 text-primary border-primary/30"
+              : "text-[#9AA6B2] hover:text-[#E6EDF3] hover:bg-elevated/50 border-[#2A3441]"
+          }`}
+        >
+          <BookOpen size={12} />
+          Docs
         </button>
 
         {isEditing && (
