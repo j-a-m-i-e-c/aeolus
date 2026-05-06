@@ -66,7 +66,7 @@ export const PANE_REGISTRY: Record<string, PaneRegistryEntry> = {
     displayName: "Automation",
     defaultIcon: "code",
     defaultConfig: { ruleId: "" },
-    defaultSize: { w: 6, h: 5 },
+    defaultSize: { w: 6, h: 9 },
     category: "automations",
   },
   "automation-rules": {

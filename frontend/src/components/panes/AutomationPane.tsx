@@ -73,13 +73,13 @@ const DEFAULT_SCRIPT = `// ─── Option 1: Free-form (use the globals howeve
 
 automation({
   conditions: [
-    function check(ctx) {
-      return ctx.state.value !== undefined;
+    function check(context) {
+      return context.state.value !== undefined;
     },
   ],
   actions: [
-    function act(ctx) {
-      log.info(\`Event: \${ctx.topic} → \${JSON.stringify(ctx.state)}\`);
+    function act(context) {
+      log.info(\`Event: \${context.topic} → \${JSON.stringify(context.state)}\`);
     },
   ],
 });
@@ -661,8 +661,8 @@ export function AutomationPane({ config, paneId }: Props) {
 
         {/* Docs panel — collapsible API reference */}
         {showDocs && (
-          <div className="w-64 shrink-0 rounded-xl border border-[#2A3441] bg-[#121821] overflow-auto p-3">
-            <div className="flex items-center justify-between mb-2">
+          <div className="w-72 shrink-0 rounded-xl border border-[#2A3441] bg-[#121821] overflow-auto p-3">
+            <div className="flex items-center justify-between mb-3">
               <span className="text-xs font-semibold text-[#9AA6B2]">API Reference</span>
               <button
                 onClick={() => setShowDocs(false)}
@@ -671,17 +671,82 @@ export function AutomationPane({ config, paneId }: Props) {
                 <X size={12} />
               </button>
             </div>
-            <pre className="text-[10px] leading-relaxed font-mono text-[#E6EDF3] whitespace-pre-wrap">
-{`context — { topic, deviceId, state, timestamp }
-devices — .get(id), .list(), .filter(fn), .action(id, type, params?)
-mqtt    — .publish(topic, payload)
-log     — .info(msg), .warn(msg), .error(msg)
-state   — .get(key), .set(key, value), .getAll(), .delete(key)
-services — .get(type), .list()
-http    — .get(url, opts?), .post(url, opts?)
+            <div className="space-y-3 text-[11px] font-mono">
+              {/* automation() helper */}
+              <div>
+                <div className="text-primary font-semibold mb-1">automation()</div>
+                <div className="text-[#9AA6B2] pl-2 space-y-0.5">
+                  <div className="text-[#E6EDF3]">{"automation({ conditions: [...], actions: [...] })"}</div>
+                  <div className="text-[10px] text-[#6B7785] mt-1">Optional structured helper — enables flow diagram</div>
+                </div>
+              </div>
 
-automation({ conditions: [...], actions: [...] })`}
-            </pre>
+              {/* context */}
+              <div>
+                <div className="text-primary font-semibold mb-1">context</div>
+                <div className="text-[#9AA6B2] pl-2 space-y-0.5">
+                  <div><span className="text-[#E6EDF3]">.topic</span> — MQTT topic that triggered</div>
+                  <div><span className="text-[#E6EDF3]">.deviceId</span> — source device ID</div>
+                  <div><span className="text-[#E6EDF3]">.state</span> — parsed message payload</div>
+                  <div><span className="text-[#E6EDF3]">.timestamp</span> — event time (ms)</div>
+                </div>
+              </div>
+
+              {/* devices */}
+              <div>
+                <div className="text-primary font-semibold mb-1">devices</div>
+                <div className="text-[#9AA6B2] pl-2 space-y-0.5">
+                  <div><span className="text-[#E6EDF3]">.get(id)</span> — get device by ID</div>
+                  <div><span className="text-[#E6EDF3]">.list()</span> — all devices</div>
+                  <div><span className="text-[#E6EDF3]">.filter(fn)</span> — filter devices</div>
+                  <div><span className="text-[#E6EDF3]">.action(id, type, params?)</span> — trigger action</div>
+                </div>
+              </div>
+
+              {/* mqtt */}
+              <div>
+                <div className="text-primary font-semibold mb-1">mqtt</div>
+                <div className="text-[#9AA6B2] pl-2 space-y-0.5">
+                  <div><span className="text-[#E6EDF3]">.publish(topic, payload)</span> — send message</div>
+                </div>
+              </div>
+
+              {/* log */}
+              <div>
+                <div className="text-primary font-semibold mb-1">log</div>
+                <div className="text-[#9AA6B2] pl-2 space-y-0.5">
+                  <div><span className="text-[#E6EDF3]">.info(msg)</span> / <span className="text-[#E6EDF3]">.warn(msg)</span> / <span className="text-[#E6EDF3]">.error(msg)</span></div>
+                </div>
+              </div>
+
+              {/* state */}
+              <div>
+                <div className="text-primary font-semibold mb-1">state</div>
+                <div className="text-[#9AA6B2] pl-2 space-y-0.5">
+                  <div><span className="text-[#E6EDF3]">.get(key)</span> — read value</div>
+                  <div><span className="text-[#E6EDF3]">.set(key, value)</span> — write value</div>
+                  <div><span className="text-[#E6EDF3]">.getAll()</span> — all key-value pairs</div>
+                  <div><span className="text-[#E6EDF3]">.delete(key)</span> — remove key</div>
+                </div>
+              </div>
+
+              {/* services */}
+              <div>
+                <div className="text-primary font-semibold mb-1">services</div>
+                <div className="text-[#9AA6B2] pl-2 space-y-0.5">
+                  <div><span className="text-[#E6EDF3]">.get(type)</span> / <span className="text-[#E6EDF3]">.list()</span></div>
+                </div>
+              </div>
+
+              {/* http */}
+              <div>
+                <div className="text-primary font-semibold mb-1">http</div>
+                <div className="text-[#9AA6B2] pl-2 space-y-0.5">
+                  <div><span className="text-[#E6EDF3]">.get(url, opts?)</span> — GET request</div>
+                  <div><span className="text-[#E6EDF3]">.post(url, opts?)</span> — POST request</div>
+                </div>
+              </div>
+            </div>
           </div>
         )}
       </div>

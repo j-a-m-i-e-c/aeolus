@@ -23,13 +23,13 @@ export interface ScriptEditorProps {
 
 const DEFAULT_TEMPLATE = `automation({
   conditions: [
-    function check(ctx) {
-      return ctx.state.value !== undefined;
+    function check(context) {
+      return context.state.value !== undefined;
     },
   ],
   actions: [
-    function act(ctx) {
-      log.info(\`Event: \${ctx.topic} → \${JSON.stringify(ctx.state)}\`);
+    function act(context) {
+      log.info(\`Event: \${context.topic} → \${JSON.stringify(context.state)}\`);
     },
   ],
 });

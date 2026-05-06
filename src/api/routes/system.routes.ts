@@ -210,11 +210,16 @@ export function createSystemRoutes(): Router {
     logger.info("Self-update triggered from dashboard");
     res.json({ success: true, message: "Update started — the system will restart shortly" });
 
-    // Run git pull + docker compose rebuild in the background
-    // This is fire-and-forget — the container will be replaced during rebuild
-    // Uses --build (with cache) instead of --no-cache for speed on Pi (~2-3 min vs ~15 min)
-    // Docker prune runs after rebuild to prevent build cache from filling the SD card
-    const child = spawn("sh", ["-c", `cd ${projectDir} && git pull && docker compose up -d --build && docker image prune -f > /dev/null 2>&1 && docker builder prune -f > /dev/null 2>&1`], {
+    // Run git pull + docker compose rebuild on the HOST via a temporary privileged container.
+    // This avoids the root-owned .git/objects problem that occurs when git pull runs
+    // inside the backend container (which runs as root on a bind-mounted host directory).
+    // nsenter executes the command in the host's PID/mount namespace as the host user.
+    const updateScript = `cd ${projectDir} && git pull && docker compose up -d --build && docker image prune -f > /dev/null 2>&1 && docker builder prune -f > /dev/null 2>&1`;
+    const child = spawn("docker", [
+      "run", "--rm", "--privileged", "--pid=host",
+      "alpine", "nsenter", "-t", "1", "-m", "-u", "-i", "-n", "--",
+      "su", "-", "aeolus", "-c", updateScript,
+    ], {
       detached: true,
       stdio: "ignore",
     });
