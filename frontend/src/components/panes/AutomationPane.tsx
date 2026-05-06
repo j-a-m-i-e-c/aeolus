@@ -53,7 +53,25 @@ interface Props {
   paneId?: string;
 }
 
-const DEFAULT_SCRIPT = `automation({
+const DEFAULT_SCRIPT = `// ─── Option 1: Free-form (use the globals however you like) ───
+//
+// const temp = context.state.value;
+// const bedroom = devices.get("light-bedroom");
+// if (temp > 30 && bedroom && !bedroom.state.on) {
+//   devices.action("light-bedroom", "toggle");
+//   mqtt.publish("alerts/temp", JSON.stringify({ temp, room: "kitchen" }));
+//   log.warn("High temp — turned on bedroom fan");
+// }
+// state.set("lastTemp", temp);
+// state.set("lastCheck", Date.now());
+//
+// ─── Option 2: Structured helper (generates a flow diagram) ───
+//
+// The automation() helper is optional. If you use it with named functions,
+// the pane will render a visual flow diagram of your conditions and actions.
+// All conditions must pass (AND logic) for the actions to run.
+
+automation({
   conditions: [
     function check(ctx) {
       return ctx.state.value !== undefined;
