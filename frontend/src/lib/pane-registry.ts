@@ -121,7 +121,7 @@ export const PANE_REGISTRY: Record<string, PaneRegistryEntry> = {
   },
   "schedule-viewer": {
     component: ScheduleViewerPane,
-    displayName: "Schedule Viewer",
+    displayName: "Cron Schedule Viewer",
     defaultIcon: "calendar-clock",
     defaultConfig: {},
     defaultSize: { w: 6, h: 6 },
