@@ -251,11 +251,12 @@ export function TriggerSelector({
 
   // Sync preset selection when cronExpression changes externally (e.g. edit mode)
   useEffect(() => {
+    // Don't override if user explicitly chose the picker or custom cron
+    if (selectedPreset === CUSTOM_PICKER_OPTION || selectedPreset === CUSTOM_CRON_OPTION) return;
+
     const match = CRON_PRESETS.find((p) => p.expression === cronExpression);
     if (match) {
       setSelectedPreset(match.expression);
-    } else if (selectedPreset !== CUSTOM_PICKER_OPTION && selectedPreset !== CUSTOM_CRON_OPTION) {
-      setSelectedPreset(CUSTOM_CRON_OPTION);
     }
   }, [cronExpression]);
 
