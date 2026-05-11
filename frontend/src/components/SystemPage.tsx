@@ -432,8 +432,6 @@ function CpuChart({ info }: { info: SystemInfo }) {
 
   const history = cpuHistory.current;
   const currentLoad = history.length > 0 ? history[history.length - 1].load : 0;
-  const load5m = Math.min((info.loadAvg["5m"] / info.cpuCores) * 100, 100);
-  const load15m = Math.min((info.loadAvg["15m"] / info.cpuCores) * 100, 100);
 
   // Chart dimensions
   const chartWidth = 240;
@@ -534,19 +532,9 @@ function CpuChart({ info }: { info: SystemInfo }) {
         </div>
 
         {/* Current values */}
-        <div className="shrink-0 text-right flex flex-col justify-between" style={{ height: "140px" }}>
-          <div>
-            <div className="text-2xl font-bold text-[#E6EDF3]">{Math.round(currentLoad)}%</div>
-            <div className="text-[10px] text-[#6B7785] uppercase">1m</div>
-          </div>
-          <div>
-            <div className="text-sm font-semibold text-[#9AA6B2]">{Math.round(load5m)}%</div>
-            <div className="text-[10px] text-[#6B7785] uppercase">5m</div>
-          </div>
-          <div>
-            <div className="text-sm font-semibold text-[#9AA6B2]">{Math.round(load15m)}%</div>
-            <div className="text-[10px] text-[#6B7785] uppercase">15m</div>
-          </div>
+        <div className="shrink-0 text-right">
+          <div className="text-3xl font-bold text-[#E6EDF3]">{Math.round(currentLoad)}%</div>
+          <div className="text-[10px] text-[#6B7785]">CPU Load</div>
         </div>
       </div>
     </div>
