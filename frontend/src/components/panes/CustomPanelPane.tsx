@@ -9,8 +9,10 @@ import {
   AlertTriangle,
   RotateCcw,
   LayoutDashboard,
+  Play,
 } from "lucide-react";
 import { UiEditor } from "../UiEditor";
+import { ScriptEditor } from "../ScriptEditor";
 import { CustomComponentBoundary } from "../CustomComponentBoundary";
 import { useDynamicComponent } from "../../hooks/useDynamicComponent";
 import { useDeviceStore } from "../../store/device-store";
@@ -28,6 +30,8 @@ interface PanelData {
   name: string;
   uiSource: string | null;
   compiledUi: string | null;
+  scriptSource: string | null;
+  compiledJs: string | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -42,6 +46,22 @@ interface Props {
   config: PaneConfig;
   paneId?: string;
 }
+
+const DEFAULT_SCRIPT_TEMPLATE = `// Data source script — runs on demand (click "Run") or on a schedule.
+// Use the same globals as automations: devices, mqtt, http, state, log, services.
+// Results are pushed to the UI via state.set() → props.state.get().
+
+async function fetchData() {
+  // Example: fetch external API data and push to state
+  // const res = await http.get("https://api.example.com/data");
+  // state.set("apiData", JSON.parse(res.body));
+  
+  state.set("lastRun", Date.now());
+  log.info("Panel data refreshed");
+}
+
+fetchData();
+`;
 
 export function CustomPanelPane({ config, paneId }: Props) {
   const panelId = (config.panelId as string) || "";
@@ -58,8 +78,13 @@ export function CustomPanelPane({ config, paneId }: Props) {
   // Editing state
   const [name, setName] = useState("");
   const [uiSource, setUiSource] = useState("");
+  const [scriptSource, setScriptSource] = useState("");
+  const [editingTab, setEditingTab] = useState<"data" | "ui">("ui");
   const [errors, setErrors] = useState<TranspileError[]>([]);
   const [saving, setSaving] = useState(false);
+
+  // Run state
+  const [running, setRunning] = useState(false);
 
   // Device store for custom component props
   const devices = useDeviceStore((s) => s.devices);
@@ -92,6 +117,7 @@ export function CustomPanelPane({ config, paneId }: Props) {
       if (!data.compiledUi) {
         setName(data.name);
         setUiSource(data.uiSource || "");
+        setScriptSource(data.scriptSource || "");
         setMode("editing");
       }
     } catch {
@@ -156,6 +182,7 @@ export function CustomPanelPane({ config, paneId }: Props) {
     if (!panel) return;
     setName(panel.name);
     setUiSource(panel.uiSource || "");
+    setScriptSource(panel.scriptSource || "");
     setErrors([]);
     setMode("editing");
   }, [panel]);
@@ -166,13 +193,18 @@ export function CustomPanelPane({ config, paneId }: Props) {
     setSaving(true);
     setErrors([]);
     try {
+      const body: Record<string, unknown> = {
+        name: name.trim() || "Untitled Pane",
+        uiSource,
+      };
+      // Only send scriptSource if user has entered something in the Data tab
+      if (scriptSource.trim()) {
+        body.scriptSource = scriptSource;
+      }
       const res = await fetch(`${API_URL}/api/panels/${panelId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: name.trim() || "Untitled Pane",
-          uiSource,
-        }),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -196,13 +228,14 @@ export function CustomPanelPane({ config, paneId }: Props) {
     } finally {
       setSaving(false);
     }
-  }, [panelId, name, uiSource, saving]);
+  }, [panelId, name, uiSource, scriptSource, saving]);
 
   // ── Cancel editing ──
   const handleCancel = useCallback(() => {
     if (panel) {
       setName(panel.name);
       setUiSource(panel.uiSource || "");
+      setScriptSource(panel.scriptSource || "");
     }
     setErrors([]);
     setMode("display");
@@ -215,6 +248,19 @@ export function CustomPanelPane({ config, paneId }: Props) {
     },
     [handleSave],
   );
+
+  // ── Run panel script ──
+  const handleRun = useCallback(async () => {
+    if (!panelId || running) return;
+    setRunning(true);
+    try {
+      await fetch(`${API_URL}/api/panels/${panelId}/run`, { method: "POST" });
+    } catch {
+      // Fire-and-forget — state updates flow back via WebSocket
+    } finally {
+      setRunning(false);
+    }
+  }, [panelId, running]);
 
   // ═══════════════════════════════════════════════════════════════════
   // RENDER — Loading state
@@ -322,18 +368,30 @@ export function CustomPanelPane({ config, paneId }: Props) {
       const devicesArray = Object.values(devices);
       return (
         <div className="h-full flex flex-col overflow-auto">
-          {/* Header with panel name and edit button */}
+          {/* Header with panel name, run button, and edit button */}
           <div className="flex items-center justify-between px-4 pt-3 pb-2">
             <div className="text-sm font-semibold text-[#E6EDF3] truncate">
               {panel.name}
             </div>
-            <button
-              onClick={handleEdit}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg text-[#9AA6B2] hover:text-[#E6EDF3] hover:bg-elevated/50 border border-[#2A3441] transition-colors shrink-0"
-            >
-              <Pencil size={12} />
-              Edit
-            </button>
+            <div className="flex items-center gap-2 shrink-0">
+              {panel.compiledJs && (
+                <button
+                  onClick={handleRun}
+                  disabled={running}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg text-[#10B981] hover:text-[#34D399] hover:bg-[#10B981]/10 border border-[#10B981]/30 transition-colors disabled:opacity-50"
+                >
+                  {running ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
+                  Run
+                </button>
+              )}
+              <button
+                onClick={handleEdit}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg text-[#9AA6B2] hover:text-[#E6EDF3] hover:bg-elevated/50 border border-[#2A3441] transition-colors shrink-0"
+              >
+                <Pencil size={12} />
+                Edit
+              </button>
+            </div>
           </div>
 
           {/* Rendered component */}
@@ -372,13 +430,46 @@ export function CustomPanelPane({ config, paneId }: Props) {
         className="w-full px-3 py-2 text-sm rounded-lg bg-[#0B0F14] border border-[#2A3441] text-[#E6EDF3] placeholder-[#6B7785] focus:outline-none focus:border-primary transition-colors"
       />
 
+      {/* Tab bar */}
+      <div className="flex gap-1 shrink-0">
+        <button
+          onClick={() => setEditingTab("data")}
+          className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+            editingTab === "data"
+              ? "bg-primary/20 text-primary border border-primary/30"
+              : "text-[#9AA6B2] hover:text-[#E6EDF3] hover:bg-elevated/50 border border-transparent"
+          }`}
+        >
+          Data
+        </button>
+        <button
+          onClick={() => setEditingTab("ui")}
+          className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+            editingTab === "ui"
+              ? "bg-primary/20 text-primary border border-primary/30"
+              : "text-[#9AA6B2] hover:text-[#E6EDF3] hover:bg-elevated/50 border border-transparent"
+          }`}
+        >
+          UI
+        </button>
+      </div>
+
       {/* Editor — fills remaining space */}
       <div className="flex-1 min-h-0">
-        <UiEditor
-          initialValue={uiSource}
-          onChange={(val) => setUiSource(val)}
-          onSave={handleEditorSave}
-        />
+        {editingTab === "ui" ? (
+          <UiEditor
+            initialValue={uiSource}
+            onChange={(val) => setUiSource(val)}
+            onSave={handleEditorSave}
+          />
+        ) : (
+          <ScriptEditor
+            initialValue={scriptSource || DEFAULT_SCRIPT_TEMPLATE}
+            onChange={(val) => setScriptSource(val)}
+            onSave={handleEditorSave}
+            errors={editingTab === "data" ? errors : undefined}
+          />
+        )}
       </div>
 
       {/* Transpilation errors */}

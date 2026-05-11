@@ -122,6 +122,8 @@ export function initSchema(database: Database): void {
       name TEXT NOT NULL,
       ui_source TEXT DEFAULT NULL,
       compiled_ui TEXT DEFAULT NULL,
+      script_source TEXT DEFAULT NULL,
+      compiled_js TEXT DEFAULT NULL,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );

@@ -130,6 +130,9 @@ async function main(): Promise<void> {
   const sandbox = new Sandbox({ actionExecutor, deviceRegistry: registry, serviceManager, stateStore, onStateChange: (ruleId, key, value) => {
     eventBus.emit(AUTOMATION_STATE_CHANGE, { ruleId, key, value });
   } });
+  const panelSandbox = new Sandbox({ actionExecutor, deviceRegistry: registry, serviceManager, stateStore: panelStateStore as any, onStateChange: (panelId, key, value) => {
+    eventBus.emit(PANEL_STATE_CHANGE, { panelId, key, value });
+  } });
 
   // 7. Automation Engine (with sandbox, action executor, and execution log)
   const engine = new AutomationEngine(eventBus, { sandbox, actionExecutor, executionLog });
@@ -175,7 +178,7 @@ async function main(): Promise<void> {
   app.use("/api/services", createServiceRoutes(serviceManager, serviceRegistry));
   app.use("/api/system", createSystemRoutes());
   app.use("/api/layout", createLayoutRoutes(db));
-  app.use("/api/panels", createPanelRoutes(db, panelStateStore, eventBus));
+  app.use("/api/panels", createPanelRoutes(db, panelStateStore, eventBus, panelSandbox));
 
   app.use(errorHandler);
 

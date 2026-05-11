@@ -4,11 +4,12 @@ import { Router } from "express";
 import { randomUUID } from "node:crypto";
 import type { EventEmitter } from "node:events";
 import type { Database } from "sql.js";
-import { transpileUi } from "../../automations/transpiler.js";
+import { transpileUi, transpile } from "../../automations/transpiler.js";
 import { PANEL_STATE_CHANGE } from "../../core/event-bus.js";
 import { persistDatabase } from "../../db/database.js";
 import { BadRequestError, NotFoundError } from "../middleware/error-handler.js";
 import type { PanelStateStore } from "../../panels/panel-state-store.js";
+import type { Sandbox } from "../../automations/sandbox.js";
 
 /** Default TSX template for newly created panels */
 const DEFAULT_TEMPLATE = `import type { CustomPanelProps } from "./types";
@@ -30,6 +31,8 @@ interface StoredPanel {
   name: string;
   ui_source: string | null;
   compiled_ui: string | null;
+  script_source: string | null;
+  compiled_js: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -53,6 +56,8 @@ function formatPanel(panel: StoredPanel) {
     name: panel.name,
     uiSource: panel.ui_source,
     compiledUi: panel.compiled_ui,
+    scriptSource: panel.script_source,
+    compiledJs: panel.compiled_js,
     createdAt: panel.created_at,
     updatedAt: panel.updated_at,
   };
@@ -62,6 +67,7 @@ export function createPanelRoutes(
   db: Database,
   panelStateStore: PanelStateStore,
   eventBus: EventEmitter,
+  panelSandbox?: Sandbox,
 ): Router {
   const router = Router();
 
@@ -131,7 +137,7 @@ export function createPanelRoutes(
     }
   });
 
-  /** PUT /api/panels/:id — update panel name and/or uiSource */
+  /** PUT /api/panels/:id — update panel name, uiSource, and/or scriptSource */
   router.put("/:id", (req, res, next) => {
     try {
       const id = req.params.id;
@@ -141,11 +147,13 @@ export function createPanelRoutes(
         throw new NotFoundError("Panel not found");
       }
 
-      const { name, uiSource } = req.body;
+      const { name, uiSource, scriptSource } = req.body;
       const now = Date.now();
 
       let uiSourceValue: string | null = existing.ui_source;
       let compiledUiValue: string | null = existing.compiled_ui;
+      let scriptSourceValue: string | null = existing.script_source;
+      let compiledJsValue: string | null = existing.compiled_js;
 
       if (typeof uiSource === "string") {
         // Transpile the new source
@@ -162,14 +170,68 @@ export function createPanelRoutes(
         compiledUiValue = uiResult.js;
       }
 
+      if (typeof scriptSource === "string") {
+        if (scriptSource.trim() === "") {
+          // Clear the script
+          scriptSourceValue = null;
+          compiledJsValue = null;
+        } else {
+          const scriptResult = transpile(scriptSource);
+          if (!scriptResult.success) {
+            res.status(400).json({
+              error: "Script compilation failed",
+              statusCode: 400,
+              details: scriptResult.errors,
+            });
+            return;
+          }
+          scriptSourceValue = scriptSource;
+          compiledJsValue = scriptResult.js;
+        }
+      }
+
       db.run(
-        `UPDATE custom_panels SET name = ?, ui_source = ?, compiled_ui = ?, updated_at = ? WHERE id = ?`,
-        [name || existing.name, uiSourceValue, compiledUiValue, now, id],
+        `UPDATE custom_panels SET name = ?, ui_source = ?, compiled_ui = ?, script_source = ?, compiled_js = ?, updated_at = ? WHERE id = ?`,
+        [name || existing.name, uiSourceValue, compiledUiValue, scriptSourceValue, compiledJsValue, now, id],
       );
       persistDatabase();
 
       const updated = queryPanelById(db, id)!;
       res.json(formatPanel(updated));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  /** POST /api/panels/:id/run — execute the panel's backend script on demand */
+  router.post("/:id/run", async (req, res, next) => {
+    try {
+      const id = req.params.id;
+      const panel = queryPanelById(db, id);
+
+      if (!panel) {
+        throw new NotFoundError("Panel not found");
+      }
+
+      if (!panel.compiled_js) {
+        res.status(400).json({ error: "Panel has no compiled script" });
+        return;
+      }
+
+      if (!panelSandbox) {
+        res.status(500).json({ error: "Sandbox not available" });
+        return;
+      }
+
+      const context = {
+        topic: "panel/run",
+        deviceId: id,
+        state: {},
+        timestamp: Date.now(),
+      };
+
+      await panelSandbox.execute(panel.compiled_js, context, id);
+      res.json({ success: true });
     } catch (err) {
       next(err);
     }
