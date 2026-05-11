@@ -169,6 +169,38 @@ automation({
 
 Named functions become labeled nodes in the flow diagram. The `state.set()` call in the action is what pushes `"mode"` to the UI tab.
 
+### Logic Tab — Free-form code
+
+The `automation()` helper is optional. You can write completely free-form code using the sandbox globals directly — no structure imposed:
+
+```javascript
+// React to a temperature sensor event
+const temp = context.state.value;
+const room = context.topic.split("/")[1];
+
+// Fetch weather data from an external API
+const weather = await http.get("https://api.weather.com/current");
+const forecast = JSON.parse(weather.body);
+
+// Control devices based on conditions
+if (temp > 28 && forecast.willRain === false) {
+  const fans = devices.filter(d => d.type === "plug" && d.name.includes("fan"));
+  for (const fan of fans) {
+    devices.action(fan.id, "on");
+  }
+  mqtt.publish("alerts/heat", JSON.stringify({ room, temp }));
+  log.warn(`High temp in ${room}: ${temp}°C — fans activated`);
+}
+
+// Push data to the UI component via the state store
+state.set("currentTemp", temp);
+state.set("room", room);
+state.set("fansActive", temp > 28);
+state.set("lastUpdate", Date.now());
+```
+
+Free-form scripts have full access to the same globals (`devices`, `mqtt`, `http`, `state`, `log`, `services`, `context`) — you just don't get the visual flow diagram. Use whichever style fits: the structured helper for simple condition→action flows, free-form for complex logic with API calls, loops, and data aggregation.
+
 ### UI Tab — Custom React Components
 
 ```tsx
