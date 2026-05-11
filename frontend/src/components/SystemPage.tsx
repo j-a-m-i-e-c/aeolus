@@ -1,6 +1,6 @@
 // frontend/src/components/SystemPage.tsx — Host system diagnostics
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Cpu, HardDrive, MemoryStick, Thermometer, Wifi, Server, RefreshCw, ScrollText, ChevronDown, Download, Loader2, Activity, Zap, Power, RotateCcw, Trash2 } from "lucide-react";
 import { useDeviceStore } from "../store/device-store";
 import { fetchHealth } from "../lib/api-client";
@@ -265,35 +265,7 @@ export function SystemPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* CPU */}
-        <div className="bg-surface border border-[#2A3441] rounded-xl p-4">
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-2">
-              <Cpu size={14} className="text-primary" />
-              <span className="text-sm font-semibold text-[#9AA6B2] uppercase tracking-wider">CPU</span>
-            </div>
-            <span className="text-[10px] text-[#6B7785] font-mono">{info.cpuCores} cores</span>
-          </div>
-          <div className="text-xs text-[#E6EDF3] font-mono mb-4">{info.cpuModel}</div>
-          <div className="space-y-3">
-            {([
-              { label: "1m", value: info.loadAvg["1m"] },
-              { label: "5m", value: info.loadAvg["5m"] },
-              { label: "15m", value: info.loadAvg["15m"] },
-            ] as const).map(({ label, value }) => {
-              const percent = Math.min((value / info.cpuCores) * 100, 100);
-              const color = percent > 85 ? "#EF4444" : percent > 60 ? "#F59E0B" : "#3BA4FF";
-              return (
-                <div key={label}>
-                  <div className="flex items-center justify-between text-xs mb-1">
-                    <span className="text-[#6B7785]">{label} load</span>
-                    <span className="font-mono font-semibold" style={{ color }}>{Math.round(percent)}%</span>
-                  </div>
-                  <UsageBar percent={percent} color={color} />
-                </div>
-              );
-            })}
-          </div>
-        </div>
+        <CpuChart info={info} />
 
         {/* Temperature */}
         <div className="bg-surface border border-[#2A3441] rounded-xl p-4">
@@ -435,6 +407,148 @@ export function SystemPage() {
 
       {/* Application Logs */}
       <LogViewer />
+    </div>
+  );
+}
+
+
+// ---------------------------------------------------------------------------
+// CPU Line Chart
+// ---------------------------------------------------------------------------
+
+function CpuChart({ info }: { info: SystemInfo }) {
+  const cpuHistory = useRef<Array<{ time: number; load: number }>>([]);
+  const [, forceRender] = useState(0);
+
+  useEffect(() => {
+    const load1m = Math.min((info.loadAvg["1m"] / info.cpuCores) * 100, 100);
+    cpuHistory.current.push({ time: Date.now(), load: load1m });
+    // Keep last 20 data points (10 minutes at 30s intervals)
+    if (cpuHistory.current.length > 20) {
+      cpuHistory.current = cpuHistory.current.slice(-20);
+    }
+    forceRender((n) => n + 1);
+  }, [info]);
+
+  const history = cpuHistory.current;
+  const currentLoad = history.length > 0 ? history[history.length - 1].load : 0;
+  const load5m = Math.min((info.loadAvg["5m"] / info.cpuCores) * 100, 100);
+  const load15m = Math.min((info.loadAvg["15m"] / info.cpuCores) * 100, 100);
+
+  // Chart dimensions
+  const chartWidth = 240;
+  const chartHeight = 140;
+  const padX = 0;
+  const padY = 4;
+
+  // Build polyline points
+  const points = history.map((entry, i) => {
+    const x = padX + (history.length > 1 ? (i / (history.length - 1)) * (chartWidth - padX * 2) : (chartWidth - padX * 2) / 2);
+    const y = padY + (chartHeight - padY * 2) - (entry.load / 100) * (chartHeight - padY * 2);
+    return { x, y };
+  });
+
+  const polylineStr = points.map((p) => `${p.x},${p.y}`).join(" ");
+
+  // Area fill path (closed polygon under the line)
+  const areaPath = points.length > 0
+    ? `M ${points[0].x},${chartHeight - padY} ` +
+      points.map((p) => `L ${p.x},${p.y}`).join(" ") +
+      ` L ${points[points.length - 1].x},${chartHeight - padY} Z`
+    : "";
+
+  // Grid lines at 25%, 50%, 75%
+  const gridLines = [25, 50, 75].map((pct) => ({
+    pct,
+    y: padY + (chartHeight - padY * 2) - (pct / 100) * (chartHeight - padY * 2),
+  }));
+
+  return (
+    <div className="bg-surface border border-[#2A3441] rounded-xl p-4">
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <Cpu size={14} className="text-primary" />
+          <span className="text-sm font-semibold text-[#9AA6B2] uppercase tracking-wider">CPU</span>
+        </div>
+        <span className="text-[10px] text-[#6B7785] font-mono">{info.cpuCores} cores</span>
+      </div>
+      <div className="text-xs text-[#E6EDF3] font-mono mb-4">{info.cpuModel}</div>
+
+      <div className="flex items-start gap-4">
+        {/* SVG Chart */}
+        <div className="flex-1 min-w-0">
+          <svg
+            viewBox={`0 0 ${chartWidth} ${chartHeight}`}
+            className="w-full"
+            style={{ height: "140px" }}
+            preserveAspectRatio="none"
+          >
+            <defs>
+              <linearGradient id="cpuFillGradient" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#3BA4FF" stopOpacity="0.3" />
+                <stop offset="100%" stopColor="#3BA4FF" stopOpacity="0" />
+              </linearGradient>
+            </defs>
+
+            {/* Grid lines */}
+            {gridLines.map(({ pct, y }) => (
+              <line
+                key={pct}
+                x1={padX}
+                y1={y}
+                x2={chartWidth - padX}
+                y2={y}
+                stroke="#2A3441"
+                strokeWidth="0.5"
+                strokeDasharray="3,3"
+              />
+            ))}
+
+            {/* Area fill */}
+            {points.length > 1 && (
+              <path d={areaPath} fill="url(#cpuFillGradient)" />
+            )}
+
+            {/* Line */}
+            {points.length > 1 && (
+              <polyline
+                points={polylineStr}
+                fill="none"
+                stroke="#3BA4FF"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            )}
+
+            {/* Current point dot */}
+            {points.length > 0 && (
+              <circle
+                cx={points[points.length - 1].x}
+                cy={points[points.length - 1].y}
+                r="3"
+                fill="#3BA4FF"
+              />
+            )}
+          </svg>
+        </div>
+
+        {/* Current values */}
+        <div className="shrink-0 text-right flex flex-col justify-between" style={{ height: "140px" }}>
+          <div>
+            <div className="text-2xl font-bold text-[#E6EDF3]">{Math.round(currentLoad)}%</div>
+            <div className="text-[10px] text-[#6B7785] uppercase">1m</div>
+          </div>
+          <div>
+            <div className="text-sm font-semibold text-[#9AA6B2]">{Math.round(load5m)}%</div>
+            <div className="text-[10px] text-[#6B7785] uppercase">5m</div>
+          </div>
+          <div>
+            <div className="text-sm font-semibold text-[#9AA6B2]">{Math.round(load15m)}%</div>
+            <div className="text-[10px] text-[#6B7785] uppercase">15m</div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
