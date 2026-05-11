@@ -7,7 +7,8 @@ import { useNavigate, useLocation } from "react-router-dom";
 import * as icons from "lucide-react";
 import { Plus, Trash2, Wifi, WifiOff, Play, Square, GripVertical } from "lucide-react";
 import { useState, useEffect, useRef, useCallback } from "react";
-import { fetchSimulatorStatus, startSimulator, stopSimulator } from "../lib/api-client";
+import { fetchSimulatorStatus, startSimulator, stopSimulator, fetchHealth } from "../lib/api-client";
+import type { HealthStatus } from "../store/device-store";
 
 // ---------------------------------------------------------------------------
 // Dynamic Lucide icon helper
@@ -90,6 +91,20 @@ export function Sidebar() {
   useEffect(() => {
     fetchSimulatorStatus().then((s) => setSimRunning(s.running)).catch(() => {});
   }, []);
+
+  // Poll health status globally so MQTT indicator works on all tabs
+  const setHealth = useDeviceStore((s) => s.setHealth);
+  useEffect(() => {
+    const poll = async () => {
+      try {
+        const data = await fetchHealth() as unknown as HealthStatus;
+        setHealth(data);
+      } catch {}
+    };
+    poll();
+    const interval = setInterval(poll, 30_000);
+    return () => clearInterval(interval);
+  }, [setHealth]);
 
   // Focus add-tab input when form opens
   useEffect(() => {
