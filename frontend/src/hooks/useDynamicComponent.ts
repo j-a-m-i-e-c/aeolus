@@ -1,7 +1,6 @@
 // frontend/src/hooks/useDynamicComponent.ts — Dynamic loader for custom automation UI modules
 
 import { useState, useEffect, useRef, type ComponentType } from "react";
-import type { CustomComponentProps } from "../components/panes/custom/types";
 
 const API_URL =
   (import.meta as any).env?.VITE_API_URL ||
@@ -80,7 +79,7 @@ export function rewriteImports(source: string): string {
 }
 
 export interface DynamicComponentState {
-  Component: ComponentType<CustomComponentProps> | null;
+  Component: ComponentType<any> | null;
   loading: boolean;
   error: string | null;
 }
