@@ -32,35 +32,49 @@ export function isValidCron(expression: string): boolean {
   const parts = expression.trim().split(/\s+/);
   if (parts.length !== 5) return false;
 
-  // Each field pattern: number, *, */N, N-N, N,N,N, or combinations
-  const fieldPattern = /^(\*|(\d{1,2}(-\d{1,2})?(,\d{1,2}(-\d{1,2})?)*)(\/\d{1,2})?)$/;
+  // Each field can be: *, */N, N, N-N, N,N, or combinations with /N step
+  const fieldPattern = /^(\*|\d{1,2}(-\d{1,2})?(,(\d{1,2}(-\d{1,2})?))*)(\/(\ d{1,2}))?$/;
+
+  // More permissive pattern that handles all valid cron field formats
+  const validField = (field: string): boolean => {
+    // Simple patterns
+    if (field === "*") return true;
+    if (/^\*\/\d{1,2}$/.test(field)) return true; // */N
+    if (/^\d{1,2}$/.test(field)) return true; // N
+    if (/^\d{1,2}-\d{1,2}$/.test(field)) return true; // N-N
+    if (/^\d{1,2}-\d{1,2}\/\d{1,2}$/.test(field)) return true; // N-N/N
+    // Comma-separated values (each can be N or N-N)
+    if (/^(\d{1,2}(-\d{1,2})?)(,\d{1,2}(-\d{1,2})?)*$/.test(field)) return true;
+    return false;
+  };
 
   for (const part of parts) {
-    if (!fieldPattern.test(part)) return false;
+    if (!validField(part)) return false;
   }
 
   // Basic range validation
   const [minute, hour, dayOfMonth, month, dayOfWeek] = parts;
-  const getNumbers = (field: string): number[] => {
+  const getBaseNumber = (field: string): number[] => {
     const nums: number[] = [];
-    for (const segment of field.replace(/\*/, "0").split(",")) {
-      const base = segment.split("/")[0].split("-")[0];
-      if (base !== "*" && !isNaN(Number(base))) nums.push(Number(base));
+    // Extract all numbers from the field
+    const matches = field.match(/\d+/g);
+    if (matches) {
+      for (const m of matches) nums.push(Number(m));
     }
     return nums;
   };
 
-  const minuteNums = getNumbers(minute);
-  const hourNums = getNumbers(hour);
-  const domNums = getNumbers(dayOfMonth);
-  const monthNums = getNumbers(month);
-  const dowNums = getNumbers(dayOfWeek);
+  const minuteNums = getBaseNumber(minute);
+  const hourNums = getBaseNumber(hour);
+  const domNums = getBaseNumber(dayOfMonth);
+  const monthNums = getBaseNumber(month);
+  const dowNums = getBaseNumber(dayOfWeek);
 
-  if (minuteNums.some(n => n < 0 || n > 59)) return false;
-  if (hourNums.some(n => n < 0 || n > 23)) return false;
-  if (domNums.some(n => n < 0 || n > 31)) return false;
-  if (monthNums.some(n => n < 0 || n > 12)) return false;
-  if (dowNums.some(n => n < 0 || n > 7)) return false;
+  if (minuteNums.some(n => n > 59)) return false;
+  if (hourNums.some(n => n > 23)) return false;
+  if (domNums.some(n => n > 31)) return false;
+  if (monthNums.some(n => n > 12)) return false;
+  if (dowNums.some(n => n > 7)) return false;
 
   return true;
 }
