@@ -1,7 +1,7 @@
 // frontend/src/components/TriggerSelector.tsx — Inline trigger type selector
 
-import { useState, useEffect } from "react";
-import { CRON_PRESETS, isValidCron, describeCron } from "../lib/cron-utils";
+import { useState, useEffect, useCallback } from "react";
+import { CRON_PRESETS, CUSTOM_PICKER_OPTION, CUSTOM_CRON_OPTION, isValidCron, describeCron } from "../lib/cron-utils";
 
 type TriggerType = "mqtt" | "cron" | "none";
 
@@ -21,7 +21,218 @@ const TRIGGER_OPTIONS: { value: TriggerType; label: string }[] = [
   { value: "none", label: "None" },
 ];
 
-const CUSTOM_OPTION = "custom";
+type PickerMode = "interval" | "daily";
+type IntervalUnit = "minutes" | "hours";
+
+const DAYS = [
+  { label: "Mon", value: 1 },
+  { label: "Tue", value: 2 },
+  { label: "Wed", value: 3 },
+  { label: "Thu", value: 4 },
+  { label: "Fri", value: 5 },
+  { label: "Sat", value: 6 },
+  { label: "Sun", value: 0 },
+];
+
+function generatePickerCron(
+  mode: PickerMode,
+  intervalValue: number,
+  intervalUnit: IntervalUnit,
+  time: string,
+  selectedDays: number[]
+): string {
+  if (mode === "interval") {
+    if (intervalUnit === "minutes") {
+      return `*/${intervalValue} * * * *`;
+    }
+    return `0 */${intervalValue} * * *`;
+  }
+
+  // Daily mode
+  const [hours, minutes] = time.split(":").map(Number);
+  const h = isNaN(hours) ? 0 : hours;
+  const m = isNaN(minutes) ? 0 : minutes;
+
+  if (selectedDays.length === 0 || selectedDays.length === 7) {
+    return `${m} ${h} * * *`;
+  }
+
+  const dow = [...selectedDays].sort((a, b) => a - b).join(",");
+  return `${m} ${h} * * ${dow}`;
+}
+
+/** Visual schedule builder for non-technical users */
+function CronPicker({ cronExpression, onCronExpressionChange }: {
+  cronExpression: string;
+  onCronExpressionChange: (expr: string) => void;
+}) {
+  const [mode, setMode] = useState<PickerMode>("interval");
+  const [intervalValue, setIntervalValue] = useState(5);
+  const [intervalUnit, setIntervalUnit] = useState<IntervalUnit>("minutes");
+  const [time, setTime] = useState("09:00");
+  const [selectedDays, setSelectedDays] = useState<number[]>([1, 2, 3, 4, 5, 6, 0]);
+
+  // Generate and emit cron expression when picker state changes
+  const emitCron = useCallback(() => {
+    const expr = generatePickerCron(mode, intervalValue, intervalUnit, time, selectedDays);
+    onCronExpressionChange(expr);
+  }, [mode, intervalValue, intervalUnit, time, selectedDays, onCronExpressionChange]);
+
+  useEffect(() => {
+    emitCron();
+  }, [emitCron]);
+
+  const toggleDay = (day: number) => {
+    setSelectedDays((prev) =>
+      prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day]
+    );
+  };
+
+  const selectAllDays = () => setSelectedDays([1, 2, 3, 4, 5, 6, 0]);
+  const selectWeekdays = () => setSelectedDays([1, 2, 3, 4, 5]);
+  const selectWeekends = () => setSelectedDays([6, 0]);
+
+  const cronValid = cronExpression.trim() !== "" && isValidCron(cronExpression);
+
+  return (
+    <div className="space-y-3">
+      {/* Mode selector */}
+      <div className="flex items-center gap-1 p-0.5 rounded-md bg-[#0B0F14] border border-[#2A3441] w-fit">
+        <button
+          type="button"
+          onClick={() => setMode("interval")}
+          className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
+            mode === "interval"
+              ? "bg-primary/20 text-primary border border-primary/30"
+              : "text-[#6B7785] hover:text-[#9AA6B2] border border-transparent"
+          }`}
+        >
+          Interval
+        </button>
+        <button
+          type="button"
+          onClick={() => setMode("daily")}
+          className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
+            mode === "daily"
+              ? "bg-primary/20 text-primary border border-primary/30"
+              : "text-[#6B7785] hover:text-[#9AA6B2] border border-transparent"
+          }`}
+        >
+          Daily
+        </button>
+      </div>
+
+      {/* Interval mode */}
+      {mode === "interval" && (
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-[#9AA6B2]">Run every</span>
+          <input
+            type="number"
+            min={1}
+            max={intervalUnit === "minutes" ? 59 : 23}
+            value={intervalValue}
+            onChange={(e) => {
+              const v = Math.max(1, Math.min(
+                intervalUnit === "minutes" ? 59 : 23,
+                Number(e.target.value) || 1
+              ));
+              setIntervalValue(v);
+            }}
+            className="w-16 px-2 py-1 text-sm rounded-md bg-[#0B0F14] border border-[#2A3441] text-[#E6EDF3] focus:outline-none focus:border-primary transition-colors text-center"
+          />
+          <select
+            value={intervalUnit}
+            onChange={(e) => {
+              const unit = e.target.value as IntervalUnit;
+              setIntervalUnit(unit);
+              // Clamp value to new max
+              if (unit === "hours" && intervalValue > 23) {
+                setIntervalValue(23);
+              }
+            }}
+            className="px-2 py-1 text-sm rounded-md bg-[#0B0F14] border border-[#2A3441] text-[#E6EDF3] focus:outline-none focus:border-primary transition-colors"
+          >
+            <option value="minutes">minutes</option>
+            <option value="hours">hours</option>
+          </select>
+        </div>
+      )}
+
+      {/* Daily mode */}
+      {mode === "daily" && (
+        <div className="space-y-2">
+          {/* Time input */}
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-[#9AA6B2]">At</span>
+            <input
+              type="time"
+              value={time}
+              onChange={(e) => setTime(e.target.value)}
+              className="px-2 py-1 text-sm rounded-md bg-[#0B0F14] border border-[#2A3441] text-[#E6EDF3] focus:outline-none focus:border-primary transition-colors"
+            />
+          </div>
+
+          {/* Day toggles */}
+          <div className="flex flex-wrap gap-1">
+            {DAYS.map((day) => (
+              <button
+                key={day.value}
+                type="button"
+                onClick={() => toggleDay(day.value)}
+                className={`px-2 py-1 text-xs font-medium rounded border transition-colors ${
+                  selectedDays.includes(day.value)
+                    ? "bg-primary/20 text-primary border-primary/30"
+                    : "bg-[#1A2330] text-[#6B7785] border-[#2A3441] hover:text-[#9AA6B2]"
+                }`}
+              >
+                {day.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Quick-select buttons */}
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={selectAllDays}
+              className="text-[11px] text-[#6B7785] hover:text-[#9AA6B2] transition-colors"
+            >
+              Every day
+            </button>
+            <button
+              type="button"
+              onClick={selectWeekdays}
+              className="text-[11px] text-[#6B7785] hover:text-[#9AA6B2] transition-colors"
+            >
+              Weekdays
+            </button>
+            <button
+              type="button"
+              onClick={selectWeekends}
+              className="text-[11px] text-[#6B7785] hover:text-[#9AA6B2] transition-colors"
+            >
+              Weekends
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Cron preview */}
+      {cronExpression.trim() !== "" && (
+        <div className="space-y-0.5 pt-1 border-t border-[#2A3441]/50">
+          <div className="text-[11px] text-[#6B7785] font-mono">
+            Preview: {cronExpression}
+          </div>
+          {cronValid && (
+            <div className="text-[11px] text-[#9AA6B2]">
+              {describeCron(cronExpression)}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function TriggerSelector({
   triggerType,
@@ -32,16 +243,20 @@ export function TriggerSelector({
   onCronExpressionChange,
   onValidityChange,
 }: TriggerSelectorProps) {
-  // Track which preset is selected (or "custom" for free-form)
+  // Track which preset is selected (or custom picker / custom cron)
   const [selectedPreset, setSelectedPreset] = useState<string>(() => {
     const match = CRON_PRESETS.find((p) => p.expression === cronExpression);
-    return match ? match.expression : CUSTOM_OPTION;
+    return match ? match.expression : CUSTOM_CRON_OPTION;
   });
 
   // Sync preset selection when cronExpression changes externally (e.g. edit mode)
   useEffect(() => {
     const match = CRON_PRESETS.find((p) => p.expression === cronExpression);
-    setSelectedPreset(match ? match.expression : CUSTOM_OPTION);
+    if (match) {
+      setSelectedPreset(match.expression);
+    } else if (selectedPreset !== CUSTOM_PICKER_OPTION && selectedPreset !== CUSTOM_CRON_OPTION) {
+      setSelectedPreset(CUSTOM_CRON_OPTION);
+    }
   }, [cronExpression]);
 
   // Validate cron expression and report validity
@@ -56,9 +271,10 @@ export function TriggerSelector({
 
   const handlePresetChange = (value: string) => {
     setSelectedPreset(value);
-    if (value !== CUSTOM_OPTION) {
+    if (value !== CUSTOM_CRON_OPTION && value !== CUSTOM_PICKER_OPTION) {
       onCronExpressionChange(value);
     }
+    // When switching to picker, it will emit its own cron via the CronPicker component
   };
 
   const cronValid = cronExpression.trim() === "" || isValidCron(cronExpression);
@@ -109,11 +325,20 @@ export function TriggerSelector({
                 {preset.label}
               </option>
             ))}
-            <option value={CUSTOM_OPTION}>Custom</option>
+            <option value={CUSTOM_PICKER_OPTION}>Custom Picker</option>
+            <option value={CUSTOM_CRON_OPTION}>Custom Cron</option>
           </select>
 
-          {/* Cron expression input — editable only in custom mode */}
-          {selectedPreset === CUSTOM_OPTION && (
+          {/* Custom Picker — visual schedule builder */}
+          {selectedPreset === CUSTOM_PICKER_OPTION && (
+            <CronPicker
+              cronExpression={cronExpression}
+              onCronExpressionChange={onCronExpressionChange}
+            />
+          )}
+
+          {/* Custom Cron — raw text input */}
+          {selectedPreset === CUSTOM_CRON_OPTION && (
             <input
               type="text"
               value={cronExpression}
@@ -134,8 +359,8 @@ export function TriggerSelector({
             </div>
           )}
 
-          {/* Human-readable description */}
-          {cronExpression.trim() !== "" && cronValid && (
+          {/* Human-readable description (only for non-picker modes, picker shows its own) */}
+          {selectedPreset !== CUSTOM_PICKER_OPTION && cronExpression.trim() !== "" && cronValid && (
             <div className="text-[11px] text-[#9AA6B2]">
               {describeCron(cronExpression)}
             </div>

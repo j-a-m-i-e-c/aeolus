@@ -5,6 +5,12 @@ export interface CronPreset {
   expression: string;
 }
 
+/** Special value for the custom picker option in the dropdown */
+export const CUSTOM_PICKER_OPTION = "__picker__";
+
+/** Special value for the raw cron input option in the dropdown */
+export const CUSTOM_CRON_OPTION = "custom";
+
 /** Predefined cron schedule presets for the trigger selector */
 export const CRON_PRESETS: CronPreset[] = [
   { label: "Every 1 minute", expression: "* * * * *" },
@@ -99,6 +105,22 @@ export function describeCron(expression: string): string {
     const h = hour.padStart(2, "0");
     const m = minute.padStart(2, "0");
     return `Runs at ${h}:${m} on weekdays`;
+  }
+
+  // Weekends at specific time
+  if (!minute.includes("*") && !hour.includes("*") && dayOfMonth === "*" && month === "*" && dayOfWeek === "0,6") {
+    const h = hour.padStart(2, "0");
+    const m = minute.padStart(2, "0");
+    return `Runs at ${h}:${m} on weekends`;
+  }
+
+  // Specific days at specific time
+  if (!minute.includes("*") && !hour.includes("*") && dayOfMonth === "*" && month === "*" && dayOfWeek !== "*") {
+    const h = hour.padStart(2, "0");
+    const m = minute.padStart(2, "0");
+    const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const days = dayOfWeek.split(",").map((d) => dayNames[Number(d)] || d).join(", ");
+    return `Runs at ${h}:${m} on ${days}`;
   }
 
   return "Runs on custom schedule";
