@@ -201,6 +201,7 @@ async function main(): Promise<void> {
     await serviceManager.disposeAll();
     await connectorManager.disposeAll();
     await mqttService.disconnect();
+    engine.dispose();
     persistDatabase();
     server.close();
     process.exit(0);

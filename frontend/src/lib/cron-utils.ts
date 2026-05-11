@@ -1,0 +1,105 @@
+// frontend/src/lib/cron-utils.ts — Client-side cron expression utilities
+
+export interface CronPreset {
+  label: string;
+  expression: string;
+}
+
+/** Predefined cron schedule presets for the trigger selector */
+export const CRON_PRESETS: CronPreset[] = [
+  { label: "Every 1 minute", expression: "* * * * *" },
+  { label: "Every 5 minutes", expression: "*/5 * * * *" },
+  { label: "Every 15 minutes", expression: "*/15 * * * *" },
+  { label: "Every 30 minutes", expression: "*/30 * * * *" },
+  { label: "Every hour", expression: "0 * * * *" },
+  { label: "Every 6 hours", expression: "0 */6 * * *" },
+  { label: "Every 12 hours", expression: "0 */12 * * *" },
+  { label: "Daily at midnight", expression: "0 0 * * *" },
+];
+
+/**
+ * Validate a cron expression (five-field standard syntax).
+ * Uses regex-based validation on the frontend to avoid importing node-cron.
+ */
+export function isValidCron(expression: string): boolean {
+  if (!expression || typeof expression !== "string") return false;
+  const parts = expression.trim().split(/\s+/);
+  if (parts.length !== 5) return false;
+
+  // Each field pattern: number, *, */N, N-N, N,N,N, or combinations
+  const fieldPattern = /^(\*|(\d{1,2}(-\d{1,2})?(,\d{1,2}(-\d{1,2})?)*)(\/\d{1,2})?)$/;
+
+  for (const part of parts) {
+    if (!fieldPattern.test(part)) return false;
+  }
+
+  // Basic range validation
+  const [minute, hour, dayOfMonth, month, dayOfWeek] = parts;
+  const getNumbers = (field: string): number[] => {
+    const nums: number[] = [];
+    for (const segment of field.replace(/\*/, "0").split(",")) {
+      const base = segment.split("/")[0].split("-")[0];
+      if (base !== "*" && !isNaN(Number(base))) nums.push(Number(base));
+    }
+    return nums;
+  };
+
+  const minuteNums = getNumbers(minute);
+  const hourNums = getNumbers(hour);
+  const domNums = getNumbers(dayOfMonth);
+  const monthNums = getNumbers(month);
+  const dowNums = getNumbers(dayOfWeek);
+
+  if (minuteNums.some(n => n < 0 || n > 59)) return false;
+  if (hourNums.some(n => n < 0 || n > 23)) return false;
+  if (domNums.some(n => n < 0 || n > 31)) return false;
+  if (monthNums.some(n => n < 0 || n > 12)) return false;
+  if (dowNums.some(n => n < 0 || n > 7)) return false;
+
+  return true;
+}
+
+/** Convert a cron expression to a human-readable description */
+export function describeCron(expression: string): string {
+  if (!expression) return "";
+  const parts = expression.trim().split(/\s+/);
+  if (parts.length !== 5) return "Runs on custom schedule";
+
+  const [minute, hour, dayOfMonth, month, dayOfWeek] = parts;
+
+  // Every minute
+  if (expression.trim() === "* * * * *") return "Runs every minute";
+
+  // Every N minutes
+  if (minute.startsWith("*/") && hour === "*" && dayOfMonth === "*" && month === "*" && dayOfWeek === "*") {
+    const n = minute.slice(2);
+    return `Runs every ${n} minute${n === "1" ? "" : "s"}`;
+  }
+
+  // Every N hours (at minute 0)
+  if (minute === "0" && hour.startsWith("*/") && dayOfMonth === "*" && month === "*" && dayOfWeek === "*") {
+    const n = hour.slice(2);
+    return `Runs every ${n} hour${n === "1" ? "" : "s"}`;
+  }
+
+  // Every hour at specific minute
+  if (!minute.includes("*") && !minute.includes("/") && hour === "*" && dayOfMonth === "*" && month === "*" && dayOfWeek === "*") {
+    return `Runs every hour at minute ${minute}`;
+  }
+
+  // Daily at specific time
+  if (!minute.includes("*") && !minute.includes("/") && !hour.includes("*") && !hour.includes("/") && dayOfMonth === "*" && month === "*" && dayOfWeek === "*") {
+    const h = hour.padStart(2, "0");
+    const m = minute.padStart(2, "0");
+    return `Runs daily at ${h}:${m}`;
+  }
+
+  // Weekdays at specific time
+  if (!minute.includes("*") && !hour.includes("*") && dayOfMonth === "*" && month === "*" && dayOfWeek === "1-5") {
+    const h = hour.padStart(2, "0");
+    const m = minute.padStart(2, "0");
+    return `Runs at ${h}:${m} on weekdays`;
+  }
+
+  return "Runs on custom schedule";
+}

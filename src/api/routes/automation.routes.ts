@@ -13,6 +13,7 @@ import type { ConditionRegistry } from "../../automations/condition-registry.js"
 import { transpile, transpileUi } from "../../automations/transpiler.js";
 import { extractStructuredMetadata } from "../../automations/structured-metadata-extractor.js";
 import { buildSnippetCatalog } from "../../automations/snippet-catalog.js";
+import { isValidCron } from "../../automations/cron-utils.js";
 import type { ConnectorRegistry } from "../../connectors/connector-registry.js";
 import { BadRequestError, NotFoundError } from "../middleware/error-handler.js";
 import { persistDatabase } from "../../db/database.js";
@@ -35,6 +36,8 @@ interface StoredRule {
   structured_metadata: string | null;
   ui_source: string | null;
   compiled_ui: string | null;
+  trigger_type: string | null;
+  cron_expression: string | null;
   enabled: number;
   created_at: number;
 }
@@ -158,6 +161,8 @@ export function createAutomationRoutes(
         const row: Record<string, unknown> = {};
         cols.forEach((col: string, i: number) => { row[col] = values[i]; });
         const ruleType = (row.rule_type as string) || "form";
+        const triggerType = (row.trigger_type as string) || "mqtt";
+        const cronExpression = row.cron_expression as string | null;
         const entry: Record<string, unknown> = {
           id: row.id,
           name: row.name,
@@ -166,6 +171,8 @@ export function createAutomationRoutes(
           source: "ui",
           ruleType,
           enabled: row.enabled === 1,
+          triggerType,
+          cronExpression: cronExpression || null,
         };
         if (ruleType === "form") {
           entry.actionType = row.action_type;
@@ -193,14 +200,40 @@ export function createAutomationRoutes(
   /** POST /api/automations — create a new UI rule (form or script) */
   router.post("/", (req, res, next) => {
     try {
-      const { name, triggerTopic, ruleType, conditionType, conditionValue, actionType, actionTarget, actionParams, scriptSource, uiSource } = req.body;
+      const { name, triggerTopic, ruleType, conditionType, conditionValue, actionType, actionTarget, actionParams, scriptSource, uiSource, triggerType: rawTriggerType, cronExpression } = req.body;
 
       if (!name) {
         throw new BadRequestError("name is required");
       }
 
-      // triggerTopic is optional — empty means manual-only automation
-      const effectiveTriggerTopic = (triggerTopic && typeof triggerTopic === "string") ? triggerTopic.trim() : "";
+      // Determine trigger type (default to "mqtt" for backward compat)
+      const triggerType = rawTriggerType || "mqtt";
+      if (!["mqtt", "cron", "none"].includes(triggerType)) {
+        throw new BadRequestError("triggerType must be 'mqtt', 'cron', or 'none'");
+      }
+
+      // Validate cron expression if trigger type is "cron"
+      if (triggerType === "cron") {
+        if (!cronExpression || typeof cronExpression !== "string" || !cronExpression.trim()) {
+          throw new BadRequestError("cronExpression is required when triggerType is 'cron'");
+        }
+        if (!isValidCron(cronExpression)) {
+          throw new BadRequestError("Invalid cron expression");
+        }
+      }
+
+      // Determine effective trigger topic and cron expression for storage
+      let effectiveTriggerTopic: string;
+      let effectiveCronExpression: string | null;
+
+      if (triggerType === "cron" || triggerType === "none") {
+        effectiveTriggerTopic = "";
+        effectiveCronExpression = triggerType === "cron" ? cronExpression.trim() : null;
+      } else {
+        // mqtt — use provided triggerTopic
+        effectiveTriggerTopic = (triggerTopic && typeof triggerTopic === "string") ? triggerTopic.trim() : "";
+        effectiveCronExpression = null;
+      }
 
       const id = randomUUID();
       const now = Date.now();
@@ -240,9 +273,9 @@ export function createAutomationRoutes(
         const structuredJson = structured ? JSON.stringify(structured) : null;
 
         db.run(
-          `INSERT INTO automation_rules (id, name, trigger_topic, condition_type, condition_value, action_type, action_target, action_params, rule_type, script_source, compiled_js, structured_metadata, ui_source, compiled_ui, enabled, created_at)
-           VALUES (?, ?, ?, ?, ?, 'script', '', '{}', 'script', ?, ?, ?, ?, ?, 1, ?)`,
-          [id, name, effectiveTriggerTopic, conditionType || null, conditionValue || null, scriptSource, result.js, structuredJson, uiSourceValue, compiledUiValue, now]
+          `INSERT INTO automation_rules (id, name, trigger_topic, condition_type, condition_value, action_type, action_target, action_params, rule_type, script_source, compiled_js, structured_metadata, ui_source, compiled_ui, trigger_type, cron_expression, enabled, created_at)
+           VALUES (?, ?, ?, ?, ?, 'script', '', '{}', 'script', ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
+          [id, name, effectiveTriggerTopic, conditionType || null, conditionValue || null, scriptSource, result.js, structuredJson, uiSourceValue, compiledUiValue, triggerType, effectiveCronExpression, now]
         );
         persistDatabase();
 
@@ -252,6 +285,7 @@ export function createAutomationRoutes(
           action_type: "script", action_target: "", action_params: "{}",
           rule_type: "script", script_source: scriptSource, compiled_js: result.js,
           structured_metadata: structuredJson, ui_source: uiSourceValue, compiled_ui: compiledUiValue,
+          trigger_type: triggerType, cron_expression: effectiveCronExpression,
           enabled: 1, created_at: now,
         }, conditionRegistry);
 
@@ -264,9 +298,9 @@ export function createAutomationRoutes(
         }
 
         db.run(
-          `INSERT INTO automation_rules (id, name, trigger_topic, condition_type, condition_value, action_type, action_target, action_params, rule_type, ui_source, compiled_ui, enabled, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'form', ?, ?, 1, ?)`,
-          [id, name, effectiveTriggerTopic, conditionType || null, conditionValue || null, actionType, actionTarget, JSON.stringify(actionParams || {}), uiSourceValue, compiledUiValue, now]
+          `INSERT INTO automation_rules (id, name, trigger_topic, condition_type, condition_value, action_type, action_target, action_params, rule_type, ui_source, compiled_ui, trigger_type, cron_expression, enabled, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'form', ?, ?, ?, ?, 1, ?)`,
+          [id, name, effectiveTriggerTopic, conditionType || null, conditionValue || null, actionType, actionTarget, JSON.stringify(actionParams || {}), uiSourceValue, compiledUiValue, triggerType, effectiveCronExpression, now]
         );
         persistDatabase();
 
@@ -277,6 +311,7 @@ export function createAutomationRoutes(
           action_params: JSON.stringify(actionParams || {}),
           rule_type: "form", script_source: null, compiled_js: null,
           structured_metadata: null, ui_source: uiSourceValue, compiled_ui: compiledUiValue,
+          trigger_type: triggerType, cron_expression: effectiveCronExpression,
           enabled: 1, created_at: now,
         }, conditionRegistry);
 
@@ -299,7 +334,37 @@ export function createAutomationRoutes(
         throw new NotFoundError(`Automation rule ${id} not found`);
       }
 
-      const { name, triggerTopic, conditionType, conditionValue, actionType, actionTarget, actionParams, scriptSource, uiSource } = req.body;
+      const { name, triggerTopic, conditionType, conditionValue, actionType, actionTarget, actionParams, scriptSource, uiSource, triggerType: rawTriggerType, cronExpression } = req.body;
+
+      // Determine trigger type (keep existing if not provided)
+      const triggerType = rawTriggerType || existing.trigger_type || "mqtt";
+      if (!["mqtt", "cron", "none"].includes(triggerType)) {
+        throw new BadRequestError("triggerType must be 'mqtt', 'cron', or 'none'");
+      }
+
+      // Validate cron expression if trigger type is "cron"
+      if (triggerType === "cron") {
+        const effectiveExpr = cronExpression !== undefined ? cronExpression : existing.cron_expression;
+        if (!effectiveExpr || typeof effectiveExpr !== "string" || !effectiveExpr.trim()) {
+          throw new BadRequestError("cronExpression is required when triggerType is 'cron'");
+        }
+        if (!isValidCron(effectiveExpr)) {
+          throw new BadRequestError("Invalid cron expression");
+        }
+      }
+
+      // Determine effective trigger topic and cron expression for storage
+      let effectiveTriggerTopic: string;
+      let effectiveCronExpression: string | null;
+
+      if (triggerType === "cron" || triggerType === "none") {
+        effectiveTriggerTopic = "";
+        effectiveCronExpression = triggerType === "cron" ? (cronExpression !== undefined ? cronExpression.trim() : (existing.cron_expression || "")) : null;
+      } else {
+        // mqtt — use provided triggerTopic or keep existing
+        effectiveTriggerTopic = triggerTopic !== undefined ? triggerTopic : existing.trigger_topic;
+        effectiveCronExpression = null;
+      }
 
       if (existing.rule_type === "script") {
         // Script rule update — re-transpile
@@ -317,7 +382,7 @@ export function createAutomationRoutes(
           return;
         }
 
-        const structured = extractStructuredMetadata(result.js, triggerTopic !== undefined ? triggerTopic : existing.trigger_topic);
+        const structured = extractStructuredMetadata(result.js, effectiveTriggerTopic);
         const structuredJson = structured ? JSON.stringify(structured) : null;
 
         // Determine ui_source value: explicit empty/null means clear, non-empty means update, undefined means keep existing
@@ -350,8 +415,8 @@ export function createAutomationRoutes(
         }
 
         db.run(
-          `UPDATE automation_rules SET name = ?, trigger_topic = ?, condition_type = ?, condition_value = ?, script_source = ?, compiled_js = ?, structured_metadata = ?, ui_source = ?, compiled_ui = ? WHERE id = ?`,
-          [name || existing.name, triggerTopic !== undefined ? triggerTopic : existing.trigger_topic, conditionType ?? existing.condition_type, conditionValue ?? existing.condition_value, updatedSource, result.js, structuredJson, uiSourceValue, compiledUiValue, id]
+          `UPDATE automation_rules SET name = ?, trigger_topic = ?, condition_type = ?, condition_value = ?, script_source = ?, compiled_js = ?, structured_metadata = ?, ui_source = ?, compiled_ui = ?, trigger_type = ?, cron_expression = ? WHERE id = ?`,
+          [name || existing.name, effectiveTriggerTopic, conditionType ?? existing.condition_type, conditionValue ?? existing.condition_value, updatedSource, result.js, structuredJson, uiSourceValue, compiledUiValue, triggerType, effectiveCronExpression, id]
         );
         persistDatabase();
 
@@ -396,10 +461,10 @@ export function createAutomationRoutes(
         }
 
         db.run(
-          `UPDATE automation_rules SET name = ?, trigger_topic = ?, condition_type = ?, condition_value = ?, action_type = ?, action_target = ?, action_params = ?, ui_source = ?, compiled_ui = ? WHERE id = ?`,
+          `UPDATE automation_rules SET name = ?, trigger_topic = ?, condition_type = ?, condition_value = ?, action_type = ?, action_target = ?, action_params = ?, ui_source = ?, compiled_ui = ?, trigger_type = ?, cron_expression = ? WHERE id = ?`,
           [
             name || existing.name,
-            triggerTopic !== undefined ? triggerTopic : existing.trigger_topic,
+            effectiveTriggerTopic,
             conditionType ?? existing.condition_type,
             conditionValue ?? existing.condition_value,
             actionType || existing.action_type,
@@ -407,6 +472,8 @@ export function createAutomationRoutes(
             JSON.stringify(actionParams || JSON.parse(existing.action_params)),
             uiSourceValue,
             compiledUiValue,
+            triggerType,
+            effectiveCronExpression,
             id,
           ]
         );
@@ -578,6 +645,10 @@ function registerUiRule(
   // never match any incoming event topic (empty string won't match).
   const effectiveTopic = stored.trigger_topic || "";
 
+  // Determine trigger type and cron expression
+  const triggerType = (stored.trigger_type as "mqtt" | "cron" | "none") || "mqtt";
+  const cronExpression = stored.cron_expression || undefined;
+
   // Build condition via the registry (falls back to undefined if type/value are null or unregistered)
   const condition = conditionRegistry
     ? conditionRegistry.buildCondition(stored.condition_type, stored.condition_value)
@@ -600,6 +671,8 @@ function registerUiRule(
       condition,
       action,
       compiled_js: compiledJs,
+      triggerType,
+      cronExpression,
     };
     engine.register(rule as unknown as import("../../core/types.js").Rule);
   } else {
@@ -620,6 +693,8 @@ function registerUiRule(
       name: stored.name,
       condition,
       action,
+      triggerType,
+      cronExpression,
     });
   }
 }

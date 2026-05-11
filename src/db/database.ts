@@ -50,6 +50,8 @@ export function initSchema(database: Database): void {
   addColumn("structured_metadata", "TEXT DEFAULT NULL");
   addColumn("ui_source", "TEXT DEFAULT NULL");
   addColumn("compiled_ui", "TEXT DEFAULT NULL");
+  addColumn("trigger_type", "TEXT DEFAULT 'mqtt'");
+  addColumn("cron_expression", "TEXT DEFAULT NULL");
 
   // Backfill existing rows that lack a rule_type value
   database.run(`UPDATE automation_rules SET rule_type = 'form' WHERE rule_type IS NULL;`);

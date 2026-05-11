@@ -20,6 +20,7 @@ import { FlowDiagram } from "../FlowDiagram";
 import { ActivityFeed } from "../ActivityFeed";
 import { SnippetPicker } from "../SnippetPicker";
 import { CustomComponentBoundary } from "../CustomComponentBoundary";
+import { TriggerSelector } from "../TriggerSelector";
 import { useDynamicComponent } from "../../hooks/useDynamicComponent";
 import type { ExecutionEntry } from "./custom/types";
 import { useDashboardStore } from "../../store/dashboard-store";
@@ -41,6 +42,8 @@ interface AutomationRule {
   enabled: boolean;
   scriptSource?: string;
   uiSource?: string;
+  triggerType?: "mqtt" | "cron" | "none";
+  cronExpression?: string | null;
   structured?: {
     trigger: string;
     conditions: string[];
@@ -128,6 +131,9 @@ export function AutomationPane({ config, paneId }: Props) {
   // Setup / editing fields
   const [name, setName] = useState("");
   const [triggerTopic, setTriggerTopic] = useState("");
+  const [triggerType, setTriggerType] = useState<"mqtt" | "cron" | "none">("mqtt");
+  const [cronExpression, setCronExpression] = useState("");
+  const [triggerValid, setTriggerValid] = useState(true);
   const [scriptSource, setScriptSource] = useState(DEFAULT_SCRIPT);
   const [uiSource, setUiSource] = useState("");
   const [errors, setErrors] = useState<TranspileError[]>([]);
@@ -274,6 +280,8 @@ export function AutomationPane({ config, paneId }: Props) {
         body: JSON.stringify({
           name: name.trim(),
           triggerTopic: triggerTopic.trim() || undefined,
+          triggerType,
+          cronExpression: triggerType === "cron" ? cronExpression : undefined,
           ruleType: "script",
           scriptSource,
           uiSource: uiSource || undefined,
@@ -295,7 +303,7 @@ export function AutomationPane({ config, paneId }: Props) {
     } finally {
       setSaving(false);
     }
-  }, [name, triggerTopic, scriptSource, uiSource, saving, paneId, config, updatePaneConfig]);
+  }, [name, triggerTopic, triggerType, cronExpression, scriptSource, uiSource, saving, paneId, config, updatePaneConfig]);
 
   // ── Update handler (editing mode) — includes uiSource (15.4) ──
   const handleUpdate = useCallback(async () => {
@@ -309,6 +317,8 @@ export function AutomationPane({ config, paneId }: Props) {
         body: JSON.stringify({
           name: name.trim(),
           triggerTopic: triggerTopic.trim() || undefined,
+          triggerType,
+          cronExpression: triggerType === "cron" ? cronExpression : undefined,
           scriptSource,
           uiSource: uiSource || undefined,
         }),
@@ -328,7 +338,7 @@ export function AutomationPane({ config, paneId }: Props) {
     } finally {
       setSaving(false);
     }
-  }, [name, triggerTopic, scriptSource, uiSource, saving, ruleId, fetchRule]);
+  }, [name, triggerTopic, triggerType, cronExpression, scriptSource, uiSource, saving, ruleId, fetchRule]);
 
   // ── Toggle handler ──
   const handleToggle = useCallback(async () => {
@@ -376,6 +386,8 @@ export function AutomationPane({ config, paneId }: Props) {
     if (!rule) return;
     setName(rule.name);
     setTriggerTopic(rule.topic);
+    setTriggerType(rule.triggerType || "mqtt");
+    setCronExpression(rule.cronExpression || "");
     setScriptSource(rule.scriptSource || DEFAULT_SCRIPT);
     setUiSource(rule.uiSource || "");
     setErrors([]);
@@ -391,12 +403,15 @@ export function AutomationPane({ config, paneId }: Props) {
     setNotFound(false);
     setName("");
     setTriggerTopic("");
+    setTriggerType("mqtt");
+    setCronExpression("");
+    setTriggerValid(true);
     setScriptSource(DEFAULT_SCRIPT);
     setUiSource("");
     setErrors([]);
   }, [paneId, config, updatePaneConfig]);
 
-  const saveDisabled = !name.trim() || saving;
+  const saveDisabled = !name.trim() || saving || !triggerValid;
 
   // Ctrl+S handler for editors
   const handleEditorSave = useCallback(
@@ -580,13 +595,15 @@ export function AutomationPane({ config, paneId }: Props) {
         className="w-full px-3 py-2 text-sm rounded-lg bg-[#0B0F14] border border-[#2A3441] text-[#E6EDF3] placeholder-[#6B7785] focus:outline-none focus:border-primary transition-colors"
       />
 
-      {/* Trigger topic input */}
-      <input
-        type="text"
-        value={triggerTopic}
-        onChange={(e) => setTriggerTopic(e.target.value)}
-        placeholder="Trigger topic (e.g. sensor/+/temperature, service/cron/every-5m)"
-        className="w-full px-3 py-2 text-sm rounded-lg bg-[#0B0F14] border border-[#2A3441] text-[#E6EDF3] placeholder-[#6B7785] focus:outline-none focus:border-primary transition-colors font-mono"
+      {/* Trigger selector */}
+      <TriggerSelector
+        triggerType={triggerType}
+        mqttTopic={triggerTopic}
+        cronExpression={cronExpression}
+        onTriggerTypeChange={setTriggerType}
+        onMqttTopicChange={setTriggerTopic}
+        onCronExpressionChange={setCronExpression}
+        onValidityChange={setTriggerValid}
       />
 
       {/* Tab bar — visible in BOTH setup and editing modes (15.1) */}

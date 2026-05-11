@@ -34,6 +34,8 @@ export interface Rule {
   condition?: (ctx: EventContext) => boolean;
   action: (ctx: EventContext) => void | Promise<void>;
   name?: string;
+  triggerType?: "mqtt" | "cron" | "none";
+  cronExpression?: string;
 }
 
 /** Context passed to rule condition and action functions */

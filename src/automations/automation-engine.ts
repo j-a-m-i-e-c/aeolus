@@ -11,6 +11,7 @@ import type { Sandbox, SandboxContext } from "./sandbox.js";
 import type { ActionExecutor } from "./action-executor.js";
 import type { ExecutionLog, ExecutionLogEntry } from "./execution-log.js";
 import { RuleRegistry } from "./rule-registry.js";
+import { CronTimerManager } from "./cron-timer-manager.js";
 import logger from "../logger.js";
 
 /** Optional dependencies for script/form rule execution. */
@@ -26,6 +27,7 @@ export class AutomationEngine {
   private sandbox?: Sandbox;
   private actionExecutor?: ActionExecutor;
   private executionLog?: ExecutionLog;
+  private cronTimerManager: CronTimerManager;
 
   constructor(eventBus: EventEmitter, deps?: AutomationEngineDeps) {
     this.registry = new RuleRegistry();
@@ -33,6 +35,7 @@ export class AutomationEngine {
     this.sandbox = deps?.sandbox;
     this.actionExecutor = deps?.actionExecutor;
     this.executionLog = deps?.executionLog;
+    this.cronTimerManager = new CronTimerManager();
     this.eventBus.on(DEVICE_STATE_CHANGE, (event: NormalizedEvent) => {
       this.evaluate(event);
     });
@@ -41,11 +44,29 @@ export class AutomationEngine {
   /** Register a rule */
   register(rule: Rule): void {
     this.registry.register(rule);
+
+    // If this is a cron-triggered rule, start a timer
+    if (rule.triggerType === "cron" && rule.cronExpression) {
+      const started = this.cronTimerManager.start(rule.id, rule.cronExpression, () => {
+        const ctx: EventContext = {
+          topic: `automation/cron/${rule.id}`,
+          deviceId: `cron-${rule.id}`,
+          state: { ruleId: rule.id, cronExpression: rule.cronExpression, firedAt: Date.now() },
+          timestamp: Date.now(),
+        };
+        this.executeDirectRule(rule, ctx);
+      });
+      if (started) {
+        logger.debug({ ruleId: rule.id, cronExpression: rule.cronExpression }, "Cron timer started for rule");
+      }
+    }
+
     logger.debug({ ruleId: rule.id, topic: rule.topic, name: rule.name }, "Rule registered");
   }
 
   /** Remove a rule */
   unregister(ruleId: string): void {
+    this.cronTimerManager.stop(ruleId);
     this.registry.unregister(ruleId);
   }
 
@@ -62,6 +83,11 @@ export class AutomationEngine {
   /** Get rule count */
   get ruleCount(): number {
     return this.registry.size;
+  }
+
+  /** Stop all cron timers and clean up resources */
+  dispose(): void {
+    this.cronTimerManager.stopAll();
   }
 
   /** Load rule files from a directory */
