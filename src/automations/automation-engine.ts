@@ -49,8 +49,8 @@ export class AutomationEngine {
     if (rule.triggerType === "cron" && rule.cronExpression) {
       const started = this.cronTimerManager.start(rule.id, rule.cronExpression, () => {
         const ctx: EventContext = {
-          topic: `automation/cron/${rule.id}`,
-          deviceId: `cron-${rule.id}`,
+          topic: `cron/${rule.name || rule.id}`,
+          deviceId: rule.id,
           state: { ruleId: rule.id, cronExpression: rule.cronExpression, firedAt: Date.now() },
           timestamp: Date.now(),
         };

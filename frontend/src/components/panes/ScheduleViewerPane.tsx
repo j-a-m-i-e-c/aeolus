@@ -11,7 +11,7 @@ interface Automation {
   id: string;
   name: string;
   triggerType: string;
-  triggerConfig?: { cron?: string; expression?: string };
+  cronExpression?: string | null;
   enabled: boolean;
 }
 
@@ -108,7 +108,7 @@ export function ScheduleViewerPane({ config }: Props) {
   };
 
   const getCronExpression = (a: Automation): string => {
-    return a.triggerConfig?.cron || a.triggerConfig?.expression || "";
+    return a.cronExpression || "";
   };
 
   const filtered = automations.filter((a) => {
