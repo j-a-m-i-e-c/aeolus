@@ -7,7 +7,7 @@ import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
 import { useDashboardStore } from "../store/dashboard-store";
 import { getPaneEntry } from "../lib/pane-registry";
-import { Settings, X, Plus, Zap, LayoutDashboard } from "lucide-react";
+import { Settings, X, Plus, Zap } from "lucide-react";
 import { PanePicker } from "./PanePicker";
 import { PaneConfigPanel } from "./PaneConfigPanel";
 import { motion } from "framer-motion";
@@ -99,14 +99,6 @@ export function TabLayout({ tabId }: TabLayoutProps) {
           // Do not block removal on failure
         });
       }
-      if (pane?.paneType === "custom-panel" && pane.config.panelId) {
-        // Fire-and-forget DELETE for the linked custom panel
-        fetch(`${API_URL}/api/panels/${pane.config.panelId}`, {
-          method: "DELETE",
-        }).catch(() => {
-          // Do not block removal on failure
-        });
-      }
       removePane(paneId);
     },
     [tabPanes, removePane],
@@ -114,7 +106,7 @@ export function TabLayout({ tabId }: TabLayoutProps) {
 
   return (
     <div ref={containerRef} className="w-full">
-      {/* Header area with New Automation + New Pane + Browse Panes buttons */}
+      {/* Header area with New Automation Pane + Browse Panes buttons */}
       <div className="flex items-center justify-end gap-2 px-4 py-2">
         <motion.button
           whileHover={{ scale: 1.02 }}
@@ -126,32 +118,7 @@ export function TabLayout({ tabId }: TabLayoutProps) {
           }}
         >
           <Zap size={13} />
-          New Automation
-        </motion.button>
-        <motion.button
-          whileHover={{ scale: 1.02 }}
-          whileTap={{ scale: 0.97 }}
-          onClick={async () => {
-            try {
-              const res = await fetch(`${API_URL}/api/panels`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ name: "Untitled Pane" }),
-              });
-              if (!res.ok) return;
-              const panel = await res.json();
-              addPane(tabId, "custom-panel", { panelId: panel.id });
-            } catch {
-              // Silently degrade
-            }
-          }}
-          className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold text-white border border-primary/40 transition-colors"
-          style={{
-            background: "linear-gradient(135deg, #3BA4FF, #5CE1E6)",
-          }}
-        >
-          <LayoutDashboard size={13} />
-          New Pane
+          New Automation Pane
         </motion.button>
         <button
           onClick={() => setShowPicker(true)}

@@ -241,6 +241,9 @@ export class AutomationEngine {
 
   /** Check if a rule topic pattern matches an event topic */
   private topicMatches(pattern: string, topic: string): boolean {
+    // Empty pattern means manual-only rule — never matches any event
+    if (!pattern) return false;
+
     // Exact match
     if (pattern === topic) return true;
 

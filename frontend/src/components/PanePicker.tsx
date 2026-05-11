@@ -39,7 +39,7 @@ const CATEGORY_LABELS: Record<string, { label: string; icon: string }> = {
 const CATEGORY_ORDER = ["controls", "automations", "monitoring", "system"];
 
 /** Pane types that have their own dedicated entry point and should be excluded from the picker */
-const EXCLUDED_FROM_PICKER = new Set(["automation", "custom-panel"]);
+const EXCLUDED_FROM_PICKER = new Set(["automation"]);
 
 function groupByCategory() {
   const groups: Record<string, Array<[string, (typeof PANE_REGISTRY)[string]]>> = {};

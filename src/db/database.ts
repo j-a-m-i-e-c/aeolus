@@ -116,27 +116,6 @@ export function initSchema(database: Database): void {
     CREATE INDEX IF NOT EXISTS idx_device_history_device_ts
     ON device_history(device_id, timestamp DESC);
   `);
-  database.run(`
-    CREATE TABLE IF NOT EXISTS custom_panels (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      ui_source TEXT DEFAULT NULL,
-      compiled_ui TEXT DEFAULT NULL,
-      script_source TEXT DEFAULT NULL,
-      compiled_js TEXT DEFAULT NULL,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
-    );
-  `);
-  database.run(`
-    CREATE TABLE IF NOT EXISTS panel_state (
-      panel_id TEXT NOT NULL,
-      key TEXT NOT NULL,
-      value TEXT NOT NULL,
-      PRIMARY KEY (panel_id, key)
-    );
-  `);
-
   migrateRemoveTypeCheck(database);
 }
 

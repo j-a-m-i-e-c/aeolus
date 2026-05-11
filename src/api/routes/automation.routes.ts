@@ -195,9 +195,12 @@ export function createAutomationRoutes(
     try {
       const { name, triggerTopic, ruleType, conditionType, conditionValue, actionType, actionTarget, actionParams, scriptSource, uiSource } = req.body;
 
-      if (!name || !triggerTopic) {
-        throw new BadRequestError("name and triggerTopic are required");
+      if (!name) {
+        throw new BadRequestError("name is required");
       }
+
+      // triggerTopic is optional — empty means manual-only automation
+      const effectiveTriggerTopic = (triggerTopic && typeof triggerTopic === "string") ? triggerTopic.trim() : "";
 
       const id = randomUUID();
       const now = Date.now();
@@ -233,18 +236,18 @@ export function createAutomationRoutes(
           return;
         }
 
-        const structured = extractStructuredMetadata(result.js, triggerTopic);
+        const structured = extractStructuredMetadata(result.js, effectiveTriggerTopic);
         const structuredJson = structured ? JSON.stringify(structured) : null;
 
         db.run(
           `INSERT INTO automation_rules (id, name, trigger_topic, condition_type, condition_value, action_type, action_target, action_params, rule_type, script_source, compiled_js, structured_metadata, ui_source, compiled_ui, enabled, created_at)
            VALUES (?, ?, ?, ?, ?, 'script', '', '{}', 'script', ?, ?, ?, ?, ?, 1, ?)`,
-          [id, name, triggerTopic, conditionType || null, conditionValue || null, scriptSource, result.js, structuredJson, uiSourceValue, compiledUiValue, now]
+          [id, name, effectiveTriggerTopic, conditionType || null, conditionValue || null, scriptSource, result.js, structuredJson, uiSourceValue, compiledUiValue, now]
         );
         persistDatabase();
 
         registerUiRule(engine, registry, actionExecutor, {
-          id, name, trigger_topic: triggerTopic,
+          id, name, trigger_topic: effectiveTriggerTopic,
           condition_type: conditionType || null, condition_value: conditionValue || null,
           action_type: "script", action_target: "", action_params: "{}",
           rule_type: "script", script_source: scriptSource, compiled_js: result.js,
@@ -252,7 +255,7 @@ export function createAutomationRoutes(
           enabled: 1, created_at: now,
         }, conditionRegistry);
 
-        logger.info({ ruleId: id, name, triggerTopic, ruleType: "script" }, "Script automation rule created");
+        logger.info({ ruleId: id, name, triggerTopic: effectiveTriggerTopic, ruleType: "script" }, "Script automation rule created");
         res.json({ success: true, id });
       } else {
         // Form rule (default)
@@ -263,12 +266,12 @@ export function createAutomationRoutes(
         db.run(
           `INSERT INTO automation_rules (id, name, trigger_topic, condition_type, condition_value, action_type, action_target, action_params, rule_type, ui_source, compiled_ui, enabled, created_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'form', ?, ?, 1, ?)`,
-          [id, name, triggerTopic, conditionType || null, conditionValue || null, actionType, actionTarget, JSON.stringify(actionParams || {}), uiSourceValue, compiledUiValue, now]
+          [id, name, effectiveTriggerTopic, conditionType || null, conditionValue || null, actionType, actionTarget, JSON.stringify(actionParams || {}), uiSourceValue, compiledUiValue, now]
         );
         persistDatabase();
 
         registerUiRule(engine, registry, actionExecutor, {
-          id, name, trigger_topic: triggerTopic,
+          id, name, trigger_topic: effectiveTriggerTopic,
           condition_type: conditionType || null, condition_value: conditionValue || null,
           action_type: actionType, action_target: actionTarget,
           action_params: JSON.stringify(actionParams || {}),
@@ -277,7 +280,7 @@ export function createAutomationRoutes(
           enabled: 1, created_at: now,
         }, conditionRegistry);
 
-        logger.info({ ruleId: id, name, triggerTopic }, "Form automation rule created");
+        logger.info({ ruleId: id, name, triggerTopic: effectiveTriggerTopic }, "Form automation rule created");
         res.json({ success: true, id });
       }
     } catch (err) {
@@ -314,7 +317,7 @@ export function createAutomationRoutes(
           return;
         }
 
-        const structured = extractStructuredMetadata(result.js, triggerTopic || existing.trigger_topic);
+        const structured = extractStructuredMetadata(result.js, triggerTopic !== undefined ? triggerTopic : existing.trigger_topic);
         const structuredJson = structured ? JSON.stringify(structured) : null;
 
         // Determine ui_source value: explicit empty/null means clear, non-empty means update, undefined means keep existing
@@ -348,7 +351,7 @@ export function createAutomationRoutes(
 
         db.run(
           `UPDATE automation_rules SET name = ?, trigger_topic = ?, condition_type = ?, condition_value = ?, script_source = ?, compiled_js = ?, structured_metadata = ?, ui_source = ?, compiled_ui = ? WHERE id = ?`,
-          [name || existing.name, triggerTopic || existing.trigger_topic, conditionType ?? existing.condition_type, conditionValue ?? existing.condition_value, updatedSource, result.js, structuredJson, uiSourceValue, compiledUiValue, id]
+          [name || existing.name, triggerTopic !== undefined ? triggerTopic : existing.trigger_topic, conditionType ?? existing.condition_type, conditionValue ?? existing.condition_value, updatedSource, result.js, structuredJson, uiSourceValue, compiledUiValue, id]
         );
         persistDatabase();
 
@@ -396,7 +399,7 @@ export function createAutomationRoutes(
           `UPDATE automation_rules SET name = ?, trigger_topic = ?, condition_type = ?, condition_value = ?, action_type = ?, action_target = ?, action_params = ?, ui_source = ?, compiled_ui = ? WHERE id = ?`,
           [
             name || existing.name,
-            triggerTopic || existing.trigger_topic,
+            triggerTopic !== undefined ? triggerTopic : existing.trigger_topic,
             conditionType ?? existing.condition_type,
             conditionValue ?? existing.condition_value,
             actionType || existing.action_type,
@@ -570,6 +573,11 @@ function registerUiRule(
   stored: StoredRule,
   conditionRegistry?: ConditionRegistry,
 ): void {
+  // If trigger_topic is empty, the rule is manual-only — still register it
+  // so it's accessible via getRule() for the /fire endpoint, but it will
+  // never match any incoming event topic (empty string won't match).
+  const effectiveTopic = stored.trigger_topic || "";
+
   // Build condition via the registry (falls back to undefined if type/value are null or unregistered)
   const condition = conditionRegistry
     ? conditionRegistry.buildCondition(stored.condition_type, stored.condition_value)
@@ -587,7 +595,7 @@ function registerUiRule(
     // Register with compiled_js attached so AutomationEngine can detect script rules
     const rule: Record<string, unknown> = {
       id: stored.id,
-      topic: stored.trigger_topic,
+      topic: effectiveTopic,
       name: stored.name,
       condition,
       action,
@@ -608,7 +616,7 @@ function registerUiRule(
 
     engine.register({
       id: stored.id,
-      topic: stored.trigger_topic,
+      topic: effectiveTopic,
       name: stored.name,
       condition,
       action,

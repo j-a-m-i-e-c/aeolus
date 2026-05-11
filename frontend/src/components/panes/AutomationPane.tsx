@@ -264,7 +264,7 @@ export function AutomationPane({ config, paneId }: Props) {
 
   // ── Save handler (setup mode) — includes uiSource (15.4) ──
   const handleSave = useCallback(async () => {
-    if (!name.trim() || !triggerTopic.trim() || saving) return;
+    if (!name.trim() || saving) return;
     setSaving(true);
     setErrors([]);
     try {
@@ -273,7 +273,7 @@ export function AutomationPane({ config, paneId }: Props) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: name.trim(),
-          triggerTopic: triggerTopic.trim(),
+          triggerTopic: triggerTopic.trim() || undefined,
           ruleType: "script",
           scriptSource,
           uiSource: uiSource || undefined,
@@ -299,7 +299,7 @@ export function AutomationPane({ config, paneId }: Props) {
 
   // ── Update handler (editing mode) — includes uiSource (15.4) ──
   const handleUpdate = useCallback(async () => {
-    if (!name.trim() || !triggerTopic.trim() || saving || !ruleId) return;
+    if (!name.trim() || saving || !ruleId) return;
     setSaving(true);
     setErrors([]);
     try {
@@ -308,7 +308,7 @@ export function AutomationPane({ config, paneId }: Props) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: name.trim(),
-          triggerTopic: triggerTopic.trim(),
+          triggerTopic: triggerTopic.trim() || undefined,
           scriptSource,
           uiSource: uiSource || undefined,
         }),
@@ -396,7 +396,7 @@ export function AutomationPane({ config, paneId }: Props) {
     setErrors([]);
   }, [paneId, config, updatePaneConfig]);
 
-  const saveDisabled = !name.trim() || !triggerTopic.trim() || saving;
+  const saveDisabled = !name.trim() || saving;
 
   // Ctrl+S handler for editors
   const handleEditorSave = useCallback(
@@ -585,7 +585,7 @@ export function AutomationPane({ config, paneId }: Props) {
         type="text"
         value={triggerTopic}
         onChange={(e) => setTriggerTopic(e.target.value)}
-        placeholder="e.g. sensor/+/temperature"
+        placeholder="e.g. sensor/+/temperature (optional — leave empty for manual-only)"
         className="w-full px-3 py-2 text-sm rounded-lg bg-[#0B0F14] border border-[#2A3441] text-[#E6EDF3] placeholder-[#6B7785] focus:outline-none focus:border-primary transition-colors font-mono"
       />
 
