@@ -100,7 +100,7 @@ export function useDynamicComponent(
   hasUiSource: boolean,
   moduleUrl?: string,
 ): DynamicComponentState {
-  const [Component, setComponent] = useState<ComponentType<CustomComponentProps> | null>(null);
+  const [Component, setComponent] = useState<ComponentType<any> | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const versionRef = useRef(0);
