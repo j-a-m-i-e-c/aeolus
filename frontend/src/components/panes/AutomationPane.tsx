@@ -585,7 +585,7 @@ export function AutomationPane({ config, paneId }: Props) {
         type="text"
         value={triggerTopic}
         onChange={(e) => setTriggerTopic(e.target.value)}
-        placeholder="e.g. sensor/+/temperature (optional — leave empty for manual-only)"
+        placeholder="Trigger topic (e.g. sensor/+/temperature, service/cron/every-5m)"
         className="w-full px-3 py-2 text-sm rounded-lg bg-[#0B0F14] border border-[#2A3441] text-[#E6EDF3] placeholder-[#6B7785] focus:outline-none focus:border-primary transition-colors font-mono"
       />
 
