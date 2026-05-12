@@ -427,7 +427,7 @@ export function SystemPage() {
                   {info.docker.reclaimable > 1024 * 1024 && (
                     <button
                       onClick={async () => {
-                        if (!confirm(`Free up ${formatBytes(info.docker!.reclaimable)} by removing unused Docker images and build cache?`)) return;
+                        if (!confirm(`This will remove all unused Docker images (old versions from previous builds) and clear the entire build cache. This frees up ${formatBytes(info.docker!.reclaimable)} but the next update will take longer as images are rebuilt from scratch.\n\nProceed?`)) return;
                         try {
                           const res = await fetch(`${API_URL}/api/system/docker-prune`, { method: "POST" });
                           const data = await res.json();
