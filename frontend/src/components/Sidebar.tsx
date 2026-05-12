@@ -363,7 +363,7 @@ export function Sidebar() {
       {/* System status — pinned to bottom */}
       <div className="px-2 space-y-2 shrink-0">
         <div className="flex items-center gap-2 text-xs">
-          <div className="w-3.5 flex items-center justify-center shrink-0">
+          <div className="w-4 flex items-center justify-center shrink-0">
             {health?.mqtt === "connected" ? (
               <Wifi size={14} className="text-[#22C55E]" />
             ) : (
@@ -375,7 +375,7 @@ export function Sidebar() {
           </span>
         </div>
         <div className="flex items-center gap-2 text-xs text-[#6B7785]">
-          <div className="w-3.5 flex items-center justify-center shrink-0">
+          <div className="w-4 flex items-center justify-center shrink-0">
             <div className={`w-2 h-2 rounded-full ${wsConnected ? "bg-[#22C55E]" : "bg-[#EF4444]"}`} />
           </div>
           WebSocket {wsConnected ? "Live" : "Offline"}
