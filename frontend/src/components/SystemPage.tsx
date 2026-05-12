@@ -140,7 +140,8 @@ export function SystemPage() {
         try {
           const healthRes = await fetch(`${API_URL}/api/health`, { signal: AbortSignal.timeout(2000) });
           if (healthRes.ok) {
-            // Backend is back — reload the page
+            // Backend is back — refresh the version cache so it doesn't show stale "update available"
+            await fetch(`${API_URL}/api/system/version?refresh=true`, { signal: AbortSignal.timeout(5000) }).catch(() => {});
             window.location.reload();
             return;
           }
