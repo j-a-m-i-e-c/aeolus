@@ -155,6 +155,11 @@ function checkVersion(): VersionInfo {
     return { ...cachedVersion, lastChecked: Date.now(), error: "Project directory not mounted" };
   }
 
+  // Check if this is actually a git repo
+  if (!fs.existsSync(`${projectDir}/.git`)) {
+    return { ...cachedVersion, lastChecked: Date.now(), error: "Not a git repository" };
+  }
+
   try {
     const currentCommit = execSync("git rev-parse --short HEAD", { cwd: projectDir, encoding: "utf-8", timeout: 5000 }).trim();
     const currentMessage = execSync("git log -1 --format=%s", { cwd: projectDir, encoding: "utf-8", timeout: 5000 }).trim();
@@ -178,6 +183,8 @@ function checkVersion(): VersionInfo {
 
     if (behind > 0) {
       logger.info({ commitsBehind: behind, latest: latestCommit }, "Aeolus update available");
+    } else {
+      logger.debug({ commit: currentCommit }, "Aeolus is up to date");
     }
   } catch (err) {
     logger.warn({ error: (err as Error).message }, "Daily version check failed");
@@ -293,19 +300,29 @@ export function createSystemRoutes(): Router {
     logger.info("Self-update triggered from dashboard");
     res.json({ success: true, message: "Update started — the system will restart shortly" });
 
-    // Run git pull + docker compose rebuild on the HOST via a temporary privileged container.
-    // This avoids the root-owned .git/objects problem that occurs when git pull runs
-    // inside the backend container (which runs as root on a bind-mounted host directory).
-    // nsenter executes the command in the host's PID/mount namespace as the host user.
-    const updateScript = `cd ${projectDir} && git pull && docker compose up -d --build && docker image prune -f > /dev/null 2>&1 && docker builder prune -f > /dev/null 2>&1`;
-    const child = spawn("docker", [
-      "run", "--rm", "--privileged", "--pid=host",
-      "alpine", "nsenter", "-t", "1", "-m", "-u", "-i", "-n", "--",
-      "su", "-", "aeolus", "-c", updateScript,
-    ], {
+    // The project directory is bind-mounted from the host at /aeolus-host.
+    // We run git pull directly on the mount (container has git + safe.directory configured in Dockerfile).
+    // Then rebuild via the Docker socket (also mounted).
+    const updateCmd = [
+      `git -C ${projectDir} pull origin main`,
+      `docker compose -f ${projectDir}/docker-compose.yml up -d --build`,
+      `docker image prune -f`,
+      `docker builder prune -f`,
+    ].join(" && ");
+
+    const child = spawn("sh", ["-c", updateCmd], {
       detached: true,
-      stdio: "ignore",
+      stdio: ["ignore", "pipe", "pipe"],
     });
+
+    // Log output for debugging
+    child.stdout?.on("data", (data: Buffer) => {
+      logger.info({ source: "update" }, data.toString().trim());
+    });
+    child.stderr?.on("data", (data: Buffer) => {
+      logger.warn({ source: "update" }, data.toString().trim());
+    });
+
     child.unref();
   });
 
