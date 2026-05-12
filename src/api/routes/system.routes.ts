@@ -303,9 +303,14 @@ export function createSystemRoutes(): Router {
     // The project directory is bind-mounted from the host at /aeolus-host.
     // We run git pull directly on the mount (container has git + safe.directory configured in Dockerfile).
     // Then rebuild via the Docker socket (also mounted).
+    // The project directory is bind-mounted from the host at /aeolus-host.
+    // We need to match the project name that was used when containers were originally created.
+    // Using --project-directory ensures compose uses the correct context.
+    // We also explicitly remove existing containers first to avoid name conflicts.
     const updateCmd = [
       `git -C ${projectDir} pull origin main`,
-      `docker compose --project-directory ${projectDir} down`,
+      // Stop and remove existing Aeolus containers by name to avoid conflicts
+      `docker rm -f aeolus-backend aeolus-frontend aeolus-mosquitto 2>/dev/null || true`,
       `docker compose --project-directory ${projectDir} up -d --build`,
       `docker image prune -f`,
       `docker builder prune -f`,
