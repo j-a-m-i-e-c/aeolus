@@ -331,17 +331,10 @@ export function createSystemRoutes(): Router {
   router.post("/docker-prune", async (_req, res) => {
     try {
       logger.info("Docker prune (Aeolus-scoped) triggered from dashboard");
-      // Remove dangling images (old build layers)
-      execSync("docker image prune -f", { encoding: "utf-8", timeout: 30000 });
-      // Remove old Aeolus images that aren't currently running
-      try {
-        execSync(
-          "docker images --format '{{.ID}} {{.Repository}}' | grep -E 'aeolus' | grep '<none>' | awk '{print $1}' | xargs -r docker rmi -f",
-          { encoding: "utf-8", timeout: 30000 },
-        );
-      } catch { /* no dangling aeolus images */ }
-      // Prune build cache (shared, but on a dedicated Pi this is mostly Aeolus)
-      execSync("docker builder prune -f", { encoding: "utf-8", timeout: 60000 });
+      // Remove ALL unused images (not just dangling) — this catches old tagged versions
+      execSync("docker image prune -af", { encoding: "utf-8", timeout: 30000 });
+      // Prune all build cache
+      execSync("docker builder prune -af", { encoding: "utf-8", timeout: 60000 });
       // Re-fetch docker disk usage after prune
       const docker = getDockerDiskUsage();
       res.json({ success: true, docker });
