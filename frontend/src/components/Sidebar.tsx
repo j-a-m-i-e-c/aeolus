@@ -5,7 +5,7 @@ import { useDeviceStore } from "../store/device-store";
 import { useDashboardStore, tabNameToSlug } from "../store/dashboard-store";
 import { useNavigate, useLocation } from "react-router-dom";
 import * as icons from "lucide-react";
-import { Plus, Trash2, Wifi, WifiOff, GripVertical } from "lucide-react";
+import { Plus, Trash2, GripVertical } from "lucide-react";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { fetchHealth } from "../lib/api-client";
 import type { HealthStatus } from "../store/device-store";
@@ -362,20 +362,18 @@ export function Sidebar() {
 
       {/* System status — pinned to bottom */}
       <div className="px-2 space-y-2 shrink-0">
-        <div className="flex items-center gap-2 text-xs">
-          <div className="w-4 flex items-center justify-center shrink-0">
+        <div className="flex items-center gap-2 text-xs text-[#9AA6B2]">
+          <div className="w-4 h-4 flex items-center justify-center shrink-0">
             {health?.mqtt === "connected" ? (
-              <Wifi size={14} className="text-[#22C55E]" />
+              <div className="w-2 h-2 rounded-full bg-[#22C55E]" />
             ) : (
-              <WifiOff size={14} className="text-[#EF4444]" />
+              <div className="w-2 h-2 rounded-full bg-[#EF4444]" />
             )}
           </div>
-          <span className="text-[#9AA6B2]">
-            MQTT {health?.mqtt === "connected" ? "Connected" : "Disconnected"}
-          </span>
+          MQTT {health?.mqtt === "connected" ? "Connected" : "Disconnected"}
         </div>
-        <div className="flex items-center gap-2 text-xs text-[#6B7785]">
-          <div className="w-4 flex items-center justify-center shrink-0">
+        <div className="flex items-center gap-2 text-xs text-[#9AA6B2]">
+          <div className="w-4 h-4 flex items-center justify-center shrink-0">
             <div className={`w-2 h-2 rounded-full ${wsConnected ? "bg-[#22C55E]" : "bg-[#EF4444]"}`} />
           </div>
           WebSocket {wsConnected ? "Live" : "Offline"}
