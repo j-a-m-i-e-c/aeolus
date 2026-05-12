@@ -198,6 +198,43 @@ export function createSystemRoutes(): Router {
     res.json(logs);
   });
 
+  /** GET /api/system/version — check current vs latest version */
+  router.get("/version", (_req, res) => {
+    const projectDir = process.env.AEOLUS_PROJECT_DIR || "/aeolus-host";
+
+    if (!fs.existsSync(projectDir)) {
+      res.json({ current: null, latest: null, updateAvailable: false, error: "Project directory not mounted" });
+      return;
+    }
+
+    try {
+      // Get current local commit
+      const currentCommit = execSync("git rev-parse --short HEAD", { cwd: projectDir, encoding: "utf-8", timeout: 5000 }).trim();
+      const currentMessage = execSync("git log -1 --format=%s", { cwd: projectDir, encoding: "utf-8", timeout: 5000 }).trim();
+      const currentDate = execSync("git log -1 --format=%ci", { cwd: projectDir, encoding: "utf-8", timeout: 5000 }).trim();
+
+      // Fetch latest from remote (without pulling)
+      execSync("git fetch origin --quiet", { cwd: projectDir, encoding: "utf-8", timeout: 15000 });
+
+      const latestCommit = execSync("git rev-parse --short origin/main", { cwd: projectDir, encoding: "utf-8", timeout: 5000 }).trim();
+      const latestMessage = execSync("git log origin/main -1 --format=%s", { cwd: projectDir, encoding: "utf-8", timeout: 5000 }).trim();
+      const latestDate = execSync("git log origin/main -1 --format=%ci", { cwd: projectDir, encoding: "utf-8", timeout: 5000 }).trim();
+
+      // Count commits behind
+      const behind = execSync("git rev-list HEAD..origin/main --count", { cwd: projectDir, encoding: "utf-8", timeout: 5000 }).trim();
+
+      res.json({
+        current: { commit: currentCommit, message: currentMessage, date: currentDate },
+        latest: { commit: latestCommit, message: latestMessage, date: latestDate },
+        updateAvailable: parseInt(behind, 10) > 0,
+        commitsBehind: parseInt(behind, 10),
+      });
+    } catch (err) {
+      logger.warn({ error: (err as Error).message }, "Version check failed");
+      res.json({ current: null, latest: null, updateAvailable: false, error: (err as Error).message });
+    }
+  });
+
   /** POST /api/system/update — pull latest code and rebuild containers */
   router.post("/update", (_req, res) => {
     const projectDir = process.env.AEOLUS_PROJECT_DIR || "/aeolus-host";

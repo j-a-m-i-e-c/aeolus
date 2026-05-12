@@ -53,6 +53,10 @@ export function SystemPage() {
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
   const [updateMsg, setUpdateMsg] = useState("");
+  const [checkingVersion, setCheckingVersion] = useState(false);
+  const [updateAvailable, setUpdateAvailable] = useState(false);
+  const [commitsBehind, setCommitsBehind] = useState(0);
+  const [versionChecked, setVersionChecked] = useState(false);
 
   // Health polling (device count, rule count, uptime, MQTT status)
   const health = useDeviceStore((s) => s.health);
@@ -84,6 +88,28 @@ export function SystemPage() {
     const interval = setInterval(poll, 30000);
     return () => clearInterval(interval);
   }, [setHealth]);
+
+  const checkForUpdates = async () => {
+    setCheckingVersion(true);
+    setUpdateMsg("");
+    try {
+      const res = await fetch(`${API_URL}/api/system/version`);
+      const data = await res.json();
+      if (data.error) {
+        setUpdateMsg(data.error);
+      } else if (data.updateAvailable) {
+        setUpdateAvailable(true);
+        setCommitsBehind(data.commitsBehind);
+      } else {
+        setUpdateMsg("You're on the latest version");
+      }
+      setVersionChecked(true);
+    } catch {
+      setUpdateMsg("Failed to check for updates");
+    } finally {
+      setCheckingVersion(false);
+    }
+  };
 
   const triggerUpdate = async () => {
     if (!confirm("Pull latest code and rebuild? The system will restart automatically.")) return;
@@ -167,13 +193,17 @@ export function SystemPage() {
         <h1 className="text-2xl font-bold text-[#E6EDF3]">System</h1>
         <div className="flex items-center gap-2">
           <button
-            onClick={triggerUpdate}
-            disabled={updating}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-primary/20 text-primary border border-primary/30 hover:bg-primary/30 transition-colors disabled:opacity-50"
-            title="Pull latest code and rebuild"
+            onClick={updateAvailable ? triggerUpdate : checkForUpdates}
+            disabled={updating || checkingVersion}
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors disabled:opacity-50 ${
+              updateAvailable
+                ? "bg-[#22C55E]/20 text-[#22C55E] border-[#22C55E]/30 hover:bg-[#22C55E]/30"
+                : "bg-primary/20 text-primary border-primary/30 hover:bg-primary/30"
+            }`}
+            title={updateAvailable ? `${commitsBehind} commit${commitsBehind > 1 ? "s" : ""} behind — pull and rebuild` : "Check GitHub for new commits"}
           >
-            {updating ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
-            {updating ? "Updating..." : "Update & Restart"}
+            {updating ? <Loader2 size={12} className="animate-spin" /> : checkingVersion ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
+            {updating ? "Updating..." : checkingVersion ? "Checking..." : updateAvailable ? `Update Aeolus (${commitsBehind} new)` : "Check for Updates"}
           </button>
           <button
             onClick={triggerReboot}
