@@ -89,27 +89,32 @@ export function SystemPage() {
     return () => clearInterval(interval);
   }, [setHealth]);
 
-  const checkForUpdates = async () => {
-    setCheckingVersion(true);
+  const checkForUpdates = async (forceRefresh = true) => {
+    if (forceRefresh) setCheckingVersion(true);
     setUpdateMsg("");
     try {
-      const res = await fetch(`${API_URL}/api/system/version`);
+      const res = await fetch(`${API_URL}/api/system/version${forceRefresh ? "?refresh=true" : ""}`);
       const data = await res.json();
-      if (data.error) {
+      if (data.error && forceRefresh) {
         setUpdateMsg(data.error);
       } else if (data.updateAvailable) {
         setUpdateAvailable(true);
         setCommitsBehind(data.commitsBehind);
-      } else {
+      } else if (forceRefresh) {
         setUpdateMsg("You're on the latest version");
       }
       setVersionChecked(true);
     } catch {
-      setUpdateMsg("Failed to check for updates");
+      if (forceRefresh) setUpdateMsg("Failed to check for updates");
     } finally {
       setCheckingVersion(false);
     }
   };
+
+  // On mount, load the cached version status (no network fetch to GitHub)
+  useEffect(() => {
+    checkForUpdates(false);
+  }, []);
 
   const triggerUpdate = async () => {
     if (!confirm("Pull latest code and rebuild? The system will restart automatically.")) return;
@@ -193,7 +198,7 @@ export function SystemPage() {
         <h1 className="text-2xl font-bold text-[#E6EDF3]">System</h1>
         <div className="flex items-center gap-2">
           <button
-            onClick={updateAvailable ? triggerUpdate : checkForUpdates}
+            onClick={updateAvailable ? triggerUpdate : () => checkForUpdates(true)}
             disabled={updating || checkingVersion}
             className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors disabled:opacity-50 ${
               updateAvailable

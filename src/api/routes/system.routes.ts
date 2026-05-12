@@ -129,6 +129,71 @@ function parseDockerSize(str: string): number {
   }
 }
 
+// ── Cached daily version check ──────────────────────────────────────────────
+
+interface VersionInfo {
+  current: { commit: string; message: string; date: string } | null;
+  latest: { commit: string; message: string; date: string } | null;
+  updateAvailable: boolean;
+  commitsBehind: number;
+  lastChecked: number;
+  error?: string;
+}
+
+let cachedVersion: VersionInfo = {
+  current: null,
+  latest: null,
+  updateAvailable: false,
+  commitsBehind: 0,
+  lastChecked: 0,
+};
+
+function checkVersion(): VersionInfo {
+  const projectDir = process.env.AEOLUS_PROJECT_DIR || "/aeolus-host";
+
+  if (!fs.existsSync(projectDir)) {
+    return { ...cachedVersion, lastChecked: Date.now(), error: "Project directory not mounted" };
+  }
+
+  try {
+    const currentCommit = execSync("git rev-parse --short HEAD", { cwd: projectDir, encoding: "utf-8", timeout: 5000 }).trim();
+    const currentMessage = execSync("git log -1 --format=%s", { cwd: projectDir, encoding: "utf-8", timeout: 5000 }).trim();
+    const currentDate = execSync("git log -1 --format=%ci", { cwd: projectDir, encoding: "utf-8", timeout: 5000 }).trim();
+
+    execSync("git fetch origin --quiet", { cwd: projectDir, encoding: "utf-8", timeout: 15000 });
+
+    const latestCommit = execSync("git rev-parse --short origin/main", { cwd: projectDir, encoding: "utf-8", timeout: 5000 }).trim();
+    const latestMessage = execSync("git log origin/main -1 --format=%s", { cwd: projectDir, encoding: "utf-8", timeout: 5000 }).trim();
+    const latestDate = execSync("git log origin/main -1 --format=%ci", { cwd: projectDir, encoding: "utf-8", timeout: 5000 }).trim();
+
+    const behind = parseInt(execSync("git rev-list HEAD..origin/main --count", { cwd: projectDir, encoding: "utf-8", timeout: 5000 }).trim(), 10);
+
+    cachedVersion = {
+      current: { commit: currentCommit, message: currentMessage, date: currentDate },
+      latest: { commit: latestCommit, message: latestMessage, date: latestDate },
+      updateAvailable: behind > 0,
+      commitsBehind: behind,
+      lastChecked: Date.now(),
+    };
+
+    if (behind > 0) {
+      logger.info({ commitsBehind: behind, latest: latestCommit }, "Aeolus update available");
+    }
+  } catch (err) {
+    logger.warn({ error: (err as Error).message }, "Daily version check failed");
+    cachedVersion = { ...cachedVersion, lastChecked: Date.now(), error: (err as Error).message };
+  }
+
+  return cachedVersion;
+}
+
+// Run initial check after a short delay (let the server start first), then every 24h
+const VERSION_CHECK_INTERVAL = 24 * 60 * 60 * 1000; // 24 hours
+setTimeout(() => {
+  checkVersion();
+  setInterval(checkVersion, VERSION_CHECK_INTERVAL);
+}, 10_000); // 10s after startup
+
 export function createSystemRoutes(): Router {
   const router = Router();
 
@@ -198,40 +263,21 @@ export function createSystemRoutes(): Router {
     res.json(logs);
   });
 
-  /** GET /api/system/version — check current vs latest version */
-  router.get("/version", (_req, res) => {
-    const projectDir = process.env.AEOLUS_PROJECT_DIR || "/aeolus-host";
+  /** GET /api/system/version — check current vs latest version (cached, refreshes daily) */
+  router.get("/version", (req, res) => {
+    const forceRefresh = req.query.refresh === "true";
 
-    if (!fs.existsSync(projectDir)) {
-      res.json({ current: null, latest: null, updateAvailable: false, error: "Project directory not mounted" });
-      return;
-    }
-
-    try {
-      // Get current local commit
-      const currentCommit = execSync("git rev-parse --short HEAD", { cwd: projectDir, encoding: "utf-8", timeout: 5000 }).trim();
-      const currentMessage = execSync("git log -1 --format=%s", { cwd: projectDir, encoding: "utf-8", timeout: 5000 }).trim();
-      const currentDate = execSync("git log -1 --format=%ci", { cwd: projectDir, encoding: "utf-8", timeout: 5000 }).trim();
-
-      // Fetch latest from remote (without pulling)
-      execSync("git fetch origin --quiet", { cwd: projectDir, encoding: "utf-8", timeout: 15000 });
-
-      const latestCommit = execSync("git rev-parse --short origin/main", { cwd: projectDir, encoding: "utf-8", timeout: 5000 }).trim();
-      const latestMessage = execSync("git log origin/main -1 --format=%s", { cwd: projectDir, encoding: "utf-8", timeout: 5000 }).trim();
-      const latestDate = execSync("git log origin/main -1 --format=%ci", { cwd: projectDir, encoding: "utf-8", timeout: 5000 }).trim();
-
-      // Count commits behind
-      const behind = execSync("git rev-list HEAD..origin/main --count", { cwd: projectDir, encoding: "utf-8", timeout: 5000 }).trim();
-
-      res.json({
-        current: { commit: currentCommit, message: currentMessage, date: currentDate },
-        latest: { commit: latestCommit, message: latestMessage, date: latestDate },
-        updateAvailable: parseInt(behind, 10) > 0,
-        commitsBehind: parseInt(behind, 10),
-      });
-    } catch (err) {
-      logger.warn({ error: (err as Error).message }, "Version check failed");
-      res.json({ current: null, latest: null, updateAvailable: false, error: (err as Error).message });
+    if (forceRefresh) {
+      const result = checkVersion();
+      res.json(result);
+    } else {
+      // Return cached result; if never checked, trigger a check now
+      if (cachedVersion.lastChecked === 0) {
+        const result = checkVersion();
+        res.json(result);
+      } else {
+        res.json(cachedVersion);
+      }
     }
   });
 
