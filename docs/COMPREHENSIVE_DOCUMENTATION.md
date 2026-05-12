@@ -124,6 +124,8 @@ aeolus/
 │   │   ├── automation-engine.ts      # Rule evaluation engine (dispatches to Sandbox or ActionExecutor)
 │   │   ├── action-executor.ts        # Central dispatch service for all automation actions
 │   │   ├── automation-state-store.ts # Per-rule key-value store with SQLite persistence + in-memory cache
+│   │   ├── cron-timer-manager.ts     # Per-rule cron timer management (start/stop/stopAll)
+│   │   ├── cron-utils.ts             # Shared cron expression utilities (validation, presets, description)
 │   │   ├── transpiler.ts             # TypeScript → JavaScript transpilation (logic scripts + UI components)
 │   │   ├── sandbox.ts                # Secure isolated-vm sandbox for user-authored scripts
 │   │   ├── execution-log.ts          # In-memory ring buffer for execution history (200 entries)
@@ -197,11 +199,12 @@ aeolus/
 │       │   ├── ActivityFeed.tsx      # Recent execution feed for free-form automations
 │       │   ├── SnippetPicker.tsx     # Code snippet picker panel for the automation editor
 │       │   ├── UiEditor.tsx          # Monaco editor for custom automation UI components (TSX)
+│       │   ├── TriggerSelector.tsx   # Inline trigger type selector (MQTT topic, cron schedule, or none)
 │       │   ├── CustomComponentBoundary.tsx  # Error boundary for custom automation UI components
 │       │   ├── WelcomeScreen.tsx     # Onboarding screen for empty dashboard (no devices)
 │       │   ├── ConnectorsPage.tsx    # Connector management (enable/disable, config, generic setup wizard)
 │       │   ├── ServicesPage.tsx     # Service management dashboard (available but not routed as a pinned tab)
-│       │   ├── SystemPage.tsx        # Host diagnostics, application log viewer, self-update
+│       │   ├── SystemPage.tsx        # Host diagnostics, application log viewer, version check, self-update
 │       │   ├── StateHistoryChart.tsx  # SVG trend chart for device state history
 │       │   ├── CommandPalette.tsx    # Ctrl+K command palette
 │       │   ├── ToastContainer.tsx    # Animated toast notifications
@@ -213,6 +216,9 @@ aeolus/
 │       │       ├── KasaControlPane.tsx   # Kasa device control pane
 │       │       ├── AutomationRulesPane.tsx
 │       │       ├── AutomationPane.tsx    # Self-contained one-pane-one-automation (setup/status/editing)
+│       │       ├── AutomationCardPane.tsx  # Single automation control card
+│       │       ├── AutomationsEditorPane.tsx  # Full automations editor pane wrapper
+│       │       ├── ScheduleViewerPane.tsx  # Cron schedule viewer for scheduled automations
 │       │       ├── TriggerButtonPane.tsx  # Configurable API trigger button
 │       │       ├── SystemStatsPane.tsx
 │       │       ├── TopicTreePane.tsx
@@ -229,12 +235,12 @@ aeolus/
 │       │   └── automation-state-store.ts  # Zustand store for per-rule automation state + WebSocket sync
 │       ├── lib/
 │       │   ├── api-client.ts         # REST API client (dynamic hostname)
+│       │   ├── cron-utils.ts         # Client-side cron validation, presets, and human-readable descriptions
 │       │   ├── ws-client.ts          # WebSocket client with auto-reconnect
 │       │   └── pane-registry.ts      # Maps pane type identifiers to React components + metadata
 │       └── types/
 │           └── dashboard.ts          # Tab, Pane, PaneConfig, LayoutPayload interfaces + defaults
-├── automations/                      # User-defined rule files
-│   └── example.ts                    # Sample automation
+├── automations/                      # User-defined rule files (loaded on startup)
 ├── mosquitto/
 │   └── mosquitto.conf                # Broker configuration
 ├── scripts/
@@ -283,15 +289,44 @@ In-memory device cache backed by SQLite for persistence across restarts.
 
 ### Automation Engine (`src/automations/automation-engine.ts`)
 
-Evaluates code-driven rules against incoming device events. Supports three rule types: file-based DSL rules, form-based UI rules, and script-based TypeScript rules.
+Evaluates code-driven rules against incoming device events. Supports three rule types: file-based DSL rules, form-based UI rules, and script-based TypeScript rules. Supports two trigger modes: MQTT topic matching and cron scheduling.
 
 - TypeScript DSL: `when(topic).if(condition).then(action)`
 - MQTT wildcard matching (`#` multi-level, `+` single-level)
+- Cron-triggered rules: rules with `triggerType: "cron"` and a `cronExpression` are scheduled via `CronTimerManager` instead of matching MQTT events
 - Fault isolation: one rule throwing doesn't affect others
 - Loads rule files from `automations/` directory on startup
 - Script rules are dispatched through the Sandbox (isolated-vm) with execution timing
 - Form rules are dispatched through the ActionExecutor pipeline
 - Records every execution in the ExecutionLog with duration and success/failure status
+
+### Cron Trigger System
+
+Automations can be triggered by cron schedules instead of (or in addition to) MQTT topic events. This enables time-based automations like "dim lights at sunset" or "check sensor health every 5 minutes".
+
+**Backend components:**
+
+- `CronTimerManager` (`src/automations/cron-timer-manager.ts`) — manages per-rule `node-cron` scheduled tasks. When a rule with `triggerType: "cron"` is registered, the engine starts a timer that fires the rule's action on schedule. Timers are stopped when rules are unregistered or the engine is disposed.
+- `cron-utils.ts` (`src/automations/cron-utils.ts`) — shared utilities: `isValidCron(expression)` validates five-field cron syntax via `node-cron`, `describeCron(expression)` converts to human-readable text, and `CRON_PRESETS` provides common schedule options.
+
+**Frontend components:**
+
+- `TriggerSelector` (`frontend/src/components/TriggerSelector.tsx`) — inline trigger type selector used in the AutomationPane setup/editing mode. Offers three modes: MQTT Topic (text input with wildcard support), Schedule (cron preset dropdown + custom picker with interval/daily modes), or None (manual-only). Reports validity back to the parent via `onValidityChange`.
+- `cron-utils.ts` (`frontend/src/lib/cron-utils.ts`) — client-side cron validation (regex-based, no `node-cron` dependency), `describeCron()` for human-readable labels, and `CRON_PRESETS` matching the backend presets.
+- `ScheduleViewerPane` (`frontend/src/components/panes/ScheduleViewerPane.tsx`) — dashboard pane that lists all cron-triggered automations with their schedule descriptions and next-fire indicators.
+
+**Database schema additions:**
+
+The `automation_rules` table includes:
+- `trigger_type TEXT NOT NULL DEFAULT 'mqtt'` — either `'mqtt'`, `'cron'`, or `'none'`
+- `cron_expression TEXT DEFAULT NULL` — five-field cron expression (e.g. `*/5 * * * *`)
+
+**How it works:**
+1. User selects "Schedule" in the TriggerSelector and picks a preset or builds a custom expression
+2. On save, the rule is stored with `trigger_type: "cron"` and the expression
+3. On registration, the AutomationEngine detects `triggerType === "cron"` and starts a `CronTimerManager` timer
+4. On each cron fire, the engine constructs a synthetic `EventContext` with topic `cron/{ruleName}` and dispatches through the normal execution pipeline (sandbox for script rules, ActionExecutor for form rules)
+5. Execution is logged identically to MQTT-triggered rules
 
 ### Condition Registry (`src/automations/condition-registry.ts`)
 
@@ -1144,6 +1179,8 @@ CREATE TABLE automation_rules (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   trigger_topic TEXT NOT NULL,
+  trigger_type TEXT NOT NULL DEFAULT 'mqtt',
+  cron_expression TEXT DEFAULT NULL,
   condition_type TEXT,
   condition_value TEXT,
   action_type TEXT NOT NULL DEFAULT 'log',
@@ -1347,7 +1384,7 @@ The React dashboard provides a comprehensive developer-focused interface with a 
 
 ### Modular Pane System
 - **Pane Registry** — Maps pane type identifiers to React components with metadata (display name, icon, default size, category)
-- **Available Pane Types:** device-grid, sensor-panel, mqtt-inspector, hue-control, kasa-control, trigger-button, automation, automation-rules, system-stats, topic-tree, event-log, state-history, connectors-page
+- **Available Pane Types:** device-grid, sensor-panel, mqtt-inspector, hue-control, kasa-control, trigger-button, automation, automation-card, automations-editor, automation-rules, schedule-viewer, system-stats, topic-tree, event-log, state-history, connectors-page
 - **New Automation Button** — Dedicated gradient-styled button in the tab header that directly creates an automation pane in setup mode, bypassing the pane picker. Automations are the core creative act in Aeolus and get first-class entry point treatment
 - **PanePicker** — Grouped pane type selector organized into categories: Controls, Automations, Monitoring, System. Each category is a collapsible section with pane type cards. The `automation` pane type is excluded from the picker since it has its own dedicated button
 - **PaneConfigPanel** — Per-pane configuration editor for type-specific settings
@@ -1356,10 +1393,8 @@ The React dashboard provides a comprehensive developer-focused interface with a 
 
 ### System Tab (pinned — route: `/dashboard`)
 - **Welcome Screen** — Shown when no devices exist. Three animated onboarding cards: Publish MQTT Data (guidance on connecting microcontrollers or running the seed script), Connect Devices (navigates to Connectors tab), Write Automations (navigates to create a custom tab). Uses framer-motion animations and Aeolus branding. Also shown in DeviceGrid when the device list is empty
-- **System Health** — MQTT connection status, device count, rule count, uptime (polls every 30s)
-- **Device Grid** — Cards grouped by room (parsed from MQTT topic), collapsible sections, click to open detail modal
-- **Device Detail Modal** — Full state view, capabilities, toggle/brightness controls, last seen timestamp
-- **System Page** — Host diagnostics (CPU, memory, disk, temperature, network), application log viewer, self-update controls (rendered inline below the device grid)
+- **System Health** — MQTT connection status, device count, automation count, uptime (polls every 30s)
+- **System Page** — Host diagnostics (CPU, memory, disk, Docker usage, temperature, network), application log viewer, version check (daily automatic + manual), self-update controls, Docker prune
 
 ### Connectors Tab (pinned)
 - **Available Connectors** — Cards for each discovered connector type showing display name, icon, description, supported device types, and setup requirement badge
