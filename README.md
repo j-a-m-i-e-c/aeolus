@@ -488,7 +488,6 @@ aeolus/
 │   │   ├── kasa/                 # TP-Link Kasa connector
 │   │   └── _template/            # Skeleton for new connectors
 │   ├── services/                 # Pluggable service framework (cron, triggers, system)
-│   ├── simulator/                # Fake device data generator
 │   ├── websocket/                # WebSocket server
 │   └── db/                       # SQLite setup + schema
 ├── frontend/                     # React + Vite dashboard

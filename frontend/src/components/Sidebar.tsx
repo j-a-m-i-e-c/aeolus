@@ -5,9 +5,9 @@ import { useDeviceStore } from "../store/device-store";
 import { useDashboardStore, tabNameToSlug } from "../store/dashboard-store";
 import { useNavigate, useLocation } from "react-router-dom";
 import * as icons from "lucide-react";
-import { Plus, Trash2, Wifi, WifiOff, Play, Square, GripVertical } from "lucide-react";
+import { Plus, Trash2, Wifi, WifiOff, GripVertical } from "lucide-react";
 import { useState, useEffect, useRef, useCallback } from "react";
-import { fetchSimulatorStatus, startSimulator, stopSimulator, fetchHealth } from "../lib/api-client";
+import { fetchHealth } from "../lib/api-client";
 import type { HealthStatus } from "../store/device-store";
 
 // ---------------------------------------------------------------------------
@@ -48,10 +48,6 @@ export function Sidebar() {
   const reorderTabs = useDashboardStore((s) => s.reorderTabs);
   const deleteTab = useDashboardStore((s) => s.deleteTab);
 
-  // Simulator state
-  const [simRunning, setSimRunning] = useState(false);
-  const [simLoading, setSimLoading] = useState(false);
-
   // Add-tab form state
   const [showAddForm, setShowAddForm] = useState(false);
   const [newTabName, setNewTabName] = useState("");
@@ -87,11 +83,6 @@ export function Sidebar() {
     return location.pathname === route;
   };
 
-  // Fetch simulator status on mount
-  useEffect(() => {
-    fetchSimulatorStatus().then((s) => setSimRunning(s.running)).catch(() => {});
-  }, []);
-
   // Poll health status globally so MQTT indicator works on all tabs
   const setHealth = useDeviceStore((s) => s.setHealth);
   useEffect(() => {
@@ -115,20 +106,6 @@ export function Sidebar() {
   useEffect(() => {
     if (renamingTabId) renameRef.current?.focus();
   }, [renamingTabId]);
-
-  const toggleSimulator = async () => {
-    setSimLoading(true);
-    try {
-      if (simRunning) {
-        await stopSimulator();
-        setSimRunning(false);
-      } else {
-        await startSimulator();
-        setSimRunning(true);
-      }
-    } catch {}
-    setSimLoading(false);
-  };
 
   // ---- Add tab handlers ----
 
@@ -382,22 +359,6 @@ export function Sidebar() {
           </button>
         )}
       </nav>
-
-      {/* Simulator toggle — pinned to bottom */}
-      <div className="px-2 shrink-0">
-        <button
-          onClick={toggleSimulator}
-          disabled={simLoading}
-          className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all duration-200 ${
-            simRunning
-              ? "bg-accent/15 text-accent border border-accent/30"
-              : "bg-elevated text-[#6B7785] border border-[#2A3441] hover:text-[#9AA6B2]"
-          }`}
-        >
-          {simRunning ? <Square size={12} /> : <Play size={12} />}
-          {simLoading ? "..." : simRunning ? "Stop Simulator" : "Start Simulator"}
-        </button>
-      </div>
 
       {/* System status — pinned to bottom */}
       <div className="px-2 space-y-2 shrink-0">

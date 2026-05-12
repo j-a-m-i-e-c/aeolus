@@ -1,28 +1,12 @@
 // frontend/src/components/WelcomeScreen.tsx — Onboarding screen for empty dashboard
 
-import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Zap, Plug, Code } from "lucide-react";
+import { Radio, Plug, Code } from "lucide-react";
 import { AeolusLogo } from "./AeolusLogo";
-import { startSimulator } from "../lib/api-client";
 
 export function WelcomeScreen() {
   const navigate = useNavigate();
-  const [simLoading, setSimLoading] = useState(false);
-  const [simStarted, setSimStarted] = useState(false);
-
-  const handleStartSimulator = async () => {
-    setSimLoading(true);
-    try {
-      await startSimulator();
-      setSimStarted(true);
-    } catch {
-      // toast or silent fail
-    } finally {
-      setSimLoading(false);
-    }
-  };
 
   return (
     <motion.div
@@ -41,22 +25,18 @@ export function WelcomeScreen() {
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 w-full max-w-2xl mt-4">
-        {/* Enable Simulator */}
-        <button
-          onClick={handleStartSimulator}
-          disabled={simLoading || simStarted}
-          className="group flex flex-col items-center gap-3 p-6 rounded-xl bg-[#121821] border border-[#2A3441] hover:border-[#3BA4FF]/50 transition-all duration-200 text-center disabled:opacity-60 disabled:cursor-not-allowed"
-        >
-          <div className="w-10 h-10 rounded-lg bg-[#3BA4FF]/10 flex items-center justify-center group-hover:bg-[#3BA4FF]/20 transition-colors">
-            <Zap size={20} className="text-[#3BA4FF]" />
+        {/* MQTT Devices */}
+        <div className="group flex flex-col items-center gap-3 p-6 rounded-xl bg-[#121821] border border-[#2A3441] text-center">
+          <div className="w-10 h-10 rounded-lg bg-[#3BA4FF]/10 flex items-center justify-center">
+            <Radio size={20} className="text-[#3BA4FF]" />
           </div>
           <span className="text-sm font-semibold text-[#E6EDF3]">
-            {simStarted ? "Simulator Running" : "Enable Simulator"}
+            Publish MQTT Data
           </span>
           <span className="text-xs text-[#6B7785] leading-relaxed">
-            See Aeolus in action with simulated devices
+            Connect your microcontrollers or run the seed script to populate demo data
           </span>
-        </button>
+        </div>
 
         {/* Connect Devices */}
         <button

@@ -6,7 +6,6 @@ const SILENT_PATHS = [
   "/api/system/logs",
   "/api/system",
   "/api/health",
-  "/api/simulator",
 ];
 
 export function requestLogger(req: Request, res: Response, next: NextFunction): void {

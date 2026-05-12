@@ -770,7 +770,7 @@ console.log(`
    Dashboard: ${API.replace(":3001", ":3000")}
    Tabs: Garden · Home · Monitoring
    Automations: ${allRules.length} (all with custom UI components)
-   Devices: ~30 (simulator + custom MQTT)
+   Devices: ~30 (via MQTT publish)
 
    Custom UI components render instantly — just refresh the page.
 `);

@@ -1343,7 +1343,6 @@ The React dashboard provides a comprehensive developer-focused interface with a 
 - **Rename** — Double-click a custom tab to rename inline
 - **Drag-to-Reorder** — Rearrange custom tabs via HTML5 drag-and-drop
 - **Delete** — Remove custom tabs with confirmation (cascades to panes)
-- **Simulator Toggle** — Start/stop device simulator without restarting backend
 - **System Status** — MQTT connection and WebSocket status indicators
 
 ### Modular Pane System
@@ -1356,7 +1355,7 @@ The React dashboard provides a comprehensive developer-focused interface with a 
 - **Layout Persistence** — Dashboard layout (tabs + panes) is persisted to SQLite via `GET/PUT /api/layout`, with debounced auto-save (2s). Only custom (unpinned) tabs are persisted — pinned tabs are hardcoded
 
 ### System Tab (pinned — route: `/dashboard`)
-- **Welcome Screen** — Shown when no devices exist. Three animated onboarding cards: Enable Simulator (starts the device simulator), Connect Devices (navigates to Connectors tab), Write Automations (navigates to create a custom tab). Uses framer-motion animations and Aeolus branding. Also shown in DeviceGrid when the device list is empty
+- **Welcome Screen** — Shown when no devices exist. Three animated onboarding cards: Publish MQTT Data (guidance on connecting microcontrollers or running the seed script), Connect Devices (navigates to Connectors tab), Write Automations (navigates to create a custom tab). Uses framer-motion animations and Aeolus branding. Also shown in DeviceGrid when the device list is empty
 - **System Health** — MQTT connection status, device count, rule count, uptime (polls every 30s)
 - **Device Grid** — Cards grouped by room (parsed from MQTT topic), collapsible sections, click to open detail modal
 - **Device Detail Modal** — Full state view, capabilities, toggle/brightness controls, last seen timestamp
@@ -1509,7 +1508,6 @@ Custom tabs use the modular pane grid powered by `react-grid-layout`. Users crea
 ### Global Features
 - **Toast Notifications** — Animated alerts in bottom-right when automations fire (auto-dismiss 4s)
 - **Command Palette** — Ctrl+K to search devices or publish MQTT messages via keyboard
-- **Simulator Toggle** — Start/stop device simulator from the sidebar without restarting backend
 - **Dynamic API URLs** — Frontend uses `window.location.hostname` so the dashboard works from any browser on the network
 - **Animated Logo** — SVG Aeolus logo with framer-motion wind swirl animation
 - **UUID Fallback** — Dashboard store uses a `generateId()` fallback for HTTP contexts where `crypto.randomUUID()` isn't available (e.g. accessing the dashboard over LAN without HTTPS)
@@ -1533,9 +1531,6 @@ Custom tabs use the modular pane grid powered by `react-grid-layout`. Users crea
 | GET | `/api/automations/history` | Execution log entries (optional limit param) |
 | GET | `/api/automations/:id/ui-module` | Serve compiled UI module as JavaScript (for runtime dynamic loading) |
 | POST | `/api/mqtt/publish` | Publish MQTT message `{ topic, payload }` |
-| GET | `/api/simulator` | Simulator running status |
-| POST | `/api/simulator/start` | Start device simulator |
-| POST | `/api/simulator/stop` | Stop device simulator |
 | GET | `/api/connectors/available` | List discovered connector types with metadata + config schemas |
 | GET | `/api/connectors` | List enabled connector instances (passwords redacted) |
 | POST | `/api/connectors` | Enable a new connector `{ connector_type, config }` |
@@ -1576,36 +1571,6 @@ Records device state snapshots to SQLite for historical trend analysis. Each sta
 - `clearDevice(deviceId)` — delete all history for one device
 - `clearAll()` — delete all history for all devices
 - Served via `GET /api/devices/:id/history`, `DELETE /api/devices/:id/history`, `DELETE /api/devices/history/all`
-
-## Device Simulator
-
-Built-in simulator generates realistic fake data for development and demos without requiring an MQTT broker. Device definitions are loaded from `data/simulator-devices.json` at startup — adding a new simulated device means editing the JSON file, nothing else.
-
-**JSON schema:** Each entry in the `devices` array has:
-- `topic` — MQTT topic string (e.g. `"sensor/kitchen/temp"`)
-- `deviceId` — device identifier (e.g. `"sensor-kitchen-temp"`)
-- `deviceType` — device type string (e.g. `"sensor"`)
-- `intervalMs` — emission interval in milliseconds
-- `generator` — state value generator configuration with `type` and type-specific fields:
-  - `drift` — numeric value that drifts within bounds (`min`, `max`, `step`, `initial`, optional `key`)
-  - `toggle` — boolean that flips on each interval (optional `key`)
-  - `random_boolean` — boolean with configurable `probability` (default 0.5, optional `key`)
-
-If the config file is missing or contains invalid JSON, the simulator logs a warning and starts with zero devices. Invalid generator types within the config are skipped with a warning.
-
-The default config ships 7 devices:
-
-| Device | Topic | Type | Interval | Behavior |
-|--------|-------|------|----------|----------|
-| Kitchen Temp | sensor/kitchen/temp | sensor | 5s | Drifts 18-28°C |
-| Bathroom Humidity | sensor/bathroom/humidity | sensor | 7s | Drifts 40-90% |
-| Living Room Temp | sensor/living-room/temp | sensor | 6s | Drifts 19-26°C |
-| Outdoor Temp | sensor/outdoor/temp | sensor | 10s | Drifts 5-35°C |
-| Bedroom Light | light/bedroom | light | 15s | Random brightness |
-| Desk Switch | switch/desk | switch | 20s | Random on/off |
-| Hallway Motion | motion/hallway | sensor | 8s | 30% chance true |
-
-Enable via `SIMULATOR=true` env var (auto-starts on boot) or toggle from the sidebar at runtime.
 
 ---
 

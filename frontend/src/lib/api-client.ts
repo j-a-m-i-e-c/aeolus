@@ -55,16 +55,10 @@ export async function fetchAutomations() {
   return request<AutomationRule[]>("/api/automations");
 }
 
-export async function fetchSimulatorStatus() {
-  return request<{ running: boolean }>("/api/simulator");
-}
-
-export async function startSimulator() {
-  return request<{ running: boolean }>("/api/simulator/start", { method: "POST" });
-}
-
-export async function stopSimulator() {
-  return request<{ running: boolean }>("/api/simulator/stop", { method: "POST" });
+export async function deleteAutomation(id: string) {
+  return request<{ success: boolean }>(`/api/automations/${id}`, {
+    method: "DELETE",
+  });
 }
 
 // ---- Layout persistence ----
