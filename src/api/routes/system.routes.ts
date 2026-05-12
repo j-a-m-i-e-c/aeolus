@@ -303,33 +303,31 @@ export function createSystemRoutes(): Router {
     // The project directory is bind-mounted from the host at /aeolus-host.
     // We run git pull directly on the mount (container has git + safe.directory configured in Dockerfile).
     // Then rebuild via the Docker socket (also mounted).
-    // The project directory is bind-mounted from the host at /aeolus-host.
-    // The original project name is "aeolus" (derived from the host folder name /home/aeolus/aeolus).
-    // We can't use `down` because it kills this container (the backend) mid-script.
-    // Instead: stop only the frontend and mosquitto, then rebuild everything.
-    // The backend will be replaced by compose when it recreates the service.
-    const updateCmd = [
-      `git -C ${projectDir} pull origin main`,
-      `docker stop aeolus-frontend aeolus-mosquitto 2>/dev/null || true`,
-      `docker rm aeolus-frontend aeolus-mosquitto 2>/dev/null || true`,
-      `docker compose -p aeolus -f ${projectDir}/docker-compose.yml up -d --build`,
-      `docker image prune -f`,
-      `docker builder prune -f`,
-    ].join(" && ");
+    logger.info("Self-update triggered from dashboard");
 
-    const child = spawn("sh", ["-c", updateCmd], {
+    // Pull latest code first (while we're still alive)
+    try {
+      const pullOutput = execSync(`git -C ${projectDir} pull origin main`, { encoding: "utf-8", timeout: 30000 });
+      logger.info({ source: "update", output: pullOutput.trim() }, "Git pull completed");
+    } catch (err) {
+      logger.error({ error: (err as Error).message }, "Git pull failed");
+      res.status(500).json({ error: "Git pull failed", message: (err as Error).message });
+      return;
+    }
+
+    res.json({ success: true, message: "Update started — the system will restart shortly" });
+
+    // Rebuild and restart all services. Compose will gracefully replace the running backend.
+    // Using --project-directory so compose resolves the build context correctly.
+    // The project name "aeolus" is derived from the host folder name automatically
+    // since /aeolus-host is a bind mount of /home/aeolus/aeolus.
+    const child = spawn("docker", [
+      "compose", "--project-name", "aeolus", "-f", `${projectDir}/docker-compose.yml`,
+      "up", "-d", "--build", "--remove-orphans",
+    ], {
       detached: true,
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: "ignore",
     });
-
-    // Log output for debugging
-    child.stdout?.on("data", (data: Buffer) => {
-      logger.info({ source: "update" }, data.toString().trim());
-    });
-    child.stderr?.on("data", (data: Buffer) => {
-      logger.warn({ source: "update" }, data.toString().trim());
-    });
-
     child.unref();
   });
 
