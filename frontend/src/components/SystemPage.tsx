@@ -243,28 +243,28 @@ export function SystemPage() {
         <div className="bg-surface border border-[#2A3441] rounded-xl p-4">
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             <div className="flex items-center gap-2">
-              <Cpu size={14} className="text-primary" />
+              <Cpu size={18} className="text-primary" />
               <div>
                 <div className="text-lg font-semibold text-[#E6EDF3]">{health.deviceCount}</div>
                 <div className="text-[10px] text-[#6B7785] uppercase">Devices</div>
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <Zap size={14} className="text-accent" />
+              <Zap size={18} className="text-accent" />
               <div>
                 <div className="text-lg font-semibold text-[#E6EDF3]">{health.ruleCount}</div>
                 <div className="text-[10px] text-[#6B7785] uppercase">Automations</div>
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <Activity size={14} className="text-[#22C55E]" />
+              <Activity size={18} className="text-[#22C55E]" />
               <div>
                 <div className="text-lg font-semibold text-[#E6EDF3]">{formatHealthUptime(health.uptime)}</div>
                 <div className="text-[10px] text-[#6B7785] uppercase">Uptime</div>
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <Wifi size={14} className={health.mqtt === "connected" ? "text-[#22C55E]" : "text-[#EF4444]"} />
+              <Wifi size={18} className={health.mqtt === "connected" ? "text-[#22C55E]" : "text-[#EF4444]"} />
               <div>
                 <div className="text-lg font-semibold text-[#E6EDF3] capitalize">{health.mqtt}</div>
                 <div className="text-[10px] text-[#6B7785] uppercase">MQTT</div>
