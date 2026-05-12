@@ -305,7 +305,7 @@ export function createSystemRoutes(): Router {
     // Then rebuild via the Docker socket (also mounted).
     const updateCmd = [
       `git -C ${projectDir} pull origin main`,
-      `docker compose -f ${projectDir}/docker-compose.yml up -d --build`,
+      `docker compose -f ${projectDir}/docker-compose.yml up -d --build --force-recreate`,
       `docker image prune -f`,
       `docker builder prune -f`,
     ].join(" && ");
