@@ -51,7 +51,7 @@ docker compose up
 
 Open **http://localhost:3000** — that's it.
 
-The built-in device simulator generates fake sensor data so you can explore aspects of the platform without any hardware.
+Use the seed script (`node scripts/seed-demo.mjs`) to populate the platform with realistic demo data so you can explore without any hardware.
 
 <!-- TODO: Add screenshot of the welcome/onboarding screen here -->
 <!-- ![Welcome Screen](docs/screenshots/welcome.png) -->
@@ -408,13 +408,10 @@ Three event source layers feed the same internal bus: MQTT devices (bidirectiona
 | GET | `/api/automations/history` | Execution log entries |
 | GET | `/api/automations/:id/ui-module` | Compiled UI module (JavaScript) |
 
-#### MQTT & Simulator
+#### MQTT
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/api/mqtt/publish` | Publish MQTT message |
-| GET | `/api/simulator` | Simulator status |
-| POST | `/api/simulator/start` | Start simulator |
-| POST | `/api/simulator/stop` | Stop simulator |
 
 #### Connectors
 | Method | Path | Description |
@@ -471,7 +468,6 @@ All configuration is via environment variables. Defaults work out of the box wit
 | `DB_PATH` | `./data/aeolus.db` | SQLite database path |
 | `LOG_LEVEL` | `info` | Log level (debug, info, warn, error) |
 | `NODE_ENV` | `development` | Environment mode |
-| `SIMULATOR` | `false` | Start the device simulator on boot |
 
 ---
 

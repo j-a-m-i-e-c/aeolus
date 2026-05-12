@@ -39,8 +39,7 @@ import triggerModule from "./services/trigger/index.js";
 import systemModule from "./services/system/index.js";
 import { requestLogger } from "./api/middleware/request-logger.js";
 import { errorHandler } from "./api/middleware/error-handler.js";
-import { DeviceSimulator } from "./simulator/device-simulator.js";
-import { createSimulatorRoutes } from "./api/routes/simulator.routes.js";
+
 import { createSystemRoutes } from "./api/routes/system.routes.js";
 import { createLayoutRoutes } from "./api/routes/layout.routes.js";
 import { StateHistory } from "./core/state-history.js";
@@ -140,21 +139,14 @@ async function main(): Promise<void> {
     stateHistory.record(event.deviceId, event.state, event.timestamp);
   });
 
-  // 8. Simulator (always available, auto-starts if SIMULATOR=true)
-  const simulatorConfigPath = path.resolve(process.cwd(), "data/simulator-devices.json");
-  const simulator = new DeviceSimulator(eventBus, simulatorConfigPath);
-  if (config.simulator) {
-    simulator.start();
-  }
-
-  // 9. Connect MQTT (always attempt — works alongside simulator)
+  // 8. Connect MQTT
   try {
     await mqttService.connect();
   } catch (err) {
     logger.error({ error: (err as Error).message }, "MQTT connection failed — running without MQTT");
   }
 
-  // 10. Express app
+  // 9. Express app
   const app = express();
   app.use(cors());
   app.use(express.json());
@@ -166,7 +158,6 @@ async function main(): Promise<void> {
   app.use("/api/mqtt", createMqttRoutes(mqttService));
   const sandboxTypesPath = path.resolve(import.meta.dirname, "automations/sandbox-types.d.ts");
   app.use("/api/automations", createAutomationRoutes(engine, db, registry, actionExecutor, executionLog, sandboxTypesPath, connectorRegistry, stateStore, conditionRegistry));
-  app.use("/api/simulator", createSimulatorRoutes(simulator));
   app.use("/api/connectors", createConnectorRoutes(connectorManager, connectorRegistry));
   app.use("/api/services", createServiceRoutes(serviceManager, serviceRegistry));
   app.use("/api/system", createSystemRoutes());
@@ -175,7 +166,7 @@ async function main(): Promise<void> {
   app.use(errorHandler);
 
 
-  // 11. HTTP + WebSocket server
+  // 10. HTTP + WebSocket server
   const server = createServer(app);
 
   const WS_MAPPINGS: WsEventMapping[] = [
@@ -194,10 +185,9 @@ async function main(): Promise<void> {
     );
   });
 
-  // 12. Graceful shutdown
+  // 11. Graceful shutdown
   const shutdown = async () => {
     logger.info("Shutting down Aeolus...");
-    simulator.stop();
     await serviceManager.disposeAll();
     await connectorManager.disposeAll();
     await mqttService.disconnect();

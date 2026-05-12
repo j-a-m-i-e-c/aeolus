@@ -28,11 +28,9 @@ async function api(method, path, body) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// 1. START SIMULATOR + PUBLISH EXTRA DEVICES
+// 1. PUBLISH MOCK DEVICES
 // ═══════════════════════════════════════════════════════════════════════
-console.log("1. Starting simulator & publishing devices...");
-await api("POST", "/api/simulator/start");
-await new Promise(r => setTimeout(r, 2000));
+console.log("1. Publishing mock devices...");
 
 const mqttDevices = [
   // Garden ecosystem

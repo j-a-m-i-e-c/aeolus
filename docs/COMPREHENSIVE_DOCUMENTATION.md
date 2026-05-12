@@ -103,7 +103,6 @@ aeolus/
 │   │   │   ├── health.routes.ts      # GET /api/health
 │   │   │   ├── mqtt.routes.ts        # POST /api/mqtt/publish
 │   │   │   ├── automation.routes.ts  # CRUD for UI-created automation rules
-│   │   │   ├── simulator.routes.ts   # Start/stop device simulator
 │   │   │   ├── connector.routes.ts   # Generic connector REST API (replaces hue.routes.ts)
 │   │   │   ├── service.routes.ts     # Generic service REST API
 │   │   │   ├── layout.routes.ts      # GET/PUT /api/layout (tab + pane persistence)
@@ -151,8 +150,6 @@ aeolus/
 │   │   │   ├── index.ts             # Template module exports
 │   │   │   └── connector.ts         # Template connector class
 │   │   └── README.md                 # Developer guide for creating new connectors
-│   ├── simulator/
-│   │   └── device-simulator.ts       # Fake device data generator (loads from data/simulator-devices.json)
 │   ├── services/                     # Pluggable service framework (non-device event producers)
 │   │   ├── service.interface.ts      # Core TypeScript interfaces (ServiceModule, ServiceInstance, etc.)
 │   │   ├── service-registry.ts       # Manual registration and lookup of service modules
@@ -180,7 +177,7 @@ aeolus/
 │       ├── components/
 │       │   ├── AeolusLogo.tsx        # Animated SVG logo
 │       │   ├── Layout.tsx            # Sidebar + main content
-│       │   ├── Sidebar.tsx           # Dynamic tab navigation + system status + simulator toggle
+│       │   ├── Sidebar.tsx           # Dynamic tab navigation + system status
 │       │   ├── TabLayout.tsx         # Renders panes for the active tab (passes paneId to components)
 │       │   ├── PanePicker.tsx        # Grouped pane type selector with categories (Controls, Automations, Monitoring, System)
 │       │   ├── PaneConfigPanel.tsx   # Per-pane configuration editor
@@ -1219,7 +1216,6 @@ CREATE TABLE automation_state (
 | DB_PATH | ./data/aeolus.db | SQLite database file path |
 | LOG_LEVEL | debug | pino log level |
 | NODE_ENV | development | Environment |
-| SIMULATOR | false | Enable device simulator (generates fake data without MQTT) |
 | AEOLUS_PROJECT_DIR | /aeolus-host | Host project directory mounted into the backend container (used by self-update) |
 | STATE_HISTORY_MAX | 100 | Maximum history entries stored per device |
 | HISTORY_RECORD_INTERVAL | 5000 | Minimum ms between history records per device |
