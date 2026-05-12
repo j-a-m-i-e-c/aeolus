@@ -252,7 +252,7 @@ export function SystemPage() {
               <Zap size={14} className="text-accent" />
               <div>
                 <div className="text-lg font-semibold text-[#E6EDF3]">{health.ruleCount}</div>
-                <div className="text-[10px] text-[#6B7785] uppercase">Rules</div>
+                <div className="text-[10px] text-[#6B7785] uppercase">Automations</div>
               </div>
             </div>
             <div className="flex items-center gap-2">
