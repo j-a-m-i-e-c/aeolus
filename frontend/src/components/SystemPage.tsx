@@ -427,7 +427,7 @@ export function SystemPage() {
                   {info.docker.reclaimable > 1024 * 1024 && (
                     <button
                       onClick={async () => {
-                        if (!confirm(`This will remove all unused Docker images (old versions from previous builds) and clear the entire build cache. This frees up ${formatBytes(info.docker!.reclaimable)} but the next update will take longer as images are rebuilt from scratch.\n\nProceed?`)) return;
+                        if (!confirm(`Clean up ${formatBytes(info.docker!.reclaimable)} of Aeolus Docker storage?\n\nThis removes:\n• Old image layers from previous builds\n• Build cache (speeds up rebuilds but safe to clear)\n\nCurrently running containers are not affected. The next update may take slightly longer to rebuild.`)) return;
                         try {
                           const res = await fetch(`${API_URL}/api/system/docker-prune`, { method: "POST" });
                           const data = await res.json();
