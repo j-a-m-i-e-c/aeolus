@@ -305,10 +305,13 @@ export function createSystemRoutes(): Router {
     // Then rebuild via the Docker socket (also mounted).
     // The project directory is bind-mounted from the host at /aeolus-host.
     // The original project name is "aeolus" (derived from the host folder name /home/aeolus/aeolus).
-    // We must use -p aeolus so compose targets the correct existing containers.
+    // We can't use `down` because it kills this container (the backend) mid-script.
+    // Instead: stop only the frontend and mosquitto, then rebuild everything.
+    // The backend will be replaced by compose when it recreates the service.
     const updateCmd = [
       `git -C ${projectDir} pull origin main`,
-      `docker compose -p aeolus -f ${projectDir}/docker-compose.yml down`,
+      `docker stop aeolus-frontend aeolus-mosquitto 2>/dev/null || true`,
+      `docker rm aeolus-frontend aeolus-mosquitto 2>/dev/null || true`,
       `docker compose -p aeolus -f ${projectDir}/docker-compose.yml up -d --build`,
       `docker image prune -f`,
       `docker builder prune -f`,
