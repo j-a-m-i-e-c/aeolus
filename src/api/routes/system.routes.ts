@@ -323,7 +323,7 @@ export function createSystemRoutes(): Router {
     // since /aeolus-host is a bind mount of /home/aeolus/aeolus.
     const child = spawn("docker", [
       "compose", "--project-name", "aeolus", "-f", `${projectDir}/docker-compose.yml`,
-      "up", "-d", "--build", "--remove-orphans",
+      "up", "-d", "--build", "--force-recreate", "--remove-orphans",
     ], {
       detached: true,
       stdio: "ignore",
