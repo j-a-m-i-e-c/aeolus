@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { Routes, Route, Navigate, useParams } from "react-router-dom";
 import { Layout } from "./components/Layout";
-import { DeviceGrid } from "./components/DeviceGrid";
 import { DeviceDetail } from "./components/DeviceDetail";
 import { ToastContainer } from "./components/ToastContainer";
 import { CommandPalette } from "./components/CommandPalette";
@@ -22,7 +21,7 @@ import type { Device } from "./store/device-store";
 // Dashboard page (pinned)
 // ---------------------------------------------------------------------------
 
-function DashboardPage({ onSelectDevice }: { onSelectDevice: (id: string) => void }) {
+function DashboardPage() {
   const devices = useDeviceStore((s) => s.devices);
   const hasDevices = Object.keys(devices).length > 0;
 
@@ -30,12 +29,7 @@ function DashboardPage({ onSelectDevice }: { onSelectDevice: (id: string) => voi
     return <WelcomeScreen />;
   }
 
-  return (
-    <div className="space-y-6">
-      <SystemPage />
-      <DeviceGrid onSelectDevice={onSelectDevice} />
-    </div>
-  );
+  return <SystemPage />;
 }
 
 // ---------------------------------------------------------------------------
@@ -105,7 +99,7 @@ export default function App() {
     <Layout>
       <Routes>
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
-        <Route path="/dashboard" element={<DashboardPage onSelectDevice={setSelectedDeviceId} />} />
+        <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/connectors" element={<ConnectorsPage />} />
         <Route path="/system" element={<Navigate to="/dashboard" replace />} />
         <Route path="/tab/:slug" element={<CustomTabPage />} />
