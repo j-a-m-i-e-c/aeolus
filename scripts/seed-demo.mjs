@@ -208,27 +208,27 @@ export default function SmartIrrigation(props: CustomComponentProps) {
   };
 
   const TankSVG = ({ level, label }: { level: number; label: string }) => {
-    const fillHeight = (level / 100) * 60;
     const tankColor = level > 60 ? "#22C55E" : level > 30 ? "#F59E0B" : "#EF4444";
+    const fillH = (level / 100) * 70;
     return (
-      <div className="flex flex-col items-center gap-1">
-        <svg width="60" height="80" viewBox="0 0 60 80">
+      <div className="flex flex-col items-center gap-1 flex-1">
+        <svg width="100%" height="90" viewBox="0 0 160 90" preserveAspectRatio="xMidYMid meet">
           <defs>
             <linearGradient id={"tankGrad-" + label} x1="0" y1="1" x2="0" y2="0">
-              <stop offset="0%" stopColor={tankColor} stopOpacity="0.9" />
-              <stop offset="100%" stopColor={tankColor} stopOpacity="0.4" />
+              <stop offset="0%" stopColor={tankColor} stopOpacity="0.85" />
+              <stop offset="50%" stopColor={tankColor} stopOpacity="0.5" />
+              <stop offset="100%" stopColor={tankColor} stopOpacity="0.2" />
             </linearGradient>
             <clipPath id={"tankClip-" + label}>
-              <rect x="6" y="10" width="48" height="60" rx="8" />
+              <rect x="10" y="10" width="140" height="70" rx="10" />
             </clipPath>
           </defs>
-          <rect x="6" y="10" width="48" height="60" rx="8" fill="#1A2330" stroke="#2A3441" strokeWidth="1.5" />
-          <rect x="6" y={70 - fillHeight} width="48" height={fillHeight} fill={"url(#tankGrad-" + label + ")"} clipPath={"url(#tankClip-" + label + ")"} className="transition-all duration-700" />
-          <rect x="6" y="10" width="48" height="60" rx="8" fill="none" stroke="#2A3441" strokeWidth="1.5" />
-          <rect x="20" y="4" width="20" height="8" rx="3" fill="#1A2330" stroke="#2A3441" strokeWidth="1" />
+          <rect x="10" y="10" width="140" height="70" rx="10" fill="#0B0F14" stroke="#2A3441" strokeWidth="1.5" />
+          <rect x="10" y={80 - fillH} width="140" height={fillH} fill={"url(#tankGrad-" + label + ")"} clipPath={"url(#tankClip-" + label + ")"} className="transition-all duration-700" />
+          <rect x="10" y="10" width="140" height="70" rx="10" fill="none" stroke="#2A3441" strokeWidth="1.5" />
+          <text x="80" y="48" textAnchor="middle" fill="#E6EDF3" fontSize="14" fontFamily="monospace" fontWeight="bold">{level}%</text>
+          <text x="80" y="62" textAnchor="middle" fill="#6B7785" fontSize="9">{label}</text>
         </svg>
-        <div className="text-[10px] text-[#6B7785]">{label}</div>
-        <div className="text-xs font-mono font-semibold" style={{ color: tankColor }}>{level}%</div>
       </div>
     );
   };
@@ -240,7 +240,7 @@ export default function SmartIrrigation(props: CustomComponentProps) {
         <div className="text-[10px] text-[#6B7785]">{totalCycles} cycles</div>
       </div>
 
-      <div className="flex justify-center gap-6">
+      <div className="space-y-2">
         <TankSVG level={tank1} label="Tank A" />
         <TankSVG level={tank2} label="Tank B" />
       </div>
@@ -378,6 +378,119 @@ export default function GreenhousePanel(props: CustomComponentProps) {
 }`,
 });
 if (greenhouse) console.log("  ✓ Greenhouse:", greenhouse.id);
+
+// ─── Tab 1: Garden — Tank Transfer ──────────────────────────────────
+const tankTransfer = await api("POST", "/api/automations", {
+  name: "Tank Transfer",
+  triggerTopic: "sensor/tank/+",
+  ruleType: "script",
+  scriptSource: `automation({
+  conditions: [
+    function hasLevel(context) {
+      return typeof context.state.value === "number";
+    },
+  ],
+  actions: [
+    function managePump(context) {
+      const topic = context.topic;
+      const level = context.state.value;
+
+      if (topic.includes("water-level-1")) state.set("mainTankLevel", level);
+      if (topic.includes("water-level-2")) state.set("feederTankLevel", level);
+
+      const mainLevel = state.get("mainTankLevel") || 0;
+      const feederLevel = state.get("feederTankLevel") || 0;
+
+      // When main house tank drops below 40%, pump from feeder tank
+      const shouldPump = mainLevel < 40 && feederLevel > 15;
+      const wasPumping = state.get("pumpActive") || false;
+
+      state.set("pumpActive", shouldPump);
+      state.set("lastCheck", Date.now());
+      state.set("totalTransfers", (state.get("totalTransfers") || 0) + (shouldPump && !wasPumping ? 1 : 0));
+
+      if (shouldPump && !wasPumping) {
+        mqtt.publish("switch/tank/transfer-pump/command", JSON.stringify({ on: true }));
+        log.info("Transfer pump started — main tank at " + mainLevel + "%, feeder at " + feederLevel + "%");
+      } else if (!shouldPump && wasPumping) {
+        mqtt.publish("switch/tank/transfer-pump/command", JSON.stringify({ on: false }));
+        log.info("Transfer pump stopped — main tank at " + mainLevel + "%");
+      }
+    },
+  ],
+});`,
+  uiSource: `import type { CustomComponentProps } from "./types";
+
+export default function TankTransfer(props: CustomComponentProps) {
+  const mainLevel = props.state.get("mainTankLevel") as number || 0;
+  const feederLevel = props.state.get("feederTankLevel") as number || 0;
+  const pumpActive = props.state.get("pumpActive") as boolean || false;
+  const totalTransfers = props.state.get("totalTransfers") as number || 0;
+
+  const tankColor = (level: number) => level > 60 ? "#22C55E" : level > 30 ? "#F59E0B" : "#EF4444";
+  const mainColor = tankColor(mainLevel);
+  const feederColor = tankColor(feederLevel);
+
+  const TankSVG = ({ level, label, color }: { level: number; label: string; color: string }) => {
+    const fillH = (level / 100) * 55;
+    return (
+      <div className="flex-1">
+        <svg width="100%" height="75" viewBox="0 0 140 75" preserveAspectRatio="xMidYMid meet">
+          <defs>
+            <linearGradient id={"xferTank-" + label} x1="0" y1="1" x2="0" y2="0">
+              <stop offset="0%" stopColor={color} stopOpacity="0.85" />
+              <stop offset="50%" stopColor={color} stopOpacity="0.5" />
+              <stop offset="100%" stopColor={color} stopOpacity="0.2" />
+            </linearGradient>
+            <clipPath id={"xferClip-" + label}>
+              <rect x="8" y="8" width="124" height="58" rx="8" />
+            </clipPath>
+          </defs>
+          <rect x="8" y="8" width="124" height="58" rx="8" fill="#0B0F14" stroke="#2A3441" strokeWidth="1.5" />
+          <rect x="8" y={66 - fillH} width="124" height={fillH} fill={"url(#xferTank-" + label + ")"} clipPath={"url(#xferClip-" + label + ")"} className="transition-all duration-700" />
+          <rect x="8" y="8" width="124" height="58" rx="8" fill="none" stroke="#2A3441" strokeWidth="1.5" />
+          <text x="70" y="40" textAnchor="middle" fill="#E6EDF3" fontSize="13" fontFamily="monospace" fontWeight="bold">{level}%</text>
+          <text x="70" y="54" textAnchor="middle" fill="#6B7785" fontSize="8">{label}</text>
+        </svg>
+      </div>
+    );
+  };
+
+  return (
+    <div className="p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <div className="text-sm font-semibold text-[#E6EDF3]">🔄 Tank Transfer</div>
+        <div className="text-[10px] text-[#6B7785]">{totalTransfers} transfers</div>
+      </div>
+
+      <TankSVG level={mainLevel} label="Main (House)" color={mainColor} />
+
+      {/* Pump indicator between tanks */}
+      <div className="flex items-center justify-center gap-2 py-1">
+        <div className="h-px flex-1 bg-[#2A3441]" />
+        <div className={"flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-medium " + (pumpActive ? "bg-[#3BA4FF]/20 text-[#3BA4FF] border border-[#3BA4FF]/30" : "bg-[#1A2330] text-[#6B7785] border border-[#2A3441]")}>
+          {pumpActive ? "⬆ Pumping" : "○ Idle"}
+        </div>
+        <div className="h-px flex-1 bg-[#2A3441]" />
+      </div>
+
+      <TankSVG level={feederLevel} label="Feeder (Rainwater)" color={feederColor} />
+
+      <div className="bg-[#0B0F14] rounded-lg p-2.5 border border-[#2A3441] text-[10px] text-[#6B7785]">
+        Pump activates when house tank drops below 40% and feeder has water available.
+      </div>
+
+      <button
+        onClick={() => props.mqttPublish("switch/tank/transfer-pump/command", JSON.stringify({ on: true, duration: 300 }))}
+        className="w-full py-2 rounded-lg text-xs font-medium bg-[#3BA4FF]/20 text-[#3BA4FF] border border-[#3BA4FF]/30 hover:bg-[#3BA4FF]/30 transition-colors"
+      >
+        Manual Transfer (5 min)
+      </button>
+    </div>
+  );
+}`,
+});
+if (tankTransfer) console.log("  ✓ Tank Transfer:", tankTransfer.id);
 
 
 // ─── Tab 2: Home — Energy Monitor ────────────────────────────────────
@@ -1683,6 +1796,14 @@ if (greenhouse) {
   console.log("  ✓ Greenhouse state");
 }
 
+if (tankTransfer) {
+  await api("PUT", `/api/automations/${tankTransfer.id}/state`, { key: "mainTankLevel", value: 35 });
+  await api("PUT", `/api/automations/${tankTransfer.id}/state`, { key: "feederTankLevel", value: 72 });
+  await api("PUT", `/api/automations/${tankTransfer.id}/state`, { key: "pumpActive", value: true });
+  await api("PUT", `/api/automations/${tankTransfer.id}/state`, { key: "totalTransfers", value: 23 });
+  console.log("  ✓ Tank Transfer state");
+}
+
 if (energyMonitor) {
   await api("PUT", `/api/automations/${energyMonitor.id}/state`, { key: "solar-production", value: 3.2 });
   await api("PUT", `/api/automations/${energyMonitor.id}/state`, { key: "grid-consumption", value: 1.4 });
@@ -1859,6 +1980,7 @@ const panes = [
   // Garden
   { id: "pane-irrigation", tabId: "tab-garden", paneType: "automation", config: { ruleId: smartIrrigation?.id || "" }, x: 0, y: 0, w: 6, h: 9, createdAt: now },
   { id: "pane-greenhouse", tabId: "tab-garden", paneType: "automation", config: { ruleId: greenhouse?.id || "" }, x: 6, y: 0, w: 6, h: 9, createdAt: now },
+  { id: "pane-tank-transfer", tabId: "tab-garden", paneType: "automation", config: { ruleId: tankTransfer?.id || "" }, x: 0, y: 9, w: 6, h: 9, createdAt: now },
 
   // Home
   { id: "pane-energy", tabId: "tab-home", paneType: "automation", config: { ruleId: energyMonitor?.id || "" }, x: 0, y: 0, w: 6, h: 9, createdAt: now },
@@ -1898,7 +2020,7 @@ console.log(`  ✓ Layout: ${tabs.length} tabs, ${panes.length} panes`);
 console.log("\n5. Generating execution history...");
 
 const allRules = [
-  smartIrrigation, greenhouse,
+  smartIrrigation, greenhouse, tankTransfer,
   energyMonitor, securityMonitor,
   reefTank, waterQuality,
   fermentation, brewDay,
