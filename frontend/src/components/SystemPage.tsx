@@ -57,6 +57,7 @@ export function SystemPage() {
   const [updateAvailable, setUpdateAvailable] = useState(false);
   const [commitsBehind, setCommitsBehind] = useState(0);
   const [versionChecked, setVersionChecked] = useState(false);
+  const [pruning, setPruning] = useState(false);
 
   // Health polling (device count, rule count, uptime, MQTT status)
   const health = useDeviceStore((s) => s.health);
@@ -428,20 +429,22 @@ export function SystemPage() {
                     <button
                       onClick={async () => {
                         if (!confirm(`Clean up ${formatBytes(info.docker!.reclaimable)} of Aeolus Docker storage?\n\nThis removes:\n• Old image layers from previous builds\n• Build cache (speeds up rebuilds but safe to clear)\n\nCurrently running containers are not affected. The next update may take slightly longer to rebuild.`)) return;
+                        setPruning(true);
                         try {
                           const res = await fetch(`${API_URL}/api/system/docker-prune`, { method: "POST" });
                           const data = await res.json();
                           if (data.docker) {
-                            // Update the info with fresh docker stats
                             setInfo((prev) => prev ? { ...prev, docker: data.docker } : prev);
                           }
-                          fetchInfo(); // Refresh disk stats too
+                          fetchInfo();
                         } catch {}
+                        setPruning(false);
                       }}
-                      className="flex items-center gap-1.5 text-[10px] text-[#F59E0B] hover:text-[#E6EDF3] transition-colors"
+                      disabled={pruning}
+                      className="flex items-center gap-1.5 text-[10px] text-[#F59E0B] hover:text-[#E6EDF3] transition-colors disabled:opacity-50"
                     >
                       <Trash2 size={10} />
-                      {formatBytes(info.docker.reclaimable)} reclaimable — clean up
+                      {pruning ? "Clearing..." : `${formatBytes(info.docker.reclaimable)} reclaimable — clean up`}
                     </button>
                   )}
                 </div>
