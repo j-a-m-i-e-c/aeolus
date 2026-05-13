@@ -46,6 +46,14 @@ const mqttDevices = [
   { topic: "sensor/greenhouse/humidity", payload: '{"value": 72}' },
   { topic: "sensor/greenhouse/co2", payload: '{"value": 420}' },
   { topic: "switch/greenhouse/vent", payload: '{"on": true}' },
+  { topic: "sensor/greenhouse/zone-tomato-moisture", payload: '{"value": 65}' },
+  { topic: "sensor/greenhouse/zone-pepper-moisture", payload: '{"value": 52}' },
+  { topic: "sensor/greenhouse/zone-lettuce-moisture", payload: '{"value": 78}' },
+  { topic: "sensor/greenhouse/zone-herbs-moisture", payload: '{"value": 60}' },
+  { topic: "sensor/greenhouse/zone-tomato-light", payload: '{"value": 850}' },
+  { topic: "sensor/greenhouse/zone-pepper-light", payload: '{"value": 720}' },
+  { topic: "sensor/greenhouse/zone-lettuce-light", payload: '{"value": 450}' },
+  { topic: "sensor/greenhouse/zone-herbs-light", payload: '{"value": 380}' },
 
   // ── Home ──
   { topic: "sensor/energy/solar-production", payload: '{"value": 3.2}' },
@@ -307,9 +315,25 @@ const greenhouse = await api("POST", "/api/automations", {
   ],
   actions: [
     function manageGreenhouse(context) {
-      const metric = context.topic.split("/")[2];
+      const topic = context.topic;
       const value = context.state.value;
-      state.set(metric, value);
+      const parts = topic.split("/");
+      const metric = parts.slice(2).join("_").replace(/-/g, "_");
+
+      // Map zone sensor topics to state keys
+      if (topic.includes("zone-tomato-moisture")) state.set("zone_tomato_moisture", value);
+      else if (topic.includes("zone-pepper-moisture")) state.set("zone_pepper_moisture", value);
+      else if (topic.includes("zone-lettuce-moisture")) state.set("zone_lettuce_moisture", value);
+      else if (topic.includes("zone-herbs-moisture")) state.set("zone_herbs_moisture", value);
+      else if (topic.includes("zone-tomato-light")) state.set("zone_tomato_light", value);
+      else if (topic.includes("zone-pepper-light")) state.set("zone_pepper_light", value);
+      else if (topic.includes("zone-lettuce-light")) state.set("zone_lettuce_light", value);
+      else if (topic.includes("zone-herbs-light")) state.set("zone_herbs_light", value);
+      else {
+        const simple = parts[2];
+        state.set(simple, value);
+      }
+
       state.set("lastUpdate", Date.now());
 
       const temp = state.get("temp") || 0;
@@ -319,6 +343,15 @@ const greenhouse = await api("POST", "/api/automations", {
 
       if (needsVent) {
         mqtt.publish("switch/greenhouse/vent/command", JSON.stringify({ action: "open" }));
+      }
+
+      // Determine growth stages based on light + moisture
+      const stages = ["seedling", "vegetative", "flowering", "fruiting"];
+      const zones = ["tomato", "pepper", "lettuce", "herbs"];
+      for (const z of zones) {
+        if (!state.get("zone_" + z + "_stage")) {
+          state.set("zone_" + z + "_stage", "vegetative");
+        }
       }
     },
   ],
@@ -331,60 +364,108 @@ export default function GreenhousePanel(props: CustomComponentProps) {
   const co2 = props.state.get("co2") as number || 0;
   const ventActive = props.state.get("ventActive") as boolean;
 
-  const tempOk = temp >= 20 && temp <= 30;
-  const humOk = humidity >= 50 && humidity <= 80;
-  const co2Ok = co2 >= 350 && co2 <= 600;
+  const zones = [
+    { key: "tomato", icon: "🍅", label: "Tomatoes" },
+    { key: "pepper", icon: "🌶️", label: "Peppers" },
+    { key: "lettuce", icon: "🥬", label: "Lettuce" },
+    { key: "herbs", icon: "🌿", label: "Herbs" },
+  ];
 
-  const statusDot = (ok: boolean) => ok ? "bg-[#22C55E]" : "bg-[#F59E0B]";
+  const getMoisture = (z: string) => props.state.get("zone_" + z + "_moisture") as number || 0;
+  const getLight = (z: string) => props.state.get("zone_" + z + "_light") as number || 0;
+  const getStage = (z: string) => props.state.get("zone_" + z + "_stage") as string || "vegetative";
+
+  const stageColor = (s: string) => s === "fruiting" ? "#EF4444" : s === "flowering" ? "#F59E0B" : s === "vegetative" ? "#22C55E" : "#3BA4FF";
+
+  const lightIntensity = (lux: number) => lux > 700 ? 1 : lux > 400 ? 0.6 : 0.3;
 
   return (
-    <div className="p-4 space-y-4">
+    <div className="p-4 space-y-3">
+      {/* Environment bar */}
       <div className="flex items-center justify-between">
         <div className="text-sm font-semibold text-[#E6EDF3]">🌱 Greenhouse</div>
-        <div className={"text-[10px] px-2 py-0.5 rounded " + (ventActive ? "bg-[#F59E0B]/20 text-[#F59E0B]" : "bg-[#22C55E]/20 text-[#22C55E]")}>
-          {ventActive ? "Venting" : "Sealed"}
+        <div className="flex items-center gap-1.5">
+          <span className="text-[9px] px-1.5 py-0.5 rounded bg-[#F59E0B]/15 text-[#F59E0B] font-mono">{temp.toFixed(1)}°C</span>
+          <span className="text-[9px] px-1.5 py-0.5 rounded bg-[#3BA4FF]/15 text-[#3BA4FF] font-mono">{humidity}%</span>
+          <span className="text-[9px] px-1.5 py-0.5 rounded bg-[#22C55E]/15 text-[#22C55E] font-mono">{co2}ppm</span>
         </div>
       </div>
 
-      <div className="space-y-3">
-        <div className="flex items-center gap-3">
-          <div className={"w-2 h-2 rounded-full shrink-0 " + statusDot(tempOk)} />
-          <div className="flex-1">
-            <div className="flex justify-between text-xs">
-              <span className="text-[#9AA6B2]">Temperature</span>
-              <span className="text-[#E6EDF3] font-mono font-semibold">{temp.toFixed(1)}°C</span>
-            </div>
-            <div className="w-full h-1.5 bg-[#1A2330] rounded-full mt-1 overflow-hidden">
-              <div className="h-full rounded-full bg-[#F59E0B] transition-all" style={{ width: Math.min((temp / 40) * 100, 100) + "%" }} />
-            </div>
-          </div>
+      {/* Vent/Fan + Grow Lights status */}
+      <div className="flex items-center gap-2">
+        <div className={"flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-medium border " + (ventActive ? "bg-[#F59E0B]/10 border-[#F59E0B]/30 text-[#F59E0B]" : "bg-[#22C55E]/10 border-[#22C55E]/30 text-[#22C55E]")}>
+          <svg width="12" height="12" viewBox="0 0 12 12" className={"transition-all duration-700 " + (ventActive ? "animate-spin" : "")}>
+            <circle cx="6" cy="6" r="1.5" fill="currentColor" />
+            <path d="M6,1.5 Q8,4 6,6 Q4,4 6,1.5" fill="currentColor" opacity="0.7" />
+            <path d="M10.5,6 Q8,8 6,6 Q8,4 10.5,6" fill="currentColor" opacity="0.7" />
+            <path d="M6,10.5 Q4,8 6,6 Q8,8 6,10.5" fill="currentColor" opacity="0.7" />
+            <path d="M1.5,6 Q4,4 6,6 Q4,8 1.5,6" fill="currentColor" opacity="0.7" />
+          </svg>
+          {ventActive ? "Vent Open" : "Vent Sealed"}
         </div>
+        <div className="flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-medium border bg-[#F59E0B]/10 border-[#F59E0B]/30 text-[#F59E0B]">
+          <svg width="10" height="10" viewBox="0 0 10 10">
+            <circle cx="5" cy="5" r="2" fill="#F59E0B" />
+            {[0,45,90,135,180,225,270,315].map((a, i) => (
+              <line key={i} x1={5 + 3 * Math.cos(a * Math.PI / 180)} y1={5 + 3 * Math.sin(a * Math.PI / 180)} x2={5 + 4.5 * Math.cos(a * Math.PI / 180)} y2={5 + 4.5 * Math.sin(a * Math.PI / 180)} stroke="#F59E0B" strokeWidth="0.8" strokeLinecap="round" />
+            ))}
+          </svg>
+          Grow Lights · Full Spectrum
+        </div>
+      </div>
 
-        <div className="flex items-center gap-3">
-          <div className={"w-2 h-2 rounded-full shrink-0 " + statusDot(humOk)} />
-          <div className="flex-1">
-            <div className="flex justify-between text-xs">
-              <span className="text-[#9AA6B2]">Humidity</span>
-              <span className="text-[#E6EDF3] font-mono font-semibold">{humidity}%</span>
-            </div>
-            <div className="w-full h-1.5 bg-[#1A2330] rounded-full mt-1 overflow-hidden">
-              <div className="h-full rounded-full bg-[#3BA4FF] transition-all" style={{ width: humidity + "%" }} />
-            </div>
-          </div>
-        </div>
+      {/* Plant zone cards */}
+      <div className="grid grid-cols-2 gap-2">
+        {zones.map(zone => {
+          const moisture = getMoisture(zone.key);
+          const light = getLight(zone.key);
+          const stage = getStage(zone.key);
+          const sColor = stageColor(stage);
+          const lIntensity = lightIntensity(light);
 
-        <div className="flex items-center gap-3">
-          <div className={"w-2 h-2 rounded-full shrink-0 " + statusDot(co2Ok)} />
-          <div className="flex-1">
-            <div className="flex justify-between text-xs">
-              <span className="text-[#9AA6B2]">CO₂</span>
-              <span className="text-[#E6EDF3] font-mono font-semibold">{co2} ppm</span>
+          // Circular moisture gauge
+          const radius = 14;
+          const circumference = 2 * Math.PI * radius;
+          const moistureArc = (moisture / 100) * circumference;
+          const moistureColor = moisture > 70 ? "#3BA4FF" : moisture > 40 ? "#22C55E" : "#F59E0B";
+
+          return (
+            <div key={zone.key} className="bg-[#0B0F14] rounded-xl border border-[#2A3441] p-2.5">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-base">{zone.icon}</span>
+                <span className="text-[11px] text-[#E6EDF3] font-medium">{zone.label}</span>
+              </div>
+
+              <div className="flex items-center justify-between">
+                {/* Circular moisture gauge */}
+                <div className="relative flex items-center justify-center">
+                  <svg width="38" height="38" viewBox="0 0 38 38">
+                    <circle cx="19" cy="19" r={radius} fill="none" stroke="#1A2330" strokeWidth="3" />
+                    <circle cx="19" cy="19" r={radius} fill="none" stroke={moistureColor} strokeWidth="3" strokeLinecap="round" strokeDasharray={circumference} strokeDashoffset={circumference - moistureArc} transform="rotate(-90 19 19)" className="transition-all duration-700" />
+                    <text x="19" y="21" textAnchor="middle" fill="#E6EDF3" fontSize="8" fontFamily="monospace" fontWeight="bold">{moisture}</text>
+                  </svg>
+                  <div className="absolute -bottom-1 text-[7px] text-[#6B7785]">💧</div>
+                </div>
+
+                {/* Light indicator */}
+                <div className="flex flex-col items-center gap-0.5">
+                  <svg width="20" height="20" viewBox="0 0 20 20" style={{ opacity: lIntensity }} className="transition-all duration-700">
+                    <circle cx="10" cy="10" r="4" fill="#F59E0B" />
+                    {[0,45,90,135,180,225,270,315].map((a, i) => (
+                      <line key={i} x1={10 + 5.5 * Math.cos(a * Math.PI / 180)} y1={10 + 5.5 * Math.sin(a * Math.PI / 180)} x2={10 + 7.5 * Math.cos(a * Math.PI / 180)} y2={10 + 7.5 * Math.sin(a * Math.PI / 180)} stroke="#F59E0B" strokeWidth="1.2" strokeLinecap="round" />
+                    ))}
+                  </svg>
+                  <span className="text-[8px] font-mono text-[#9AA6B2]">{light} lux</span>
+                </div>
+              </div>
+
+              {/* Growth stage badge */}
+              <div className="mt-2 flex justify-center">
+                <span className="text-[9px] px-2 py-0.5 rounded-full font-semibold capitalize" style={{ backgroundColor: sColor + "20", color: sColor }}>{stage}</span>
+              </div>
             </div>
-            <div className="w-full h-1.5 bg-[#1A2330] rounded-full mt-1 overflow-hidden">
-              <div className="h-full rounded-full bg-[#22C55E] transition-all" style={{ width: Math.min((co2 / 1000) * 100, 100) + "%" }} />
-            </div>
-          </div>
-        </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -1992,6 +2073,81 @@ export default function ClimateOverview(props: CustomComponentProps) {
 });
 if (climateOverview) console.log("  ✓ Climate Overview:", climateOverview.id);
 
+// ─── Tab 8: Weather — Weekly Forecast ────────────────────────────────
+const weeklyForecast = await api("POST", "/api/automations", {
+  name: "Weekly Forecast",
+  triggerType: "cron",
+  cronExpression: "0 */6 * * *",
+  ruleType: "script",
+  scriptSource: `automation({
+  actions: [
+    function fetchForecast(context) {
+      // In a real setup this would use http.get to fetch weather API data.
+      // For demo purposes we set hardcoded forecast data into state.
+      state.set("today", { temp: 24, high: 27, low: 18, condition: "partly-cloudy", description: "Partly cloudy with afternoon sun" });
+      state.set("forecast", [
+        { day: "Mon", high: 27, low: 18, condition: "sunny", rainChance: 10 },
+        { day: "Tue", high: 25, low: 17, condition: "partly-cloudy", rainChance: 20 },
+        { day: "Wed", high: 22, low: 15, condition: "rainy", rainChance: 75 },
+        { day: "Thu", high: 20, low: 14, condition: "stormy", rainChance: 90 },
+        { day: "Fri", high: 23, low: 16, condition: "partly-cloudy", rainChance: 30 },
+        { day: "Sat", high: 26, low: 18, condition: "sunny", rainChance: 5 },
+        { day: "Sun", high: 28, low: 19, condition: "sunny", rainChance: 0 },
+      ]);
+      state.set("lastFetch", Date.now());
+    },
+  ],
+});`,
+  uiSource: `import type { CustomComponentProps } from "./types";
+
+export default function WeeklyForecast(props: CustomComponentProps) {
+  const today = props.state.get("today") as { temp: number; high: number; low: number; condition: string; description: string } || { temp: 24, high: 27, low: 18, condition: "partly-cloudy", description: "Partly cloudy with afternoon sun" };
+  const forecast = props.state.get("forecast") as Array<{ day: string; high: number; low: number; condition: string; rainChance: number }> || [];
+
+  const conditionIcon = (c: string) => c === "sunny" ? "☀️" : c === "partly-cloudy" ? "⛅" : c === "rainy" ? "🌧️" : c === "stormy" ? "⛈️" : "☀️";
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="text-sm font-semibold text-[#E6EDF3]">📅 Weekly Forecast</div>
+
+      {/* Today's summary */}
+      <div className="bg-[#0B0F14] rounded-xl border border-[#2A3441] p-4 flex items-center gap-4">
+        <span className="text-4xl">{conditionIcon(today.condition)}</span>
+        <div className="flex-1">
+          <div className="text-2xl font-bold font-mono text-[#E6EDF3]">{today.temp}°C</div>
+          <div className="text-[10px] text-[#6B7785] mt-0.5">H: <span className="text-[#E6EDF3] font-mono">{today.high}°</span> · L: <span className="text-[#E6EDF3] font-mono">{today.low}°</span></div>
+          <div className="text-[10px] text-[#9AA6B2] mt-1">{today.description}</div>
+        </div>
+      </div>
+
+      {/* 7-day forecast row */}
+      <div className="overflow-x-auto -mx-4 px-4">
+        <div className="flex gap-2" style={{ minWidth: "max-content" }}>
+          {forecast.map((day, i) => (
+            <div key={i} className="bg-[#0B0F14] rounded-lg border border-[#2A3441] p-2.5 w-[72px] flex flex-col items-center gap-1.5">
+              <span className="text-[10px] text-[#9AA6B2] font-medium">{day.day}</span>
+              <span className="text-lg">{conditionIcon(day.condition)}</span>
+              <div className="text-center">
+                <div className="text-[10px] font-mono font-semibold text-[#E6EDF3]">{day.high}°</div>
+                <div className="text-[9px] font-mono text-[#6B7785]">{day.low}°</div>
+              </div>
+              {/* Rain probability bar */}
+              <div className="w-full space-y-0.5">
+                <div className="w-full h-1.5 bg-[#1A2330] rounded-full overflow-hidden">
+                  <div className="h-full rounded-full bg-[#3BA4FF] transition-all duration-700" style={{ width: day.rainChance + "%" }} />
+                </div>
+                <div className="text-[7px] text-[#6B7785] text-center font-mono">{day.rainChance}%</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}`,
+});
+if (weeklyForecast) console.log("  ✓ Weekly Forecast:", weeklyForecast.id);
+
 
 // ═══════════════════════════════════════════════════════════════════════
 // 3. SEED AUTOMATION STATE
@@ -2016,6 +2172,18 @@ if (greenhouse) {
   await api("PUT", `/api/automations/${greenhouse.id}/state`, { key: "humidity", value: 72 });
   await api("PUT", `/api/automations/${greenhouse.id}/state`, { key: "co2", value: 420 });
   await api("PUT", `/api/automations/${greenhouse.id}/state`, { key: "ventActive", value: true });
+  await api("PUT", `/api/automations/${greenhouse.id}/state`, { key: "zone_tomato_moisture", value: 65 });
+  await api("PUT", `/api/automations/${greenhouse.id}/state`, { key: "zone_pepper_moisture", value: 52 });
+  await api("PUT", `/api/automations/${greenhouse.id}/state`, { key: "zone_lettuce_moisture", value: 78 });
+  await api("PUT", `/api/automations/${greenhouse.id}/state`, { key: "zone_herbs_moisture", value: 60 });
+  await api("PUT", `/api/automations/${greenhouse.id}/state`, { key: "zone_tomato_light", value: 850 });
+  await api("PUT", `/api/automations/${greenhouse.id}/state`, { key: "zone_pepper_light", value: 720 });
+  await api("PUT", `/api/automations/${greenhouse.id}/state`, { key: "zone_lettuce_light", value: 450 });
+  await api("PUT", `/api/automations/${greenhouse.id}/state`, { key: "zone_herbs_light", value: 380 });
+  await api("PUT", `/api/automations/${greenhouse.id}/state`, { key: "zone_tomato_stage", value: "fruiting" });
+  await api("PUT", `/api/automations/${greenhouse.id}/state`, { key: "zone_pepper_stage", value: "flowering" });
+  await api("PUT", `/api/automations/${greenhouse.id}/state`, { key: "zone_lettuce_stage", value: "vegetative" });
+  await api("PUT", `/api/automations/${greenhouse.id}/state`, { key: "zone_herbs_stage", value: "vegetative" });
   console.log("  ✓ Greenhouse state");
 }
 
@@ -2180,6 +2348,21 @@ if (climateOverview) {
   console.log("  ✓ Climate Overview state");
 }
 
+if (weeklyForecast) {
+  await api("PUT", `/api/automations/${weeklyForecast.id}/state`, { key: "today", value: { temp: 24, high: 27, low: 18, condition: "partly-cloudy", description: "Partly cloudy with afternoon sun" } });
+  await api("PUT", `/api/automations/${weeklyForecast.id}/state`, { key: "forecast", value: [
+    { day: "Mon", high: 27, low: 18, condition: "sunny", rainChance: 10 },
+    { day: "Tue", high: 25, low: 17, condition: "partly-cloudy", rainChance: 20 },
+    { day: "Wed", high: 22, low: 15, condition: "rainy", rainChance: 75 },
+    { day: "Thu", high: 20, low: 14, condition: "stormy", rainChance: 90 },
+    { day: "Fri", high: 23, low: 16, condition: "partly-cloudy", rainChance: 30 },
+    { day: "Sat", high: 26, low: 18, condition: "sunny", rainChance: 5 },
+    { day: "Sun", high: 28, low: 19, condition: "sunny", rainChance: 0 },
+  ] });
+  await api("PUT", `/api/automations/${weeklyForecast.id}/state`, { key: "lastFetch", value: Date.now() });
+  console.log("  ✓ Weekly Forecast state");
+}
+
 
 // ═══════════════════════════════════════════════════════════════════════
 // 4. CREATE DASHBOARD LAYOUT (8 tabs)
@@ -2232,6 +2415,7 @@ const panes = [
   // Weather
   { id: "pane-weather-station", tabId: "tab-weather", paneType: "automation", config: { ruleId: weatherStation?.id || "" }, x: 0, y: 0, w: 6, h: 9, createdAt: now },
   { id: "pane-climate-overview", tabId: "tab-weather", paneType: "automation", config: { ruleId: climateOverview?.id || "" }, x: 6, y: 0, w: 6, h: 9, createdAt: now },
+  { id: "pane-weekly-forecast", tabId: "tab-weather", paneType: "automation", config: { ruleId: weeklyForecast?.id || "" }, x: 0, y: 9, w: 12, h: 7, createdAt: now },
 ];
 
 await api("PUT", "/api/layout", { tabs, panes });
@@ -2250,7 +2434,7 @@ const allRules = [
   nutrientSystem, growLights,
   poolMonitor, spaControls,
   rackMonitor, powerNetwork,
-  weatherStation, climateOverview,
+  weatherStation, climateOverview, weeklyForecast,
 ].filter(Boolean);
 
 for (const rule of allRules) {
