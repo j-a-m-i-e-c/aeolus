@@ -607,25 +607,27 @@ export function AutomationPane({ config, paneId }: Props) {
       />
 
       {/* Tab bar — visible in BOTH setup and editing modes (15.1) */}
-      <div className="flex items-center gap-1 border-b border-[#2A3441]">
+      <div className="flex items-center gap-1 bg-[#0B0F14] rounded-lg p-1 border border-[#2A3441]">
         <button
           onClick={() => setEditingTab("logic")}
-          className={`px-3 py-1.5 text-xs font-medium rounded-t-lg transition-colors ${
+          className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 text-xs font-semibold rounded-md transition-all duration-200 ${
             editingTab === "logic"
-              ? "text-[#E6EDF3] border-b-2 border-primary"
-              : "text-[#6B7785] hover:text-[#9AA6B2]"
+              ? "bg-gradient-to-r from-[#3BA4FF]/20 to-[#5CE1E6]/20 text-[#5CE1E6] border border-[#5CE1E6]/30 shadow-[0_0_12px_rgba(92,225,230,0.1)]"
+              : "text-[#6B7785] hover:text-[#9AA6B2] hover:bg-[#1A2330]"
           }`}
         >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="16 18 22 12 16 6" /><polyline points="8 6 2 12 8 18" /></svg>
           Logic
         </button>
         <button
           onClick={() => setEditingTab("ui")}
-          className={`px-3 py-1.5 text-xs font-medium rounded-t-lg transition-colors ${
+          className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 text-xs font-semibold rounded-md transition-all duration-200 ${
             editingTab === "ui"
-              ? "text-[#E6EDF3] border-b-2 border-primary"
-              : "text-[#6B7785] hover:text-[#9AA6B2]"
+              ? "bg-gradient-to-r from-[#3BA4FF]/20 to-[#5CE1E6]/20 text-[#5CE1E6] border border-[#5CE1E6]/30 shadow-[0_0_12px_rgba(92,225,230,0.1)]"
+              : "text-[#6B7785] hover:text-[#9AA6B2] hover:bg-[#1A2330]"
           }`}
         >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M3 9h18" /><path d="M9 21V9" /></svg>
           UI
         </button>
       </div>
