@@ -44,12 +44,15 @@ The system runs as three Docker services: a Mosquitto MQTT broker, an Express.js
                      │          │  Logging         │
                      │          └─────────────────┘
                      │
-              ┌──────▼──────┐
-              │  WebSocket  │
-              │   Server    │
-              └──────┬──────┘
-                     │
-              ┌──────▼──────┐      ┌──────────────┐
+              ┌──────▼──────┐  ┌──────────────────┐
+              │  WebSocket  │  │   Data Store      │
+              │   Server    │  │   (SQLite)        │
+              └──────┬──────┘  └──────┬────────────┘
+                     │                 │
+                     │    ┌────────────┘
+                     │    │  db global in Sandbox
+                     │    │  + REST API
+              ┌──────▼────▼─┐      ┌──────────────┐
               │  REST API   │◄────►│    React     │
               │  (Express)  │      │  Dashboard   │
               └─────────────┘      └──────────────┘
@@ -105,6 +108,7 @@ aeolus/
 │   │   │   ├── automation.routes.ts  # CRUD for UI-created automation rules
 │   │   │   ├── connector.routes.ts   # Generic connector REST API (replaces hue.routes.ts)
 │   │   │   ├── service.routes.ts     # Generic service REST API
+│   │   │   ├── data-store.routes.ts  # Data Store REST API (collections, records, buckets, config)
 │   │   │   ├── layout.routes.ts      # GET/PUT /api/layout (tab + pane persistence)
 │   │   │   └── system.routes.ts      # Host diagnostics, application logs, self-update
 │   │   └── middleware/
@@ -164,6 +168,14 @@ aeolus/
 │   │   ├── system/                   # System Events service
 │   │   │   └── index.ts             # Module exports (metadata, configSchema, createService)
 │   │   └── README.md                 # Developer guide for creating services
+│   ├── data-store/                   # Persistent time-series + key-value storage
+│   │   ├── data-store.ts            # DataStore class (write, query, buckets, retention, config)
+│   │   ├── duration.ts              # Duration string parser (pure module, no dependencies)
+│   │   └── __tests__/               # Property-based + unit tests
+│   │       ├── duration.test.ts     # PBT for duration parser
+│   │       ├── data-store.test.ts   # PBT for DataStore core logic
+│   │       ├── data-store.routes.test.ts  # Integration tests for REST API
+│   │       └── data-store.sandbox.test.ts # Integration tests for sandbox wiring
 │   ├── websocket/
 │   │   └── ws-server.ts              # WebSocket server
 │   ├── db/
@@ -229,10 +241,22 @@ aeolus/
 │       │           └── types.ts         # CustomComponentProps interface
 │       ├── hooks/
 │       │   └── useDynamicComponent.ts # Runtime loader for custom automation UI modules (blob URL + dynamic import)
+│       ├── pages/
+│       │   ├── DataStorePage.tsx      # Data Store page (setup wizard or data explorer)
+│       │   └── data-store/           # Data Store sub-components
+│       │       ├── BucketList.tsx     # Expandable bucket list with key-value pairs
+│       │       ├── CollectionDetail.tsx # Time-series chart + record table + management
+│       │       ├── CollectionList.tsx  # Card grid of collections
+│       │       ├── DataExplorer.tsx   # Main explorer with SummaryBar + tab switcher
+│       │       ├── RecordTable.tsx    # Paginated record table
+│       │       ├── SettingsPanel.tsx  # DataStore configuration editor
+│       │       ├── SetupWizard.tsx    # First-run setup wizard (shown when disabled)
+│       │       └── TimeSeriesChart.tsx # SVG chart adapted for DataStore records
 │       ├── store/
 │       │   ├── device-store.ts       # Zustand device state + WebSocket sync
 │       │   ├── dashboard-store.ts    # Zustand dashboard layout state (tabs, panes, persistence)
-│       │   └── automation-state-store.ts  # Zustand store for per-rule automation state + WebSocket sync
+│       │   ├── automation-state-store.ts  # Zustand store for per-rule automation state + WebSocket sync
+│       │   └── data-store-store.ts   # Zustand store for Data Store state (collections, records, buckets, config)
 │       ├── lib/
 │       │   ├── api-client.ts         # REST API client (dynamic hostname)
 │       │   ├── cron-utils.ts         # Client-side cron validation, presets, and human-readable descriptions
@@ -386,7 +410,7 @@ Secure execution environment for user-authored automation scripts using `isolate
 
 - Creates a fresh V8 isolate per execution with a 32 MB memory limit
 - Enforces a 5-second execution timeout to prevent infinite loops
-- Exposes a controlled API surface as globals: `devices`, `mqtt`, `log`, `context`, `services`, `http`, `automation`, `state`
+- Exposes a controlled API surface as globals: `devices`, `mqtt`, `log`, `context`, `services`, `http`, `automation`, `state`, `db`
 - `devices.get/list/filter` — synchronous, data copied into isolate via `ivm.ExternalCopy`
 - `devices.action()` and `mqtt.publish()` — host-side callbacks via `ivm.Reference` delegating to ActionExecutor
 - `log.info/warn/error` — host-side callbacks delegating to the application logger with ruleId context
@@ -400,6 +424,13 @@ Secure execution environment for user-authored automation scripts using `isolate
 - `state.set(key, value)` — write a JSON-serializable value; persists to SQLite and broadcasts via WebSocket
 - `state.getAll()` — returns all key-value pairs for the current rule as a plain object
 - `state.delete(key)` — remove a key from the state store
+- `db` — Data Store interface (undefined when Data Store is disabled):
+  - `db.write(collection, payload, options?)` — write a record to a time-series collection (auto-creates collection if needed)
+  - `db.query(collection, options?)` — query records with time-range filtering, tag filtering, pagination, and aggregation
+  - `db.get(bucket, key)` — get a value from a key-value bucket (returns undefined if not found)
+  - `db.set(bucket, key, value)` — set a key-value pair in a bucket
+  - `db.delete(bucket, key)` — delete a key from a bucket
+  - `db.collections()` — list all collections with metadata
 - Blocks access to `require`, `import`, `process`, `fs`, `child_process`, `eval`, `Function`, `global`
 - Graceful fallback: if `isolated-vm` is not available (e.g. Windows dev without C++ toolchain), sandbox execution is disabled with a warning
 
@@ -646,6 +677,95 @@ The `services` global is available in automation scripts alongside `devices`, `m
 - `services.get(serviceType)` — returns a read-only snapshot of the service's `getState()`, or `undefined` if not running
 - `services.list()` — returns `[{ type, displayName, running }]` for all registered services
 
+### Data Store (`src/data-store/data-store.ts`)
+
+Persistent time-series and key-value storage system built on the existing sql.js (pure JS SQLite) infrastructure. Enables automations to accumulate structured data over time, share computed values across rules, and query historical records with aggregation.
+
+**Purpose:** Provide a durable storage layer for automation scripts that need to persist data beyond a single execution — sensor data logging, rolling averages, cross-rule state sharing, and historical trend analysis.
+
+**Architecture:** A single `DataStore` class receives the sql.js `Database` instance and an `EventEmitter` (the internal event bus). All logic — write, query, buckets, retention, config, safeguards — lives in this one class, mirroring the existing `StateHistory` and `ConnectorStore` patterns.
+
+**Disabled by default:** The `ds_config` table stores an `enabled` flag. When disabled, the sandbox `db` global is `undefined` and REST write endpoints return 503. A setup wizard on first visit guides users through storage limits to prevent accidental SD card fill on Raspberry Pi.
+
+#### DataStore Class Methods
+
+```typescript
+class DataStore {
+  constructor(db: Database, eventBus: EventEmitter, config?: Partial<DataStoreConfig>);
+
+  // Lifecycle
+  isEnabled(): boolean;
+  enable(config: DataStoreConfig): void;
+  disable(): void;
+  getConfig(): DataStoreConfig;
+  updateConfig(partial: Partial<DataStoreConfig>): void;
+
+  // Time-series operations
+  write(collection: string, payload: Record<string, unknown>, options?: WriteOptions): void;
+  query(collection: string, options?: QueryOptions): QueryResult;
+
+  // Key-value bucket operations
+  get(bucket: string, key: string): unknown | undefined;
+  set(bucket: string, key: string, value: unknown): void;
+  delete(bucket: string, key: string): void;
+  listBucket(bucket: string): Array<{ key: string; value: unknown; updatedAt: number }>;
+  listBuckets(): Array<{ bucket: string; keyCount: number }>;
+
+  // Collection management
+  createCollection(name: string, description?: string, retentionDays?: number | null): void;
+  updateCollection(name: string, updates: { description?: string; retentionDays?: number | null }): void;
+  deleteCollection(name: string): void;
+  listCollections(): CollectionMetadata[];
+  getStats(): DataStoreStats;
+
+  // Retention enforcement (called by internal hourly timer)
+  enforceRetention(): void;
+  startRetentionTimer(): void;
+  stopRetentionTimer(): void;
+  dispose(): void;
+}
+```
+
+#### Duration Parser Module (`src/data-store/duration.ts`)
+
+Pure functions with no side effects or dependencies — ideal for property-based testing.
+
+- `parseDuration(input: string): number` — Parse a duration string like `"7d"`, `"24h"`, `"30m"` into milliseconds
+- `formatDuration(ms: number): string` — Format milliseconds back into the shortest valid duration string
+- Supported units: `m` (minutes), `h` (hours), `d` (days), `w` (weeks), `y` (years)
+- Throws a descriptive error for invalid inputs (empty strings, decimal numbers, unknown suffixes, negative numbers)
+
+#### Configuration and Safeguards
+
+```typescript
+interface DataStoreConfig {
+  enabled: boolean;
+  maxStorageMb: number;           // Default: 500 — maximum estimated storage before writes are rejected
+  maxRecordsPerCollection: number; // Default: 100,000 — triggers FIFO eviction when exceeded
+  maxCollections: number;          // Default: 50 — maximum number of collections allowed
+}
+```
+
+#### FIFO Eviction Behavior
+
+When a write would cause a collection to exceed `maxRecordsPerCollection`, the oldest records are deleted first to make room for the new record. The newest write is always preserved. This approach preserves the most recent data rather than rejecting the write entirely.
+
+#### Retention Enforcement
+
+An internal timer runs every hour (3,600,000 ms) and deletes records older than `retentionDays` for each collection that has a retention policy set. Collections with `retentionDays = null` keep records forever. Errors during enforcement are logged and do not affect other collections.
+
+#### Event Emission
+
+- `DATA_STORE_WRITE` (`"data-store:write"`) — emitted after every successful write with `{ collection, record }`
+- `DATA_STORE_COLLECTION_DELETED` (`"data-store:collection-deleted"`) — emitted when a collection is deleted with `{ collection }`
+
+These events are broadcast to WebSocket clients via the existing `WS_MAPPINGS` array for real-time frontend updates.
+
+#### Enable/Disable Lifecycle
+
+- **Enable:** Called via `POST /api/data-store/enable` with config values. Persists config to `ds_config` table, sets `enabled = true`. The sandbox `db` global becomes available on next script execution.
+- **Disable:** Called via `POST /api/data-store/disable`. Sets `enabled = false` in config. Existing data is preserved. The sandbox `db` global becomes `undefined`.
+
 ## API Reference
 
 ### REST Endpoints
@@ -835,6 +955,100 @@ Returns `{ "success": true, "trigger": "<name>" }`.
 **GET /api/services/topics**
 List available service event topics for all enabled services (e.g. `service/cron/every-5m`, `service/trigger/{name}`, `service/system/startup`).
 
+### Data Store API
+
+All Data Store endpoints are mounted at `/api/data-store`. Write operations return 503 when the Data Store is disabled.
+
+**GET /api/data-store/collections**
+List all collections with metadata (name, description, retentionDays, recordCount, oldestRecord, newestRecord, createdAt, updatedAt).
+Returns `CollectionMetadata[]`. 200.
+
+**POST /api/data-store/collections**
+Create a new collection.
+```json
+{ "name": "temperatures", "description": "Kitchen sensor readings", "retentionDays": 30 }
+```
+Returns `{ "success": true }`. 201. 400 if name missing, 409 if collection already exists.
+
+**PATCH /api/data-store/collections/:name**
+Update collection description or retention policy.
+```json
+{ "description": "Updated description", "retentionDays": 7 }
+```
+Returns `{ "success": true }`. 200. 404 if collection not found.
+
+**DELETE /api/data-store/collections/:name**
+Delete a collection and all its records. Emits `DATA_STORE_COLLECTION_DELETED` event.
+Returns `{ "success": true }`. 200. 404 if collection not found.
+
+**POST /api/data-store/collections/:name/records**
+Write a record to a collection. Auto-creates the collection if it doesn't exist.
+```json
+{ "payload": { "value": 23.5, "unit": "°C" }, "tags": { "sensor": "kitchen-temp" } }
+```
+Returns `{ "success": true }`. 201. 400 if payload missing or not an object, 503 if Data Store disabled, 404 if collection not found.
+
+**GET /api/data-store/collections/:name/records**
+Query records with filtering, pagination, and aggregation.
+Query parameters:
+- `from` (optional) — duration string (`"7d"`, `"24h"`) or epoch ms
+- `to` (optional) — epoch ms (defaults to now)
+- `limit` (optional) — max records to return
+- `offset` (optional) — skip N records for pagination
+- `tags` (optional) — JSON string of tag key-value pairs to filter by
+- `aggregate` (optional) — `sum`, `avg`, `min`, `max`, or `count`
+- `field` (optional) — required when aggregate is specified
+
+Returns `{ records: DataRecord[], total: number }` for normal queries or `{ value: number }` for aggregation queries. 200. 400 for invalid parameters.
+
+**GET /api/data-store/collections/:name/export**
+Export all records in a collection as CSV. Response has `Content-Type: text/csv` and `Content-Disposition: attachment` headers.
+
+**GET /api/data-store/buckets**
+List all buckets with key counts.
+Returns `Array<{ bucket: string, keyCount: number }>`. 200.
+
+**GET /api/data-store/buckets/:bucket**
+List all entries in a bucket.
+Returns `Array<{ key: string, value: unknown, updatedAt: number }>`. 200.
+
+**PUT /api/data-store/buckets/:bucket/:key**
+Set a key-value pair in a bucket.
+```json
+{ "value": 42 }
+```
+Returns `{ "success": true }`. 200. 400 if value field missing, 503 if Data Store disabled.
+
+**DELETE /api/data-store/buckets/:bucket/:key**
+Delete a key from a bucket.
+Returns `{ "success": true }`. 200. 503 if Data Store disabled.
+
+**GET /api/data-store/config**
+Return current DataStore configuration.
+Returns `DataStoreConfig` object. 200.
+
+**PUT /api/data-store/config**
+Update configuration values (validates numeric fields are positive).
+```json
+{ "maxStorageMb": 1000, "maxRecordsPerCollection": 200000 }
+```
+Returns `{ "success": true }`. 200. 400 if invalid values.
+
+**GET /api/data-store/stats**
+Return storage statistics.
+Returns `DataStoreStats` object with `totalRecords`, `totalBucketEntries`, `totalCollections`, `estimatedStorageMb`, `maxStorageMb`, `storagePercent`. 200.
+
+**POST /api/data-store/enable**
+Enable the Data Store with provided configuration.
+```json
+{ "maxStorageMb": 500, "maxRecordsPerCollection": 100000, "maxCollections": 50 }
+```
+Returns `{ "success": true }`. 200. 400 if required fields missing or invalid.
+
+**POST /api/data-store/disable**
+Disable the Data Store. Existing data is preserved.
+Returns `{ "success": true }`. 200.
+
 ### System API
 
 **GET /api/system**
@@ -898,6 +1112,18 @@ Connect to `ws://localhost:3001/ws`
 { "type": "automation-state", "data": { "ruleId": "...", "key": "avgTemp", "value": 22.5 } }
 ```
 Broadcast whenever a script calls `state.set(key, value)` or the REST API updates state via `PUT /api/automations/:id/state`.
+
+**Server → Client: Data Store write**
+```json
+{ "type": "data-store-write", "data": { "collection": "temperatures", "record": { "id": 42, "collection": "temperatures", "payload": { "value": 23.5 }, "tags": { "sensor": "kitchen" }, "timestamp": 1711806244000 } } }
+```
+Broadcast whenever a record is written to a Data Store collection (via sandbox `db.write()` or REST API).
+
+**Server → Client: Data Store collection deleted**
+```json
+{ "type": "data-store-collection-deleted", "data": { "collection": "temperatures" } }
+```
+Broadcast when a collection is deleted via the REST API.
 
 ## Data Models
 
@@ -1241,6 +1467,43 @@ CREATE TABLE automation_state (
   value TEXT NOT NULL,
   PRIMARY KEY (rule_id, key)
 );
+
+-- Data Store tables
+CREATE TABLE ds_config (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+
+CREATE TABLE ds_collections (
+  name TEXT PRIMARY KEY,
+  description TEXT,
+  retention_days INTEGER,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE ds_records (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  collection TEXT NOT NULL REFERENCES ds_collections(name) ON DELETE CASCADE,
+  payload TEXT NOT NULL,
+  tags TEXT NOT NULL DEFAULT '{}',
+  timestamp INTEGER NOT NULL
+);
+
+CREATE TABLE ds_buckets (
+  bucket TEXT NOT NULL,
+  key TEXT NOT NULL,
+  value TEXT NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (bucket, key)
+);
+
+-- Data Store indexes
+CREATE INDEX idx_ds_records_collection_ts
+  ON ds_records(collection, timestamp DESC);
+
+CREATE INDEX idx_ds_records_collection_tags
+  ON ds_records(collection, tags);
 ```
 
 ## Environment Variables
@@ -1344,19 +1607,23 @@ The Dockerfile installs `git`, `docker-cli`, and `docker-cli-compose` in the pro
 
 ## Design Decisions
 
+- **Data Store disabled by default with setup wizard:** Prevents accidental SD card fill on Raspberry Pi. Users must explicitly enable with configured storage limits, ensuring they understand the implications of persistent data accumulation on constrained hardware.
+- **FIFO eviction over hard rejection when collection hits record limit:** Preserves newest data automatically rather than failing writes. For time-series sensor data, recent readings are almost always more valuable than old ones.
+- **Duration parser as pure module for property-based testing:** The `src/data-store/duration.ts` module has zero dependencies and no side effects, making it ideal for exhaustive property-based testing with fast-check. Separating it from the DataStore class keeps the test surface clean.
+- **Single DataStore class mirrors existing StateHistory/ConnectorStore patterns:** All logic (write, query, buckets, retention, config, safeguards) lives in one class that receives the sql.js Database instance. This consistency makes the codebase predictable — developers familiar with one storage component can immediately understand the others.
 - **sql.js over better-sqlite3:** Pure JavaScript avoids native C++ build tools requirement, enabling cross-platform development (Windows → Raspberry Pi) without compilation issues.
 - **EventEmitter over message queue:** Simple pub/sub is sufficient at MVP scale. No need for Redis/RabbitMQ for a local-first system.
 - **Zustand over Redux:** Lightweight, minimal boilerplate, matches the "clarity over decoration" design principle.
 - **Express over Fastify:** Broader ecosystem familiarity, easier WebSocket integration via ws library.
 - **Pluggable connector architecture over hardcoded integrations:** Each connector is a self-contained module with metadata, config schema, and factory function. The ConnectorRegistry discovers modules at startup, the ConnectorManager handles lifecycle (enable/disable/poll/action routing), and the ConnectorStore persists state to SQLite. This replaces the previous `src/integrations/` approach where each integration required its own route file and manual wiring. New connectors can be added by creating a directory in `src/connectors/` with the standard module exports — no changes to backend core code required. A `_template/` skeleton is provided for developers. Connector devices automatically appear in the Device Grid pane and can be targeted by automations. For connector-specific controls (colour pickers, energy stats, thermostat setpoints), a dedicated frontend pane component is recommended but optional — see `HueControlPane.tsx` and `KasaControlPane.tsx` as reference implementations.
 - **Host networking for LAN device discovery:** The backend container uses `network_mode: host` instead of the shared bridge network. This is required for Kasa's UDP broadcast discovery (which doesn't work across Docker bridge networks) and for direct LAN access to Hue bridges. The trade-off is that the backend port is exposed directly on the host rather than through Docker port mapping, and the MQTT broker URL must use `localhost` instead of the Docker service name.
-- **Pinned tabs render dedicated components:** Pinned system tabs (System, Connectors) render their own full-page components directly via React Router `<Route>` elements in `App.tsx`, bypassing the modular pane grid. The System tab (`/dashboard`) renders `SystemHealth`, `DeviceGrid`, and `SystemPage` inline. The Connectors tab (`/connectors`) renders the `ConnectorsPage` component. This gives each system page full control over its layout and styling. Custom (unpinned) tabs use the `TabLayout` component with the pane grid system. This separation keeps system pages polished while maintaining flexibility for user-created tabs.
+- **Pinned tabs render dedicated components:** Pinned system tabs (System, Connectors, Data) render their own full-page components directly via React Router `<Route>` elements in `App.tsx`, bypassing the modular pane grid. The System tab (`/dashboard`) renders `SystemHealth`, `DeviceGrid`, and `SystemPage` inline. The Connectors tab (`/connectors`) renders the `ConnectorsPage` component. The Data tab (`/data-store`) renders the `DataStorePage` component (setup wizard when disabled, data explorer when enabled). This gives each system page full control over its layout and styling. Custom (unpinned) tabs use the `TabLayout` component with the pane grid system. This separation keeps system pages polished while maintaining flexibility for user-created tabs.
 - **Services Framework mirrors Connector Framework architecture:** The Services Framework deliberately mirrors the Connector Framework's architecture (Module → Registry → Manager → Store) so that anyone familiar with the connector code can immediately understand the services code. Services differ in that they are event producers only — no device discovery, no polling, no action routing. They emit events through the existing `DEVICE_STATE_CHANGE` pipeline using synthetic `service/{type}/{name}` topics, requiring zero changes to the automation engine.
 - **`isolated-vm` over Node.js `vm` for sandbox execution:** The Node.js `vm` module is explicitly documented as "not a security mechanism" — it runs code in the same V8 isolate as the host process, allowing escape via prototype pollution and `Function` constructor access. The `vm2` library was deprecated after repeated critical sandbox escape CVEs. `isolated-vm` creates a separate V8 isolate with its own heap, no access to the host's global scope, and built-in support for memory limits (32 MB) and execution timeouts (5 seconds). This is the same isolation primitive used by Cloudflare Workers. For a Raspberry Pi deployment where the automation engine shares a process with the MQTT broker connection and device registry, true V8-level isolation is essential. The tradeoff is that `isolated-vm` is a native addon requiring C++ compilation — the Dockerfile includes `build-essential` and `python3` for ARM64 builds.
 - **Monaco over CodeMirror for the script editor:** Monaco is the editor engine behind VS Code. It provides native TypeScript language service integration — IntelliSense, type checking, and error squiggles work out of the box when you register `.d.ts` type definitions via `addExtraLib()`. CodeMirror 6 is lighter but requires significant custom work to achieve comparable TypeScript support. Since the code editor is the centrepiece of the automation overhaul and developer experience is paramount, Monaco is the right choice. The `@monaco-editor/react` wrapper provides clean React integration.
 - **TypeScript as a runtime dependency:** The TypeScript compiler API (`ts.transpileModule()`) is used at runtime to transpile user-authored automation scripts on save. This means `typescript` is a production dependency, not just a dev dependency. The tradeoff is a larger production bundle, but it enables on-the-fly transpilation without a separate build step or external service.
 - **Generic backend-driven setup wizard:** The ConnectorsPage setup wizard is fully generic — it fetches step descriptors from `GET /api/connectors/:id/setup-steps` and renders them dynamically. No connector-specific UI code exists in the frontend. Each step can include input fields, and the wizard accumulates data across steps, passing it to subsequent step executions and patching the connector config on completion. This means adding a new connector with a multi-step setup flow requires zero frontend changes.
-- **2 pinned tabs instead of 5:** Simplified from 5 pinned tabs (Dashboard, Automations, Connectors, Services, System) to 2 (System, Connectors). The System tab renders the device grid, system health, and host diagnostics inline. Automations moved to self-contained panes in custom tabs — each automation is one pane, reflecting the code-first philosophy. Services are infrastructure that auto-enable on startup and don't need a dedicated tab. Pinned tabs are hardcoded in the frontend, not stored in the database.
+- **3 pinned tabs instead of 5:** Simplified from 5 pinned tabs (Dashboard, Automations, Connectors, Services, System) to 3 (System, Connectors, Data). The System tab renders the device grid, system health, and host diagnostics inline. The Data tab renders the Data Store explorer (setup wizard when disabled, data explorer when enabled). Automations moved to self-contained panes in custom tabs — each automation is one pane, reflecting the code-first philosophy. Services are infrastructure that auto-enable on startup and don't need a dedicated tab. Pinned tabs are hardcoded in the frontend, not stored in the database.
 - **One-pane-one-automation pattern:** Each AutomationPane manages a single automation rule through a setup → status → editing state machine. This replaces the previous list-based approach where all automations lived in one page. The pane pattern means automations live alongside the controls they manage in custom tabs, and users can see the flow diagram or activity feed at a glance.
 - **Structured `automation()` helper with named function arrays:** The `automation({ conditions: [...], actions: [...] })` helper accepts arrays of named functions. Named functions become labeled nodes in the FlowDiagram SVG. This gives users the flexibility of free-form TypeScript while enabling automatic visualization. Backward compatible with single-function form.
 - **Host-side HTTP for sandbox `http` global:** The `http.get/post` sandbox globals delegate to host-side `fetch()` via `ivm.Reference` callbacks rather than allowing network access inside the isolate. This maintains the security boundary — the isolate has no network stack — while enabling external API calls with a 10-second timeout. Errors are caught and returned as `{ status: 0, body: errorMessage }` rather than throwing. Both HTTP and HTTPS are allowed (local LAN services often don't have TLS), but a warning is logged when plain HTTP is used for non-local URLs to nudge users toward HTTPS for internet-facing requests. Local/private network addresses (localhost, 10.x, 172.16-31.x, 192.168.x) are exempt from the warning.
@@ -1371,10 +1638,10 @@ The Dockerfile installs `git`, `docker-cli`, and `docker-cli-compose` in the pro
 
 ## Dashboard Features
 
-The React dashboard provides a comprehensive developer-focused interface with a modular tab-and-pane layout. The sidebar displays dynamic tabs — 2 pinned system tabs (System, Connectors) plus user-created custom tabs. Pinned tabs are hardcoded in the frontend (not from DB) and render dedicated full-page components via React Router routes; custom tabs use the modular pane grid. Automations and services are accessed through panes in custom tabs rather than dedicated pinned tabs — this reflects the code-first philosophy where automations are self-contained units that live alongside the controls they manage.
+The React dashboard provides a comprehensive developer-focused interface with a modular tab-and-pane layout. The sidebar displays dynamic tabs — 3 pinned system tabs (System, Connectors, Data) plus user-created custom tabs. Pinned tabs are hardcoded in the frontend (not from DB) and render dedicated full-page components via React Router routes; custom tabs use the modular pane grid. Automations and services are accessed through panes in custom tabs rather than dedicated pinned tabs — this reflects the code-first philosophy where automations are self-contained units that live alongside the controls they manage.
 
 ### Sidebar
-- **Pinned System Tabs** — System, Connectors (hardcoded, cannot be deleted or reordered)
+- **Pinned System Tabs** — System, Connectors, Data (hardcoded, cannot be deleted or reordered)
 - **Custom Tabs** — User-created tabs with custom names and Lucide icons
 - **Add Tab** — Inline form with name input and icon picker (16 icon choices)
 - **Rename** — Double-click a custom tab to rename inline
@@ -1407,6 +1674,29 @@ The React dashboard provides a comprehensive developer-focused interface with a 
 
 ### Services (removed as pinned tab)
 Services are infrastructure that auto-enable on startup — they don't need a dedicated pinned tab. The three built-in services (Cron, API Trigger, System Events) start automatically and emit events on synthetic `service/{type}/{name}` topics. Services are managed via the REST API (`/api/services/*`).
+
+### Data Tab (pinned — route: `/data-store`)
+
+The Data tab provides a persistent time-series and key-value storage explorer. It renders either the SetupWizard (when Data Store is disabled) or the DataExplorer (when enabled).
+
+**SetupWizard** — Shown when the Data Store is disabled (first visit). Displays system info (disk space, RAM, current DB size), recommends defaults based on available disk, and presents an editable configuration form with `maxStorageMb`, `maxRecordsPerCollection`, and `maxCollections`. Calls `POST /api/data-store/enable` on confirmation.
+
+**DataExplorer** — The main explorer interface with:
+- **SummaryBar** — Total collections, records, buckets, and storage usage with a progress bar. Storage health indicators: normal (green), 80% amber warning, 95% red critical
+- **Tab Switcher** — Collections | Buckets | Settings
+- **CollectionList** — Card grid showing each collection with name, description, record count, retention policy, and last write timestamp
+- **CollectionDetail** — Time-series chart (reuses `StateHistoryChart` SVG component) + paginated record table + management controls (edit description, set retention, delete)
+- **TimeSeriesChart** — Catmull-Rom spline rendering adapted for multi-field time-series data from DataStore records
+- **RecordTable** — Paginated table of records with timestamp, payload fields, and tags
+- **BucketList** — Expandable list of buckets with key-value pairs, inline editing
+- **SettingsPanel** — View and edit DataStore configuration (maxStorageMb, maxRecordsPerCollection, maxCollections), disable Data Store
+
+**Real-time WebSocket updates** — The `useDataStoreStore` Zustand store listens for `data-store-write` and `data-store-collection-deleted` WebSocket messages to update the UI in real time without polling.
+
+**Storage health indicators:**
+- Normal (green): storage usage below 80%
+- Warning (amber): storage usage between 80% and 95%
+- Critical (red): storage usage above 95%
 
 ### Automation Pane (`automation` pane type)
 
@@ -1595,6 +1885,22 @@ Custom tabs use the modular pane grid powered by `react-grid-layout`. Users crea
 | POST | `/api/system/shutdown` | Gracefully shut down the host Pi |
 | POST | `/api/system/reboot` | Gracefully reboot the host Pi |
 | POST | `/api/system/docker-prune` | Remove unused Aeolus Docker images and build cache |
+| GET | `/api/data-store/collections` | List all collections with metadata |
+| POST | `/api/data-store/collections` | Create a new collection |
+| PATCH | `/api/data-store/collections/:name` | Update collection description/retention |
+| DELETE | `/api/data-store/collections/:name` | Delete collection and all records |
+| POST | `/api/data-store/collections/:name/records` | Write a record to a collection |
+| GET | `/api/data-store/collections/:name/records` | Query records (filter, paginate, aggregate) |
+| GET | `/api/data-store/collections/:name/export` | Export collection records as CSV |
+| GET | `/api/data-store/buckets` | List all buckets with key counts |
+| GET | `/api/data-store/buckets/:bucket` | List all entries in a bucket |
+| PUT | `/api/data-store/buckets/:bucket/:key` | Set a key-value pair |
+| DELETE | `/api/data-store/buckets/:bucket/:key` | Delete a key from a bucket |
+| GET | `/api/data-store/config` | Get current DataStore configuration |
+| PUT | `/api/data-store/config` | Update DataStore configuration |
+| GET | `/api/data-store/stats` | Storage statistics (records, buckets, usage) |
+| POST | `/api/data-store/enable` | Enable Data Store with config |
+| POST | `/api/data-store/disable` | Disable Data Store (preserves data) |
 
 ### State History (`src/core/state-history.ts`)
 
@@ -1609,8 +1915,8 @@ Records device state snapshots to SQLite for historical trend analysis. Each sta
 
 ---
 
-**Last Updated:** May 6, 2026
-**Version:** 0.12.0
+**Last Updated:** May 13, 2026
+**Version:** 0.13.0
 **Status:** MVP Development
 
 ## Future Enhancements

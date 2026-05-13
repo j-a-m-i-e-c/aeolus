@@ -21,6 +21,7 @@
   <a href="#features">Features</a> •
   <a href="#dashboard">Dashboard</a> •
   <a href="#automations">Automations</a> •
+  <a href="#data-store">Data Store</a> •
   <a href="#microcontrollers">Microcontrollers</a> •
   <a href="#connectors">Connectors</a> •
   <a href="#architecture">Architecture</a> •
@@ -81,6 +82,7 @@ Installs Docker, clones Aeolus, builds containers, and starts everything. Auto-s
 | 📡 | **Internal event bus** | Typed pub/sub bus decouples MQTT ingestion, device state changes, automation triggers, and WebSocket pushes |
 | ⏱️ | **Services framework** | Cron schedules, API triggers, and system events as automation triggers |
 | 🍓 | **Raspberry Pi ready** | One-line install, auto-start on boot, runs on a Pi 4/5 |
+| 💾 | **Data Store** | Persistent time-series collections and key-value buckets — accumulate sensor data, query with aggregation, share state across automations |
 | 📊 | **State history & charts** | Per-device state history with SVG trend charts, time range filtering, and data cleanup |
 | 🔒 | **100% local** | Everything stays on your network — no cloud dependency |
 
@@ -88,7 +90,7 @@ Installs Docker, clones Aeolus, builds containers, and starts everything. Auto-s
 
 ## Dashboard
 
-The dashboard has two permanent tabs — **System** (device grid, health, diagnostics) and **Connectors** (manage integrations) — plus as many custom tabs as you want.
+The dashboard has three permanent tabs — **System** (device grid, health, diagnostics), **Connectors** (manage integrations), and **Data** (time-series explorer and key-value buckets) — plus as many custom tabs as you want.
 
 Custom tabs are where the real work happens. Each tab has two buttons in the header:
 
@@ -249,6 +251,7 @@ The Monaco editor provides full IntelliSense for all globals — autocomplete, p
 | `services` | Read-only access to service state (cron, triggers, system events) |
 | `http` | GET/POST requests to external APIs (10s timeout, HTTPS recommended for non-local URLs) |
 | `automation()` | Structured helper with conditions + actions for flow diagram visualization |
+| `db` | Time-series write/query and key-value get/set/delete (available when Data Store is enabled) |
 
 ---
 
@@ -316,6 +319,39 @@ Services emit events on the standard event bus using `service/{type}/{name}` top
 
 ---
 
+## Data Store
+
+Persistent time-series collections and key-value buckets built on the existing SQLite infrastructure. Accumulate sensor data over time, query with aggregation, and share computed state across automations.
+
+- **Disabled by default** — a setup wizard on first visit guides you through storage limits to prevent accidental SD card fill on Raspberry Pi
+- **Accessible from automations** via the `db` sandbox global (undefined when disabled)
+- **REST API** at `/api/data-store` for the frontend and external consumers
+- **Data Explorer UI** in the "Data" pinned sidebar tab with collection browsing, charts, and bucket management
+- **Configurable safeguards** — `maxStorageMb`, `maxRecordsPerCollection`, `maxCollections`, FIFO eviction, and retention policies
+
+### Quick example — using `db` in an automation
+
+```javascript
+// Write a temperature reading to a time-series collection
+db.write("temperatures", { value: context.state.value, room: "kitchen" }, {
+  tags: { sensor: context.deviceId }
+});
+
+// Query the last hour of readings with aggregation
+const avg = db.query("temperatures", {
+  from: "1h",
+  aggregate: "avg",
+  field: "value"
+});
+log.info(`Average temperature (1h): ${avg.value}°C`);
+
+// Key-value bucket for sharing state across automations
+db.set("config", "heating-target", 22);
+const target = db.get("config", "heating-target"); // 22
+```
+
+---
+
 ## Architecture
 
 ```
@@ -345,12 +381,15 @@ Services emit events on the standard event bus using `service/{type}/{name}` top
                      │          │ Devices · Log│
                      │          └─────────────┘
                      │
-              ┌──────▼──────┐
-              │  WebSocket  │
-              │   Server    │
-              └──────┬──────┘
-                     │
-              ┌──────▼──────┐      ┌──────────────┐
+              ┌──────▼──────┐  ┌──────────────┐
+              │  WebSocket  │  │  Data Store   │
+              │   Server    │  │  (SQLite)     │
+              └──────┬──────┘  └──────┬────────┘
+                     │                 │
+                     │    ┌────────────┘
+                     │    │  db global in Sandbox
+                     │    │  + REST API
+              ┌──────▼────▼─┐      ┌──────────────┐
               │  REST API   │◄────►│    React     │
               │  (Express)  │      │  Dashboard   │
               └─────────────┘      └──────────────┘
@@ -439,6 +478,26 @@ Three event source layers feed the same internal bus: MQTT devices (bidirectiona
 | POST | `/api/services/trigger/:name` | Fire an API trigger event |
 | GET | `/api/services/topics` | List available service event topics |
 
+#### Data Store
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/data-store/collections` | List all collections |
+| POST | `/api/data-store/collections` | Create a collection |
+| PATCH | `/api/data-store/collections/:name` | Update collection |
+| DELETE | `/api/data-store/collections/:name` | Delete collection |
+| POST | `/api/data-store/collections/:name/records` | Write a record |
+| GET | `/api/data-store/collections/:name/records` | Query records |
+| GET | `/api/data-store/collections/:name/export` | Export as CSV |
+| GET | `/api/data-store/buckets` | List buckets |
+| GET | `/api/data-store/buckets/:bucket` | List bucket entries |
+| PUT | `/api/data-store/buckets/:bucket/:key` | Set a key |
+| DELETE | `/api/data-store/buckets/:bucket/:key` | Delete a key |
+| GET | `/api/data-store/config` | Get config |
+| PUT | `/api/data-store/config` | Update config |
+| GET | `/api/data-store/stats` | Storage statistics |
+| POST | `/api/data-store/enable` | Enable Data Store |
+| POST | `/api/data-store/disable` | Disable Data Store |
+
 #### System & Layout
 | Method | Path | Description |
 |--------|------|-------------|
@@ -488,6 +547,10 @@ aeolus/
 │   │   ├── kasa/                 # TP-Link Kasa connector
 │   │   └── _template/            # Skeleton for new connectors
 │   ├── services/                 # Pluggable service framework (cron, triggers, system)
+│   ├── data-store/               # Persistent time-series + key-value storage
+│   │   ├── data-store.ts         # DataStore class (write, query, buckets, retention)
+│   │   ├── duration.ts           # Duration string parser (pure module)
+│   │   └── __tests__/            # Property-based + unit tests
 │   ├── websocket/                # WebSocket server
 │   └── db/                       # SQLite setup + schema
 ├── frontend/                     # React + Vite dashboard
