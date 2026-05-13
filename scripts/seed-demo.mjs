@@ -1213,19 +1213,35 @@ if (nutrientSystem) console.log("  ✓ Nutrient System:", nutrientSystem.id);
 // ─── Tab 5: Hydroponics — Grow Lights ────────────────────────────────
 const growLights = await api("POST", "/api/automations", {
   name: "Grow Lights",
-  triggerTopic: "sensor/hydro/+",
+  triggerType: "cron",
+  cronExpression: "*/5 * * * *",
   ruleType: "script",
   scriptSource: `automation({
-  conditions: [
-    function hasReading(context) {
-      return context.state.value !== undefined;
-    },
-  ],
   actions: [
-    function trackLights(context) {
-      const metric = context.topic.split("/")[2];
-      state.set(metric, context.state.value);
-      state.set("lastUpdate", Date.now());
+    function manageLights(context) {
+      const hour = new Date().getHours();
+      const onHour = 6;
+      const offHour = 22;
+      const shouldBeOn = hour >= onHour && hour < offHour;
+
+      state.set("lightsOn", shouldBeOn);
+      state.set("onHour", onHour);
+      state.set("offHour", offHour);
+      state.set("lastCheck", Date.now());
+
+      // Read latest sensor values from devices
+      const ppfdDevice = devices.get("sensor-hydro-ppfd");
+      const dliDevice = devices.get("sensor-hydro-dli");
+      if (ppfdDevice) state.set("ppfd", ppfdDevice.state.value);
+      if (dliDevice) state.set("dli", dliDevice.state.value);
+
+      if (shouldBeOn) {
+        state.set("spectrumMode", "full-spectrum");
+        mqtt.publish("switch/hydro/lights/command", JSON.stringify({ on: true, mode: "full-spectrum" }));
+      } else {
+        state.set("spectrumMode", "off");
+        mqtt.publish("switch/hydro/lights/command", JSON.stringify({ on: false }));
+      }
     },
   ],
 });`,
@@ -1305,19 +1321,34 @@ if (growLights) console.log("  ✓ Grow Lights:", growLights.id);
 // ─── Tab 6: Pool & Spa — Pool Monitor ────────────────────────────────
 const poolMonitor = await api("POST", "/api/automations", {
   name: "Pool Monitor",
-  triggerTopic: "sensor/pool/+",
+  triggerType: "cron",
+  cronExpression: "*/15 * * * *",
   ruleType: "script",
   scriptSource: `automation({
-  conditions: [
-    function hasReading(context) {
-      return context.state.value !== undefined;
-    },
-  ],
   actions: [
-    function trackPool(context) {
-      const metric = context.topic.split("/")[2];
-      state.set(metric, context.state.value);
-      state.set("lastUpdate", Date.now());
+    function checkPoolChemistry(context) {
+      // Read latest sensor values from device registry
+      const tempDev = devices.get("sensor-pool-temp");
+      const chlorineDev = devices.get("sensor-pool-chlorine");
+      const phDev = devices.get("sensor-pool-ph");
+      const orpDev = devices.get("sensor-pool-orp");
+      const filterDev = devices.get("sensor-pool-filter-pressure");
+
+      if (tempDev) state.set("temp", tempDev.state.value);
+      if (chlorineDev) state.set("chlorine", chlorineDev.state.value);
+      if (phDev) state.set("ph", phDev.state.value);
+      if (orpDev) state.set("orp", orpDev.state.value);
+      if (filterDev) state.set("filter-pressure", filterDev.state.value);
+
+      state.set("pumpOn", true);
+      state.set("lastCheck", Date.now());
+      state.set("checksToday", (state.get("checksToday") || 0) + 1);
+
+      // Alert if chemistry is off
+      const ph = state.get("ph") || 7.4;
+      const chlorine = state.get("chlorine") || 1.5;
+      if (ph < 7.2 || ph > 7.6) log.warn("Pool pH out of range: " + ph);
+      if (chlorine < 1.0 || chlorine > 3.0) log.warn("Pool chlorine out of range: " + chlorine);
     },
   ],
 });`,
@@ -1484,18 +1515,22 @@ if (spaControls) console.log("  ✓ Spa Controls:", spaControls.id);
 // ─── Tab 7: Server Room — Rack Monitor ───────────────────────────────
 const rackMonitor = await api("POST", "/api/automations", {
   name: "Rack Monitor",
-  triggerTopic: "sensor/rack/+",
+  triggerType: "cron",
+  cronExpression: "* * * * *",
   ruleType: "script",
   scriptSource: `automation({
-  conditions: [
-    function hasReading(context) {
-      return context.state.value !== undefined;
-    },
-  ],
   actions: [
-    function trackRack(context) {
-      const metric = context.topic.split("/")[2];
-      state.set(metric, context.state.value);
+    function pollRackSensors(context) {
+      // Poll all server sensors from device registry
+      for (let i = 1; i <= 4; i++) {
+        const tempDev = devices.get("sensor-rack-server" + i + "-temp");
+        const cpuDev = devices.get("sensor-rack-server" + i + "-cpu");
+        const fanDev = devices.get("sensor-rack-server" + i + "-fan");
+        if (tempDev) state.set("server" + i + "-temp", tempDev.state.value);
+        if (cpuDev) state.set("server" + i + "-cpu", cpuDev.state.value);
+        if (fanDev) state.set("server" + i + "-fan", fanDev.state.value);
+      }
+
       state.set("lastUpdate", Date.now());
 
       // Calculate overall rack temp
