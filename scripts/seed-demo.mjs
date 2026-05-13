@@ -2126,28 +2126,24 @@ export default function WeeklyForecast(props: CustomComponentProps) {
         </div>
       </div>
 
-      {/* 7-day forecast — grid layout */}
-      <div className="grid grid-cols-7 gap-1.5">
-        {forecast.map((day, i) => {
-          const isToday = i === 0;
-          return (
-            <div key={i} className={"rounded-lg border p-2 flex flex-col items-center gap-1 " + (isToday ? "bg-[#3BA4FF]/10 border-[#3BA4FF]/30" : "bg-[#0B0F14] border-[#2A3441]")}>
-              <span className={"text-[10px] font-semibold " + (isToday ? "text-[#3BA4FF]" : "text-[#9AA6B2]")}>{day.day}</span>
-              <span className="text-xl leading-none">{conditionIcon(day.condition)}</span>
-              <div className="text-center mt-0.5">
-                <div className="text-[11px] font-mono font-bold text-[#E6EDF3]">{day.high}°</div>
-                <div className="text-[9px] font-mono text-[#6B7785]">{day.low}°</div>
-              </div>
-              {/* Rain bar */}
-              <div className="w-full mt-1">
-                <div className="w-full h-1.5 bg-[#1A2330] rounded-full overflow-hidden">
-                  <div className="h-full rounded-full transition-all duration-700" style={{ width: day.rainChance + "%", backgroundColor: day.rainChance > 50 ? "#3BA4FF" : "#3BA4FF80" }} />
-                </div>
-                <div className="text-[7px] text-[#6B7785] text-center mt-0.5 font-mono">{day.rainChance}%</div>
-              </div>
+      {/* 7-day forecast — horizontal row, properly sized and centered */}
+      <div className="flex gap-2 justify-between">
+        {forecast.map((day, i) => (
+          <div key={i} className="flex-1 bg-[#0B0F14] rounded-lg border border-[#2A3441] p-3 flex flex-col items-center gap-2">
+            <span className="text-[11px] text-[#9AA6B2] font-semibold">{day.day}</span>
+            <span className="text-2xl">{conditionIcon(day.condition)}</span>
+            <div className="text-center">
+              <div className="text-xs font-mono font-bold text-[#E6EDF3]">{day.high}°</div>
+              <div className="text-[10px] font-mono text-[#6B7785]">{day.low}°</div>
             </div>
-          );
-        })}
+            <div className="w-full">
+              <div className="w-full h-2 bg-[#1A2330] rounded-full overflow-hidden">
+                <div className="h-full rounded-full transition-all duration-700" style={{ width: day.rainChance + "%", backgroundColor: day.rainChance > 50 ? "#3BA4FF" : "#3BA4FF80" }} />
+              </div>
+              <div className="text-[8px] text-[#6B7785] text-center mt-0.5 font-mono">{day.rainChance}% rain</div>
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
