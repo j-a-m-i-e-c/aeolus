@@ -2105,42 +2105,49 @@ export default function WeeklyForecast(props: CustomComponentProps) {
   const forecast = props.state.get("forecast") as Array<{ day: string; high: number; low: number; condition: string; rainChance: number }> || [];
 
   const conditionIcon = (c: string) => c === "sunny" ? "☀️" : c === "partly-cloudy" ? "⛅" : c === "rainy" ? "🌧️" : c === "stormy" ? "⛈️" : "☀️";
+  const conditionColor = (c: string) => c === "sunny" ? "#F59E0B" : c === "partly-cloudy" ? "#9AA6B2" : c === "rainy" ? "#3BA4FF" : c === "stormy" ? "#EF4444" : "#F59E0B";
 
   return (
     <div className="p-4 space-y-4">
       <div className="text-sm font-semibold text-[#E6EDF3]">📅 Weekly Forecast</div>
 
-      {/* Today's summary */}
-      <div className="bg-[#0B0F14] rounded-xl border border-[#2A3441] p-4 flex items-center gap-4">
-        <span className="text-4xl">{conditionIcon(today.condition)}</span>
-        <div className="flex-1">
-          <div className="text-2xl font-bold font-mono text-[#E6EDF3]">{today.temp}°C</div>
-          <div className="text-[10px] text-[#6B7785] mt-0.5">H: <span className="text-[#E6EDF3] font-mono">{today.high}°</span> · L: <span className="text-[#E6EDF3] font-mono">{today.low}°</span></div>
-          <div className="text-[10px] text-[#9AA6B2] mt-1">{today.description}</div>
+      {/* Today's summary — larger and more prominent */}
+      <div className="bg-[#0B0F14] rounded-xl border border-[#2A3441] p-5">
+        <div className="flex items-center gap-5">
+          <div className="text-5xl">{conditionIcon(today.condition)}</div>
+          <div className="flex-1">
+            <div className="text-3xl font-bold font-mono text-[#E6EDF3]">{today.temp}°C</div>
+            <div className="flex items-center gap-3 mt-1">
+              <span className="text-xs text-[#9AA6B2]">H: <span className="text-[#E6EDF3] font-mono font-semibold">{today.high}°</span></span>
+              <span className="text-xs text-[#9AA6B2]">L: <span className="text-[#E6EDF3] font-mono font-semibold">{today.low}°</span></span>
+            </div>
+            <div className="text-xs text-[#6B7785] mt-2">{today.description}</div>
+          </div>
         </div>
       </div>
 
-      {/* 7-day forecast row */}
-      <div className="overflow-x-auto -mx-4 px-4">
-        <div className="flex gap-2" style={{ minWidth: "max-content" }}>
-          {forecast.map((day, i) => (
-            <div key={i} className="bg-[#0B0F14] rounded-lg border border-[#2A3441] p-2.5 w-[72px] flex flex-col items-center gap-1.5">
-              <span className="text-[10px] text-[#9AA6B2] font-medium">{day.day}</span>
-              <span className="text-lg">{conditionIcon(day.condition)}</span>
-              <div className="text-center">
-                <div className="text-[10px] font-mono font-semibold text-[#E6EDF3]">{day.high}°</div>
+      {/* 7-day forecast — grid layout */}
+      <div className="grid grid-cols-7 gap-1.5">
+        {forecast.map((day, i) => {
+          const isToday = i === 0;
+          return (
+            <div key={i} className={"rounded-lg border p-2 flex flex-col items-center gap-1 " + (isToday ? "bg-[#3BA4FF]/10 border-[#3BA4FF]/30" : "bg-[#0B0F14] border-[#2A3441]")}>
+              <span className={"text-[10px] font-semibold " + (isToday ? "text-[#3BA4FF]" : "text-[#9AA6B2]")}>{day.day}</span>
+              <span className="text-xl leading-none">{conditionIcon(day.condition)}</span>
+              <div className="text-center mt-0.5">
+                <div className="text-[11px] font-mono font-bold text-[#E6EDF3]">{day.high}°</div>
                 <div className="text-[9px] font-mono text-[#6B7785]">{day.low}°</div>
               </div>
-              {/* Rain probability bar */}
-              <div className="w-full space-y-0.5">
+              {/* Rain bar */}
+              <div className="w-full mt-1">
                 <div className="w-full h-1.5 bg-[#1A2330] rounded-full overflow-hidden">
-                  <div className="h-full rounded-full bg-[#3BA4FF] transition-all duration-700" style={{ width: day.rainChance + "%" }} />
+                  <div className="h-full rounded-full transition-all duration-700" style={{ width: day.rainChance + "%", backgroundColor: day.rainChance > 50 ? "#3BA4FF" : "#3BA4FF80" }} />
                 </div>
-                <div className="text-[7px] text-[#6B7785] text-center font-mono">{day.rainChance}%</div>
+                <div className="text-[7px] text-[#6B7785] text-center mt-0.5 font-mono">{day.rainChance}%</div>
               </div>
             </div>
-          ))}
-        </div>
+          );
+        })}
       </div>
     </div>
   );

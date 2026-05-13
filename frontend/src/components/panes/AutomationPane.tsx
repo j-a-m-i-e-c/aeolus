@@ -527,7 +527,8 @@ export function AutomationPane({ config, paneId }: Props) {
           </button>
         </div>
 
-        {/* Toggle + Fire Now + last fired */}
+        {/* Toggle + Fire Now + last fired — hidden for trigger-less automations */}
+        {rule.triggerType !== "none" && (
         <div className="flex items-center gap-2">
           <button
             onClick={handleToggle}
@@ -558,6 +559,7 @@ export function AutomationPane({ config, paneId }: Props) {
               : "—"}
           </div>
         </div>
+        )}
 
         {/* Visual: Custom component, FlowDiagram, or ActivityFeed */}
         <div className="flex-1 min-h-0 overflow-auto">
