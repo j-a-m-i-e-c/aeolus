@@ -7,7 +7,7 @@ import path from "node:path";
 import { config } from "./config.js";
 import logger from "./logger.js";
 import { getDatabase, persistDatabase } from "./db/database.js";
-import { eventBus, DEVICE_STATE_CHANGE, AUTOMATION_STATE_CHANGE, WS_STATE_CHANGE, MQTT_RAW_MESSAGE, AUTOMATION_FIRED } from "./core/event-bus.js";
+import { eventBus, DEVICE_STATE_CHANGE, AUTOMATION_STATE_CHANGE, WS_STATE_CHANGE, MQTT_RAW_MESSAGE, AUTOMATION_FIRED, DATA_STORE_WRITE, DATA_STORE_COLLECTION_DELETED } from "./core/event-bus.js";
 import { DeviceRegistry } from "./core/device-registry.js";
 import { MqttService } from "./mqtt/mqtt-service.js";
 import { AutomationEngine } from "./automations/automation-engine.js";
@@ -42,7 +42,9 @@ import { errorHandler } from "./api/middleware/error-handler.js";
 
 import { createSystemRoutes } from "./api/routes/system.routes.js";
 import { createLayoutRoutes } from "./api/routes/layout.routes.js";
+import { createDataStoreRoutes } from "./api/routes/data-store.routes.js";
 import { StateHistory } from "./core/state-history.js";
+import { DataStore } from "./data-store/data-store.js";
 
 
 const startTime = Date.now();
@@ -122,7 +124,14 @@ async function main(): Promise<void> {
   const executionLog = new ExecutionLog();
   const stateStore = new AutomationStateStore(db);
   stateStore.loadFromDb();
-  const sandbox = new Sandbox({ actionExecutor, deviceRegistry: registry, serviceManager, stateStore, onStateChange: (ruleId, key, value) => {
+
+  // 6b. Data Store
+  const dataStore = new DataStore(db, eventBus);
+  if (dataStore.isEnabled()) {
+    dataStore.startRetentionTimer();
+  }
+
+  const sandbox = new Sandbox({ actionExecutor, deviceRegistry: registry, serviceManager, stateStore, dataStore, onStateChange: (ruleId, key, value) => {
     eventBus.emit(AUTOMATION_STATE_CHANGE, { ruleId, key, value });
   } });
 
@@ -162,6 +171,7 @@ async function main(): Promise<void> {
   app.use("/api/services", createServiceRoutes(serviceManager, serviceRegistry));
   app.use("/api/system", createSystemRoutes());
   app.use("/api/layout", createLayoutRoutes(db));
+  app.use("/api/data-store", createDataStoreRoutes(dataStore));
 
   app.use(errorHandler);
 
@@ -174,6 +184,8 @@ async function main(): Promise<void> {
     { eventName: MQTT_RAW_MESSAGE, messageType: "mqtt-message" },
     { eventName: AUTOMATION_FIRED, messageType: "automation-fired" },
     { eventName: AUTOMATION_STATE_CHANGE, messageType: "automation-state" },
+    { eventName: DATA_STORE_WRITE, messageType: "data-store-write" },
+    { eventName: DATA_STORE_COLLECTION_DELETED, messageType: "data-store-collection-deleted" },
   ];
 
   const wsServer = new WsServer(server, registry, eventBus, WS_MAPPINGS);
@@ -188,6 +200,7 @@ async function main(): Promise<void> {
   // 11. Graceful shutdown
   const shutdown = async () => {
     logger.info("Shutting down Aeolus...");
+    dataStore.dispose();
     await serviceManager.disposeAll();
     await connectorManager.disposeAll();
     await mqttService.disconnect();

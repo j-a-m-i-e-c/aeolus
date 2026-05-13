@@ -247,3 +247,164 @@ declare const state: {
    */
   delete(key: string): void;
 };
+
+// ─── Data Store API ──────────────────────────────────────────────────────────
+
+/** A timestamped record from a Data Store collection. */
+interface DataStoreRecord {
+  /** Auto-incremented record ID. */
+  id: number;
+  /** The collection this record belongs to. */
+  collection: string;
+  /** The JSON payload stored in this record. */
+  payload: Record<string, unknown>;
+  /** Key-value tags for filtering. */
+  tags: Record<string, string>;
+  /** Unix timestamp (ms) when the record was written. */
+  timestamp: number;
+}
+
+/** Metadata about a Data Store collection. */
+interface DataStoreCollectionMetadata {
+  /** Collection name. */
+  name: string;
+  /** Optional description. */
+  description: string | null;
+  /** Retention policy in days, or null for keep forever. */
+  retentionDays: number | null;
+  /** Number of records in this collection. */
+  recordCount: number;
+  /** Timestamp of the oldest record, or null if empty. */
+  oldestRecord: number | null;
+  /** Timestamp of the newest record, or null if empty. */
+  newestRecord: number | null;
+  /** When the collection was created (epoch ms). */
+  createdAt: number;
+  /** When the collection was last updated (epoch ms). */
+  updatedAt: number;
+}
+
+/** Options for writing a record to a Data Store collection. */
+interface DataStoreWriteOptions {
+  /** Key-value tags to attach to the record for filtering. */
+  tags?: Record<string, string>;
+  /** Explicit timestamp (epoch ms). Defaults to Date.now(). */
+  timestamp?: number;
+}
+
+/** Options for querying records from a Data Store collection. */
+interface DataStoreQueryOptions {
+  /** Start of time range — duration string (e.g. "7d", "24h") or epoch ms. */
+  from?: string | number;
+  /** End of time range — epoch ms. Defaults to now. */
+  to?: number;
+  /** Maximum number of records to return. */
+  limit?: number;
+  /** Number of records to skip (for pagination). */
+  offset?: number;
+  /** Filter by tag key-value pairs (AND logic). */
+  tags?: Record<string, string>;
+  /** Aggregation function to apply. */
+  aggregate?: "sum" | "avg" | "min" | "max" | "count";
+  /** Payload field to aggregate over (required when aggregate is specified). */
+  field?: string;
+}
+
+/** Result of a normal (non-aggregation) query. */
+interface DataStoreQueryResult {
+  /** Matching records ordered by timestamp descending. */
+  records: DataStoreRecord[];
+  /** Total matching records (before limit/offset). */
+  total: number;
+}
+
+/** Result of an aggregation query. */
+interface DataStoreAggregateResult {
+  /** The computed aggregate value. */
+  value: number;
+}
+
+/**
+ * Persistent time-series and key-value storage for automation scripts.
+ *
+ * The `db` global provides access to the Aeolus Data Store — a SQLite-backed
+ * storage system for accumulating structured data over time, sharing computed
+ * values across automations, and querying historical records with aggregation.
+ *
+ * **Note:** The `db` global is only available when the Data Store is enabled.
+ * If the Data Store has not been set up yet, `db` will be `undefined`.
+ *
+ * @example
+ * ```typescript
+ * // Write energy readings to a time-series collection
+ * db.write("energy-daily", { kwh: 12.5, source: "solar" }, {
+ *   tags: { zone: "roof" }
+ * });
+ *
+ * // Query the last 7 days of readings
+ * const result = db.query("energy-daily", { from: "7d" });
+ * log.info(`Got ${result.total} records`);
+ *
+ * // Compute average energy over the last 30 days
+ * const avg = db.query("energy-daily", {
+ *   from: "30d",
+ *   aggregate: "avg",
+ *   field: "kwh"
+ * });
+ * log.info(`Average: ${avg.value} kWh`);
+ *
+ * // Use key-value buckets for cross-automation shared state
+ * db.set("computed", "dailyAvgKwh", avg.value);
+ * const stored = db.get("computed", "dailyAvgKwh"); // avg.value
+ *
+ * // List all collections
+ * const collections = db.collections();
+ * ```
+ */
+declare const db: {
+  /**
+   * Write a timestamped record to a collection.
+   * If the collection doesn't exist, it will be auto-created.
+   * @param collection - The collection name.
+   * @param payload - A JSON object to store as the record payload.
+   * @param options - Optional tags and explicit timestamp.
+   */
+  write(collection: string, payload: Record<string, unknown>, options?: DataStoreWriteOptions): void;
+
+  /**
+   * Query records from a collection with optional time range, filtering, pagination, and aggregation.
+   * @param collection - The collection name.
+   * @param options - Query options (from, to, limit, offset, tags, aggregate, field).
+   * @returns An array of records with total count, or a single aggregate value.
+   */
+  query(collection: string, options?: DataStoreQueryOptions): DataStoreQueryResult | DataStoreAggregateResult;
+
+  /**
+   * Get a value from a key-value bucket.
+   * @param bucket - The bucket name.
+   * @param key - The key to look up.
+   * @returns The stored value, or `undefined` if the key does not exist.
+   */
+  get(bucket: string, key: string): unknown;
+
+  /**
+   * Set a value in a key-value bucket. Creates the bucket implicitly if needed.
+   * @param bucket - The bucket name.
+   * @param key - The key to store under.
+   * @param value - A JSON-serializable value.
+   */
+  set(bucket: string, key: string, value: unknown): void;
+
+  /**
+   * Delete a key from a key-value bucket.
+   * @param bucket - The bucket name.
+   * @param key - The key to remove.
+   */
+  delete(bucket: string, key: string): void;
+
+  /**
+   * List all existing collections with their metadata.
+   * @returns An array of collection metadata objects.
+   */
+  collections(): DataStoreCollectionMetadata[];
+} | undefined;

@@ -3,6 +3,7 @@
 import { AeolusLogo } from "./AeolusLogo";
 import { useDeviceStore } from "../store/device-store";
 import { useDashboardStore, tabNameToSlug } from "../store/dashboard-store";
+import { useDataStoreStore } from "../store/data-store-store";
 import { useNavigate, useLocation } from "react-router-dom";
 import * as icons from "lucide-react";
 import { Plus, Trash2, GripVertical } from "lucide-react";
@@ -39,6 +40,7 @@ const ICON_CHOICES = [
 export function Sidebar() {
   const wsConnected = useDeviceStore((s) => s.wsConnected);
   const health = useDeviceStore((s) => s.health);
+  const dataStoreEnabled = useDataStoreStore((s) => s.enabled);
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -71,6 +73,7 @@ export function Sidebar() {
   const PINNED_ROUTES: Record<string, string> = {
     "default-dashboard": "/dashboard",
     "default-connectors": "/connectors",
+    "default-data-store": "/data-store",
   };
 
   const getTabRoute = (tab: { id: string; name: string; pinned: boolean }): string => {
@@ -110,7 +113,7 @@ export function Sidebar() {
   // ---- Add tab handlers ----
 
   const newTabSlug = tabNameToSlug(newTabName);
-  const RESERVED_SLUGS = new Set(["dashboard", "connectors"]);
+  const RESERVED_SLUGS = new Set(["dashboard", "connectors", "data-store"]);
   const existingSlugs = new Set(tabs.map((t) => tabNameToSlug(t.name)));
   const isNameTaken = !!newTabSlug && (existingSlugs.has(newTabSlug) || RESERVED_SLUGS.has(newTabSlug));
 
@@ -224,6 +227,7 @@ export function Sidebar() {
     const isActive = isTabActive(tab);
     const isRenaming = renamingTabId === tab.id;
     const isDragOver = dragOverTabId === tab.id;
+    const showDisabledDot = tab.id === "default-data-store" && !dataStoreEnabled;
 
     return (
       <div
@@ -244,7 +248,12 @@ export function Sidebar() {
           <GripVertical size={12} className="text-[#6B7785] opacity-0 group-hover:opacity-100 transition-opacity shrink-0 cursor-grab" />
         )}
 
-        <DynamicIcon name={tab.icon} size={16} className="shrink-0" />
+        <span className="relative shrink-0">
+          <DynamicIcon name={tab.icon} size={16} />
+          {showDisabledDot && (
+            <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-[#F59E0B]" title="Data Store is disabled" />
+          )}
+        </span>
 
         {isRenaming ? (
           <input

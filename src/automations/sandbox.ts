@@ -4,6 +4,7 @@ import type { ActionExecutor } from "./action-executor.js";
 import type { AutomationStateStore } from "./automation-state-store.js";
 import type { DeviceRegistry } from "../core/device-registry.js";
 import type { ServiceManager } from "../services/service-manager.js";
+import type { DataStore } from "../data-store/data-store.js";
 import type { Device } from "../core/types.js";
 import logger from "../logger.js";
 
@@ -23,6 +24,7 @@ export interface SandboxDeps {
   deviceRegistry: DeviceRegistry;
   serviceManager?: ServiceManager;
   stateStore?: AutomationStateStore;
+  dataStore?: DataStore;
   onStateChange?: (ruleId: string, key: string, value: unknown) => void;
 }
 
@@ -65,6 +67,12 @@ const BOOTSTRAP_SCRIPT = `
   var stateSetRef = __stateSetRef;
   var stateGetAllRef = __stateGetAllRef;
   var stateDeleteRef = __stateDeleteRef;
+  var dbWriteRef = __dbWriteRef;
+  var dbQueryRef = __dbQueryRef;
+  var dbGetRef = __dbGetRef;
+  var dbSetRef = __dbSetRef;
+  var dbDeleteRef = __dbDeleteRef;
+  var dbCollectionsRef = __dbCollectionsRef;
 
   globalThis.devices = {
     list: function() { return data; },
@@ -117,6 +125,32 @@ const BOOTSTRAP_SCRIPT = `
     delete: function(key) { stateDeleteRef.applySync(undefined, [key]); }
   };
 
+  if (dbWriteRef) {
+    globalThis.db = {
+      write: function(collection, payload, options) {
+        dbWriteRef.applySync(undefined, [collection, JSON.stringify(payload), JSON.stringify(options || {})]);
+      },
+      query: function(collection, options) {
+        var result = dbQueryRef.applySync(undefined, [collection, JSON.stringify(options || {})]);
+        return JSON.parse(result);
+      },
+      get: function(bucket, key) {
+        var result = dbGetRef.applySync(undefined, [bucket, key]);
+        return result === undefined ? undefined : JSON.parse(result);
+      },
+      set: function(bucket, key, value) {
+        dbSetRef.applySync(undefined, [bucket, key, JSON.stringify(value)]);
+      },
+      delete: function(bucket, key) {
+        dbDeleteRef.applySync(undefined, [bucket, key]);
+      },
+      collections: function() {
+        var result = dbCollectionsRef.applySync(undefined, []);
+        return JSON.parse(result);
+      }
+    };
+  }
+
   globalThis.automation = function(config) {
     // Normalize conditions: accept single function, array, or undefined
     var conditions = config.conditions || config.condition;
@@ -152,6 +186,12 @@ const BOOTSTRAP_SCRIPT = `
   delete globalThis.__stateSetRef;
   delete globalThis.__stateGetAllRef;
   delete globalThis.__stateDeleteRef;
+  delete globalThis.__dbWriteRef;
+  delete globalThis.__dbQueryRef;
+  delete globalThis.__dbGetRef;
+  delete globalThis.__dbSetRef;
+  delete globalThis.__dbDeleteRef;
+  delete globalThis.__dbCollectionsRef;
 })();
 `;
 
@@ -169,6 +209,7 @@ export class Sandbox {
   private deviceRegistry: DeviceRegistry;
   private serviceManager?: ServiceManager;
   private stateStore?: AutomationStateStore;
+  private dataStore?: DataStore;
   private onStateChange?: (ruleId: string, key: string, value: unknown) => void;
 
   constructor(deps: SandboxDeps) {
@@ -176,6 +217,7 @@ export class Sandbox {
     this.deviceRegistry = deps.deviceRegistry;
     this.serviceManager = deps.serviceManager;
     this.stateStore = deps.stateStore;
+    this.dataStore = deps.dataStore;
     this.onStateChange = deps.onStateChange;
   }
 
@@ -204,6 +246,7 @@ export class Sandbox {
       await this.setServicesRefs(jail);
       await this.setHttpRefs(jail, ruleId);
       await this.setStateRefs(jail, ruleId);
+      await this.setDataStoreRefs(jail, ruleId);
 
       // Run bootstrap to wire up the clean API from the raw refs
       const bootstrap = await isolate.compileScript(BOOTSTRAP_SCRIPT);
@@ -499,6 +542,102 @@ export class Sandbox {
       new ivm.Reference(function (key: string) {
         if (!stateStore) return;
         stateStore.delete(ruleId, key);
+      }),
+    );
+  }
+
+  /**
+   * Set Data Store references on the jail for the bootstrap script.
+   * Provides `db.write()`, `db.query()`, `db.get()`, `db.set()`, `db.delete()`, `db.collections()`
+   * via host-side callbacks. Only wired when dataStore is provided and enabled.
+   */
+  private async setDataStoreRefs(jail: IvmGlobal, ruleId: string): Promise<void> {
+    if (!ivm) return;
+
+    const dataStore = this.dataStore;
+
+    // Only wire references when DataStore is provided and enabled
+    if (!dataStore || !dataStore.isEnabled()) return;
+
+    // Host-side callback for db.write(collection, payloadJson, optionsJson)
+    await jail.set(
+      "__dbWriteRef",
+      new ivm.Reference(function (collection: string, payloadJson: string, optionsJson: string) {
+        try {
+          const payload = JSON.parse(payloadJson);
+          const options = JSON.parse(optionsJson);
+          dataStore.write(collection, payload, options);
+        } catch (err) {
+          logger.error({ ruleId, error: (err as Error).message }, "[sandbox] db.write failed");
+        }
+      }),
+    );
+
+    // Host-side callback for db.query(collection, optionsJson)
+    await jail.set(
+      "__dbQueryRef",
+      new ivm.Reference(function (collection: string, optionsJson: string) {
+        try {
+          const options = JSON.parse(optionsJson);
+          const result = dataStore.query(collection, options);
+          return JSON.stringify(result);
+        } catch (err) {
+          logger.error({ ruleId, error: (err as Error).message }, "[sandbox] db.query failed");
+          return JSON.stringify({ records: [], total: 0 });
+        }
+      }),
+    );
+
+    // Host-side callback for db.get(bucket, key)
+    await jail.set(
+      "__dbGetRef",
+      new ivm.Reference(function (bucket: string, key: string) {
+        try {
+          const result = dataStore.get(bucket, key);
+          return result === undefined ? undefined : JSON.stringify(result);
+        } catch (err) {
+          logger.error({ ruleId, error: (err as Error).message }, "[sandbox] db.get failed");
+          return undefined;
+        }
+      }),
+    );
+
+    // Host-side callback for db.set(bucket, key, valueJson)
+    await jail.set(
+      "__dbSetRef",
+      new ivm.Reference(function (bucket: string, key: string, valueJson: string) {
+        try {
+          const value = JSON.parse(valueJson);
+          dataStore.set(bucket, key, value);
+        } catch (err) {
+          logger.error({ ruleId, error: (err as Error).message }, "[sandbox] db.set failed");
+        }
+      }),
+    );
+
+    // Host-side callback for db.delete(bucket, key)
+    await jail.set(
+      "__dbDeleteRef",
+      new ivm.Reference(function (bucket: string, key: string) {
+        try {
+          dataStore.delete(bucket, key);
+        } catch (err) {
+          logger.error({ ruleId, error: (err as Error).message }, "[sandbox] db.delete failed");
+        }
+      }),
+    );
+
+    // Host-side callback for db.collections()
+    await jail.set(
+      "__dbCollectionsRef",
+      new ivm.Reference(function () {
+        try {
+          const result = dataStore.listCollections();
+          return JSON.stringify(result);
+        } catch (err) {
+          logger.error({ ruleId, error: (err as Error).message }, "[sandbox] db.collections failed");
+          return JSON.stringify([]);
+        }
       }),
     );
   }
