@@ -68,6 +68,25 @@ Detect unusual patterns in device state history and surface them as alerts or au
 
 ## Platform
 
+### Data Store — Persistent Time-Series & Key-Value Storage
+Add a general-purpose data store accessible from automations, connectors, and services for persisting structured data beyond the ephemeral device state. Currently, device readings are transient (overwritten on each update) and the state history only keeps the last N snapshots per device. The Data Store would provide:
+
+- **Time-series collections** — automations can write timestamped records (e.g. daily energy totals, irrigation cycle logs, pool chemistry readings) that accumulate over time without being pruned
+- **Key-value buckets** — persistent storage for computed values, configuration, and cross-automation shared state (beyond the per-rule state store)
+- **Query API** — retrieve records by time range, aggregate (sum, avg, min, max), and filter by tags
+- **Sandbox global** — `db.write("energy-daily", { solar: 14.2, grid: 8.1 })` and `db.query("energy-daily", { from: "7d" })`
+- **Dashboard pane** — a "Data Explorer" pane for browsing collections, viewing charts, and exporting CSV
+- **Retention policies** — configurable per-collection (keep 30 days, keep 1 year, keep forever)
+
+This would be a new pinned tab in the sidebar (under Connectors) called "Data Store" with a UI for browsing collections, viewing time-series charts, and managing retention. The underlying storage would use SQLite (same as everything else) with a dedicated `data_store` table.
+
+**Use cases:**
+- Track daily/weekly/monthly energy production and consumption totals
+- Log every irrigation cycle with duration, volume, and which zones were watered
+- Store pool chemistry readings over time for trend analysis
+- Record automation execution metrics for performance monitoring
+- Persist computed values that survive automation restarts (rolling averages, counters, thresholds)
+
 ### Multi-Node Clustering
 Run Aeolus across multiple Raspberry Pis with shared state and distributed device management. A primary node would coordinate automations and state, while secondary nodes handle local MQTT ingestion and connector communication. Useful for large homes or buildings with multiple floors.
 
