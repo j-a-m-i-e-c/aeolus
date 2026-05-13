@@ -207,61 +207,75 @@ export default function SmartIrrigation(props: CustomComponentProps) {
     return "#22C55E";
   };
 
-  const TankSVG = ({ level, label }: { level: number; label: string }) => {
-    const fillH = (level / 100) * 70;
+  const Tank = ({ level, label, id }: { level: number; label: string; id: string }) => {
+    const fillY = 85 - (level / 100) * 60;
+    const levelColor = level > 60 ? "#3BA4FF" : level > 30 ? "#5CE1E6" : "#F59E0B";
     return (
-      <div className="flex flex-col items-center gap-1 flex-1">
-        <svg width="100%" height="90" viewBox="0 0 160 90" preserveAspectRatio="xMidYMid meet">
+      <div className="flex-1 bg-[#0B0F14] rounded-xl border border-[#2A3441] p-3">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-[10px] text-[#9AA6B2] font-medium uppercase">{label}</span>
+          <span className="text-xs font-mono font-bold" style={{ color: levelColor }}>{level}%</span>
+        </div>
+        <svg width="100%" height="70" viewBox="0 0 120 90" preserveAspectRatio="xMidYMid meet">
           <defs>
-            <linearGradient id={"tankGrad-" + label} x1="0" y1="1" x2="0" y2="0">
-              <stop offset="0%" stopColor="#3BA4FF" stopOpacity="0.85" />
-              <stop offset="50%" stopColor="#5CE1E6" stopOpacity="0.5" />
-              <stop offset="100%" stopColor="#5CE1E6" stopOpacity="0.2" />
+            <linearGradient id={"irrTank-" + id} x1="0" y1="1" x2="0" y2="0">
+              <stop offset="0%" stopColor={levelColor} stopOpacity="0.7" />
+              <stop offset="100%" stopColor={levelColor} stopOpacity="0.15" />
             </linearGradient>
-            <clipPath id={"tankClip-" + label}>
-              <rect x="10" y="10" width="140" height="70" rx="10" />
+            <clipPath id={"irrClip-" + id}>
+              <rect x="10" y="5" width="100" height="80" rx="12" />
             </clipPath>
           </defs>
-          <rect x="10" y="10" width="140" height="70" rx="10" fill="#121821" stroke="#2A3441" strokeWidth="1.5" />
-          <rect x="10" y={80 - fillH} width="140" height={fillH} fill={"url(#tankGrad-" + label + ")"} clipPath={"url(#tankClip-" + label + ")"} className="transition-all duration-700" />
-          <rect x="10" y="10" width="140" height="70" rx="10" fill="none" stroke="#2A3441" strokeWidth="1.5" />
-          <text x="80" y="48" textAnchor="middle" fill="#E6EDF3" fontSize="14" fontFamily="monospace" fontWeight="bold">{level}%</text>
-          <text x="80" y="62" textAnchor="middle" fill="#9AA6B2" fontSize="9">{label}</text>
+          {/* Tank shell */}
+          <rect x="10" y="5" width="100" height="80" rx="12" fill="#121821" stroke={levelColor} strokeWidth="1" strokeOpacity="0.25" />
+          {/* Water fill */}
+          <rect x="10" y={fillY} width="100" height={85 - fillY} fill={"url(#irrTank-" + id + ")"} clipPath={"url(#irrClip-" + id + ")"} className="transition-all duration-700" />
+          {/* Water surface wave */}
+          <path d={"M10," + fillY + " Q35," + (fillY - 3) + " 60," + fillY + " T110," + fillY} fill="none" stroke={levelColor} strokeWidth="1.5" strokeOpacity="0.6" clipPath={"url(#irrClip-" + id + ")"} className="transition-all duration-700" />
+          {/* Level markers */}
+          <line x1="112" y1="25" x2="116" y2="25" stroke="#6B7785" strokeWidth="1" />
+          <line x1="112" y1="45" x2="116" y2="45" stroke="#6B7785" strokeWidth="1" />
+          <line x1="112" y1="65" x2="116" y2="65" stroke="#6B7785" strokeWidth="1" />
+          <text x="118" y="28" fill="#6B7785" fontSize="6">75</text>
+          <text x="118" y="48" fill="#6B7785" fontSize="6">50</text>
+          <text x="118" y="68" fill="#6B7785" fontSize="6">25</text>
+          {/* Outer stroke */}
+          <rect x="10" y="5" width="100" height="80" rx="12" fill="none" stroke="#2A3441" strokeWidth="1" />
         </svg>
       </div>
     );
   };
 
   return (
-    <div className="p-4 space-y-4">
+    <div className="p-4 space-y-3">
       <div className="flex items-center justify-between">
         <div className="text-sm font-semibold text-[#E6EDF3]">💧 Smart Irrigation</div>
-        <div className="text-[10px] text-[#6B7785]">{totalCycles} cycles</div>
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] text-[#6B7785]">{totalCycles} cycles</span>
+        </div>
       </div>
 
-      <div className="space-y-2">
-        <TankSVG level={tank1} label="Tank A" />
-        <TankSVG level={tank2} label="Tank B" />
+      {/* Tanks side by side */}
+      <div className="grid grid-cols-2 gap-2">
+        <Tank level={tank1} label="Tank A" id="a" />
+        <Tank level={tank2} label="Tank B" id="b" />
       </div>
 
-      <div className="space-y-2">
+      {/* Moisture zones */}
+      <div className="space-y-1.5">
         {zones.map(z => {
           const m = getMoisture(z);
           const active = isWatering(z);
+          const color = moistureColor(m);
           return (
-            <div key={z} className="bg-[#0B0F14] rounded-lg p-2.5 border border-[#2A3441]">
-              <div className="flex items-center justify-between mb-1.5">
-                <span className="text-[10px] text-[#9AA6B2] uppercase">{z.replace("zone", "Zone ")}</span>
-                <span className={"text-[10px] px-1.5 py-0.5 rounded " + (active ? "bg-[#22C55E]/20 text-[#22C55E]" : "bg-[#1A2330] text-[#6B7785]")}>
-                  {active ? "● Watering" : "○ Idle"}
-                </span>
+            <div key={z} className="flex items-center gap-3 bg-[#0B0F14] rounded-lg px-3 py-2 border border-[#2A3441]">
+              <div className="w-2 h-2 rounded-full" style={{ backgroundColor: color, boxShadow: active ? "0 0 6px " + color : "none" }} />
+              <span className="text-[10px] text-[#9AA6B2] w-12">{z.replace("zone", "Zone ")}</span>
+              <div className="flex-1 h-2.5 bg-[#1A2330] rounded-full overflow-hidden">
+                <div className="h-full rounded-full transition-all duration-700" style={{ width: (m || 0) + "%", background: "linear-gradient(90deg, " + color + "80, " + color + ")" }} />
               </div>
-              <div className="flex items-center gap-2">
-                <div className="flex-1 h-2 bg-[#1A2330] rounded-full overflow-hidden">
-                  <div className="h-full rounded-full transition-all duration-500" style={{ width: (m || 0) + "%", backgroundColor: moistureColor(m) }} />
-                </div>
-                <span className="text-xs font-mono font-semibold w-8 text-right" style={{ color: moistureColor(m) }}>{m ?? "—"}%</span>
-              </div>
+              <span className="text-[10px] font-mono font-semibold w-8 text-right" style={{ color }}>{m ?? "—"}%</span>
+              {active && <span className="text-[8px] text-[#22C55E] animate-pulse">●</span>}
             </div>
           );
         })}
@@ -269,7 +283,7 @@ export default function SmartIrrigation(props: CustomComponentProps) {
 
       <button
         onClick={() => props.mqttPublish("switch/irrigation/zone-1/command", JSON.stringify({ action: "open", duration: 300 }))}
-        className="w-full py-2 rounded-lg text-xs font-medium bg-[#3BA4FF]/20 text-[#3BA4FF] border border-[#3BA4FF]/30 hover:bg-[#3BA4FF]/30 transition-colors"
+        className="w-full py-2.5 rounded-lg text-xs font-medium bg-gradient-to-r from-[#3BA4FF]/20 to-[#5CE1E6]/20 text-[#5CE1E6] border border-[#5CE1E6]/30 hover:from-[#3BA4FF]/30 hover:to-[#5CE1E6]/30 transition-all"
       >
         Manual Water All Zones (5 min)
       </button>
@@ -426,30 +440,37 @@ export default function TankTransfer(props: CustomComponentProps) {
   const pumpActive = props.state.get("pumpActive") as boolean || false;
   const totalTransfers = props.state.get("totalTransfers") as number || 0;
 
-  const tankColor = (level: number) => level > 60 ? "#22C55E" : level > 30 ? "#F59E0B" : "#EF4444";
-  const mainColor = tankColor(mainLevel);
-  const feederColor = tankColor(feederLevel);
-
-  const TankSVG = ({ level, label, color }: { level: number; label: string; color: string }) => {
-    const fillH = (level / 100) * 55;
+  const Tank = ({ level, label, id, subtitle }: { level: number; label: string; id: string; subtitle: string }) => {
+    const fillY = 75 - (level / 100) * 55;
+    const levelColor = level > 60 ? "#3BA4FF" : level > 30 ? "#5CE1E6" : "#F59E0B";
+    const lowWarning = level < 40;
     return (
-      <div className="flex-1">
-        <svg width="100%" height="75" viewBox="0 0 140 75" preserveAspectRatio="xMidYMid meet">
+      <div className={"bg-[#0B0F14] rounded-xl border p-3 " + (lowWarning ? "border-[#F59E0B]/40" : "border-[#2A3441]")}>
+        <div className="flex items-center justify-between mb-1">
+          <div>
+            <div className="text-[10px] text-[#E6EDF3] font-semibold">{label}</div>
+            <div className="text-[8px] text-[#6B7785]">{subtitle}</div>
+          </div>
+          <div className="text-right">
+            <div className="text-lg font-mono font-bold" style={{ color: levelColor }}>{level}%</div>
+            {lowWarning && <div className="text-[8px] text-[#F59E0B]">Low</div>}
+          </div>
+        </div>
+        <svg width="100%" height="60" viewBox="0 0 200 75" preserveAspectRatio="xMidYMid meet">
           <defs>
-            <linearGradient id={"xferTank-" + label} x1="0" y1="1" x2="0" y2="0">
-              <stop offset="0%" stopColor="#3BA4FF" stopOpacity="0.85" />
-              <stop offset="50%" stopColor="#5CE1E6" stopOpacity="0.5" />
-              <stop offset="100%" stopColor="#5CE1E6" stopOpacity="0.2" />
+            <linearGradient id={"xfer-" + id} x1="0" y1="1" x2="0" y2="0">
+              <stop offset="0%" stopColor={levelColor} stopOpacity="0.75" />
+              <stop offset="100%" stopColor={levelColor} stopOpacity="0.1" />
             </linearGradient>
-            <clipPath id={"xferClip-" + label}>
-              <rect x="8" y="8" width="124" height="58" rx="8" />
+            <clipPath id={"xferC-" + id}>
+              <rect x="5" y="5" width="190" height="65" rx="10" />
             </clipPath>
           </defs>
-          <rect x="8" y="8" width="124" height="58" rx="8" fill="#121821" stroke="#2A3441" strokeWidth="1.5" />
-          <rect x="8" y={66 - fillH} width="124" height={fillH} fill={"url(#xferTank-" + label + ")"} clipPath={"url(#xferClip-" + label + ")"} className="transition-all duration-700" />
-          <rect x="8" y="8" width="124" height="58" rx="8" fill="none" stroke="#2A3441" strokeWidth="1.5" />
-          <text x="70" y="40" textAnchor="middle" fill="#E6EDF3" fontSize="13" fontFamily="monospace" fontWeight="bold">{level}%</text>
-          <text x="70" y="54" textAnchor="middle" fill="#9AA6B2" fontSize="8">{label}</text>
+          <rect x="5" y="5" width="190" height="65" rx="10" fill="#121821" stroke={levelColor} strokeWidth="0.8" strokeOpacity="0.2" />
+          <rect x="5" y={fillY} width="190" height={75 - fillY} fill={"url(#xfer-" + id + ")"} clipPath={"url(#xferC-" + id + ")"} className="transition-all duration-700" />
+          {/* Surface wave */}
+          <path d={"M5," + fillY + " Q50," + (fillY - 2.5) + " 100," + fillY + " T195," + fillY} fill="none" stroke={levelColor} strokeWidth="1.2" strokeOpacity="0.5" clipPath={"url(#xferC-" + id + ")"} className="transition-all duration-700" />
+          <rect x="5" y="5" width="190" height="65" rx="10" fill="none" stroke="#2A3441" strokeWidth="1" />
         </svg>
       </div>
     );
@@ -462,26 +483,32 @@ export default function TankTransfer(props: CustomComponentProps) {
         <div className="text-[10px] text-[#6B7785]">{totalTransfers} transfers</div>
       </div>
 
-      <TankSVG level={mainLevel} label="Main (House)" color={mainColor} />
+      <Tank level={mainLevel} label="Main Tank" id="main" subtitle="Feeds house supply" />
 
-      {/* Pump indicator between tanks */}
-      <div className="flex items-center justify-center gap-2 py-1">
-        <div className="h-px flex-1 bg-[#2A3441]" />
-        <div className={"flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-medium " + (pumpActive ? "bg-[#3BA4FF]/20 text-[#3BA4FF] border border-[#3BA4FF]/30" : "bg-[#1A2330] text-[#6B7785] border border-[#2A3441]")}>
-          {pumpActive ? "⬆ Pumping" : "○ Idle"}
+      {/* Pump flow indicator */}
+      <div className="flex items-center gap-2">
+        <div className="flex-1 h-px bg-[#2A3441]" />
+        <div className="flex flex-col items-center gap-0.5">
+          <div className={"flex items-center gap-1.5 px-4 py-1.5 rounded-full text-[10px] font-semibold border " + (pumpActive ? "bg-[#3BA4FF]/15 text-[#3BA4FF] border-[#3BA4FF]/40" : "bg-[#1A2330] text-[#6B7785] border-[#2A3441]")}>
+            {pumpActive && <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#3BA4FF] animate-pulse" />}
+            {pumpActive ? "Transferring ↑" : "Pump Idle"}
+          </div>
+          {pumpActive && <div className="text-[8px] text-[#3BA4FF]/60">Feeder → Main</div>}
         </div>
-        <div className="h-px flex-1 bg-[#2A3441]" />
+        <div className="flex-1 h-px bg-[#2A3441]" />
       </div>
 
-      <TankSVG level={feederLevel} label="Feeder (Rainwater)" color={feederColor} />
+      <Tank level={feederLevel} label="Feeder Tank" id="feeder" subtitle="Rainwater collection" />
 
-      <div className="bg-[#0B0F14] rounded-lg p-2.5 border border-[#2A3441] text-[10px] text-[#6B7785]">
-        Pump activates when house tank drops below 40% and feeder has water available.
+      <div className="bg-[#0B0F14] rounded-lg px-3 py-2 border border-[#2A3441]">
+        <div className="text-[9px] text-[#6B7785] leading-relaxed">
+          Auto-transfer activates when main tank drops below <span className="text-[#F59E0B] font-mono">40%</span> and feeder has water available (&gt;<span className="text-[#22C55E] font-mono">15%</span>).
+        </div>
       </div>
 
       <button
         onClick={() => props.mqttPublish("switch/tank/transfer-pump/command", JSON.stringify({ on: true, duration: 300 }))}
-        className="w-full py-2 rounded-lg text-xs font-medium bg-[#3BA4FF]/20 text-[#3BA4FF] border border-[#3BA4FF]/30 hover:bg-[#3BA4FF]/30 transition-colors"
+        className="w-full py-2.5 rounded-lg text-xs font-medium bg-gradient-to-r from-[#3BA4FF]/20 to-[#5CE1E6]/20 text-[#5CE1E6] border border-[#5CE1E6]/30 hover:from-[#3BA4FF]/30 hover:to-[#5CE1E6]/30 transition-all"
       >
         Manual Transfer (5 min)
       </button>
