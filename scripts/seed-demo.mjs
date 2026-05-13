@@ -208,26 +208,25 @@ export default function SmartIrrigation(props: CustomComponentProps) {
   };
 
   const TankSVG = ({ level, label }: { level: number; label: string }) => {
-    const tankColor = level > 60 ? "#22C55E" : level > 30 ? "#F59E0B" : "#EF4444";
     const fillH = (level / 100) * 70;
     return (
       <div className="flex flex-col items-center gap-1 flex-1">
         <svg width="100%" height="90" viewBox="0 0 160 90" preserveAspectRatio="xMidYMid meet">
           <defs>
             <linearGradient id={"tankGrad-" + label} x1="0" y1="1" x2="0" y2="0">
-              <stop offset="0%" stopColor={tankColor} stopOpacity="0.85" />
-              <stop offset="50%" stopColor={tankColor} stopOpacity="0.5" />
-              <stop offset="100%" stopColor={tankColor} stopOpacity="0.2" />
+              <stop offset="0%" stopColor="#3BA4FF" stopOpacity="0.85" />
+              <stop offset="50%" stopColor="#5CE1E6" stopOpacity="0.5" />
+              <stop offset="100%" stopColor="#5CE1E6" stopOpacity="0.2" />
             </linearGradient>
             <clipPath id={"tankClip-" + label}>
               <rect x="10" y="10" width="140" height="70" rx="10" />
             </clipPath>
           </defs>
-          <rect x="10" y="10" width="140" height="70" rx="10" fill="#0B0F14" stroke="#2A3441" strokeWidth="1.5" />
+          <rect x="10" y="10" width="140" height="70" rx="10" fill="#121821" stroke="#2A3441" strokeWidth="1.5" />
           <rect x="10" y={80 - fillH} width="140" height={fillH} fill={"url(#tankGrad-" + label + ")"} clipPath={"url(#tankClip-" + label + ")"} className="transition-all duration-700" />
           <rect x="10" y="10" width="140" height="70" rx="10" fill="none" stroke="#2A3441" strokeWidth="1.5" />
           <text x="80" y="48" textAnchor="middle" fill="#E6EDF3" fontSize="14" fontFamily="monospace" fontWeight="bold">{level}%</text>
-          <text x="80" y="62" textAnchor="middle" fill="#6B7785" fontSize="9">{label}</text>
+          <text x="80" y="62" textAnchor="middle" fill="#9AA6B2" fontSize="9">{label}</text>
         </svg>
       </div>
     );
@@ -438,19 +437,19 @@ export default function TankTransfer(props: CustomComponentProps) {
         <svg width="100%" height="75" viewBox="0 0 140 75" preserveAspectRatio="xMidYMid meet">
           <defs>
             <linearGradient id={"xferTank-" + label} x1="0" y1="1" x2="0" y2="0">
-              <stop offset="0%" stopColor={color} stopOpacity="0.85" />
-              <stop offset="50%" stopColor={color} stopOpacity="0.5" />
-              <stop offset="100%" stopColor={color} stopOpacity="0.2" />
+              <stop offset="0%" stopColor="#3BA4FF" stopOpacity="0.85" />
+              <stop offset="50%" stopColor="#5CE1E6" stopOpacity="0.5" />
+              <stop offset="100%" stopColor="#5CE1E6" stopOpacity="0.2" />
             </linearGradient>
             <clipPath id={"xferClip-" + label}>
               <rect x="8" y="8" width="124" height="58" rx="8" />
             </clipPath>
           </defs>
-          <rect x="8" y="8" width="124" height="58" rx="8" fill="#0B0F14" stroke="#2A3441" strokeWidth="1.5" />
+          <rect x="8" y="8" width="124" height="58" rx="8" fill="#121821" stroke="#2A3441" strokeWidth="1.5" />
           <rect x="8" y={66 - fillH} width="124" height={fillH} fill={"url(#xferTank-" + label + ")"} clipPath={"url(#xferClip-" + label + ")"} className="transition-all duration-700" />
           <rect x="8" y="8" width="124" height="58" rx="8" fill="none" stroke="#2A3441" strokeWidth="1.5" />
           <text x="70" y="40" textAnchor="middle" fill="#E6EDF3" fontSize="13" fontFamily="monospace" fontWeight="bold">{level}%</text>
-          <text x="70" y="54" textAnchor="middle" fill="#6B7785" fontSize="8">{label}</text>
+          <text x="70" y="54" textAnchor="middle" fill="#9AA6B2" fontSize="8">{label}</text>
         </svg>
       </div>
     );
@@ -590,30 +589,30 @@ export default function EnergyMonitor(props: CustomComponentProps) {
         @keyframes flowRight { from { stroke-dashoffset: -20; } to { stroke-dashoffset: 0; } }
       \`}</style>
 
-      <div className="flex items-center justify-around">
+      <div className="grid grid-cols-2 gap-4 px-2">
         {/* Battery SVG icon */}
-        <div className="flex flex-col items-center">
-          <svg width="40" height="56" viewBox="0 0 40 56">
-            <rect x="12" y="2" width="16" height="6" rx="2" fill="#1A2330" stroke="#2A3441" strokeWidth="1" />
-            <rect x="6" y="8" width="28" height="42" rx="4" fill="#1A2330" stroke="#2A3441" strokeWidth="1.5" />
+        <div className="flex flex-col items-center justify-center bg-[#0B0F14] rounded-xl p-3 border border-[#2A3441]">
+          <svg width="50" height="70" viewBox="0 0 50 70">
+            <rect x="15" y="2" width="20" height="7" rx="3" fill="#1A2330" stroke="#2A3441" strokeWidth="1" />
+            <rect x="7" y="9" width="36" height="52" rx="5" fill="#1A2330" stroke="#2A3441" strokeWidth="1.5" />
             <defs>
               <clipPath id="battClip">
-                <rect x="8" y="10" width="24" height="38" rx="3" />
+                <rect x="9" y="11" width="32" height="48" rx="4" />
               </clipPath>
             </defs>
-            <rect x="8" y={48 - batteryFill} width="24" height={batteryFill} fill={batteryColor} clipPath="url(#battClip)" className="transition-all duration-700" opacity="0.8" />
-            <text x="20" y="33" textAnchor="middle" fill="#E6EDF3" fontSize="9" fontFamily="monospace" fontWeight="bold">{battery}%</text>
+            <rect x="9" y={59 - batteryFill * 2.4} width="32" height={batteryFill * 2.4} fill={batteryColor} clipPath="url(#battClip)" className="transition-all duration-700" opacity="0.8" />
+            <text x="25" y="40" textAnchor="middle" fill="#E6EDF3" fontSize="11" fontFamily="monospace" fontWeight="bold">{battery}%</text>
           </svg>
-          <div className="text-[9px] text-[#6B7785] mt-1">Battery</div>
+          <div className="text-[10px] text-[#6B7785] mt-1">Battery</div>
         </div>
 
         {/* Self-sufficiency gauge */}
-        <div className="flex flex-col items-center">
-          <svg width="100" height="80" viewBox="0 0 100 80">
-            <path d={\`M 10 70 A \${suffRadius} \${suffRadius} 0 1 1 90 70\`} fill="none" stroke="#1A2330" strokeWidth="8" strokeLinecap="round" />
-            <path d={\`M 10 70 A \${suffRadius} \${suffRadius} 0 1 1 90 70\`} fill="none" stroke="#5CE1E6" strokeWidth="8" strokeLinecap="round" strokeDasharray={suffCircumference * 0.75} strokeDashoffset={suffCircumference * 0.75 - suffArc} className="transition-all duration-700" />
-            <text x="50" y="55" textAnchor="middle" fill="#E6EDF3" fontSize="16" fontFamily="monospace" fontWeight="bold">{selfSuff}%</text>
-            <text x="50" y="70" textAnchor="middle" fill="#6B7785" fontSize="7">Self-Sufficiency</text>
+        <div className="flex flex-col items-center justify-center bg-[#0B0F14] rounded-xl p-3 border border-[#2A3441]">
+          <svg width="110" height="85" viewBox="0 0 110 85">
+            <path d={\`M 10 75 A \${suffRadius} \${suffRadius} 0 1 1 100 75\`} fill="none" stroke="#1A2330" strokeWidth="9" strokeLinecap="round" />
+            <path d={\`M 10 75 A \${suffRadius} \${suffRadius} 0 1 1 100 75\`} fill="none" stroke="#5CE1E6" strokeWidth="9" strokeLinecap="round" strokeDasharray={suffCircumference * 0.75} strokeDashoffset={suffCircumference * 0.75 - suffArc} className="transition-all duration-700" />
+            <text x="55" y="58" textAnchor="middle" fill="#E6EDF3" fontSize="18" fontFamily="monospace" fontWeight="bold">{selfSuff}%</text>
+            <text x="55" y="74" textAnchor="middle" fill="#6B7785" fontSize="8">Self-Sufficiency</text>
           </svg>
         </div>
       </div>
@@ -1737,51 +1736,52 @@ export default function WeatherStation(props: CustomComponentProps) {
     <div className="p-4 space-y-4">
       <div className="text-sm font-semibold text-[#E6EDF3]">🌤️ Weather Station</div>
 
-      <div className="flex items-center justify-around">
+      <div className="grid grid-cols-2 gap-4">
         {/* Thermometer SVG */}
-        <div className="flex flex-col items-center">
-          <svg width="40" height="110" viewBox="0 0 40 110">
+        <div className="flex flex-col items-center justify-center bg-[#0B0F14] rounded-xl p-3 border border-[#2A3441]">
+          <svg width="50" height="120" viewBox="0 0 50 120">
             {/* Thermometer body */}
-            <rect x="15" y="5" width="10" height="80" rx="5" fill="#1A2330" stroke="#2A3441" strokeWidth="1.5" />
+            <rect x="18" y="5" width="14" height="85" rx="7" fill="#1A2330" stroke="#2A3441" strokeWidth="1.5" />
             {/* Bulb */}
-            <circle cx="20" cy="92" r="10" fill="#1A2330" stroke="#2A3441" strokeWidth="1.5" />
+            <circle cx="25" cy="100" r="12" fill="#1A2330" stroke="#2A3441" strokeWidth="1.5" />
             {/* Mercury fill */}
-            <rect x="17" y={85 - mercuryHeight} width="6" height={mercuryHeight} rx="3" fill={tempColor} className="transition-all duration-700" />
-            <circle cx="20" cy="92" r="7" fill={tempColor} className="transition-all duration-700" />
+            <rect x="21" y={90 - mercuryHeight} width="8" height={mercuryHeight} rx="4" fill={tempColor} className="transition-all duration-700" />
+            <circle cx="25" cy="100" r="9" fill={tempColor} className="transition-all duration-700" />
             {/* Degree markings */}
-            <line x1="26" y1="15" x2="30" y2="15" stroke="#6B7785" strokeWidth="0.8" />
-            <text x="32" y="18" fill="#6B7785" fontSize="6">40°</text>
-            <line x1="26" y1="33" x2="30" y2="33" stroke="#6B7785" strokeWidth="0.8" />
-            <text x="32" y="36" fill="#6B7785" fontSize="6">25°</text>
-            <line x1="26" y1="51" x2="30" y2="51" stroke="#6B7785" strokeWidth="0.8" />
-            <text x="32" y="54" fill="#6B7785" fontSize="6">10°</text>
-            <line x1="26" y1="69" x2="30" y2="69" stroke="#6B7785" strokeWidth="0.8" />
-            <text x="32" y="72" fill="#6B7785" fontSize="6">-5°</text>
+            <line x1="33" y1="15" x2="38" y2="15" stroke="#6B7785" strokeWidth="0.8" />
+            <text x="40" y="18" fill="#6B7785" fontSize="7">40°</text>
+            <line x1="33" y1="35" x2="38" y2="35" stroke="#6B7785" strokeWidth="0.8" />
+            <text x="40" y="38" fill="#6B7785" fontSize="7">25°</text>
+            <line x1="33" y1="55" x2="38" y2="55" stroke="#6B7785" strokeWidth="0.8" />
+            <text x="40" y="58" fill="#6B7785" fontSize="7">10°</text>
+            <line x1="33" y1="75" x2="38" y2="75" stroke="#6B7785" strokeWidth="0.8" />
+            <text x="40" y="78" fill="#6B7785" fontSize="7">-5°</text>
           </svg>
-          <div className="text-lg font-bold font-mono text-[#E6EDF3] mt-1">{temp.toFixed(1)}°</div>
+          <div className="text-xl font-bold font-mono text-[#E6EDF3] mt-2">{temp.toFixed(1)}°C</div>
+          <div className="text-[9px] text-[#6B7785]">Outdoor</div>
         </div>
 
         {/* Wind compass with speed ring */}
-        <div className="flex flex-col items-center">
-          <svg width="80" height="80" viewBox="0 0 80 80">
+        <div className="flex flex-col items-center justify-center bg-[#0B0F14] rounded-xl p-3 border border-[#2A3441]">
+          <svg width="100" height="100" viewBox="0 0 100 100">
             {/* Speed ring background */}
-            <circle cx="40" cy="40" r="36" fill="none" stroke="#1A2330" strokeWidth="4" />
+            <circle cx="50" cy="50" r="45" fill="none" stroke="#1A2330" strokeWidth="5" />
             {/* Speed ring fill */}
-            <circle cx="40" cy="40" r="36" fill="none" stroke="#5CE1E6" strokeWidth="4" strokeLinecap="round" strokeDasharray={2 * Math.PI * 36} strokeDashoffset={2 * Math.PI * 36 - windArcLength * (36/24)} transform="rotate(-90 40 40)" className="transition-all duration-700" />
+            <circle cx="50" cy="50" r="45" fill="none" stroke="#5CE1E6" strokeWidth="5" strokeLinecap="round" strokeDasharray={2 * Math.PI * 45} strokeDashoffset={2 * Math.PI * 45 - windPct * 2 * Math.PI * 45} transform="rotate(-90 50 50)" className="transition-all duration-700" />
             {/* Compass circle */}
-            <circle cx="40" cy="40" r="24" fill="none" stroke="#2A3441" strokeWidth="1.5" />
+            <circle cx="50" cy="50" r="30" fill="none" stroke="#2A3441" strokeWidth="1.5" />
             {/* Cardinal directions */}
-            <text x="40" y="20" textAnchor="middle" fill="#6B7785" fontSize="7">N</text>
-            <text x="40" y="65" textAnchor="middle" fill="#6B7785" fontSize="7">S</text>
-            <text x="17" y="43" textAnchor="middle" fill="#6B7785" fontSize="7">W</text>
-            <text x="63" y="43" textAnchor="middle" fill="#6B7785" fontSize="7">E</text>
+            <text x="50" y="24" textAnchor="middle" fill="#6B7785" fontSize="8" fontWeight="bold">N</text>
+            <text x="50" y="81" textAnchor="middle" fill="#6B7785" fontSize="8">S</text>
+            <text x="21" y="53" textAnchor="middle" fill="#6B7785" fontSize="8">W</text>
+            <text x="79" y="53" textAnchor="middle" fill="#6B7785" fontSize="8">E</text>
             {/* Direction arrow */}
-            <g transform={"rotate(" + arrowRotation + " 40 40)"}>
-              <polygon points="40,20 44,48 40,44 36,48" fill="#5CE1E6" opacity="0.9" />
+            <g transform={"rotate(" + arrowRotation + " 50 50)"}>
+              <polygon points="50,24 55,60 50,55 45,60" fill="#5CE1E6" opacity="0.9" />
             </g>
-            <circle cx="40" cy="40" r="3" fill="#5CE1E6" />
+            <circle cx="50" cy="50" r="4" fill="#5CE1E6" />
           </svg>
-          <div className="text-sm font-bold font-mono text-[#E6EDF3] mt-1">{windSpeed.toFixed(1)} km/h</div>
+          <div className="text-lg font-bold font-mono text-[#E6EDF3] mt-2">{windSpeed.toFixed(1)} km/h</div>
           <div className="text-[9px] text-[#6B7785]">{windDir}° ({windDir >= 315 || windDir < 45 ? "N" : windDir < 135 ? "E" : windDir < 225 ? "S" : "W"})</div>
         </div>
       </div>
