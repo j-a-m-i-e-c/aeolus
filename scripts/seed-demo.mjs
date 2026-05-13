@@ -527,9 +527,17 @@ export default function EnergyMonitor(props: CustomComponentProps) {
   const net = props.state.get("net") as number || 0;
   const selfSuff = props.state.get("selfSufficiency") as number || 0;
 
-  const maxBar = Math.max(solar, grid, 0.1);
-  const barPct = (v: number) => Math.max((v / (maxBar * 1.3)) * 100, 3) + "%";
   const batteryColor = battery > 60 ? "#22C55E" : battery > 25 ? "#F59E0B" : "#EF4444";
+  const batteryFill = (battery / 100) * 20;
+
+  // Self-sufficiency arc
+  const suffRadius = 40;
+  const suffCircumference = 2 * Math.PI * suffRadius;
+  const suffArc = (selfSuff / 100) * suffCircumference * 0.75;
+
+  // Flow line animation
+  const solarFlow = solar > 0;
+  const gridFlow = grid > 0;
 
   return (
     <div className="p-4 space-y-4">
@@ -540,33 +548,73 @@ export default function EnergyMonitor(props: CustomComponentProps) {
         </div>
       </div>
 
-      <div className="flex items-end gap-4 justify-center h-28 px-4">
-        <div className="flex flex-col items-center gap-1 flex-1">
-          <div className="text-[10px] font-mono text-[#22C55E]">{solar.toFixed(1)} kW</div>
-          <div className="w-full rounded-t-md transition-all duration-500" style={{ height: barPct(solar), background: "linear-gradient(to top, #22C55E, #5CE1E6)" }} />
-          <div className="text-[10px] text-[#6B7785]">Solar</div>
-        </div>
-        <div className="flex flex-col items-center gap-1 flex-1">
-          <div className="text-[10px] font-mono text-[#F59E0B]">{grid.toFixed(1)} kW</div>
-          <div className="w-full rounded-t-md transition-all duration-500" style={{ height: barPct(grid), background: "linear-gradient(to top, #F59E0B, #EF4444)" }} />
-          <div className="text-[10px] text-[#6B7785]">Grid</div>
-        </div>
-      </div>
+      {/* Energy Flow Diagram */}
+      <svg width="100%" height="100" viewBox="0 0 300 100" className="overflow-visible">
+        {/* Sun icon */}
+        <circle cx="40" cy="50" r="16" fill="#F59E0B" opacity="0.2" />
+        <circle cx="40" cy="50" r="10" fill="#F59E0B" opacity="0.6" />
+        <circle cx="40" cy="50" r="5" fill="#F59E0B" />
+        {[0,45,90,135,180,225,270,315].map((angle, i) => (
+          <line key={i} x1={40 + 13 * Math.cos(angle * Math.PI / 180)} y1={50 + 13 * Math.sin(angle * Math.PI / 180)} x2={40 + 18 * Math.cos(angle * Math.PI / 180)} y2={50 + 18 * Math.sin(angle * Math.PI / 180)} stroke="#F59E0B" strokeWidth="1.5" strokeLinecap="round" />
+        ))}
+        <text x="40" y="78" textAnchor="middle" fill="#9AA6B2" fontSize="8">{solar.toFixed(1)} kW</text>
 
-      <div className="grid grid-cols-2 gap-2">
-        <div className="bg-[#0B0F14] rounded-lg p-3 border border-[#2A3441] text-center">
-          <div className="text-[10px] text-[#6B7785]">Battery</div>
-          <div className="text-xl font-bold font-mono" style={{ color: batteryColor }}>{battery}%</div>
-          <div className="w-full h-1.5 bg-[#1A2330] rounded-full mt-1.5 overflow-hidden">
-            <div className="h-full rounded-full transition-all duration-500" style={{ width: battery + "%", backgroundColor: batteryColor }} />
-          </div>
+        {/* House icon */}
+        <path d="M145,35 L150,30 L155,35 L155,55 L145,55 Z" fill="#1A2330" stroke="#5CE1E6" strokeWidth="1.5" />
+        <path d="M140,37 L150,27 L160,37" fill="none" stroke="#5CE1E6" strokeWidth="1.5" strokeLinecap="round" />
+        <rect x="148" y="47" width="4" height="8" fill="#5CE1E6" opacity="0.5" />
+        <text x="150" y="70" textAnchor="middle" fill="#9AA6B2" fontSize="8">Home</text>
+
+        {/* Grid icon */}
+        <rect x="245" y="36" width="20" height="28" rx="2" fill="#1A2330" stroke="#F59E0B" strokeWidth="1.5" />
+        <line x1="250" y1="36" x2="250" y2="64" stroke="#F59E0B" strokeWidth="0.8" />
+        <line x1="255" y1="36" x2="255" y2="64" stroke="#F59E0B" strokeWidth="0.8" />
+        <line x1="260" y1="36" x2="260" y2="64" stroke="#F59E0B" strokeWidth="0.8" />
+        <line x1="245" y1="44" x2="265" y2="44" stroke="#F59E0B" strokeWidth="0.8" />
+        <line x1="245" y1="52" x2="265" y2="52" stroke="#F59E0B" strokeWidth="0.8" />
+        <text x="255" y="78" textAnchor="middle" fill="#9AA6B2" fontSize="8">{grid.toFixed(1)} kW</text>
+
+        {/* Solar flow line */}
+        {solarFlow && (
+          <line x1="62" y1="50" x2="140" y2="50" stroke="#22C55E" strokeWidth="2" strokeDasharray="6 4" className="transition-all duration-700" style={{ animation: "flowLeft 1.5s linear infinite" }} />
+        )}
+
+        {/* Grid flow line */}
+        {gridFlow && (
+          <line x1="165" y1="50" x2="242" y2="50" stroke="#F59E0B" strokeWidth="2" strokeDasharray="6 4" className="transition-all duration-700" style={{ animation: "flowRight 1.5s linear infinite" }} />
+        )}
+      </svg>
+
+      <style>{\`
+        @keyframes flowLeft { from { stroke-dashoffset: 20; } to { stroke-dashoffset: 0; } }
+        @keyframes flowRight { from { stroke-dashoffset: -20; } to { stroke-dashoffset: 0; } }
+      \`}</style>
+
+      <div className="flex items-center justify-around">
+        {/* Battery SVG icon */}
+        <div className="flex flex-col items-center">
+          <svg width="40" height="56" viewBox="0 0 40 56">
+            <rect x="12" y="2" width="16" height="6" rx="2" fill="#1A2330" stroke="#2A3441" strokeWidth="1" />
+            <rect x="6" y="8" width="28" height="42" rx="4" fill="#1A2330" stroke="#2A3441" strokeWidth="1.5" />
+            <defs>
+              <clipPath id="battClip">
+                <rect x="8" y="10" width="24" height="38" rx="3" />
+              </clipPath>
+            </defs>
+            <rect x="8" y={48 - batteryFill} width="24" height={batteryFill} fill={batteryColor} clipPath="url(#battClip)" className="transition-all duration-700" opacity="0.8" />
+            <text x="20" y="33" textAnchor="middle" fill="#E6EDF3" fontSize="9" fontFamily="monospace" fontWeight="bold">{battery}%</text>
+          </svg>
+          <div className="text-[9px] text-[#6B7785] mt-1">Battery</div>
         </div>
-        <div className="bg-[#0B0F14] rounded-lg p-3 border border-[#2A3441] text-center">
-          <div className="text-[10px] text-[#6B7785]">Self-Sufficiency</div>
-          <div className="text-xl font-bold font-mono text-[#5CE1E6]">{selfSuff}%</div>
-          <div className="w-full h-1.5 bg-[#1A2330] rounded-full mt-1.5 overflow-hidden">
-            <div className="h-full rounded-full bg-[#5CE1E6] transition-all duration-500" style={{ width: selfSuff + "%" }} />
-          </div>
+
+        {/* Self-sufficiency gauge */}
+        <div className="flex flex-col items-center">
+          <svg width="100" height="80" viewBox="0 0 100 80">
+            <path d={\`M 10 70 A \${suffRadius} \${suffRadius} 0 1 1 90 70\`} fill="none" stroke="#1A2330" strokeWidth="8" strokeLinecap="round" />
+            <path d={\`M 10 70 A \${suffRadius} \${suffRadius} 0 1 1 90 70\`} fill="none" stroke="#5CE1E6" strokeWidth="8" strokeLinecap="round" strokeDasharray={suffCircumference * 0.75} strokeDashoffset={suffCircumference * 0.75 - suffArc} className="transition-all duration-700" />
+            <text x="50" y="55" textAnchor="middle" fill="#E6EDF3" fontSize="16" fontFamily="monospace" fontWeight="bold">{selfSuff}%</text>
+            <text x="50" y="70" textAnchor="middle" fill="#6B7785" fontSize="7">Self-Sufficiency</text>
+          </svg>
         </div>
       </div>
     </div>
@@ -889,36 +937,50 @@ export default function Fermentation(props: CustomComponentProps) {
     <div className="p-4 space-y-4">
       <div className="text-sm font-semibold text-[#E6EDF3]">🍺 Fermentation Vessels</div>
 
-      <div className="flex justify-center gap-4">
+      <div className="flex justify-center gap-5">
         {vessels.map(v => {
           const temp = getTemp(v.id);
           const gravity = getGravity(v.id);
           const co2 = getCo2(v.id);
           const fill = fillLevel(v.id);
           const color = stageColor(v.stage);
-          const fillH = (fill / 100) * 80;
+          const fillH = (fill / 100) * 90;
 
           return (
             <div key={v.id} className="flex flex-col items-center gap-1">
-              <svg width="50" height="100" viewBox="0 0 50 100">
+              <svg width="70" height="130" viewBox="0 0 70 130">
                 <defs>
                   <linearGradient id={"vesselGrad" + v.id} x1="0" y1="1" x2="0" y2="0">
                     <stop offset="0%" stopColor={color} stopOpacity="0.9" />
                     <stop offset="100%" stopColor={color} stopOpacity="0.3" />
                   </linearGradient>
                   <clipPath id={"vesselClip" + v.id}>
-                    <rect x="8" y="10" width="34" height="80" rx="6" />
+                    <path d="M15,10 L55,10 Q60,10 60,15 L60,85 L55,105 Q35,115 35,115 Q15,105 15,105 L10,85 L10,15 Q10,10 15,10 Z" />
                   </clipPath>
                 </defs>
-                <rect x="8" y="10" width="34" height="80" rx="6" fill="#1A2330" stroke="#2A3441" strokeWidth="1.5" />
-                <rect x="8" y={90 - fillH} width="34" height={fillH} fill={"url(#vesselGrad" + v.id + ")"} clipPath={"url(#vesselClip" + v.id + ")"} className="transition-all duration-700" />
-                <rect x="8" y="10" width="34" height="80" rx="6" fill="none" stroke="#2A3441" strokeWidth="1.5" />
-                <rect x="18" y="4" width="14" height="8" rx="3" fill="#1A2330" stroke="#2A3441" strokeWidth="1" />
+                {/* Cylindroconical vessel shape */}
+                <path d="M15,10 L55,10 Q60,10 60,15 L60,85 L55,105 Q35,115 35,115 Q15,105 15,105 L10,85 L10,15 Q10,10 15,10 Z" fill="#1A2330" stroke="#2A3441" strokeWidth="1.5" />
+                {/* Liquid fill */}
+                <rect x="10" y={115 - fillH} width="50" height={fillH} fill={"url(#vesselGrad" + v.id + ")"} clipPath={"url(#vesselClip" + v.id + ")"} className="transition-all duration-700" />
+                {/* Bubble dots */}
+                <circle cx="25" cy={115 - fillH + 15} r="2" fill={color} opacity="0.5" />
+                <circle cx="40" cy={115 - fillH + 25} r="1.5" fill={color} opacity="0.4" />
+                <circle cx="30" cy={115 - fillH + 35} r="2.5" fill={color} opacity="0.3" />
+                <circle cx="45" cy={115 - fillH + 45} r="1.8" fill={color} opacity="0.45" />
+                <circle cx="22" cy={115 - fillH + 55} r="2" fill={color} opacity="0.35" />
+                {/* Vessel outline */}
+                <path d="M15,10 L55,10 Q60,10 60,15 L60,85 L55,105 Q35,115 35,115 Q15,105 15,105 L10,85 L10,15 Q10,10 15,10 Z" fill="none" stroke="#2A3441" strokeWidth="1.5" />
+                {/* Top cap */}
+                <rect x="25" y="4" width="20" height="8" rx="3" fill="#1A2330" stroke="#2A3441" strokeWidth="1" />
+                {/* Temperature indicator line on side */}
+                <rect x="62" y="20" width="3" height="70" rx="1.5" fill="#1A2330" stroke="#2A3441" strokeWidth="0.5" />
+                <rect x="62" y={90 - Math.min((temp / 30) * 70, 70)} width="3" height={Math.min((temp / 30) * 70, 70)} rx="1.5" fill={temp > 25 ? "#EF4444" : temp > 20 ? "#F59E0B" : "#3BA4FF"} className="transition-all duration-700" />
               </svg>
-              <div className="text-center">
-                <div className="text-[9px] text-[#6B7785]">{v.label}</div>
-                <div className="text-[10px] font-mono" style={{ color }}>{v.stage}</div>
+              {/* Stage badge */}
+              <div className="px-2 py-0.5 rounded-full text-[9px] font-semibold" style={{ backgroundColor: color + "20", color: color }}>
+                {v.stage}
               </div>
+              <div className="text-[9px] text-[#6B7785]">{v.label}</div>
             </div>
           );
         })}
@@ -1442,42 +1504,62 @@ export default function RackMonitor(props: CustomComponentProps) {
     <div className="p-4 space-y-4">
       <div className="flex items-center justify-between">
         <div className="text-sm font-semibold text-[#E6EDF3]">🖥️ Rack Monitor</div>
-        <div className="text-[10px] text-[#6B7785]">Avg: <span className="font-mono" style={{ color: tempColor(avgTemp) }}>{avgTemp.toFixed(1)}°C</span></div>
+        <div className={"text-[10px] px-2 py-0.5 rounded font-mono font-semibold " + (avgTemp > 50 ? "bg-[#EF4444]/20 text-[#EF4444]" : avgTemp > 40 ? "bg-[#F59E0B]/20 text-[#F59E0B]" : "bg-[#22C55E]/20 text-[#22C55E]")}>
+          Avg: {avgTemp.toFixed(1)}°C
+        </div>
       </div>
 
-      <div className="space-y-2">
-        {servers.map(s => {
-          const temp = getTemp(s.id);
-          const cpu = getCpu(s.id);
-          const fan = getFan(s.id);
-          const color = tempColor(temp);
+      {/* Rack enclosure */}
+      <div className="relative border-2 border-[#2A3441] rounded-lg bg-[#0B0F14] p-1">
+        {/* Rack rails */}
+        <div className="absolute left-0 top-0 bottom-0 w-2 bg-[#1A2330] rounded-l-lg flex flex-col justify-around items-center py-2">
+          {[0,1,2,3,4,5,6,7].map(i => <div key={i} className="w-1 h-1 rounded-full bg-[#2A3441]" />)}
+        </div>
+        <div className="absolute right-0 top-0 bottom-0 w-2 bg-[#1A2330] rounded-r-lg flex flex-col justify-around items-center py-2">
+          {[0,1,2,3,4,5,6,7].map(i => <div key={i} className="w-1 h-1 rounded-full bg-[#2A3441]" />)}
+        </div>
 
-          return (
-            <div key={s.id} className="bg-[#0B0F14] rounded-lg p-2.5 border border-[#2A3441]">
-              <div className="flex items-center justify-between mb-1.5">
-                <span className="text-[10px] text-[#9AA6B2] font-medium">{s.name}</span>
-                <span className="text-[10px] font-mono text-[#6B7785]">{fan} RPM</span>
-              </div>
-              <div className="flex items-center gap-2">
+        <div className="ml-3 mr-3 space-y-1.5 py-1">
+          {servers.map(s => {
+            const temp = getTemp(s.id);
+            const cpu = getCpu(s.id);
+            const fan = getFan(s.id);
+            const color = tempColor(temp);
+
+            // CPU arc gauge
+            const cpuAngle = (cpu / 100) * 180;
+
+            return (
+              <div key={s.id} className="bg-[#121821] rounded-md p-2 border border-[#2A3441] flex items-center gap-2">
+                {/* LED status dot */}
+                <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: color, boxShadow: "0 0 4px " + color }} />
+
+                {/* Server name */}
+                <div className="flex-shrink-0 w-16">
+                  <span className="text-[10px] text-[#9AA6B2] font-medium">{s.name}</span>
+                </div>
+
                 {/* Temp bar */}
-                <div className="flex-1">
-                  <div className="w-full h-3 bg-[#1A2330] rounded-full overflow-hidden relative">
-                    <div className="h-full rounded-full transition-all duration-500" style={{ width: Math.min((temp / 70) * 100, 100) + "%", backgroundColor: color }} />
+                <div className="flex-1 flex items-center gap-1.5">
+                  <div className="flex-1 h-3 bg-[#1A2330] rounded-full overflow-hidden relative">
+                    <div className="h-full rounded-full transition-all duration-700" style={{ width: Math.min((temp / 70) * 100, 100) + "%", backgroundColor: color }} />
                   </div>
+                  <span className="text-[9px] font-mono font-semibold w-8 text-right" style={{ color }}>{temp}°</span>
                 </div>
-                <span className="text-[10px] font-mono font-semibold w-10 text-right" style={{ color }}>{temp}°C</span>
+
+                {/* CPU arc gauge */}
+                <svg width="28" height="18" viewBox="0 0 28 18" className="flex-shrink-0">
+                  <path d="M 4 16 A 10 10 0 0 1 24 16" fill="none" stroke="#1A2330" strokeWidth="3" strokeLinecap="round" />
+                  <path d="M 4 16 A 10 10 0 0 1 24 16" fill="none" stroke="#3BA4FF" strokeWidth="3" strokeLinecap="round" strokeDasharray={Math.PI * 10} strokeDashoffset={Math.PI * 10 - (cpuAngle / 180) * Math.PI * 10} className="transition-all duration-700" />
+                  <text x="14" y="15" textAnchor="middle" fill="#3BA4FF" fontSize="6" fontFamily="monospace">{cpu}%</text>
+                </svg>
+
+                {/* Fan RPM */}
+                <span className="text-[8px] font-mono text-[#6B7785] w-12 text-right">{fan} RPM</span>
               </div>
-              <div className="flex items-center gap-2 mt-1">
-                <div className="flex-1">
-                  <div className="w-full h-1.5 bg-[#1A2330] rounded-full overflow-hidden">
-                    <div className="h-full rounded-full bg-[#3BA4FF] transition-all duration-500" style={{ width: cpu + "%" }} />
-                  </div>
-                </div>
-                <span className="text-[9px] font-mono text-[#3BA4FF] w-10 text-right">{cpu}% CPU</span>
-              </div>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </div>
     </div>
   );
@@ -1629,44 +1711,123 @@ export default function WeatherStation(props: CustomComponentProps) {
   // Wind direction arrow rotation
   const arrowRotation = windDir;
 
+  // Thermometer calculations
+  const tempMin = -10;
+  const tempMax = 50;
+  const tempPct = Math.min(Math.max((temp - tempMin) / (tempMax - tempMin), 0), 1);
+  const mercuryHeight = tempPct * 70;
+  const tempColor = temp > 35 ? "#EF4444" : temp > 25 ? "#F59E0B" : temp > 10 ? "#22C55E" : "#3BA4FF";
+
+  // Wind speed arc (max 100 km/h)
+  const maxWind = 100;
+  const windPct = Math.min(windSpeed / maxWind, 1);
+  const windArcLength = windPct * Math.PI * 24;
+
+  // Pressure trend (simplified)
+  const prevPressure = 1013;
+  const pressureTrend = pressure > prevPressure ? "up" : pressure < prevPressure ? "down" : "stable";
+
+  // Rain bar chart (simulated hourly data)
+  const rainBars = [rain * 0.2, rain * 0.5, rain * 0.8, rain * 1.0, rain * 0.6, rain * 0.3];
+
+  // UV position on gradient bar
+  const uvPct = Math.min((uv / 11) * 100, 100);
+
   return (
     <div className="p-4 space-y-4">
       <div className="text-sm font-semibold text-[#E6EDF3]">🌤️ Weather Station</div>
 
-      {/* Large temp display */}
-      <div className="text-center py-2">
-        <div className="text-5xl font-bold text-[#E6EDF3] font-mono">{temp.toFixed(1)}°</div>
-        <div className="text-[10px] text-[#6B7785] mt-1">Outdoor Temperature</div>
+      <div className="flex items-center justify-around">
+        {/* Thermometer SVG */}
+        <div className="flex flex-col items-center">
+          <svg width="40" height="110" viewBox="0 0 40 110">
+            {/* Thermometer body */}
+            <rect x="15" y="5" width="10" height="80" rx="5" fill="#1A2330" stroke="#2A3441" strokeWidth="1.5" />
+            {/* Bulb */}
+            <circle cx="20" cy="92" r="10" fill="#1A2330" stroke="#2A3441" strokeWidth="1.5" />
+            {/* Mercury fill */}
+            <rect x="17" y={85 - mercuryHeight} width="6" height={mercuryHeight} rx="3" fill={tempColor} className="transition-all duration-700" />
+            <circle cx="20" cy="92" r="7" fill={tempColor} className="transition-all duration-700" />
+            {/* Degree markings */}
+            <line x1="26" y1="15" x2="30" y2="15" stroke="#6B7785" strokeWidth="0.8" />
+            <text x="32" y="18" fill="#6B7785" fontSize="6">40°</text>
+            <line x1="26" y1="33" x2="30" y2="33" stroke="#6B7785" strokeWidth="0.8" />
+            <text x="32" y="36" fill="#6B7785" fontSize="6">25°</text>
+            <line x1="26" y1="51" x2="30" y2="51" stroke="#6B7785" strokeWidth="0.8" />
+            <text x="32" y="54" fill="#6B7785" fontSize="6">10°</text>
+            <line x1="26" y1="69" x2="30" y2="69" stroke="#6B7785" strokeWidth="0.8" />
+            <text x="32" y="72" fill="#6B7785" fontSize="6">-5°</text>
+          </svg>
+          <div className="text-lg font-bold font-mono text-[#E6EDF3] mt-1">{temp.toFixed(1)}°</div>
+        </div>
+
+        {/* Wind compass with speed ring */}
+        <div className="flex flex-col items-center">
+          <svg width="80" height="80" viewBox="0 0 80 80">
+            {/* Speed ring background */}
+            <circle cx="40" cy="40" r="36" fill="none" stroke="#1A2330" strokeWidth="4" />
+            {/* Speed ring fill */}
+            <circle cx="40" cy="40" r="36" fill="none" stroke="#5CE1E6" strokeWidth="4" strokeLinecap="round" strokeDasharray={2 * Math.PI * 36} strokeDashoffset={2 * Math.PI * 36 - windArcLength * (36/24)} transform="rotate(-90 40 40)" className="transition-all duration-700" />
+            {/* Compass circle */}
+            <circle cx="40" cy="40" r="24" fill="none" stroke="#2A3441" strokeWidth="1.5" />
+            {/* Cardinal directions */}
+            <text x="40" y="20" textAnchor="middle" fill="#6B7785" fontSize="7">N</text>
+            <text x="40" y="65" textAnchor="middle" fill="#6B7785" fontSize="7">S</text>
+            <text x="17" y="43" textAnchor="middle" fill="#6B7785" fontSize="7">W</text>
+            <text x="63" y="43" textAnchor="middle" fill="#6B7785" fontSize="7">E</text>
+            {/* Direction arrow */}
+            <g transform={"rotate(" + arrowRotation + " 40 40)"}>
+              <polygon points="40,20 44,48 40,44 36,48" fill="#5CE1E6" opacity="0.9" />
+            </g>
+            <circle cx="40" cy="40" r="3" fill="#5CE1E6" />
+          </svg>
+          <div className="text-sm font-bold font-mono text-[#E6EDF3] mt-1">{windSpeed.toFixed(1)} km/h</div>
+          <div className="text-[9px] text-[#6B7785]">{windDir}° ({windDir >= 315 || windDir < 45 ? "N" : windDir < 135 ? "E" : windDir < 225 ? "S" : "W"})</div>
+        </div>
       </div>
 
-      {/* Wind with direction arrow */}
-      <div className="flex items-center justify-center gap-4 bg-[#0B0F14] rounded-lg p-3 border border-[#2A3441]">
-        <svg width="40" height="40" viewBox="0 0 40 40">
-          <circle cx="20" cy="20" r="18" fill="none" stroke="#2A3441" strokeWidth="1.5" />
-          <g transform={"rotate(" + arrowRotation + " 20 20)"}>
-            <polygon points="20,4 24,28 20,24 16,28" fill="#5CE1E6" opacity="0.9" />
-          </g>
-          <circle cx="20" cy="20" r="3" fill="#5CE1E6" />
-        </svg>
-        <div>
-          <div className="text-lg font-bold font-mono text-[#E6EDF3]">{windSpeed.toFixed(1)} km/h</div>
-          <div className="text-[10px] text-[#6B7785]">{windDir}° ({windDir >= 315 || windDir < 45 ? "N" : windDir < 135 ? "E" : windDir < 225 ? "S" : "W"})</div>
+      {/* Rain mini bar chart */}
+      <div className="bg-[#0B0F14] rounded-lg p-3 border border-[#2A3441]">
+        <div className="flex items-center justify-between mb-2">
+          <div className="text-[10px] text-[#6B7785]">🌧️ Rain Accumulation</div>
+          <div className="text-xs font-mono font-semibold text-[#3BA4FF]">{rain} mm</div>
+        </div>
+        <div className="flex items-end gap-1 h-8">
+          {rainBars.map((val, i) => (
+            <div key={i} className="flex-1 bg-[#3BA4FF] rounded-t-sm transition-all duration-700 opacity-70" style={{ height: Math.max((val / Math.max(...rainBars, 1)) * 100, 5) + "%" }} />
+          ))}
+        </div>
+        <div className="flex justify-between text-[7px] text-[#6B7785] mt-1">
+          <span>-6h</span><span>-5h</span><span>-4h</span><span>-3h</span><span>-2h</span><span>-1h</span>
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-2">
-        <div className="bg-[#0B0F14] rounded-lg p-2 border border-[#2A3441] text-center">
-          <div className="text-[10px] text-[#6B7785]">🌧️ Rain</div>
-          <div className="text-sm font-bold font-mono text-[#3BA4FF]">{rain} mm</div>
+      {/* Pressure with trend arrow */}
+      <div className="flex items-center gap-3">
+        <div className="flex-1 bg-[#0B0F14] rounded-lg p-2.5 border border-[#2A3441] flex items-center justify-between">
+          <div>
+            <div className="text-[10px] text-[#6B7785]">📊 Pressure</div>
+            <div className="text-sm font-bold font-mono text-[#9AA6B2]">{pressure} hPa</div>
+          </div>
+          <svg width="20" height="20" viewBox="0 0 20 20">
+            {pressureTrend === "up" && <path d="M10,4 L16,12 L12,12 L12,16 L8,16 L8,12 L4,12 Z" fill="#22C55E" />}
+            {pressureTrend === "down" && <path d="M10,16 L16,8 L12,8 L12,4 L8,4 L8,8 L4,8 Z" fill="#EF4444" />}
+            {pressureTrend === "stable" && <rect x="4" y="8" width="12" height="4" rx="2" fill="#F59E0B" />}
+          </svg>
         </div>
-        <div className="bg-[#0B0F14] rounded-lg p-2 border border-[#2A3441] text-center">
-          <div className="text-[10px] text-[#6B7785]">📊 Pressure</div>
-          <div className="text-sm font-bold font-mono text-[#9AA6B2]">{pressure} hPa</div>
+      </div>
+
+      {/* UV Index gradient bar */}
+      <div className="bg-[#0B0F14] rounded-lg p-2.5 border border-[#2A3441]">
+        <div className="flex items-center justify-between mb-1.5">
+          <div className="text-[10px] text-[#6B7785]">☀️ UV Index</div>
+          <div className="text-xs font-mono font-semibold" style={{ color: uvColor }}>{uv} - {uvLabel}</div>
         </div>
-        <div className="bg-[#0B0F14] rounded-lg p-2 border border-[#2A3441] text-center">
-          <div className="text-[10px] text-[#6B7785]">☀️ UV</div>
-          <div className="text-sm font-bold font-mono" style={{ color: uvColor }}>{uv}</div>
-          <div className="text-[8px]" style={{ color: uvColor }}>{uvLabel}</div>
+        <div className="relative h-3 rounded-full overflow-hidden" style={{ background: "linear-gradient(to right, #22C55E, #F59E0B, #EF4444, #9333EA)" }}>
+          <div className="absolute top-0.5 w-2 h-2 rounded-full bg-[#E6EDF3] border border-[#0B0F14] transition-all duration-700" style={{ left: "calc(" + uvPct + "% - 4px)" }} />
+        </div>
+        <div className="flex justify-between text-[7px] text-[#6B7785] mt-0.5">
+          <span>Low</span><span>Moderate</span><span>High</span><span>Extreme</span>
         </div>
       </div>
     </div>
