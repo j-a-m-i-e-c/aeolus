@@ -2449,7 +2449,159 @@ for (const rule of allRules) {
 console.log(`  ✓ Fired ${allRules.length} automations × 5`);
 
 // ═══════════════════════════════════════════════════════════════════════
-// 6. DONE
+// 6. SEED DATA STORE
+// ═══════════════════════════════════════════════════════════════════════
+console.log("\n6. Seeding Data Store...");
+
+// Enable the Data Store with sensible defaults
+await api("POST", "/api/data-store/enable", {
+  maxStorageMb: 500,
+  maxRecordsPerCollection: 100000,
+  maxCollections: 50,
+});
+console.log("  ✓ Data Store enabled");
+
+// Helper: generate time-series records going back N hours
+function generateTimeSeries(hours, intervalMinutes, genPayload) {
+  const records = [];
+  const now = Date.now();
+  const steps = Math.floor((hours * 60) / intervalMinutes);
+  for (let i = steps; i >= 0; i--) {
+    const ts = now - i * intervalMinutes * 60_000;
+    records.push({ payload: genPayload(i, steps), timestamp: ts });
+  }
+  return records;
+}
+
+// ── Energy readings (7 days, every 30 min) ──
+const energyCollection = "energy-readings";
+await api("POST", "/api/data-store/collections", {
+  name: energyCollection,
+  description: "Solar production, grid consumption, and battery level over time",
+  retentionDays: 90,
+});
+const energyRecords = generateTimeSeries(168, 30, (i, total) => {
+  const hour = new Date(Date.now() - i * 30 * 60_000).getHours();
+  const daylight = hour >= 6 && hour <= 20;
+  const solarBase = daylight ? 2.5 + Math.sin((hour - 6) / 14 * Math.PI) * 3.5 : 0;
+  return {
+    solarKw: +(solarBase + (Math.random() - 0.5) * 0.8).toFixed(2),
+    gridKw: +(0.8 + Math.random() * 1.2).toFixed(2),
+    batteryPercent: Math.round(40 + Math.random() * 50),
+  };
+});
+for (const rec of energyRecords) {
+  await api("POST", `/api/data-store/collections/${energyCollection}/records`, {
+    payload: rec.payload,
+    tags: { source: "solar-inverter" },
+  });
+}
+console.log(`  ✓ ${energyRecords.length} energy readings`);
+
+// ── Irrigation cycles (30 days, every 6 hours) ──
+const irrigationCollection = "irrigation-cycles";
+await api("POST", "/api/data-store/collections", {
+  name: irrigationCollection,
+  description: "Watering events with duration and zone info",
+  retentionDays: 365,
+});
+const irrigationRecords = generateTimeSeries(720, 360, (i) => {
+  const zones = ["zone1", "zone2", "zone3"];
+  const zone = zones[i % 3];
+  return {
+    zone,
+    durationSec: 180 + Math.round(Math.random() * 120),
+    moistureBefore: Math.round(25 + Math.random() * 15),
+    moistureAfter: Math.round(55 + Math.random() * 20),
+    litersUsed: +(8 + Math.random() * 6).toFixed(1),
+  };
+});
+for (const rec of irrigationRecords) {
+  await api("POST", `/api/data-store/collections/${irrigationCollection}/records`, {
+    payload: rec.payload,
+    tags: { zone: rec.payload.zone },
+  });
+}
+console.log(`  ✓ ${irrigationRecords.length} irrigation cycles`);
+
+// ── Pool chemistry (14 days, every 2 hours) ──
+const poolCollection = "pool-chemistry";
+await api("POST", "/api/data-store/collections", {
+  name: poolCollection,
+  description: "Pool pH, chlorine, ORP, and temperature readings",
+  retentionDays: 180,
+});
+const poolRecords = generateTimeSeries(336, 120, () => ({
+  ph: +(7.2 + Math.random() * 0.4).toFixed(2),
+  chlorine: +(1.2 + Math.random() * 1.0).toFixed(2),
+  orp: Math.round(680 + Math.random() * 80),
+  tempC: +(26 + Math.random() * 4).toFixed(1),
+}));
+for (const rec of poolRecords) {
+  await api("POST", `/api/data-store/collections/${poolCollection}/records`, {
+    payload: rec.payload,
+  });
+}
+console.log(`  ✓ ${poolRecords.length} pool chemistry readings`);
+
+// ── Server rack temps (3 days, every 5 min) ──
+const rackCollection = "rack-temperatures";
+await api("POST", "/api/data-store/collections", {
+  name: rackCollection,
+  description: "Server rack temperature and CPU load monitoring",
+  retentionDays: 30,
+});
+const rackRecords = generateTimeSeries(72, 5, () => ({
+  server1Temp: +(38 + Math.random() * 12).toFixed(1),
+  server2Temp: +(35 + Math.random() * 8).toFixed(1),
+  server3Temp: +(40 + Math.random() * 18).toFixed(1),
+  server4Temp: +(33 + Math.random() * 6).toFixed(1),
+  avgCpu: Math.round(20 + Math.random() * 60),
+}));
+for (const rec of rackRecords) {
+  await api("POST", `/api/data-store/collections/${rackCollection}/records`, {
+    payload: rec.payload,
+    tags: { location: "server-room" },
+  });
+}
+console.log(`  ✓ ${rackRecords.length} rack temperature readings`);
+
+// ── Greenhouse environment (7 days, every 15 min) ──
+const ghCollection = "greenhouse-environment";
+await api("POST", "/api/data-store/collections", {
+  name: ghCollection,
+  description: "Greenhouse temperature, humidity, and CO2 levels",
+  retentionDays: 60,
+});
+const ghRecords = generateTimeSeries(168, 15, (i) => {
+  const hour = new Date(Date.now() - i * 15 * 60_000).getHours();
+  const dayTemp = hour >= 8 && hour <= 18;
+  return {
+    tempC: +(dayTemp ? 24 + Math.random() * 6 : 16 + Math.random() * 4).toFixed(1),
+    humidity: Math.round(dayTemp ? 55 + Math.random() * 20 : 70 + Math.random() * 15),
+    co2ppm: Math.round(dayTemp ? 380 + Math.random() * 80 : 420 + Math.random() * 60),
+  };
+});
+for (const rec of ghRecords) {
+  await api("POST", `/api/data-store/collections/${ghCollection}/records`, {
+    payload: rec.payload,
+    tags: { area: "greenhouse" },
+  });
+}
+console.log(`  ✓ ${ghRecords.length} greenhouse environment readings`);
+
+// ── Key-value buckets (computed values) ──
+await api("PUT", "/api/data-store/buckets/computed/dailySolarAvgKw", { value: 3.2 });
+await api("PUT", "/api/data-store/buckets/computed/weeklyWaterUsageLiters", { value: 284.5 });
+await api("PUT", "/api/data-store/buckets/computed/poolLastDosed", { value: Date.now() - 86400000 });
+await api("PUT", "/api/data-store/buckets/computed/rackMaxTemp24h", { value: 55.2 });
+await api("PUT", "/api/data-store/buckets/config/irrigationThreshold", { value: 35 });
+await api("PUT", "/api/data-store/buckets/config/poolTargetPh", { value: 7.4 });
+await api("PUT", "/api/data-store/buckets/config/rackAlertTemp", { value: 60 });
+console.log("  ✓ 7 bucket entries (computed values + config)");
+
+// ═══════════════════════════════════════════════════════════════════════
+// 7. DONE
 // ═══════════════════════════════════════════════════════════════════════
 console.log(`
 ✅ Demo seeding complete!
@@ -2458,6 +2610,7 @@ console.log(`
    Tabs: Garden · Home · Aquarium · Brewery · Hydroponics · Pool & Spa · Server Room · Weather
    Automations: ${allRules.length} (all with custom UI components)
    Devices: ${mqttDevices.length} (via MQTT publish)
+   Data Store: 5 collections + 2 buckets with historical data
 
    Custom UI components render instantly — just refresh the page.
 `);
