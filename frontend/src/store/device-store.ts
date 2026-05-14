@@ -43,6 +43,7 @@ interface DeviceState {
   deviceHistory: Record<string, number[]>; // deviceId → last N values
   setDevices: (devices: Record<string, Device>) => void;
   updateDevice: (deviceId: string, state: Record<string, unknown>) => void;
+  removeDevice: (deviceId: string) => void;
   setHealth: (health: HealthStatus) => void;
   setWsConnected: (connected: boolean) => void;
   addMqttMessage: (msg: MqttMessage) => void;
@@ -70,6 +71,11 @@ export const useDeviceStore = create<DeviceState>((set) => ({
           [deviceId]: { ...existing, state: { ...existing.state, ...state } },
         },
       };
+    }),
+  removeDevice: (deviceId) =>
+    set((prev) => {
+      const { [deviceId]: _, ...rest } = prev.devices;
+      return { devices: rest };
     }),
   setHealth: (health) => set({ health }),
   setWsConnected: (wsConnected) => set({ wsConnected }),

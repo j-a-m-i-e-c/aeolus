@@ -98,14 +98,20 @@ export function HueControlPane({ config }: Props) {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const removeDevice = useDeviceStore((s) => s.removeDevice);
 
   const handleRename = async (deviceId: string) => {
     if (!renameValue.trim()) return;
     try {
       await sendAction(deviceId, "rename", { name: renameValue.trim() });
-      // Trigger re-discovery by retrying the connector
-      if (connectorId) {
-        await fetch(`${import.meta.env.VITE_API_URL || `http://${window.location.hostname}:3001`}/api/connectors/${connectorId}/retry`, { method: "POST" });
+      // Update the device name locally in the store immediately
+      const store = useDeviceStore.getState();
+      const device = store.devices[deviceId];
+      if (device) {
+        store.setDevices({
+          ...store.devices,
+          [deviceId]: { ...device, name: renameValue.trim() },
+        });
       }
     } catch {}
     setRenamingId(null);
@@ -115,10 +121,8 @@ export function HueControlPane({ config }: Props) {
   const handleDelete = async (deviceId: string) => {
     try {
       await sendAction(deviceId, "delete", {});
-      // Trigger re-discovery to remove from device list
-      if (connectorId) {
-        await fetch(`${import.meta.env.VITE_API_URL || `http://${window.location.hostname}:3001`}/api/connectors/${connectorId}/retry`, { method: "POST" });
-      }
+      // Remove from frontend store immediately
+      removeDevice(deviceId);
     } catch {}
     setDeletingId(null);
   };

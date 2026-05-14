@@ -26,11 +26,17 @@ export function connectWebSocket(): void {
       if (msg.type === "snapshot") {
         useDeviceStore.getState().setDevices(msg.data);
       } else if (msg.type === "state-change") {
-        useDeviceStore.getState().updateDevice(msg.data.deviceId, msg.data.state);
+        const store = useDeviceStore.getState();
+        if (msg.data.device && !store.devices[msg.data.deviceId]) {
+          // New device — add it to the store
+          store.setDevices({ ...store.devices, [msg.data.deviceId]: msg.data.device });
+        } else {
+          store.updateDevice(msg.data.deviceId, msg.data.state);
+        }
         // Track numeric values for sparklines
         const val = msg.data.state?.value;
         if (typeof val === "number") {
-          useDeviceStore.getState().addDeviceValue(msg.data.deviceId, val);
+          store.addDeviceValue(msg.data.deviceId, val);
         }
       } else if (msg.type === "mqtt-message") {
         useDeviceStore.getState().addMqttMessage(msg.data);

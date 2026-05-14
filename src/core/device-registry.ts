@@ -109,6 +109,8 @@ export class DeviceRegistry {
       deviceId: device.id,
       state: device.state,
       timestamp: device.lastSeen,
+      // Include full device info for new devices so the frontend can add them
+      ...(!existing && { device }),
     });
 
     return device;
