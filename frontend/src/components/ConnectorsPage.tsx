@@ -332,7 +332,36 @@ function SetupWizard({
         ))}
       </div>
 
-      <p className="text-sm text-[#9AA6B2]">{currentStep.description}</p>
+      <div className="text-sm text-[#9AA6B2] space-y-2">
+        {currentStep.description.split("\n\n").map((block, i) => {
+          const trimmed = block.trim();
+          if (trimmed.startsWith("**") && trimmed.endsWith("**")) {
+            // Bold heading (e.g. **Prerequisites:**)
+            return <h4 key={i} className="text-xs font-semibold text-[#E6EDF3] mt-3 first:mt-0">{trimmed.replace(/\*\*/g, "")}</h4>;
+          }
+          if (trimmed.includes("\n•") || trimmed.startsWith("•")) {
+            // Bullet list
+            const lines = trimmed.split("\n").filter(l => l.trim());
+            // Check if first line is a heading
+            const firstLine = lines[0].trim();
+            const isHeading = firstLine.startsWith("**");
+            return (
+              <div key={i}>
+                {isHeading && <h4 className="text-xs font-semibold text-[#E6EDF3] mt-3">{firstLine.replace(/\*\*/g, "")}</h4>}
+                <ul className="space-y-1 mt-1">
+                  {lines.filter(l => l.trim().startsWith("•")).map((line, j) => (
+                    <li key={j} className="flex items-start gap-2 text-xs text-[#9AA6B2]">
+                      <span className="text-[#6B7785] mt-0.5">•</span>
+                      <span>{line.trim().replace(/^•\s*/, "")}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            );
+          }
+          return <p key={i} className="text-xs">{trimmed}</p>;
+        })}
+      </div>
 
       {/* Visual pairing guide for physical button-press steps */}
       {isButtonPressStep && (
@@ -717,22 +746,13 @@ export function ConnectorsPage() {
                     </div>
                   </div>
                   {isIncompleteSetup ? (
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        onClick={handleResumeSetup}
-                        disabled={actionLoading === connType.metadata.id}
-                        className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-lg bg-[#F59E0B]/20 text-[#F59E0B] border border-[#F59E0B]/30 hover:bg-[#F59E0B]/30 transition-colors disabled:opacity-50"
-                      >
-                        Setup
-                      </button>
-                      <button
-                        onClick={() => enabledInstance && handleDisable(enabledInstance.id)}
-                        disabled={actionLoading === connType.metadata.id}
-                        className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-lg bg-[#EF4444]/10 text-[#EF4444] border border-[#EF4444]/20 hover:bg-[#EF4444]/20 transition-colors disabled:opacity-50"
-                      >
-                        <PowerOff size={10} />
-                      </button>
-                    </div>
+                    <button
+                      onClick={handleResumeSetup}
+                      disabled={actionLoading === connType.metadata.id}
+                      className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-lg bg-[#F59E0B]/20 text-[#F59E0B] border border-[#F59E0B]/30 hover:bg-[#F59E0B]/30 transition-colors disabled:opacity-50"
+                    >
+                      Setup
+                    </button>
                   ) : isEnabled ? (
                     <span className="text-[10px] px-2 py-0.5 rounded bg-[#22C55E]/20 text-[#22C55E]">Active</span>
                   ) : (
@@ -750,9 +770,6 @@ export function ConnectorsPage() {
                   {connType.metadata.supportedDeviceTypes.map((dt) => (
                     <span key={dt} className="text-[10px] px-1.5 py-0.5 rounded bg-elevated text-[#6B7785]">{dt}</span>
                   ))}
-                  {connType.metadata.requiresSetup && (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#F59E0B]/10 text-[#F59E0B]">setup required</span>
-                  )}
                 </div>
 
                 {/* Config form when enabling */}
