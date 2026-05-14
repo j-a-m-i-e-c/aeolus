@@ -334,6 +334,27 @@ export class ConnectorManager {
       if (instance.record.connectorType === device.integration) {
         await instance.connector.execute(action);
 
+        // Handle special action types that modify the device list
+        if (action.type === "delete") {
+          // Remove the device from the registry entirely
+          this.deviceRegistry.remove(deviceId);
+          logger.info({ deviceId }, "Device removed from registry after delete action");
+          return;
+        }
+
+        if (action.type === "rename") {
+          // Trigger a full re-discovery to pick up the new name
+          try {
+            const discovered = await instance.connector.discoverDevices();
+            for (const d of discovered) {
+              this.emitDeviceEvent(d);
+            }
+          } catch (err) {
+            logger.warn({ error: (err as Error).message }, "Re-discovery after rename failed");
+          }
+          return;
+        }
+
         // Emit immediate synthetic event with optimistic state update
         // so automations fire and the dashboard updates without waiting for the next poll
         const updatedState = { ...device.state };

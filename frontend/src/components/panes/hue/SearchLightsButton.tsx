@@ -87,6 +87,10 @@ export function SearchLightsButton({ connectorId }: Props) {
               if (status.error) {
                 setError(status.error);
               }
+              // Trigger re-discovery so new lights appear in the UI
+              try {
+                await fetch(`${API_URL}/api/connectors/${connectorId}/retry`, { method: "POST" });
+              } catch {}
             }
           }
         } catch {}
