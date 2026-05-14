@@ -626,7 +626,7 @@ export function createAutomationRoutes(
 
 /** Query a single rule from the DB by ID */
 function queryRuleById(db: Database, id: string): StoredRule | null {
-  const results = db.exec(`SELECT * FROM automation_rules WHERE id = '${id}'`);
+  const results = db.exec("SELECT * FROM automation_rules WHERE id = ?", [id]);
   if (results.length === 0 || results[0].values.length === 0) return null;
   const cols = results[0].columns;
   const row: Record<string, unknown> = {};

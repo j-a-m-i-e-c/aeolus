@@ -63,7 +63,7 @@ export function createDataStoreRoutes(dataStore: DataStore): Router {
   /** PATCH /collections/:name — update collection description/retentionDays */
   router.patch("/collections/:name", validate({ body: updateCollectionBodySchema, params: collectionNameParamsSchema }), (req, res, next) => {
     try {
-      const { name } = req.params;
+      const name = req.params.name as string;
       const { description, retentionDays } = req.body;
 
       const updates: { description?: string; retentionDays?: number | null } = {};
@@ -101,7 +101,7 @@ export function createDataStoreRoutes(dataStore: DataStore): Router {
   /** POST /collections/:name/records — write a record to a collection */
   router.post("/collections/:name/records", validate({ body: writeRecordBodySchema, params: collectionNameParamsSchema }), (req, res, next) => {
     try {
-      const { name } = req.params;
+      const name = req.params.name as string;
       const { payload, tags } = req.body;
 
       if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
@@ -219,7 +219,8 @@ export function createDataStoreRoutes(dataStore: DataStore): Router {
   /** PUT /buckets/:bucket/:key — set a key-value pair */
   router.put("/buckets/:bucket/:key", validate({ body: setBucketValueBodySchema, params: bucketKeyParamsSchema }), (req, res, next) => {
     try {
-      const { bucket, key } = req.params;
+      const bucket = req.params.bucket as string;
+      const key = req.params.key as string;
       const { value } = req.body;
 
       if (!("value" in req.body)) {

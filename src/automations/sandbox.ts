@@ -644,9 +644,14 @@ export class Sandbox {
 }
 
 /**
- * Type alias for the global reference object inside an ivm.Context.
- * Using `any` here because the exact type depends on the ivm version
- * and we can't reference it directly when ivm may not be available.
+ * Minimal interface for the ivm context global object.
+ *
+ * The actual type is `ivm.Context["global"]` which returns a `Reference<Record<string, unknown>>`,
+ * but since isolated-vm is conditionally imported (may not be available at compile time on all
+ * platforms), we define the subset of the API we actually use. All our sandbox methods only call
+ * `jail.set(key, value)` to inject references and data into the isolate.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type IvmGlobal = any;
+interface IvmGlobal {
+  /** Set a named property on the isolate's global object. */
+  set(key: string, value: unknown): Promise<void>;
+}
