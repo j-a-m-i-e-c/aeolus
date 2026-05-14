@@ -197,6 +197,8 @@ function SetupWizard({
       ? { ...accumulatedRef.current, ...resultData }
       : accumulatedRef.current;
     try { await patchConnectorConfig(connectorId, finalConfig); } catch {}
+    // Auto-connect after setup — triggers connect() + discoverDevices()
+    try { await retryConnector(connectorId); } catch {}
     onComplete();
   }, [connectorId, onComplete, stopPolling]);
 
