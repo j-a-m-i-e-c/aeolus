@@ -25,6 +25,8 @@ export interface NormalizedEvent {
   integration?: string;
   /** Human-readable device name populated from ParsedTopic.name */
   name?: string;
+  /** Explicit capabilities from connectors (overrides inferCapabilities when provided) */
+  capabilities?: string[];
 }
 
 /** Automation rule registered in the Rule Registry */

@@ -89,13 +89,14 @@ export class DeviceRegistry {
       ? {
           ...existing,
           state: { ...existing.state, ...event.state },
+          capabilities: event.capabilities ?? existing.capabilities,
           lastSeen: event.timestamp,
         }
       : {
           id: event.deviceId,
           name: event.name ?? this.deriveNameFromId(event.deviceId),
           type: event.deviceType,
-          capabilities: this.inferCapabilities(event.deviceType),
+          capabilities: event.capabilities ?? this.inferCapabilities(event.deviceType),
           state: event.state,
           integration: event.integration || "mqtt",
           lastSeen: event.timestamp,

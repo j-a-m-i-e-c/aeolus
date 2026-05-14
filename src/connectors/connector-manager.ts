@@ -568,6 +568,7 @@ export class ConnectorManager {
       topic: `connector/${device.integration}/${device.id}`,
       timestamp: device.lastSeen || Date.now(),
       integration: device.integration,
+      capabilities: device.capabilities,
     };
     this.eventBus.emit(DEVICE_STATE_CHANGE, event);
   }
