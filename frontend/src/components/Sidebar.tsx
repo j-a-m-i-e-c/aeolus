@@ -40,11 +40,14 @@ const ICON_CHOICES = [
 export function Sidebar() {
   const wsConnected = useDeviceStore((s) => s.wsConnected);
   const health = useDeviceStore((s) => s.health);
+  const dataStoreConfig = useDataStoreStore((s) => s.config);
   const dataStoreEnabled = useDataStoreStore((s) => s.enabled);
+  const fetchDataStoreConfig = useDataStoreStore((s) => s.fetchConfig);
   const navigate = useNavigate();
   const location = useLocation();
 
-  const tabs = useDashboardStore((s) => s.tabs);
+  // Fetch data store config once on mount so the sidebar dot is accurate
+  useEffect(() => { fetchDataStoreConfig(); }, [fetchDataStoreConfig]);  const tabs = useDashboardStore((s) => s.tabs);
   const addTab = useDashboardStore((s) => s.addTab);
   const renameTab = useDashboardStore((s) => s.renameTab);
   const reorderTabs = useDashboardStore((s) => s.reorderTabs);
@@ -227,7 +230,7 @@ export function Sidebar() {
     const isActive = isTabActive(tab);
     const isRenaming = renamingTabId === tab.id;
     const isDragOver = dragOverTabId === tab.id;
-    const showDisabledDot = tab.id === "default-data-store" && !dataStoreEnabled;
+    const showDisabledDot = tab.id === "default-data-store" && dataStoreConfig !== null && !dataStoreEnabled;
 
     return (
       <div

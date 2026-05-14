@@ -15,7 +15,7 @@ export const metadata: ConnectorMetadata = {
   displayName: "TP-Link Kasa",
   icon: "plug",
   description: "TP-Link Kasa smart plugs and switches via local Wi-Fi",
-  supportedDeviceTypes: ["plug", "light", "switch"],
+  supportedDeviceTypes: ["plug", "switch"],
   requiresSetup: false,
 };
 
