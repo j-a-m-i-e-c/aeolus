@@ -26,6 +26,6 @@ export const config: Config = {
   nodeEnv: process.env.NODE_ENV || "development",
   stateHistoryMax: parseInt(process.env.STATE_HISTORY_MAX || "100", 10),
   historyRecordInterval: parseInt(process.env.HISTORY_RECORD_INTERVAL || "5000", 10),
-  rateLimitRpm: parseInt(process.env.RATE_LIMIT_RPM || "200", 10),
+  rateLimitRpm: parseInt(process.env.RATE_LIMIT_RPM || "1000", 10),
   corsOrigins: process.env.CORS_ORIGINS?.split(",").map((s) => s.trim()).filter(Boolean) || [],
 };
