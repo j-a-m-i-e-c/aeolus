@@ -1,7 +1,6 @@
 // src/index.ts — Aeolus backend entry point
 
 import express from "express";
-import cors from "cors";
 import { createServer } from "node:http";
 import path from "node:path";
 import { config } from "./config.js";
@@ -39,6 +38,8 @@ import triggerModule from "./services/trigger/index.js";
 import systemModule from "./services/system/index.js";
 import { requestLogger } from "./api/middleware/request-logger.js";
 import { errorHandler } from "./api/middleware/error-handler.js";
+import { corsMiddleware } from "./api/middleware/cors-config.js";
+import { apiRateLimiter } from "./api/middleware/rate-limiter.js";
 
 import { createSystemRoutes } from "./api/routes/system.routes.js";
 import { createLayoutRoutes } from "./api/routes/layout.routes.js";
@@ -157,8 +158,9 @@ async function main(): Promise<void> {
 
   // 9. Express app
   const app = express();
-  app.use(cors());
-  app.use(express.json());
+  app.use(corsMiddleware);
+  app.use(apiRateLimiter);
+  app.use(express.json({ limit: "1mb" }));
   app.use(requestLogger);
 
   app.use("/api/devices", createDeviceRoutes(registry, connectorManager, stateHistory));
@@ -198,16 +200,49 @@ async function main(): Promise<void> {
   });
 
   // 11. Graceful shutdown
+  let shuttingDown = false;
+
   const shutdown = async () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+
     logger.info("Shutting down Aeolus...");
-    dataStore.dispose();
-    await serviceManager.disposeAll();
-    await connectorManager.disposeAll();
-    await mqttService.disconnect();
-    engine.dispose();
-    persistDatabase();
-    server.close();
-    process.exit(0);
+
+    // Force exit after 5 seconds if cleanup hangs
+    const forceExitTimeout = setTimeout(() => {
+      logger.warn("Shutdown timeout reached (5s), forcing exit");
+      process.exit(0);
+    }, 5000);
+    forceExitTimeout.unref();
+
+    try {
+      // 1. Stop accepting new HTTP connections
+      await new Promise<void>((resolve) => {
+        server.close(() => resolve());
+      });
+
+      // 2. Close WebSocket connections (send close frames)
+      wsServer.closeAll();
+
+      // 3. Stop all active timers (retention timers, polling intervals, cron schedules)
+      dataStore.dispose();
+      await serviceManager.disposeAll();
+      await connectorManager.disposeAll();
+
+      // 4. Stop automation engine (cron timers)
+      engine.dispose();
+
+      // 5. Disconnect MQTT cleanly
+      await mqttService.disconnect();
+
+      // 6. Persist database to disk
+      persistDatabase();
+    } catch (err) {
+      logger.error({ error: (err as Error).message }, "Error during shutdown cleanup");
+    } finally {
+      clearTimeout(forceExitTimeout);
+      process.exit(0);
+    }
   };
 
   process.on("SIGINT", shutdown);

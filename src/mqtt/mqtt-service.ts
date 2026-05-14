@@ -3,35 +3,41 @@
 import mqtt, { type MqttClient } from "mqtt";
 import type { EventEmitter } from "node:events";
 import { parseTopic } from "./topic-parser.js";
-import { DEVICE_STATE_CHANGE, MQTT_RAW_MESSAGE } from "../core/event-bus.js";
+import { DEVICE_STATE_CHANGE, MQTT_RAW_MESSAGE, MQTT_CONNECTION_STATE } from "../core/event-bus.js";
 import type { NormalizedEvent } from "../core/types.js";
 import logger from "../logger.js";
+
+export type MqttConnectionState = "disconnected" | "connecting" | "connected" | "waiting_retry";
 
 export interface MqttServiceConfig {
   brokerUrl: string;
   topics: string[];
-  maxRetries: number;
   baseRetryDelayMs: number;
+  maxBackoffMs: number;
 }
 
 const DEFAULT_CONFIG: Partial<MqttServiceConfig> = {
-  maxRetries: 5,
   baseRetryDelayMs: 1000,
+  maxBackoffMs: 30000,
 };
 
 /**
  * Compute exponential backoff delay for a given attempt.
+ * Returns min(baseDelayMs × 2^(attempt-1), maxDelayMs).
  * Exported for testing.
  */
-export function computeRetryDelay(attempt: number, baseDelayMs: number): number {
-  return baseDelayMs * Math.pow(2, attempt - 1);
+export function computeRetryDelay(attempt: number, baseDelayMs: number, maxDelayMs: number): number {
+  return Math.min(baseDelayMs * Math.pow(2, attempt - 1), maxDelayMs);
 }
 
 export class MqttService {
   private client: MqttClient | null = null;
   private config: MqttServiceConfig;
   private eventBus: EventEmitter;
-  private connected = false;
+  private connectionState: MqttConnectionState = "disconnected";
+  private reconnectAttempt = 0;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private intentionalDisconnect = false;
 
   constructor(config: Partial<MqttServiceConfig> & Pick<MqttServiceConfig, "brokerUrl" | "topics">, eventBus: EventEmitter) {
     this.config = { ...DEFAULT_CONFIG, ...config } as MqttServiceConfig;
@@ -39,43 +45,30 @@ export class MqttService {
   }
 
   async connect(): Promise<void> {
-    let attempt = 0;
-
-    while (attempt < this.config.maxRetries) {
-      attempt++;
-      try {
-        await this.tryConnect();
-        logger.info(
-          { broker: this.config.brokerUrl, topics: this.config.topics },
-          "Connected to MQTT broker"
-        );
-        return;
-      } catch (err) {
-        const delay = computeRetryDelay(attempt, this.config.baseRetryDelayMs);
-        logger.warn(
-          { attempt, maxRetries: this.config.maxRetries, delay, error: (err as Error).message },
-          `MQTT connection attempt ${attempt} failed, retrying in ${delay}ms`
-        );
-        if (attempt >= this.config.maxRetries) {
-          throw new Error(`Failed to connect to MQTT broker after ${this.config.maxRetries} attempts`);
-        }
-        await this.sleep(delay);
-      }
-    }
+    this.intentionalDisconnect = false;
+    this.reconnectAttempt = 0;
+    await this.attemptConnection();
   }
 
-  private tryConnect(): Promise<void> {
+  private attemptConnection(): Promise<void> {
+    this.setConnectionState("connecting");
+
     return new Promise<void>((resolve, reject) => {
       this.client = mqtt.connect(this.config.brokerUrl, {
         reconnectPeriod: 0, // We handle reconnection ourselves
       });
 
       const onConnect = () => {
-        this.connected = true;
+        cleanup();
+        this.reconnectAttempt = 0;
+        this.setConnectionState("connected");
         this.subscribeToTopics();
         this.setupMessageHandler();
         this.setupDisconnectHandler();
-        cleanup();
+        logger.info(
+          { broker: this.config.brokerUrl, topics: this.config.topics },
+          "Connected to MQTT broker"
+        );
         resolve();
       };
 
@@ -83,6 +76,7 @@ export class MqttService {
         cleanup();
         this.client?.end(true);
         this.client = null;
+        this.setConnectionState("disconnected");
         reject(err);
       };
 
@@ -94,6 +88,44 @@ export class MqttService {
       this.client.on("connect", onConnect);
       this.client.on("error", onError);
     });
+  }
+
+  private startReconnectionLoop(): void {
+    if (this.intentionalDisconnect) return;
+
+    this.reconnectAttempt++;
+    const delay = computeRetryDelay(
+      this.reconnectAttempt,
+      this.config.baseRetryDelayMs,
+      this.config.maxBackoffMs
+    );
+
+    this.setConnectionState("waiting_retry");
+    logger.warn(
+      { attempt: this.reconnectAttempt, delayMs: delay },
+      `MQTT reconnection attempt ${this.reconnectAttempt} scheduled in ${delay}ms`
+    );
+
+    this.reconnectTimer = setTimeout(async () => {
+      this.reconnectTimer = null;
+
+      if (this.intentionalDisconnect) return;
+
+      try {
+        await this.attemptConnection();
+        logger.info(
+          { attempt: this.reconnectAttempt, broker: this.config.brokerUrl },
+          "MQTT reconnection successful"
+        );
+      } catch (err) {
+        logger.error(
+          { attempt: this.reconnectAttempt, error: (err as Error).message },
+          `MQTT reconnection attempt ${this.reconnectAttempt} failed`
+        );
+        // Schedule next attempt (indefinite retries)
+        this.startReconnectionLoop();
+      }
+    }, delay);
   }
 
   private subscribeToTopics(): void {
@@ -120,12 +152,10 @@ export class MqttService {
   private setupDisconnectHandler(): void {
     if (!this.client) return;
     this.client.on("close", () => {
-      if (this.connected) {
-        this.connected = false;
-        logger.warn("MQTT connection lost, attempting reconnection");
-        this.connect().catch((err) => {
-          logger.error({ error: (err as Error).message }, "MQTT reconnection failed");
-        });
+      if (this.connectionState === "connected" && !this.intentionalDisconnect) {
+        logger.warn("MQTT connection lost, entering reconnection loop");
+        this.setConnectionState("disconnected");
+        this.startReconnectionLoop();
       }
     });
   }
@@ -177,14 +207,23 @@ export class MqttService {
   }
 
   async disconnect(): Promise<void> {
-    this.connected = false;
+    this.intentionalDisconnect = true;
+
+    // Cancel any pending reconnection timer
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+
     return new Promise<void>((resolve) => {
       if (!this.client) {
+        this.setConnectionState("disconnected");
         resolve();
         return;
       }
       this.client.end(false, () => {
         this.client = null;
+        this.setConnectionState("disconnected");
         logger.info("Disconnected from MQTT broker");
         resolve();
       });
@@ -192,12 +231,16 @@ export class MqttService {
   }
 
   isConnected(): boolean {
-    return this.connected;
+    return this.connectionState === "connected";
+  }
+
+  getConnectionState(): MqttConnectionState {
+    return this.connectionState;
   }
 
   /** Publish a message to the MQTT broker */
   publish(topic: string, payload: string): void {
-    if (!this.client || !this.connected) {
+    if (!this.client || this.connectionState !== "connected") {
       throw new Error("MQTT client not connected");
     }
     this.client.publish(topic, payload, (err) => {
@@ -209,7 +252,12 @@ export class MqttService {
     });
   }
 
-  private sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+  private setConnectionState(state: MqttConnectionState): void {
+    const previous = this.connectionState;
+    this.connectionState = state;
+    if (previous !== state) {
+      this.eventBus.emit(MQTT_CONNECTION_STATE, { previous, current: state });
+      logger.debug({ previous, current: state }, "MQTT connection state changed");
+    }
   }
 }

@@ -9,6 +9,7 @@ import logger from "../logger.js";
 let db: Database | null = null;
 
 export function initSchema(database: Database): void {
+  database.run("PRAGMA journal_mode=WAL;");
   database.run("PRAGMA foreign_keys = ON;");
   database.run(`
     CREATE TABLE IF NOT EXISTS devices (

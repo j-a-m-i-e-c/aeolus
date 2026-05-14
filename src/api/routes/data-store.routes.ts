@@ -4,6 +4,8 @@ import { Router } from "express";
 import type { DataStore } from "../../data-store/data-store.js";
 import type { QueryOptions } from "../../data-store/data-store.js";
 import { BadRequestError, NotFoundError, AppError } from "../middleware/error-handler.js";
+import { validate } from "../middleware/validate.js";
+import { collectionNameParamsSchema, createCollectionBodySchema, updateCollectionBodySchema, writeRecordBodySchema, bucketKeyParamsSchema, setBucketValueBodySchema, dataStoreConfigBodySchema, enableDataStoreBodySchema } from "../schemas/data-store.schemas.js";
 
 /**
  * Escape a value for CSV output.
@@ -38,7 +40,7 @@ export function createDataStoreRoutes(dataStore: DataStore): Router {
   });
 
   /** POST /collections — create a new collection */
-  router.post("/collections", (req, res, next) => {
+  router.post("/collections", validate({ body: createCollectionBodySchema }), (req, res, next) => {
     try {
       const { name, description, retentionDays } = req.body;
 
@@ -59,7 +61,7 @@ export function createDataStoreRoutes(dataStore: DataStore): Router {
   });
 
   /** PATCH /collections/:name — update collection description/retentionDays */
-  router.patch("/collections/:name", (req, res, next) => {
+  router.patch("/collections/:name", validate({ body: updateCollectionBodySchema, params: collectionNameParamsSchema }), (req, res, next) => {
     try {
       const { name } = req.params;
       const { description, retentionDays } = req.body;
@@ -97,7 +99,7 @@ export function createDataStoreRoutes(dataStore: DataStore): Router {
   // ─── Record Endpoints ──────────────────────────────────────────────────────
 
   /** POST /collections/:name/records — write a record to a collection */
-  router.post("/collections/:name/records", (req, res, next) => {
+  router.post("/collections/:name/records", validate({ body: writeRecordBodySchema, params: collectionNameParamsSchema }), (req, res, next) => {
     try {
       const { name } = req.params;
       const { payload, tags } = req.body;
@@ -215,7 +217,7 @@ export function createDataStoreRoutes(dataStore: DataStore): Router {
   });
 
   /** PUT /buckets/:bucket/:key — set a key-value pair */
-  router.put("/buckets/:bucket/:key", (req, res, next) => {
+  router.put("/buckets/:bucket/:key", validate({ body: setBucketValueBodySchema, params: bucketKeyParamsSchema }), (req, res, next) => {
     try {
       const { bucket, key } = req.params;
       const { value } = req.body;
@@ -259,7 +261,7 @@ export function createDataStoreRoutes(dataStore: DataStore): Router {
   });
 
   /** PUT /config — update config (validate values) */
-  router.put("/config", (req, res, next) => {
+  router.put("/config", validate({ body: dataStoreConfigBodySchema }), (req, res, next) => {
     try {
       const body = req.body;
 
@@ -294,7 +296,7 @@ export function createDataStoreRoutes(dataStore: DataStore): Router {
   });
 
   /** POST /enable — enable DataStore with provided config */
-  router.post("/enable", (req, res, next) => {
+  router.post("/enable", validate({ body: enableDataStoreBodySchema }), (req, res, next) => {
     try {
       const { maxStorageMb, maxRecordsPerCollection, maxCollections } = req.body;
 

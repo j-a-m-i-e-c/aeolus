@@ -66,6 +66,17 @@ export class WsServer {
     }
   }
 
+  /** Send close frames to all connected clients and close the WebSocket server */
+  closeAll(): void {
+    for (const client of this.clients) {
+      if (client.readyState === WebSocket.OPEN) {
+        client.close(1001, "Server shutting down");
+      }
+    }
+    this.clients.clear();
+    this.wss.close();
+  }
+
   get clientCount(): number {
     return this.clients.size;
   }

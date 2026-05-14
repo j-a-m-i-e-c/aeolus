@@ -1,8 +1,11 @@
 import type { Request, Response, NextFunction } from "express";
+import { ZodError } from "zod";
 import logger from "../../logger.js";
 import { config } from "../../config.js";
 
 export class AppError extends Error {
+  public details?: unknown;
+
   constructor(
     public statusCode: number,
     message: string,
@@ -31,19 +34,28 @@ export function errorHandler(
   res: Response,
   _next: NextFunction,
 ): void {
-  if (err instanceof AppError) {
-    logger.error({ statusCode: err.statusCode, message: err.message }, err.message);
-    res.status(err.statusCode).json({
-      error: err.message,
-      statusCode: err.statusCode,
+  // Log full error details server-side always
+  logger.error(err, "Request error");
+
+  // Handle Zod validation errors
+  if (err instanceof ZodError) {
+    res.status(400).json({
+      error: "Validation failed",
+      details: err.issues,
     });
     return;
   }
 
-  logger.error(err, "Unexpected error");
-  const statusCode = 500;
-  res.status(statusCode).json({
+  // Handle known operational errors
+  if (err instanceof AppError) {
+    const response: { error: string; details?: unknown } = { error: err.message };
+    if (err.details) response.details = err.details;
+    res.status(err.statusCode).json(response);
+    return;
+  }
+
+  // Unexpected errors — suppress details in production
+  res.status(500).json({
     error: config.nodeEnv === "production" ? "Internal server error" : err.message,
-    statusCode,
   });
 }

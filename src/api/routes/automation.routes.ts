@@ -16,6 +16,8 @@ import { buildSnippetCatalog } from "../../automations/snippet-catalog.js";
 import { isValidCron } from "../../automations/cron-utils.js";
 import type { ConnectorRegistry } from "../../connectors/connector-registry.js";
 import { BadRequestError, NotFoundError } from "../middleware/error-handler.js";
+import { validate } from "../middleware/validate.js";
+import { createAutomationBodySchema, updateAutomationBodySchema, automationIdParamsSchema, toggleAutomationBodySchema, automationStateBodySchema } from "../schemas/automation.schemas.js";
 import { persistDatabase } from "../../db/database.js";
 import { eventBus, AUTOMATION_STATE_CHANGE } from "../../core/event-bus.js";
 import type { AutomationStateStore } from "../../automations/automation-state-store.js";
@@ -198,7 +200,7 @@ export function createAutomationRoutes(
   });
 
   /** POST /api/automations — create a new UI rule (form or script) */
-  router.post("/", (req, res, next) => {
+  router.post("/", validate({ body: createAutomationBodySchema }), (req, res, next) => {
     try {
       const { name, triggerTopic, ruleType, conditionType, conditionValue, actionType, actionTarget, actionParams, scriptSource, uiSource, triggerType: rawTriggerType, cronExpression } = req.body;
 
@@ -324,7 +326,7 @@ export function createAutomationRoutes(
   });
 
   /** PUT /api/automations/:id — update an existing UI rule */
-  router.put("/:id", (req, res, next) => {
+  router.put("/:id", validate({ body: updateAutomationBodySchema, params: automationIdParamsSchema }), (req, res, next) => {
     try {
       const id = req.params.id as string;
 
@@ -516,7 +518,7 @@ export function createAutomationRoutes(
   });
 
   /** PATCH /api/automations/:id/toggle — enable/disable a UI rule */
-  router.patch("/:id/toggle", (req, res, next) => {
+  router.patch("/:id/toggle", validate({ body: toggleAutomationBodySchema, params: automationIdParamsSchema }), (req, res, next) => {
     try {
       const id = req.params.id as string;
       const { enabled } = req.body;
@@ -587,7 +589,7 @@ export function createAutomationRoutes(
   });
 
   /** PUT /api/automations/:id/state — upsert a key-value pair, persist + broadcast */
-  router.put("/:id/state", (req, res, next) => {
+  router.put("/:id/state", validate({ body: automationStateBodySchema, params: automationIdParamsSchema }), (req, res, next) => {
     try {
       const id = req.params.id as string;
       const { key, value } = req.body;
