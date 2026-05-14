@@ -388,6 +388,14 @@ export class ConnectorManager {
   }
 
   /**
+   * Return the underlying Connector instance for direct method access.
+   * Used by routes that need to call connector-specific methods (e.g. searchForNewLights).
+   */
+  getConnectorInstance(instanceId: string): Connector | undefined {
+    return this.instances.get(instanceId)?.connector;
+  }
+
+  /**
    * Return ConnectorInstanceInfo for a specific instance.
    */
   getStatus(instanceId: string): ConnectorInstanceInfo | undefined {

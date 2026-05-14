@@ -576,11 +576,40 @@ Philips Hue smart lighting via local bridge API.
 - Config schema: `bridgeIp` (text, optional), `apiKey` (password, optional) — both are populated by the setup wizard during pairing
 - Multi-step setup: bridge discovery + button-press pairing
 - Connectors with `requiresSetup` skip the config form and go straight to enable + wizard
-- Discovers lights and maps them to Aeolus Device format
-- Supports toggle, brightness, hue, and saturation actions
+- Discovers lights and maps them to Aeolus Device format with capability-aware state
+- Capability mapping: detects light type ("Extended color light", "Color temperature light", "Dimmable light", "On/Off plug-in unit", "On/Off light") and assigns appropriate capability sets
+- Supports toggle, brightness, color (hue/saturation), and color-temperature (mirek) actions
+- Validates actions against device capabilities — rejects unsupported actions with descriptive errors
+- Zigbee light search: POST to bridge starts a ~40s scan for new unpaired lights
+- Firmware update awareness: reads `swupdate2` from bridge config and surfaces update availability in health status
 - Contributed action handlers: `hue_scene` (activate a Hue scene by name), `hue_color_loop` (start/stop a color loop on a light)
 - Contributed condition factories: `brightness_above` (check if a light's brightness exceeds a threshold)
-- Frontend pane: `HueControlPane.tsx` — brightness slider, colour picker with 10 preset swatches, per-light toggle with optimistic UI
+- Frontend pane: `HueControlPane.tsx` — capability-driven controls (toggle, brightness slider, color temperature slider, colour picker), type badges, reachability indicators, search-for-new-lights button, firmware update banner
+
+##### Hue Connector Prerequisites
+
+**What the user needs before Aeolus can control Hue lights:**
+
+- A Philips Hue bridge powered on and connected to the same LAN as the device running Aeolus
+- New lights powered on and within Zigbee range of the bridge (Aeolus can pair them via the built-in search)
+- The bridge must be reachable from the Aeolus host (same subnet or routable)
+
+**What Aeolus handles:**
+
+- Auto-discovers the bridge on the local network via the Meethue discovery service
+- Pairs with the bridge via the link button (no Hue app needed)
+- Searches for and pairs new unpaired lights via Zigbee scan (no Hue app needed)
+- Controls all lights on the bridge: toggle, brightness, color (hue/saturation), color temperature (mirek)
+- Detects light types and exposes capability-appropriate controls and state fields
+- Polls for state changes every 60 seconds
+- Detects available firmware updates and surfaces them in the UI
+
+**What Aeolus does NOT handle:**
+
+- Factory-resetting a light that is already paired to a different bridge (requires the Hue app or a Zigbee touchlink reset device)
+- Firmware updates to lights or the bridge (use the Hue app — Aeolus only notifies)
+- Creating or editing Hue Entertainment zones (use the Hue app)
+- Hue Sync or streaming features
 
 #### Kasa Connector (`src/connectors/kasa/`)
 

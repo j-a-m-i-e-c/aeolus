@@ -14,7 +14,7 @@ export const metadata: ConnectorMetadata = {
   id: "hue",
   displayName: "Philips Hue",
   icon: "lightbulb",
-  description: "Philips Hue smart lighting via local bridge API",
+  description: "Philips Hue smart lighting via local bridge API. Lights must be paired to the bridge before Aeolus can control them — use the built-in Zigbee search feature to add new unpaired lights.",
   supportedDeviceTypes: ["light"],
   requiresSetup: true,
 };
@@ -149,6 +149,48 @@ export const snippets: SnippetDescriptor[] = [
 >
   All Lights Off
 </button>`,
+  },
+  {
+    id: "set-color",
+    name: "Set Color",
+    description: "Set a Hue light to a specific color (hue 0-65535, saturation 0-254)",
+    code: `function setHueColor(context) {
+  devices.action("hue-light-1", "color", { hue: 21845, saturation: 254 });
+  log.info("Set Hue light to green");
+  state.set("lastColor", "green");
+}`,
+  },
+  {
+    id: "set-color-temp",
+    name: "Set Color Temperature",
+    description: "Set a Hue light to a specific color temperature (mirek value, 153=cool to 500=warm)",
+    code: `function setHueColorTemp(context) {
+  devices.action("hue-light-1", "color-temp", { ct: 300 });
+  log.info("Set Hue light to neutral white (300 mirek)");
+  state.set("colorTemp", 300);
+}`,
+  },
+  {
+    id: "ui-color-temp-slider",
+    name: "Color Temperature Slider",
+    description: "Range input to control Hue light color temperature",
+    mode: "ui",
+    code: `<div className="space-y-1">
+  <label className="text-[10px] text-[#6B7785]">Color Temperature</label>
+  <input
+    type="range"
+    min={153}
+    max={500}
+    defaultValue={300}
+    onChange={(e) => props.deviceAction("hue-light-1", "color-temp", { ct: Number(e.target.value) })}
+    className="w-full"
+    style={{ background: "linear-gradient(to right, #A6C8FF, #FFD580, #FF9F43)" }}
+  />
+  <div className="flex justify-between text-[9px] text-[#6B7785]">
+    <span>Cool</span>
+    <span>Warm</span>
+  </div>
+</div>`,
   },
 ];
 

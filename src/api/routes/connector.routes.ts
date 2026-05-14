@@ -136,6 +136,52 @@ export function createConnectorRoutes(
     }
   });
 
+  /** POST /api/connectors/:id/search-lights — start Zigbee light search */
+  router.post("/:id/search-lights", async (req, res, next) => {
+    try {
+      const { id } = req.params;
+      const status = connectorManager.getStatus(id);
+      if (!status) {
+        throw new NotFoundError(`Connector instance '${id}' not found`);
+      }
+
+      const connector = connectorManager.getConnectorInstance(id);
+      if (!connector || !("searchForNewLights" in connector)) {
+        throw new BadRequestError(
+          `Connector '${id}' does not support light search`,
+        );
+      }
+
+      const result = await (connector as { searchForNewLights: () => Promise<unknown> }).searchForNewLights();
+      res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  /** GET /api/connectors/:id/search-lights/status — get search progress */
+  router.get("/:id/search-lights/status", (req, res, next) => {
+    try {
+      const { id } = req.params;
+      const status = connectorManager.getStatus(id);
+      if (!status) {
+        throw new NotFoundError(`Connector instance '${id}' not found`);
+      }
+
+      const connector = connectorManager.getConnectorInstance(id);
+      if (!connector || !("getSearchStatus" in connector)) {
+        throw new BadRequestError(
+          `Connector '${id}' does not support light search`,
+        );
+      }
+
+      const result = (connector as { getSearchStatus: () => unknown }).getSearchStatus();
+      res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  });
+
   return router;
 }
 
