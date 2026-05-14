@@ -246,6 +246,39 @@ export class HueConnector implements Connector {
         body = { ct };
         break;
       }
+      case "rename": {
+        const newName = String(action.params.name ?? "").trim();
+        if (!newName) {
+          throw new Error("Rename requires a non-empty 'name' parameter");
+        }
+        const renameRes = await fetch(`${this.baseUrl}/lights/${lightIndex}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: newName }),
+        });
+        if (!renameRes.ok) {
+          throw new Error(`Hue API returned ${renameRes.status} on rename`);
+        }
+        this.lastSuccessTimestamp = Date.now();
+        this.healthStatus = { status: "connected", lastSeen: this.lastSuccessTimestamp };
+        logger.info({ deviceId: action.deviceId, newName }, "Hue light renamed");
+        return; // Early return — rename doesn't use /state endpoint
+      }
+      case "delete": {
+        const deleteRes = await fetch(`${this.baseUrl}/lights/${lightIndex}`, {
+          method: "DELETE",
+        });
+        if (!deleteRes.ok) {
+          throw new Error(`Hue API returned ${deleteRes.status} on delete`);
+        }
+        this.deviceMap.delete(action.deviceId);
+        this.capabilityMap.delete(action.deviceId);
+        this.deviceStateMap.delete(action.deviceId);
+        this.lastSuccessTimestamp = Date.now();
+        this.healthStatus = { status: "connected", lastSeen: this.lastSuccessTimestamp };
+        logger.info({ deviceId: action.deviceId }, "Hue light deleted from bridge");
+        return; // Early return — delete doesn't use /state endpoint
+      }
       default:
         throw new Error(`Unsupported action type: ${action.type}`);
     }

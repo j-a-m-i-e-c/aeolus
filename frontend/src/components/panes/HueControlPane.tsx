@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Lightbulb, Sun, Palette } from "lucide-react";
+import { Lightbulb, Sun, Palette, Pencil, Trash2, Check, X } from "lucide-react";
 import type { PaneConfig } from "../../types/dashboard";
 import { useDeviceStore } from "../../store/device-store";
 import { sendAction, fetchEnabledConnectors } from "../../lib/api-client";
@@ -95,6 +95,34 @@ export function HueControlPane({ config }: Props) {
     } catch {}
   };
 
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const handleRename = async (deviceId: string) => {
+    if (!renameValue.trim()) return;
+    try {
+      await sendAction(deviceId, "rename", { name: renameValue.trim() });
+      // Trigger re-discovery by retrying the connector
+      if (connectorId) {
+        await fetch(`${import.meta.env.VITE_API_URL || `http://${window.location.hostname}:3001`}/api/connectors/${connectorId}/retry`, { method: "POST" });
+      }
+    } catch {}
+    setRenamingId(null);
+    setRenameValue("");
+  };
+
+  const handleDelete = async (deviceId: string) => {
+    try {
+      await sendAction(deviceId, "delete", {});
+      // Trigger re-discovery to remove from device list
+      if (connectorId) {
+        await fetch(`${import.meta.env.VITE_API_URL || `http://${window.location.hostname}:3001`}/api/connectors/${connectorId}/retry`, { method: "POST" });
+      }
+    } catch {}
+    setDeletingId(null);
+  };
+
   if (hueLights.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-12 text-[#6B7785]">
@@ -142,8 +170,23 @@ export function HueControlPane({ config }: Props) {
                 <div className="flex items-center gap-2 min-w-0">
                   <Lightbulb size={16} className={isOn ? "text-[#F59E0B]" : "text-[#6B7785]"} />
                   <div className="min-w-0">
-                    <span className="text-sm font-medium text-[#E6EDF3] block truncate">{light.name}</span>
-                    {(modelId || manufacturer) && (
+                    {renamingId === light.id ? (
+                      <div className="flex items-center gap-1">
+                        <input
+                          type="text"
+                          value={renameValue}
+                          onChange={(e) => setRenameValue(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === "Enter") handleRename(light.id); if (e.key === "Escape") setRenamingId(null); }}
+                          autoFocus
+                          className="text-sm bg-[#0D1117] border border-[#30363D] rounded px-1.5 py-0.5 text-[#E6EDF3] w-28 focus:outline-none focus:border-primary"
+                        />
+                        <button onClick={() => handleRename(light.id)} className="text-[#22C55E] hover:text-[#22C55E]/80"><Check size={12} /></button>
+                        <button onClick={() => setRenamingId(null)} className="text-[#6B7785] hover:text-[#9AA6B2]"><X size={12} /></button>
+                      </div>
+                    ) : (
+                      <span className="text-sm font-medium text-[#E6EDF3] block truncate">{light.name}</span>
+                    )}
+                    {(modelId || manufacturer) && renamingId !== light.id && (
                       <span className="text-[10px] text-[#6B7785] block truncate">
                         {manufacturer}{manufacturer && modelId ? " · " : ""}{modelId}
                       </span>
@@ -151,6 +194,24 @@ export function HueControlPane({ config }: Props) {
                   </div>
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0">
+                  {renamingId !== light.id && (
+                    <>
+                      <button
+                        onClick={() => { setRenamingId(light.id); setRenameValue(light.name); }}
+                        className="text-[#6B7785] hover:text-[#9AA6B2] p-0.5"
+                        title="Rename"
+                      >
+                        <Pencil size={11} />
+                      </button>
+                      <button
+                        onClick={() => setDeletingId(light.id)}
+                        className="text-[#6B7785] hover:text-[#EF4444] p-0.5"
+                        title="Remove from bridge"
+                      >
+                        <Trash2 size={11} />
+                      </button>
+                    </>
+                  )}
                   <span className={`text-[10px] px-1.5 py-0.5 rounded ${badge.color}`}>
                     {badge.label}
                   </span>
@@ -165,6 +226,18 @@ export function HueControlPane({ config }: Props) {
                   </span>
                 </div>
               </div>
+
+              {/* Delete confirmation */}
+              {deletingId === light.id && (
+                <div className="bg-[#EF4444]/5 border border-[#EF4444]/20 rounded-lg p-2.5 space-y-2">
+                  <p className="text-[11px] text-[#E6EDF3]">Remove <strong>{light.name}</strong> from the bridge?</p>
+                  <p className="text-[10px] text-[#6B7785]">The light will need to be re-paired via Zigbee search.</p>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => handleDelete(light.id)} className="text-[10px] px-2 py-1 rounded bg-[#EF4444] text-white hover:bg-[#EF4444]/90">Remove</button>
+                    <button onClick={() => setDeletingId(null)} className="text-[10px] px-2 py-1 rounded border border-[#30363D] text-[#9AA6B2] hover:text-[#E6EDF3]">Cancel</button>
+                  </div>
+                </div>
+              )}
 
               {/* Toggle — always shown */}
               <button
