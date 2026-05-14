@@ -14,7 +14,7 @@ export const metadata: ConnectorMetadata = {
   id: "hue",
   displayName: "Philips Hue",
   icon: "lightbulb",
-  description: "Philips Hue smart lighting via local bridge API. Lights must be paired to the bridge before Aeolus can control them — use the built-in Zigbee search feature to add new unpaired lights.",
+  description: "Philips Hue smart lighting via local bridge API. Pair your bridge with one button press, then add new lights directly from Aeolus using Zigbee search — no Hue app needed.",
   supportedDeviceTypes: ["light"],
   requiresSetup: true,
 };
