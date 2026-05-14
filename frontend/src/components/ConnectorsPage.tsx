@@ -734,17 +734,18 @@ export function ConnectorsPage() {
             };
 
             return (
-              <div key={connType.metadata.id} className="bg-surface border border-[#2A3441] rounded-xl p-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 rounded-lg bg-elevated">
-                      <DynamicIcon name={connType.metadata.icon} size={18} className="text-[#9AA6B2]" />
+              <div key={connType.metadata.id} className="bg-surface border border-[#2A3441] rounded-xl p-5 space-y-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex items-start gap-3">
+                    <div className="p-2.5 rounded-lg bg-elevated shrink-0">
+                      <DynamicIcon name={connType.metadata.icon} size={20} className="text-[#9AA6B2]" />
                     </div>
-                    <div>
-                      <div className="text-sm font-medium text-[#E6EDF3]">{connType.metadata.displayName}</div>
-                      <div className="text-[10px] text-[#6B7785]">{connType.metadata.description}</div>
+                    <div className="space-y-1">
+                      <div className="text-sm font-semibold text-[#E6EDF3]">{connType.metadata.displayName}</div>
+                      <div className="text-xs text-[#6B7785] leading-relaxed">{connType.metadata.description}</div>
                     </div>
                   </div>
+                  <div className="shrink-0">
                   {isIncompleteSetup ? (
                     <button
                       onClick={handleResumeSetup}
@@ -764,11 +765,12 @@ export function ConnectorsPage() {
                       {isConfiguring ? "Cancel" : "Enable"}
                     </button>
                   )}
+                  </div>
                 </div>
 
-                <div className="flex flex-wrap gap-1.5">
+                <div className="flex flex-wrap gap-2">
                   {connType.metadata.supportedDeviceTypes.map((dt) => (
-                    <span key={dt} className="text-[10px] px-1.5 py-0.5 rounded bg-elevated text-[#6B7785]">{dt}</span>
+                    <span key={dt} className="text-[10px] px-2 py-1 rounded-md bg-elevated text-[#6B7785] capitalize">{dt}</span>
                   ))}
                 </div>
 
