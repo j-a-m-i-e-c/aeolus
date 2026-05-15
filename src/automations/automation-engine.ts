@@ -48,13 +48,13 @@ export class AutomationEngine {
     // If this is a cron-triggered rule, start a timer
     if (rule.triggerType === "cron" && rule.cronExpression) {
       const started = this.cronTimerManager.start(rule.id, rule.cronExpression, () => {
-        const ctx: EventContext = {
+        const context: EventContext = {
           topic: `cron/${rule.name || rule.id}`,
           deviceId: rule.id,
           state: { ruleId: rule.id, cronExpression: rule.cronExpression, firedAt: Date.now() },
           timestamp: Date.now(),
         };
-        this.executeDirectRule(rule, ctx);
+        this.executeDirectRule(rule, context);
       });
       if (started) {
         logger.debug({ ruleId: rule.id, cronExpression: rule.cronExpression }, "Cron timer started for rule");
@@ -129,7 +129,7 @@ export class AutomationEngine {
 
   /** Evaluate all matching rules for an event */
   private evaluate(event: NormalizedEvent): void {
-    const ctx: EventContext = {
+    const context: EventContext = {
       topic: event.topic,
       deviceId: event.deviceId,
       state: event.state,
@@ -142,17 +142,17 @@ export class AutomationEngine {
       if (!this.topicMatches(rule.topic, event.topic)) continue;
 
       try {
-        if (rule.condition && !rule.condition(ctx)) continue;
+        if (rule.condition && !rule.condition(context)) continue;
 
         // Check if this is a script rule (has compiled_js attached)
         const compiledJs = (rule as unknown as Record<string, unknown>).compiled_js as string | undefined;
 
         if (compiledJs && this.sandbox) {
           // Script rule — dispatch through Sandbox
-          this.executeScriptRule(rule, compiledJs, ctx);
+          this.executeScriptRule(rule, compiledJs, context);
         } else {
           // File-based DSL rule or form rule — execute action directly
-          this.executeDirectRule(rule, ctx);
+          this.executeDirectRule(rule, context);
         }
       } catch (err) {
         logger.error(
@@ -164,31 +164,31 @@ export class AutomationEngine {
   }
 
   /** Execute a script rule through the Sandbox with execution logging. */
-  private executeScriptRule(rule: Rule, compiledJs: string, ctx: EventContext): void {
+  private executeScriptRule(rule: Rule, compiledJs: string, context: EventContext): void {
     const start = Date.now();
     const sandboxContext: SandboxContext = {
-      topic: ctx.topic,
-      deviceId: ctx.deviceId,
-      state: ctx.state,
-      timestamp: ctx.timestamp,
+      topic: context.topic,
+      deviceId: context.deviceId,
+      state: context.state,
+      timestamp: context.timestamp,
     };
 
     const promise = this.sandbox!.execute(compiledJs, sandboxContext, rule.id);
     promise
       .then(() => {
         const duration = Date.now() - start;
-        this.recordExecution(rule, ctx, duration, true);
+        this.recordExecution(rule, context, duration, true);
         this.eventBus.emit(AUTOMATION_FIRED, {
           ruleId: rule.id,
           ruleName: rule.name || "Unnamed Rule",
-          topic: ctx.topic,
-          deviceId: ctx.deviceId,
+          topic: context.topic,
+          deviceId: context.deviceId,
           timestamp: Date.now(),
         });
       })
       .catch((err) => {
         const duration = Date.now() - start;
-        this.recordExecution(rule, ctx, duration, false, (err as Error).message);
+        this.recordExecution(rule, context, duration, false, (err as Error).message);
         logger.error(
           { ruleId: rule.id, error: (err as Error).message },
           "Script rule execution failed",
@@ -197,17 +197,17 @@ export class AutomationEngine {
   }
 
   /** Execute a file-based DSL rule or form rule directly. */
-  private executeDirectRule(rule: Rule, ctx: EventContext): void {
+  private executeDirectRule(rule: Rule, context: EventContext): void {
     const start = Date.now();
 
-    const result = rule.action(ctx);
+    const result = rule.action(context);
 
     // Emit automation fired event for the event log
     this.eventBus.emit(AUTOMATION_FIRED, {
       ruleId: rule.id,
       ruleName: rule.name || "Unnamed Rule",
-      topic: ctx.topic,
-      deviceId: ctx.deviceId,
+      topic: context.topic,
+      deviceId: context.deviceId,
       timestamp: Date.now(),
     });
 
@@ -215,11 +215,11 @@ export class AutomationEngine {
       result
         .then(() => {
           const duration = Date.now() - start;
-          this.recordExecution(rule, ctx, duration, true);
+          this.recordExecution(rule, context, duration, true);
         })
         .catch((err) => {
           const duration = Date.now() - start;
-          this.recordExecution(rule, ctx, duration, false, (err as Error).message);
+          this.recordExecution(rule, context, duration, false, (err as Error).message);
           logger.error(
             { ruleId: rule.id, error: (err as Error).message },
             "Async rule action failed",
@@ -227,7 +227,7 @@ export class AutomationEngine {
         });
     } else {
       const duration = Date.now() - start;
-      this.recordExecution(rule, ctx, duration, true);
+      this.recordExecution(rule, context, duration, true);
     }
   }
 

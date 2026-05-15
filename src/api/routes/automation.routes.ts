@@ -555,7 +555,7 @@ export function createAutomationRoutes(
       }
 
       // Build a synthetic context for manual firing
-      const ctx = {
+      const context = {
         topic: rule.topic,
         deviceId: "manual-fire",
         state: req.body ?? {},
@@ -569,9 +569,9 @@ export function createAutomationRoutes(
         // Script rule — need to get the sandbox from the engine
         // For now, just call the rule's action directly which logs
         // The automation engine will handle sandbox dispatch
-        await rule.action(ctx);
+        await rule.action(context);
       } else {
-        await rule.action(ctx);
+        await rule.action(context);
       }
 
       logger.info({ ruleId: id, ruleName: rule.name }, "Automation rule manually fired");
@@ -659,7 +659,7 @@ function registerUiRule(
   if (stored.rule_type === "script" && stored.compiled_js) {
     // Script rule — action runs compiled JS through the Sandbox
     const compiledJs = stored.compiled_js;
-    const action = async (ctx: EventContext) => {
+    const action = async (context: EventContext) => {
       // Sandbox execution is handled by AutomationEngine in task 8.1
       // For now, store compiled_js on the rule so the engine can detect it
       logger.info({ ruleId: stored.id, name: stored.name }, "Script rule triggered (sandbox dispatch pending engine wiring)");
@@ -680,7 +680,7 @@ function registerUiRule(
   } else {
     // Form rule — dispatch through ActionExecutor
     const params = JSON.parse(stored.action_params);
-    const action = async (ctx: EventContext) => {
+    const action = async (context: EventContext) => {
       const descriptor: ActionDescriptor = {
         type: stored.action_type,
         target: stored.action_target,

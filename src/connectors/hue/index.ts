@@ -235,6 +235,6 @@ export const conditions: Record<string, ConditionFactory> = {
   /** Check if a Hue light's brightness exceeds a threshold. */
   brightness_above: (conditionValue: string) => {
     const threshold = Number(conditionValue);
-    return (ctx) => Number(ctx.state.brightness) > threshold;
+    return (context) => Number(context.state.brightness) > threshold;
   },
 };

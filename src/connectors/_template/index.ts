@@ -88,7 +88,7 @@ export const snippets: SnippetDescriptor[] = [
   //   id: "toggle-device",
   //   name: "Toggle My Device",
   //   description: "Toggle a device managed by this connector",
-  //   code: `function toggleMyDevice(ctx) {\n  devices.action("my-connector-device-1", "toggle");\n  log.info("Toggled device");\n}`,
+  //   code: `function toggleMyDevice(context) {\n  devices.action("my-connector-device-1", "toggle");\n  log.info("Toggled device");\n}`,
   // },
   //
   // ← Add UI snippets for custom component controls, e.g.:

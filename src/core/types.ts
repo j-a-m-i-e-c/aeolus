@@ -33,8 +33,8 @@ export interface NormalizedEvent {
 export interface Rule {
   id: string;
   topic: string;
-  condition?: (ctx: EventContext) => boolean;
-  action: (ctx: EventContext) => void | Promise<void>;
+  condition?: (context: EventContext) => boolean;
+  action: (context: EventContext) => void | Promise<void>;
   name?: string;
   triggerType?: "mqtt" | "cron" | "none";
   cronExpression?: string;

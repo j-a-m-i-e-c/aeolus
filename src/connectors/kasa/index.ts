@@ -182,6 +182,6 @@ export const conditions: Record<string, ConditionFactory> = {
   /** Check if a Kasa plug's power draw exceeds a threshold. */
   power_above: (conditionValue: string) => {
     const threshold = Number(conditionValue);
-    return (ctx) => Number(ctx.state.power) > threshold;
+    return (context) => Number(context.state.power) > threshold;
   },
 };

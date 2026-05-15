@@ -4,7 +4,7 @@ import type { EventContext } from "../core/types.js";
 import logger from "../logger.js";
 
 /** A factory that builds a condition predicate from a condition_value string. */
-export type ConditionFactory = (conditionValue: string) => (ctx: EventContext) => boolean;
+export type ConditionFactory = (conditionValue: string) => (context: EventContext) => boolean;
 
 /**
  * Registry for condition factories, keyed by condition type string.
@@ -27,7 +27,7 @@ export class ConditionRegistry {
   }
 
   /** Build a condition predicate. Returns undefined if type/value are null or type is unregistered. */
-  buildCondition(type: string | null, value: string | null): ((ctx: EventContext) => boolean) | undefined {
+  buildCondition(type: string | null, value: string | null): ((context: EventContext) => boolean) | undefined {
     if (!type || !value) return undefined;
 
     const factory = this.factories.get(type);
