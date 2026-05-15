@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import * as icons from "lucide-react";
 import { RefreshCw, Power, PowerOff, RotateCcw, Loader2, Plus, Trash2 } from "lucide-react";
 
-const API_URL = (import.meta as any).env?.VITE_API_URL || `http://${window.location.hostname}:3001`;
+const API_URL = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:3001`;
 
 // ---------------------------------------------------------------------------
 // Types (matching backend API response shapes)

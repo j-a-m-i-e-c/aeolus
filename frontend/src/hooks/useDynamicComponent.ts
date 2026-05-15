@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, type ComponentType } from "react";
 
 const API_URL =
-  (import.meta as any).env?.VITE_API_URL ||
+  import.meta.env.VITE_API_URL ||
   `http://${window.location.hostname}:3001`;
 
 /**
@@ -79,7 +79,7 @@ export function rewriteImports(source: string): string {
 }
 
 export interface DynamicComponentState {
-  Component: ComponentType<any> | null;
+  Component: ComponentType<Record<string, unknown>> | null;
   loading: boolean;
   error: string | null;
 }
@@ -100,7 +100,7 @@ export function useDynamicComponent(
   hasUiSource: boolean,
   moduleUrl?: string,
 ): DynamicComponentState {
-  const [Component, setComponent] = useState<ComponentType<any> | null>(null);
+  const [Component, setComponent] = useState<ComponentType<Record<string, unknown>> | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const versionRef = useRef(0);

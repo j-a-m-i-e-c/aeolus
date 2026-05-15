@@ -6,7 +6,7 @@ import { useDeviceStore } from "../store/device-store";
 import { fetchHealth } from "../lib/api-client";
 import type { HealthStatus } from "../store/device-store";
 
-const API_URL = (import.meta as any).env?.VITE_API_URL || `http://${window.location.hostname}:3001`;
+const API_URL = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:3001`;
 
 interface SystemInfo {
   hostname: string;

@@ -4,7 +4,7 @@ import { useRef, useEffect, useCallback } from "react";
 import Editor, { OnMount, OnChange } from "@monaco-editor/react";
 import type { editor } from "monaco-editor";
 
-const API_URL = (import.meta as any).env?.VITE_API_URL || `http://${window.location.hostname}:3001`;
+const API_URL = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:3001`;
 
 export interface UiEditorProps {
   initialValue?: string;

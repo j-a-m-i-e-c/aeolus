@@ -5,7 +5,7 @@ import { Settings, AlertTriangle, Check } from "lucide-react";
 import { useDataStoreStore } from "../../store/data-store-store";
 
 const API_URL =
-  (import.meta as any).env?.VITE_API_URL ||
+  import.meta.env.VITE_API_URL ||
   `http://${window.location.hostname}:3001`;
 
 export function SettingsPanel() {

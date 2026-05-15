@@ -63,7 +63,7 @@ export interface QueryOptions {
 // ---- API helpers ----
 
 const API_URL =
-  (import.meta as any).env?.VITE_API_URL ||
+  import.meta.env.VITE_API_URL ||
   `http://${window.location.hostname}:3001`;
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {

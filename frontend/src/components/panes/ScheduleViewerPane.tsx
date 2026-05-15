@@ -5,7 +5,7 @@ import { CalendarClock, Search, Play, Loader2 } from "lucide-react";
 import type { PaneConfig } from "../../types/dashboard";
 import { describeCron } from "../../lib/cron-utils";
 
-const API_URL = (import.meta as any).env?.VITE_API_URL || `http://${window.location.hostname}:3001`;
+const API_URL = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:3001`;
 
 interface Automation {
   id: string;
@@ -60,8 +60,8 @@ export function ScheduleViewerPane({ config }: Props) {
         }),
       );
       setLastFiredMap(historyMap);
-    } catch (err: any) {
-      setError(err.message || "Failed to load schedules");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load schedules");
     } finally {
       setLoading(false);
     }
