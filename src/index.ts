@@ -114,9 +114,9 @@ async function main(): Promise<void> {
 
   // Condition Registry — register built-in condition factories
   const conditionRegistry = new ConditionRegistry();
-  conditionRegistry.registerCondition("value_above", (v) => (ctx) => Number((ctx.state as any).value) > Number(v));
-  conditionRegistry.registerCondition("value_below", (v) => (ctx) => Number((ctx.state as any).value) < Number(v));
-  conditionRegistry.registerCondition("equals", (v) => (ctx) => String((ctx.state as any).value) === v);
+  conditionRegistry.registerCondition("value_above", (v) => (ctx) => Number((ctx.state as Record<string, unknown>).value) > Number(v));
+  conditionRegistry.registerCondition("value_below", (v) => (ctx) => Number((ctx.state as Record<string, unknown>).value) < Number(v));
+  conditionRegistry.registerCondition("equals", (v) => (ctx) => String((ctx.state as Record<string, unknown>).value) === v);
 
   // Wire registries into ConnectorManager so contributed handlers are registered on restore
   connectorManager.setRegistries(actionExecutor, conditionRegistry);
