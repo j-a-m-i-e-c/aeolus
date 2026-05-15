@@ -10,10 +10,10 @@ services:
       - mosquitto_data:/mosquitto/data
       - mosquitto_log:/mosquitto/log
     healthcheck:
-      test: ["CMD-SHELL", "mosquitto_sub -t '$SYS/#' -C 1 -W 3 || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      test: ["CMD-SHELL", "mosquitto_sub -t '$$SYS/#' -C 1 -W 10 || exit 1"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
     logging:
       driver: json-file
       options:
