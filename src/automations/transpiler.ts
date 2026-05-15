@@ -1,6 +1,6 @@
-// src/automations/transpiler.ts — TypeScript → JavaScript transpilation with import rejection
+// src/automations/transpiler.ts — TypeScript/TSX → JavaScript transpilation via esbuild
 
-import ts from "typescript";
+import { transformSync, type Message } from "esbuild";
 
 /** Structured error from transpilation with source location. */
 export interface TranspileError {
@@ -25,6 +25,15 @@ export type TranspileResult =
 const IMPORT_REQUIRE_RE =
   /\b(?:import\s+[\s\S]*?\s+from\s|import\s*\(|import\s+['"]|require\s*\(|export\s+[\s\S]*?\s+from\s)/;
 
+/** Map esbuild error messages to our TranspileError interface. */
+function mapEsbuildErrors(messages: Message[]): TranspileError[] {
+  return messages.map((msg) => ({
+    line: msg.location?.line ?? 1,
+    column: msg.location?.column ?? 0,
+    message: msg.text,
+  }));
+}
+
 /**
  * Transpile TSX source to ES module JavaScript for custom UI components.
  * Unlike transpile(), this allows import statements (for React/JSX runtime)
@@ -38,47 +47,29 @@ export function transpileUi(source: string): TranspileResult {
     };
   }
 
-  const result = ts.transpileModule(source, {
-    compilerOptions: {
-      target: ts.ScriptTarget.ES2022,
-      module: ts.ModuleKind.ESNext,
-      jsx: ts.JsxEmit.ReactJSX,
+  try {
+    const result = transformSync(source, {
+      loader: "tsx",
+      target: "es2022",
+      format: "esm",
+      jsx: "automatic",
       jsxImportSource: "react",
-      strict: false,
-      removeComments: false,
-      sourceMap: false,
-    },
-    reportDiagnostics: true,
-  });
-
-  const diagnostics = result.diagnostics ?? [];
-
-  if (diagnostics.length > 0) {
-    const errors: TranspileError[] = diagnostics.map((d) => {
-      let line = 1;
-      let column = 0;
-      if (d.file && d.start !== undefined) {
-        const pos = d.file.getLineAndCharacterOfPosition(d.start);
-        line = pos.line + 1;
-        column = pos.character;
-      }
-      return {
-        line,
-        column,
-        message: ts.flattenDiagnosticMessageText(d.messageText, "\n"),
-      };
+      sourcemap: false,
     });
-
-    return { success: false, errors };
+    return { success: true, js: result.code };
+  } catch (err: unknown) {
+    const esbuildErr = err as { errors?: Message[] };
+    if (esbuildErr.errors?.length) {
+      return { success: false, errors: mapEsbuildErrors(esbuildErr.errors) };
+    }
+    return { success: false, errors: [{ line: 1, column: 0, message: String(err) }] };
   }
-
-  return { success: true, js: result.outputText };
 }
 
 /**
  * Transpile TypeScript source to ES2022 JavaScript.
  *
- * - Strips type annotations via `ts.transpileModule()` (no full program creation)
+ * - Strips type annotations via esbuild (fast, native)
  * - Rejects empty source strings
  * - Rejects source containing `import`/`require` statements before transpilation
  * - Returns structured errors with line/column on syntax failures
@@ -105,37 +96,19 @@ export function transpile(source: string): TranspileResult {
     };
   }
 
-  const result = ts.transpileModule(source, {
-    compilerOptions: {
-      target: ts.ScriptTarget.ES2022,
-      module: ts.ModuleKind.ESNext,
-      strict: false,
-      removeComments: false,
-      sourceMap: false,
-    },
-    reportDiagnostics: true,
-  });
-
-  const diagnostics = result.diagnostics ?? [];
-
-  if (diagnostics.length > 0) {
-    const errors: TranspileError[] = diagnostics.map((d) => {
-      let line = 1;
-      let column = 0;
-      if (d.file && d.start !== undefined) {
-        const pos = d.file.getLineAndCharacterOfPosition(d.start);
-        line = pos.line + 1;
-        column = pos.character;
-      }
-      return {
-        line,
-        column,
-        message: ts.flattenDiagnosticMessageText(d.messageText, "\n"),
-      };
+  try {
+    const result = transformSync(source, {
+      loader: "ts",
+      target: "es2022",
+      format: "esm",
+      sourcemap: false,
     });
-
-    return { success: false, errors };
+    return { success: true, js: result.code };
+  } catch (err: unknown) {
+    const esbuildErr = err as { errors?: Message[] };
+    if (esbuildErr.errors?.length) {
+      return { success: false, errors: mapEsbuildErrors(esbuildErr.errors) };
+    }
+    return { success: false, errors: [{ line: 1, column: 0, message: String(err) }] };
   }
-
-  return { success: true, js: result.outputText };
 }
