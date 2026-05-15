@@ -157,7 +157,7 @@ export function TabLayout({ tabId }: TabLayoutProps) {
               {/* Header bar */}
               <div className="pane-drag-handle flex items-center justify-between px-3 py-2 border-b border-[#2A3441] cursor-grab bg-elevated/50">
                 <span className="text-xs font-medium text-[#9AA6B2] truncate select-none">
-                  {entry?.displayName ?? pane.paneType}
+                  {(pane.config.ruleName as string) || entry?.displayName || pane.paneType}
                 </span>
                 <div className="flex items-center gap-1 shrink-0">
                   <button

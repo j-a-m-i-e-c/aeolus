@@ -294,9 +294,9 @@ export function AutomationPane({ config, paneId }: Props) {
         }
         return;
       }
-      // Success — store ruleId and transition
+      // Success — store ruleId and name, then transition
       if (paneId) {
-        updatePaneConfig(paneId, { ...config, ruleId: data.id });
+        updatePaneConfig(paneId, { ...config, ruleId: data.id, ruleName: name.trim() });
       }
     } catch {
       // Network error — could add toast here
@@ -333,12 +333,16 @@ export function AutomationPane({ config, paneId }: Props) {
       // Success — refresh and go back to status
       setMode("status");
       fetchRule();
+      // Update pane header with new name
+      if (paneId) {
+        updatePaneConfig(paneId, { ...config, ruleName: name.trim() });
+      }
     } catch {
       // Network error
     } finally {
       setSaving(false);
     }
-  }, [name, triggerTopic, triggerType, cronExpression, scriptSource, uiSource, saving, ruleId, fetchRule]);
+  }, [name, triggerTopic, triggerType, cronExpression, scriptSource, uiSource, saving, ruleId, fetchRule, paneId, config, updatePaneConfig]);
 
   // ── Toggle handler ──
   const handleToggle = useCallback(async () => {
