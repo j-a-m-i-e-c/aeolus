@@ -56,6 +56,7 @@ export class MqttService {
     return new Promise<void>((resolve, reject) => {
       this.client = mqtt.connect(this.config.brokerUrl, {
         reconnectPeriod: 0, // We handle reconnection ourselves
+        protocolVersion: 5, // MQTT 5.0 — enables message expiry, user properties, etc.
       });
 
       const onConnect = () => {
@@ -238,12 +239,16 @@ export class MqttService {
     return this.connectionState;
   }
 
-  /** Publish a message to the MQTT broker */
-  publish(topic: string, payload: string): void {
+  /** Publish a message to the MQTT broker. Commands expire after 30 seconds by default. */
+  publish(topic: string, payload: string, options?: { messageExpiryInterval?: number }): void {
     if (!this.client || this.connectionState !== "connected") {
       throw new Error("MQTT client not connected");
     }
-    this.client.publish(topic, payload, (err) => {
+    this.client.publish(topic, payload, {
+      properties: {
+        messageExpiryInterval: options?.messageExpiryInterval ?? 30,
+      },
+    }, (err) => {
       if (err) {
         logger.error({ topic, error: err.message }, "Failed to publish MQTT message");
       } else {

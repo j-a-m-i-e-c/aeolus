@@ -24,20 +24,6 @@ When designing or modifying any frontend UI, always reference `docs/BRANDING.md`
 
 Use Tailwind theme tokens (background, surface, primary, accent) rather than raw hex values. All UI should feel calm, intelligent, precise, and data-first.
 
-## Reference: lol-main Repository
-
-The `lol-main` workspace folder contains a production Next.js + Express.js app (HexTekkers) that serves as an architectural reference. When building Aeolus, refer to lol-main for patterns around:
-
-- Next.js App Router structure (`lol-main/packages/frontend/src/app/`)
-- Zustand state management (`lol-main/packages/frontend/src/store/`)
-- shadcn/ui component usage (`lol-main/packages/frontend/src/components/ui/`)
-- Express.js API structure (`lol-main/packages/backend/src/routes/`)
-- Drizzle ORM schema patterns (`lol-main/packages/backend/src/db/schema.ts`)
-- AWS deployment workflows (`lol-main/.github/workflows/`)
-- Comprehensive documentation approach (`lol-main/docs/COMPREHENSIVE_DOCUMENTATION.md`)
-
-Do not copy code directly — use it as a guide for structure and patterns, adapting to Aeolus's own branding and requirements.
-
 ## Key Reference Documents
 
 Always consult these documents when relevant:
