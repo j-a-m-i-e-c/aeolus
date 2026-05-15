@@ -515,10 +515,7 @@ export function AutomationPane({ config, paneId }: Props) {
         {/* Header */}
         <div className="flex items-center justify-between">
           <div className="flex-1 min-w-0">
-            <div className="text-sm font-semibold text-[#E6EDF3] truncate">
-              {rule.name}
-            </div>
-            <div className="mt-1 inline-block px-2 py-0.5 rounded text-[10px] font-mono text-[#9AA6B2] bg-[#0B0F14] border border-[#2A3441]">
+            <div className="inline-block px-2 py-0.5 rounded text-[10px] font-mono text-[#9AA6B2] bg-[#0B0F14] border border-[#2A3441]">
               {rule.topic}
             </div>
           </div>
