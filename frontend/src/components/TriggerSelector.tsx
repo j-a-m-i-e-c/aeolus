@@ -283,7 +283,10 @@ export function TriggerSelector({
 
   return (
     <div className="space-y-2">
-      {/* Segmented control */}
+      {/* Trigger type label + segmented control */}
+      <label className="text-[10px] text-[#6B7785] uppercase tracking-wider font-medium block">
+        Trigger
+      </label>
       <div className="flex items-center gap-1 p-1 rounded-lg bg-[#0B0F14] border border-[#2A3441]">
         {TRIGGER_OPTIONS.map((opt) => (
           <button
