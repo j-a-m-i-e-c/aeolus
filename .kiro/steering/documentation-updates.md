@@ -5,9 +5,11 @@ description: Rules for keeping COMPREHENSIVE_DOCUMENTATION.md up to date when ma
 
 # Documentation Update Rules
 
-## COMPREHENSIVE_DOCUMENTATION.md
+## CRITICAL: Keep COMPREHENSIVE_DOCUMENTATION.md in Sync
 
-`docs/COMPREHENSIVE_DOCUMENTATION.md` is the single source of truth for the entire Aeolus platform. It must stay in sync with the codebase at all times.
+`docs/COMPREHENSIVE_DOCUMENTATION.md` is the **single source of truth** for the entire Aeolus platform. It MUST stay in sync with the codebase at all times.
+
+**After EVERY significant change, update the comprehensive docs.** This is not optional — it's part of the definition of done for any feature or fix that changes behavior, adds endpoints, modifies the schema, or introduces new components.
 
 ### When to update
 
