@@ -159,7 +159,6 @@ async function main(): Promise<void> {
   // 9. Express app
   const app = express();
   app.use(corsMiddleware);
-  app.use(apiRateLimiter);
   app.use(express.json({ limit: "1mb" }));
   app.use(requestLogger);
 
