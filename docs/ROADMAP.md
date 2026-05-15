@@ -12,6 +12,9 @@ Expose the Aeolus dashboard securely over the internet via a Cloudflare Tunnel, 
 ### Authentication & User Management
 Add user accounts with login, session management, and role-based access control. Protect the API and dashboard so only authorised users can view devices, trigger actions, or modify automations. Essential before exposing Aeolus over the internet via Cloudflare Tunnel or any public endpoint. Without auth, anyone with the URL could control devices and modify automations. Consider JWT-based sessions with a simple username/password login page as a first step.
 
+### MQTT 5.0 Request/Response (Command Acknowledgment)
+Use MQTT 5.0's request/response pattern to get confirmation that a device actually received and executed a command. Currently, when Aeolus publishes a command (e.g., "open valve"), it's fire-and-forget — we don't know if the ESP32 was online, received it, or executed it. With request/response, Aeolus attaches a `responseTopic` and `correlationData` to each command. The device publishes an acknowledgment back to that topic after executing. Aeolus matches the correlation ID and updates the UI: "Valve opened ✓" instead of "Command sent." If no response arrives within a timeout (5 seconds), show "Device didn't respond." Requires firmware-side changes on ESP32 devices (respond to the `responseTopic` from the incoming message properties). The broker already supports this (Mosquitto 2.x + MQTT 5.0 enabled). Low priority since it's a LAN system where you can just look at the device, but improves reliability for unattended automations.
+
 ---
 
 ## Connectors
