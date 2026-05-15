@@ -180,3 +180,53 @@ aeolus.log.info(`Rule loaded at ${format(new Date(), "HH:mm")}`);
 - `npx @aeolus/cli deploy` — push rules to the Pi over SSH or via the REST API
 
 **Why this matters:** Home Assistant's community has been asking for "real code" automation support for years. Their YAML automations and visual editor are fine for simple rules, but developers hit a wall when they need conditional logic, external API calls, or state machines. Aeolus would be the only platform where you write automations in a real programming language with a real type system, test them with a real test runner, version them in git, and deploy them through CI/CD. That's a developer experience no other home automation platform offers.
+
+
+---
+
+## Engineering Maturity (Portfolio Gaps)
+
+These items address gaps identified in a portfolio assessment for IoT software engineering roles. Some will be implemented; others are documented here with architectural reasoning for why they're deferred and how they'd be approached.
+
+### Observability & Metrics Export
+Export platform metrics (device count, message throughput, automation execution time, error rates, memory usage) to Prometheus via a `/metrics` endpoint. Add Grafana dashboards for real-time monitoring. This demonstrates understanding of production observability — critical for any IoT platform operating at scale. Implementation: use `prom-client` to instrument key code paths, expose a Prometheus-compatible scrape endpoint, and provide a sample Grafana dashboard JSON.
+
+### End-to-End Test Coverage
+Add integration tests that prove the full IoT pipeline: MQTT publish → device appears in registry → automation fires → action executes → WebSocket delivers update to frontend. Also add load tests showing behavior under pressure (100 devices publishing simultaneously) and chaos tests (MQTT broker disconnect mid-automation). Use Vitest + supertest for integration, and k6 or Artillery for load testing.
+
+### Device Provisioning Workflow
+Currently, any device that publishes to any MQTT topic is automatically discovered — no registration, no approval, no security. A production IoT platform would have: device claim codes, fleet management, firmware assignment, group policies, and approval workflows. For Aeolus's local-first model, a lightweight version would be: optional device allowlist (only accept messages from known device IDs), device groups/tags for organization, and a "pending devices" queue that requires user approval before a new device enters the registry.
+
+**Why it's deferred:** The auto-discovery model is intentional for the home/hobbyist use case — zero friction for getting started. Adding provisioning gates would hurt the onboarding experience. The right approach is to make it optional: auto-discover by default, with an opt-in "strict mode" that requires device registration.
+
+### Message Queuing / Buffering
+Currently, if the backend restarts, any MQTT messages published during the restart window are lost (Mosquitto retains the last message per topic, but not a queue of messages). A production system would have a durable message queue (Redis Streams, Kafka, or NATS JetStream) between the broker and the processing layer to guarantee no message loss.
+
+**Why it's deferred:** For a local-first system on a single Pi, the restart window is ~5-10 seconds. MQTT retained messages cover the "last known state" case. The complexity of adding Kafka/Redis to a Pi deployment outweighs the benefit. If Aeolus ever targets multi-node or cloud deployment, this becomes essential.
+
+### High Availability / Failover
+Single Pi, single process, single database file. If the Pi dies, everything stops. A production IoT platform would have: database replication, process supervision, automatic failover, and multi-node clustering.
+
+**Why it's deferred:** This is a self-hosted edge platform, not a cloud service. The Pi is the single point of failure by design — it's the user's hardware. Docker's `restart: unless-stopped` policy handles process crashes. For hardware failure, the backup strategy (documented in `docs/production-deployment.md`) covers recovery. Multi-node clustering is on the roadmap as a separate feature for users with multiple properties.
+
+### Scalability Beyond 1000 Devices
+The current architecture (single Node.js process, SQLite, EventEmitter) handles ~100-1000 devices comfortably. Beyond that, the event bus becomes a bottleneck, SQLite write contention increases, and the single-threaded event loop can't keep up with message processing.
+
+**How we'd scale (if needed):**
+- Replace EventEmitter with NATS or Redis pub/sub for distributed event routing
+- Replace SQLite with TimescaleDB for time-series data (keeps better-sqlite3 for config/state)
+- Add worker threads or separate processes for automation execution
+- Horizontal scaling via multiple backend instances behind a load balancer
+- Shard devices across instances by topic prefix or device group
+
+**Why it's deferred:** The target deployment is a single Raspberry Pi managing a home or small building (<500 devices). The architecture is intentionally simple for this use case. Over-engineering for 10,000 devices would add complexity that hurts the primary use case.
+
+### OTA Firmware Management
+Manage microcontroller firmware updates from the Aeolus dashboard. Track firmware versions per device, push updates over Wi-Fi (ArduinoOTA / ESP-IDF OTA), staged rollouts, rollback mechanisms. This closes the loop on the device lifecycle — currently users need a separate IDE to flash firmware.
+
+**Why it's deferred:** This is a significant feature that requires firmware-side cooperation (devices must implement an OTA update client). It's on the roadmap but lower priority than platform stability and observability. The microcontroller guide documents how to add OTA capability to ESP32 firmware independently.
+
+### Device Simulator (Continuous)
+A background process that generates realistic sensor data patterns (sine waves for temperature, random walks for humidity, step functions for switches, correlated multi-sensor patterns) so the platform can be demoed without hardware. Different from the seed script (which runs once) — this would continuously publish MQTT messages simulating a realistic home environment.
+
+**Why it's valuable:** Enables live demos, load testing, and development without physical devices. Would make the GitHub repo much more impressive — clone, run, and immediately see a living dashboard with realistic data flowing through.
