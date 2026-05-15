@@ -91,6 +91,8 @@ This enables the full IoT loop — sense, decide, act — across any combination
 ### Infrastructure
 - **MQTT Broker:** Eclipse Mosquitto 2 (Docker)
 - **Deployment:** Docker Compose (Mosquitto + backend + frontend)
+- **CI/CD:** GitHub Actions (type check, test, lint, Docker image builds)
+- **Linting:** ESLint flat config with typescript-eslint
 - **Target:** Windows (development), Raspberry Pi (production)
 
 
@@ -111,10 +113,17 @@ aeolus/
 │   │   │   ├── data-store.routes.ts  # Data Store REST API (collections, records, buckets, config)
 │   │   │   ├── layout.routes.ts      # GET/PUT /api/layout (tab + pane persistence)
 │   │   │   └── system.routes.ts      # Host diagnostics, application logs, self-update
-│   │   └── middleware/
-│   │       ├── error-handler.ts      # AppError hierarchy + global handler
-│   │       ├── request-logger.ts     # pino HTTP request logging
-│   │       └── validators.ts         # Action payload validation
+│   │   ├── middleware/
+│   │   │   ├── cors-config.ts        # CORS configuration (local network + configurable origins)
+│   │   │   ├── error-handler.ts      # AppError hierarchy + global handler
+│   │   │   ├── rate-limiter.ts       # express-rate-limit (1000 req/min default)
+│   │   │   ├── request-logger.ts     # pino HTTP request logging
+│   │   │   ├── validate.ts           # Zod schema validation middleware
+│   │   │   └── validators.ts         # Action payload validation
+│   │   └── schemas/
+│   │       ├── automation.schemas.ts # Zod schemas for automation endpoints
+│   │       ├── data-store.schemas.ts # Zod schemas for data store endpoints
+│   │       └── device.schemas.ts     # Zod schemas for device endpoints
 │   ├── core/
 │   │   ├── device-registry.ts        # In-memory cache + SQLite persistence
 │   │   ├── event-bus.ts              # Internal EventEmitter pub/sub
@@ -148,6 +157,7 @@ aeolus/
 │   │   ├── migrate-legacy-hue.ts     # One-time migration of legacy hue-credentials.json
 │   │   ├── hue/                      # Philips Hue connector
 │   │   │   ├── index.ts             # Module exports (metadata, configSchema, createConnector)
+│   │   │   ├── capability-mapper.ts  # Light type → capability set mapping + state extraction
 │   │   │   └── hue-connector.ts     # Connector implementation
 │   │   ├── kasa/                     # TP-Link Kasa connector
 │   │   │   ├── index.ts             # Module exports (metadata, configSchema, createConnector)
@@ -279,11 +289,13 @@ aeolus/
 
 ### MQTT Ingestion Service (`src/mqtt/mqtt-service.ts`)
 
-Connects to the Mosquitto broker for bidirectional communication with custom IoT devices.
+Connects to the Mosquitto broker for bidirectional communication with custom IoT devices using **MQTT 5.0** (`protocolVersion: 5`).
 
-**Inbound (sensor data):** Subscribes to configurable topic patterns, normalises incoming messages, and emits `device:state-change` events on the internal bus. Supports exponential backoff retry (max 5 attempts), universal topic parsing via `parseTopic()` (any valid MQTT topic is accepted — see Topic Parser below), and multiple payload formats (JSON objects, primitives, plain numbers, strings).
+**Inbound (sensor data):** Subscribes to configurable topic patterns, normalises incoming messages, and emits `device:state-change` events on the internal bus. Supports universal topic parsing via `parseTopic()` (any valid MQTT topic is accepted — see Topic Parser below), and multiple payload formats (JSON objects, primitives, plain numbers, strings).
 
-**Outbound (device commands):** Publishes MQTT messages to command topics via `POST /api/mqtt/publish` and the dashboard's MQTT Inspector. This enables Aeolus to send commands to custom microcontroller devices — e.g. publishing `{"action": "open"}` to `valve/irrigation/command` where an ESP32 with a solenoid valve is subscribed. The roadmap includes making outbound MQTT publish a first-class automation action type so rules can trigger device commands directly.
+**Outbound (device commands):** Publishes MQTT messages to command topics via `POST /api/mqtt/publish` and the dashboard's MQTT Inspector. All published commands include a **30-second message expiry** by default (configurable per-publish via `messageExpiryInterval` option), preventing stale commands from being executed by devices that reconnect late. This enables Aeolus to send commands to custom microcontroller devices — e.g. publishing `{"action": "open"}` to `valve/irrigation/command` where an ESP32 with a solenoid valve is subscribed. The roadmap includes making outbound MQTT publish a first-class automation action type so rules can trigger device commands directly.
+
+**Connection resilience:** Implements a custom reconnection loop with exponential backoff (1s base → 30s cap, indefinite retries). The connection state machine tracks four states: `disconnected` → `connecting` → `connected` → `waiting_retry`. State transitions emit `MQTT_CONNECTION_STATE` events on the event bus (payload: `{ previous, current }`), enabling the frontend to display real-time connection status. The `computeRetryDelay(attempt, baseDelayMs, maxDelayMs)` function is exported for testing.
 
 ### Topic Parser (`src/mqtt/topic-parser.ts`)
 
@@ -310,6 +322,46 @@ In-memory device cache backed by SQLite for persistence across restarts.
 - Infers capabilities from the device type string using a `KNOWN_TYPES`-based heuristic (light → on/off + brightness, sensor → temperature, plug → on/off + energy, valve → on/off, fan → on/off + speed, etc.). Unknown device types get an empty capabilities array — they are still stored and tracked, just without inferred capabilities.
 - Emits `ws:state-change` events for WebSocket broadcast
 - Serialize/deserialize round-trip for SQLite storage
+
+### Middleware Pipeline
+
+The Express middleware stack is applied in a specific order to ensure correct request processing:
+
+**Pipeline order:** CORS → Rate Limiter → Body Parser (1MB limit) → Request Logger → Routes → Error Handler
+
+#### Rate Limiter (`src/api/middleware/rate-limiter.ts`)
+
+Uses `express-rate-limit` to protect the API from excessive requests.
+
+- Default: 1000 requests per minute (configurable via `RATE_LIMIT_RPM` environment variable)
+- 1-minute sliding window with standard rate-limit headers
+- Returns HTTP 429 with `{ "error": "Too many requests, please try again later" }` when exceeded
+
+#### CORS Configuration (`src/api/middleware/cors-config.ts`)
+
+Configured for a self-hosted local-first platform — allows requests from local network origins by default.
+
+- Allows: `localhost`, `127.0.0.1`, any `.local` hostname (mDNS), private IPs (`192.168.x.x`, `10.x.x.x`, `172.16-31.x.x`)
+- Additional origins configurable via `CORS_ORIGINS` environment variable (comma-separated)
+- Credentials enabled
+
+#### Zod Validation (`src/api/middleware/validate.ts`)
+
+Per-route request validation using Zod schemas.
+
+- Validates `body`, `params`, and/or `query` against Zod schemas
+- Returns HTTP 400 with `{ "error": "Validation failed", "details": [...] }` on failure (Zod issue array)
+- Schemas defined in `src/api/schemas/` (automation, data-store, device schemas)
+
+#### Structured Error Handler (`src/api/middleware/error-handler.ts`)
+
+Consistent error response shape across all endpoints.
+
+- `AppError` class hierarchy: `AppError` (base), `NotFoundError` (404), `BadRequestError` (400)
+- Handles `ZodError` → 400 with `{ error, details }` (Zod issues)
+- Handles `AppError` → appropriate status code with `{ error, details? }`
+- Handles unexpected errors → 500 with generic message in production (no stack traces), actual message in development
+- All errors logged server-side via pino regardless of environment
 
 ### Automation Engine (`src/automations/automation-engine.ts`)
 
@@ -523,7 +575,7 @@ interface WsEventMapping {
 
 - At construction, iterates over the provided mappings and registers a broadcast listener on the event bus for each entry
 - Adding a new real-time event type means adding an entry to the mapping list at the construction site — no changes to `ws-server.ts` required
-- The four current mappings are: `WS_STATE_CHANGE` → `"state-change"`, `MQTT_RAW_MESSAGE` → `"mqtt-message"`, `AUTOMATION_FIRED` → `"automation-fired"`, `AUTOMATION_STATE_CHANGE` → `"automation-state"`
+- The four current mappings are: `WS_STATE_CHANGE` → `"state-change"`, `MQTT_RAW_MESSAGE` → `"mqtt-message"`, `AUTOMATION_FIRED` → `"automation-fired"`, `AUTOMATION_STATE_CHANGE` → `"automation-state"`, `DATA_STORE_WRITE` → `"data-store-write"`, `DATA_STORE_COLLECTION_DELETED` → `"data-store-collection-deleted"`
 - On client connection, sends an initial snapshot of all devices from the DeviceRegistry
 - Tracks connected clients and broadcasts JSON messages to all open connections
 
@@ -577,11 +629,15 @@ Philips Hue smart lighting via local bridge API.
 - Multi-step setup: bridge discovery + button-press pairing
 - Connectors with `requiresSetup` skip the config form and go straight to enable + wizard
 - Discovers lights and maps them to Aeolus Device format with capability-aware state
-- Capability mapping: detects light type ("Extended color light", "Color temperature light", "Dimmable light", "On/Off plug-in unit", "On/Off light") and assigns appropriate capability sets
-- Supports toggle, brightness, color (hue/saturation), and color-temperature (mirek) actions
+- Capability mapping via `CapabilityMapper` module (`src/connectors/hue/capability-mapper.ts`):
+  - `mapTypeToCapabilities(type)` — maps Hue bridge light type string to a `CapabilitySet` with `capabilities[]`, `hasColor`, `hasColorTemp`, `hasBrightness` flags
+  - Light type detection: "Extended color light" (full color + CT), "Color temperature light" (CT only), "Dimmable light" (brightness only), "On/Off plug-in unit" / "On/Off light" (toggle only)
+  - `extractDeviceState(rawLight, capabilitySet)` — extracts only capability-appropriate state fields (avoids exposing color fields for non-color lights)
+  - Clamp helpers: `clampHue(0–65535)`, `clampSaturation(0–254)`, `clampCt(value, ctMin, ctMax)` — enforce Hue API value ranges
+- Supports toggle, brightness, color (hue/saturation), color-temperature (mirek), rename, and delete actions
 - Validates actions against device capabilities — rejects unsupported actions with descriptive errors
-- Zigbee light search: POST to bridge starts a ~40s scan for new unpaired lights
-- Firmware update awareness: reads `swupdate2` from bridge config and surfaces update availability in health status
+- Zigbee light search: `POST /api/connectors/:id/search-lights` starts a ~40s scan for new unpaired lights; `GET /api/connectors/:id/search-lights/status` returns progress and newly found lights
+- Firmware update awareness: reads `swupdate2` from bridge config and surfaces update availability in health status (reports `updatesAvailable` and `updateType`: bridge, lights, or both)
 - Contributed action handlers: `hue_scene` (activate a Hue scene by name), `hue_color_loop` (start/stop a color loop on a light)
 - Contributed condition factories: `brightness_above` (check if a light's brightness exceeds a threshold)
 - Frontend pane: `HueControlPane.tsx` — capability-driven controls (toggle, brightness slider, color temperature slider, colour picker), type badges, reachability indicators, search-for-new-lights button, firmware update banner
@@ -940,6 +996,14 @@ Returns `{ "success": true, "message": "...", "data": {...}, "complete": false }
 **POST /api/connectors/:id/retry**
 Retry connection for a disconnected connector, then re-discover devices.
 Returns `{ "success": true }`.
+
+**POST /api/connectors/:id/search-lights**
+Start a Zigbee light search on the connector's bridge. Initiates a ~40-second scan for new unpaired lights within Zigbee range. Only applicable to the Hue connector.
+Returns the current search state: `{ "active": true, "startedAt": ..., "newLights": [], "error": null }`.
+
+**GET /api/connectors/:id/search-lights/status**
+Get the current status of an in-progress Zigbee light search, including any newly discovered lights.
+Returns `{ "active": boolean, "startedAt": number | null, "newLights": [...], "error": string | null }`.
 
 ### Service API
 
@@ -1548,6 +1612,8 @@ CREATE INDEX idx_ds_records_collection_tags
 | AEOLUS_PROJECT_DIR | /aeolus-host | Host project directory mounted into the backend container (used by self-update) |
 | STATE_HISTORY_MAX | 100 | Maximum history entries stored per device |
 | HISTORY_RECORD_INTERVAL | 5000 | Minimum ms between history records per device |
+| RATE_LIMIT_RPM | 1000 | Maximum API requests per minute before rate limiting (429 response) |
+| CORS_ORIGINS | _(empty)_ | Additional allowed CORS origins (comma-separated), beyond the default local network patterns |
 
 **Note:** MQTT_TOPICS must be quoted in `.env` files because `#` is treated as a comment character by dotenv. The default is `#` (all topics) — this subscribes to every MQTT topic on the broker.
 
@@ -1570,13 +1636,46 @@ Backend container mounts:
 - `/var/run/docker.sock:/var/run/docker.sock` — Docker socket for self-update rebuild
 - `.:/aeolus-host` — Project directory for `git pull` during self-update
 
-The Dockerfile installs `git`, `docker-cli`, and `docker-cli-compose` in the production stage to support the self-update feature.
+The Dockerfile uses a **multi-stage build**: the `builder` stage installs Python, Make, and g++ for native addon compilation, then the `production` stage copies only the compiled output — no build tools in the final image. The production stage installs `git`, `docker-cli`, and `docker-cli-compose` to support the self-update feature.
+
+**Health checks:**
+- Mosquitto: `mosquitto_sub -t '$SYS/#' -C 1 -W 10` (30s interval, 15s timeout)
+- Backend: `wget --no-verbose --tries=1 --spider http://localhost:3001/api/health` (30s interval, 5s timeout, 10s start period)
+
+**Log rotation:** All containers use the `json-file` logging driver with `max-size: 10m` and `max-file: 5` (10 MB × 5 files per container, preventing unbounded log growth on the Pi).
+
+**SQLite WAL mode:** The database is initialized with `PRAGMA journal_mode=WAL` for improved concurrent read performance and crash resilience.
+
+## CI/CD Pipeline
+
+GitHub Actions workflow at `.github/workflows/ci.yml` provides automated quality checks and image builds.
+
+**PR checks** (runs on every pull request to `main`):
+- `npx tsc --noEmit` — TypeScript type checking (blocking)
+- `npm test` — Vitest test suite (blocking)
+- `npx eslint .` — Linting (non-blocking — `|| true` so lint warnings don't fail the build)
+
+**Main branch** (runs on push to `main`, after checks pass):
+- Builds backend Docker image tagged with commit SHA (`aeolus-backend:<sha>`)
+- Builds frontend Docker image tagged with commit SHA (`aeolus-frontend:<sha>`)
+- Uses Docker Buildx with `docker/build-push-action@v5`
+
+## ESLint Configuration
+
+Flat config at `eslint.config.js` using `typescript-eslint`.
+
+- Extends `tseslint.configs.recommended`
+- Ignores: `dist/`, `node_modules/`, `automations/`
+- Key rules:
+  - `@typescript-eslint/no-unused-vars`: **error** (with `argsIgnorePattern: "^_"` for intentionally unused params)
+  - `@typescript-eslint/no-explicit-any`: **warn**
+  - `consistent-return`: **error**
 
 ## Error Handling
 
 | Component | Error | Handling |
 |-----------|-------|----------|
-| MQTT | Broker connection failure | Exponential backoff retry (max 5) |
+| MQTT | Broker connection failure | Exponential backoff retry (1s→30s cap, indefinite retries) |
 | MQTT | Unparseable payload | Log warning, discard |
 | Device Registry | Malformed JSON on load | Log warning, skip entry |
 | Automation Engine | Rule file syntax error | Log error, skip file |
@@ -1894,6 +1993,8 @@ Custom tabs use the modular pane grid powered by `react-grid-layout`. Users crea
 | GET | `/api/connectors/:id/setup-steps` | Get setup step descriptors for a connector instance |
 | POST | `/api/connectors/:id/setup/:stepId` | Execute a setup wizard step |
 | POST | `/api/connectors/:id/retry` | Retry connection for disconnected connector |
+| POST | `/api/connectors/:id/search-lights` | Start Zigbee light search (Hue connector) |
+| GET | `/api/connectors/:id/search-lights/status` | Get Zigbee search progress and new lights |
 | GET | `/api/services/available` | List registered service types with metadata + config schemas |
 | GET | `/api/services` | List enabled service instances with health and config |
 | POST | `/api/services` | Enable a new service `{ service_type, config }` |
@@ -1944,8 +2045,8 @@ Records device state snapshots to SQLite for historical trend analysis. Each sta
 
 ---
 
-**Last Updated:** May 13, 2026
-**Version:** 0.13.0
+**Last Updated:** May 15, 2026
+**Version:** 0.14.0
 **Status:** MVP Development
 
 ## Future Enhancements
