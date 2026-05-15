@@ -3,7 +3,7 @@
 import { Router } from "express";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
-import type { Database } from "sql.js";
+import type { Database as DatabaseType } from "better-sqlite3";
 import type { AutomationEngine } from "../../automations/automation-engine.js";
 import type { DeviceRegistry } from "../../core/device-registry.js";
 import type { ActionExecutor, ActionDescriptor } from "../../automations/action-executor.js";
@@ -18,7 +18,6 @@ import type { ConnectorRegistry } from "../../connectors/connector-registry.js";
 import { BadRequestError, NotFoundError } from "../middleware/error-handler.js";
 import { validate } from "../middleware/validate.js";
 import { createAutomationBodySchema, updateAutomationBodySchema, automationIdParamsSchema, toggleAutomationBodySchema, automationStateBodySchema } from "../schemas/automation.schemas.js";
-import { persistDatabase } from "../../db/database.js";
 import { eventBus, AUTOMATION_STATE_CHANGE } from "../../core/event-bus.js";
 import type { AutomationStateStore } from "../../automations/automation-state-store.js";
 import logger from "../../logger.js";
@@ -46,7 +45,7 @@ interface StoredRule {
 
 export function createAutomationRoutes(
   engine: AutomationEngine,
-  db: Database,
+  db: DatabaseType,
   registry: DeviceRegistry,
   actionExecutor: ActionExecutor,
   executionLog: ExecutionLog,
@@ -135,11 +134,9 @@ export function createAutomationRoutes(
   router.get("/", (_req, res) => {
     // File-based rules from the engine (exclude UI-registered rules by checking DB)
     const dbIds = new Set<string>();
-    const dbResults = db.exec("SELECT id FROM automation_rules");
-    if (dbResults.length > 0) {
-      for (const values of dbResults[0].values) {
-        dbIds.add(values[0] as string);
-      }
+    const dbIdRows = db.prepare("SELECT id FROM automation_rules").all() as Array<{ id: string }>;
+    for (const row of dbIdRows) {
+      dbIds.add(row.id);
     }
 
     const fileRules = engine.listRules()
@@ -155,45 +152,40 @@ export function createAutomationRoutes(
       }));
 
     // UI-created rules from DB
-    const results = db.exec("SELECT * FROM automation_rules ORDER BY created_at DESC");
+    const rows = db.prepare("SELECT * FROM automation_rules ORDER BY created_at DESC").all() as StoredRule[];
     const dbRules: Record<string, unknown>[] = [];
-    if (results.length > 0) {
-      const cols = results[0].columns;
-      for (const values of results[0].values) {
-        const row: Record<string, unknown> = {};
-        cols.forEach((col: string, i: number) => { row[col] = values[i]; });
-        const ruleType = (row.rule_type as string) || "form";
-        const triggerType = (row.trigger_type as string) || "mqtt";
-        const cronExpression = row.cron_expression as string | null;
-        const entry: Record<string, unknown> = {
-          id: row.id,
-          name: row.name,
-          topic: row.trigger_topic,
-          hasCondition: !!row.condition_type,
-          source: "ui",
-          ruleType,
-          enabled: row.enabled === 1,
-          triggerType,
-          cronExpression: cronExpression || null,
-        };
-        if (ruleType === "form") {
-          entry.actionType = row.action_type;
-          entry.actionTarget = row.action_target;
-          entry.actionParams = JSON.parse(row.action_params as string);
-          entry.conditionType = row.condition_type;
-          entry.conditionValue = row.condition_value;
-        } else if (ruleType === "script") {
-          entry.scriptSource = row.script_source;
-          entry.conditionType = row.condition_type;
-          entry.conditionValue = row.condition_value;
-          const rawMeta = row.structured_metadata as string | null;
-          entry.structured = rawMeta ? JSON.parse(rawMeta) : null;
-        }
-        if (row.ui_source != null) {
-          entry.uiSource = row.ui_source;
-        }
-        dbRules.push(entry);
+    for (const row of rows) {
+      const ruleType = row.rule_type || "form";
+      const triggerType = row.trigger_type || "mqtt";
+      const cronExpression = row.cron_expression;
+      const entry: Record<string, unknown> = {
+        id: row.id,
+        name: row.name,
+        topic: row.trigger_topic,
+        hasCondition: !!row.condition_type,
+        source: "ui",
+        ruleType,
+        enabled: row.enabled === 1,
+        triggerType,
+        cronExpression: cronExpression || null,
+      };
+      if (ruleType === "form") {
+        entry.actionType = row.action_type;
+        entry.actionTarget = row.action_target;
+        entry.actionParams = JSON.parse(row.action_params);
+        entry.conditionType = row.condition_type;
+        entry.conditionValue = row.condition_value;
+      } else if (ruleType === "script") {
+        entry.scriptSource = row.script_source;
+        entry.conditionType = row.condition_type;
+        entry.conditionValue = row.condition_value;
+        const rawMeta = row.structured_metadata;
+        entry.structured = rawMeta ? JSON.parse(rawMeta) : null;
       }
+      if (row.ui_source != null) {
+        entry.uiSource = row.ui_source;
+      }
+      dbRules.push(entry);
     }
 
     res.json([...fileRules, ...dbRules]);
@@ -274,12 +266,10 @@ export function createAutomationRoutes(
         const structured = extractStructuredMetadata(result.js, effectiveTriggerTopic);
         const structuredJson = structured ? JSON.stringify(structured) : null;
 
-        db.run(
+        db.prepare(
           `INSERT INTO automation_rules (id, name, trigger_topic, condition_type, condition_value, action_type, action_target, action_params, rule_type, script_source, compiled_js, structured_metadata, ui_source, compiled_ui, trigger_type, cron_expression, enabled, created_at)
-           VALUES (?, ?, ?, ?, ?, 'script', '', '{}', 'script', ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
-          [id, name, effectiveTriggerTopic, conditionType || null, conditionValue || null, scriptSource, result.js, structuredJson, uiSourceValue, compiledUiValue, triggerType, effectiveCronExpression, now]
-        );
-        persistDatabase();
+           VALUES (?, ?, ?, ?, ?, 'script', '', '{}', 'script', ?, ?, ?, ?, ?, ?, ?, 1, ?)`
+        ).run(id, name, effectiveTriggerTopic, conditionType || null, conditionValue || null, scriptSource, result.js, structuredJson, uiSourceValue, compiledUiValue, triggerType, effectiveCronExpression, now);
 
         registerUiRule(engine, registry, actionExecutor, {
           id, name, trigger_topic: effectiveTriggerTopic,
@@ -299,12 +289,10 @@ export function createAutomationRoutes(
           throw new BadRequestError("actionType and actionTarget are required for form rules");
         }
 
-        db.run(
+        db.prepare(
           `INSERT INTO automation_rules (id, name, trigger_topic, condition_type, condition_value, action_type, action_target, action_params, rule_type, ui_source, compiled_ui, trigger_type, cron_expression, enabled, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'form', ?, ?, ?, ?, 1, ?)`,
-          [id, name, effectiveTriggerTopic, conditionType || null, conditionValue || null, actionType, actionTarget, JSON.stringify(actionParams || {}), uiSourceValue, compiledUiValue, triggerType, effectiveCronExpression, now]
-        );
-        persistDatabase();
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'form', ?, ?, ?, ?, 1, ?)`
+        ).run(id, name, effectiveTriggerTopic, conditionType || null, conditionValue || null, actionType, actionTarget, JSON.stringify(actionParams || {}), uiSourceValue, compiledUiValue, triggerType, effectiveCronExpression, now);
 
         registerUiRule(engine, registry, actionExecutor, {
           id, name, trigger_topic: effectiveTriggerTopic,
@@ -387,7 +375,7 @@ export function createAutomationRoutes(
         const structured = extractStructuredMetadata(result.js, effectiveTriggerTopic);
         const structuredJson = structured ? JSON.stringify(structured) : null;
 
-        // Determine ui_source value: explicit empty/null means clear, non-empty means update, undefined means keep existing
+        // Determine ui_source value
         let uiSourceValue: string | null;
         if (uiSource === "" || uiSource === null) {
           uiSourceValue = null;
@@ -397,7 +385,7 @@ export function createAutomationRoutes(
           uiSourceValue = existing.ui_source;
         }
 
-        // Transpile uiSource if updated, clear compiled_ui if uiSource cleared
+        // Transpile uiSource if updated
         let compiledUiValue: string | null;
         if (uiSource === "" || uiSource === null) {
           compiledUiValue = null;
@@ -416,11 +404,9 @@ export function createAutomationRoutes(
           compiledUiValue = existing.compiled_ui;
         }
 
-        db.run(
-          `UPDATE automation_rules SET name = ?, trigger_topic = ?, condition_type = ?, condition_value = ?, script_source = ?, compiled_js = ?, structured_metadata = ?, ui_source = ?, compiled_ui = ?, trigger_type = ?, cron_expression = ? WHERE id = ?`,
-          [name || existing.name, effectiveTriggerTopic, conditionType ?? existing.condition_type, conditionValue ?? existing.condition_value, updatedSource, result.js, structuredJson, uiSourceValue, compiledUiValue, triggerType, effectiveCronExpression, id]
-        );
-        persistDatabase();
+        db.prepare(
+          `UPDATE automation_rules SET name = ?, trigger_topic = ?, condition_type = ?, condition_value = ?, script_source = ?, compiled_js = ?, structured_metadata = ?, ui_source = ?, compiled_ui = ?, trigger_type = ?, cron_expression = ? WHERE id = ?`
+        ).run(name || existing.name, effectiveTriggerTopic, conditionType ?? existing.condition_type, conditionValue ?? existing.condition_value, updatedSource, result.js, structuredJson, uiSourceValue, compiledUiValue, triggerType, effectiveCronExpression, id);
 
         // Re-register in engine
         engine.unregister(id);
@@ -433,7 +419,6 @@ export function createAutomationRoutes(
         res.json({ success: true, id });
       } else {
         // Form rule update
-        // Determine ui_source value: explicit empty/null means clear, non-empty means update, undefined means keep existing
         let uiSourceValue: string | null;
         if (uiSource === "" || uiSource === null) {
           uiSourceValue = null;
@@ -443,7 +428,6 @@ export function createAutomationRoutes(
           uiSourceValue = existing.ui_source;
         }
 
-        // Transpile uiSource if updated, clear compiled_ui if uiSource cleared
         let compiledUiValue: string | null;
         if (uiSource === "" || uiSource === null) {
           compiledUiValue = null;
@@ -462,24 +446,22 @@ export function createAutomationRoutes(
           compiledUiValue = existing.compiled_ui;
         }
 
-        db.run(
-          `UPDATE automation_rules SET name = ?, trigger_topic = ?, condition_type = ?, condition_value = ?, action_type = ?, action_target = ?, action_params = ?, ui_source = ?, compiled_ui = ?, trigger_type = ?, cron_expression = ? WHERE id = ?`,
-          [
-            name || existing.name,
-            effectiveTriggerTopic,
-            conditionType ?? existing.condition_type,
-            conditionValue ?? existing.condition_value,
-            actionType || existing.action_type,
-            actionTarget || existing.action_target,
-            JSON.stringify(actionParams || JSON.parse(existing.action_params)),
-            uiSourceValue,
-            compiledUiValue,
-            triggerType,
-            effectiveCronExpression,
-            id,
-          ]
+        db.prepare(
+          `UPDATE automation_rules SET name = ?, trigger_topic = ?, condition_type = ?, condition_value = ?, action_type = ?, action_target = ?, action_params = ?, ui_source = ?, compiled_ui = ?, trigger_type = ?, cron_expression = ? WHERE id = ?`
+        ).run(
+          name || existing.name,
+          effectiveTriggerTopic,
+          conditionType ?? existing.condition_type,
+          conditionValue ?? existing.condition_value,
+          actionType || existing.action_type,
+          actionTarget || existing.action_target,
+          JSON.stringify(actionParams || JSON.parse(existing.action_params)),
+          uiSourceValue,
+          compiledUiValue,
+          triggerType,
+          effectiveCronExpression,
+          id,
         );
-        persistDatabase();
 
         // Re-register in engine
         engine.unregister(id);
@@ -507,8 +489,7 @@ export function createAutomationRoutes(
       if (stateStore) {
         stateStore.deleteAll(id);
       }
-      db.run("DELETE FROM automation_rules WHERE id = ?", [id]);
-      persistDatabase();
+      db.prepare("DELETE FROM automation_rules WHERE id = ?").run(id);
       engine.unregister(id);
       logger.info({ ruleId: id, ruleType: existing.rule_type }, "Automation rule deleted");
       res.json({ success: true });
@@ -528,8 +509,7 @@ export function createAutomationRoutes(
         throw new NotFoundError(`Automation rule ${id} not found`);
       }
 
-      db.run("UPDATE automation_rules SET enabled = ? WHERE id = ?", [enabled ? 1 : 0, id]);
-      persistDatabase();
+      db.prepare("UPDATE automation_rules SET enabled = ? WHERE id = ?").run(enabled ? 1 : 0, id);
 
       if (enabled) {
         // Re-register — reload from DB to get latest state
@@ -566,9 +546,6 @@ export function createAutomationRoutes(
       const compiledJs = (rule as unknown as Record<string, unknown>).compiled_js as string | undefined;
 
       if (compiledJs) {
-        // Script rule — need to get the sandbox from the engine
-        // For now, just call the rule's action directly which logs
-        // The automation engine will handle sandbox dispatch
         await rule.action(context);
       } else {
         await rule.action(context);
@@ -625,13 +602,9 @@ export function createAutomationRoutes(
 }
 
 /** Query a single rule from the DB by ID */
-function queryRuleById(db: Database, id: string): StoredRule | null {
-  const results = db.exec("SELECT * FROM automation_rules WHERE id = ?", [id]);
-  if (results.length === 0 || results[0].values.length === 0) return null;
-  const cols = results[0].columns;
-  const row: Record<string, unknown> = {};
-  cols.forEach((col: string, i: number) => { row[col] = results[0].values[0][i]; });
-  return row as unknown as StoredRule;
+function queryRuleById(db: DatabaseType, id: string): StoredRule | null {
+  const row = db.prepare("SELECT * FROM automation_rules WHERE id = ?").get(id) as StoredRule | undefined;
+  return row ?? null;
 }
 
 /** Convert a stored UI rule into a live automation rule and register it */
@@ -661,7 +634,6 @@ function registerUiRule(
     const compiledJs = stored.compiled_js;
     const action = async (context: EventContext) => {
       // Sandbox execution is handled by AutomationEngine in task 8.1
-      // For now, store compiled_js on the rule so the engine can detect it
       logger.info({ ruleId: stored.id, name: stored.name }, "Script rule triggered (sandbox dispatch pending engine wiring)");
     };
 
@@ -704,20 +676,17 @@ function registerUiRule(
 /** Load all enabled UI rules from DB into the engine on startup */
 export function loadUiRules(
   engine: AutomationEngine,
-  db: Database,
+  db: DatabaseType,
   registry: DeviceRegistry,
   actionExecutor: ActionExecutor,
   conditionRegistry?: ConditionRegistry,
 ): void {
-  const results = db.exec("SELECT * FROM automation_rules WHERE enabled = 1");
-  if (results.length === 0) return;
+  const rows = db.prepare("SELECT * FROM automation_rules WHERE enabled = 1").all() as StoredRule[];
+  if (rows.length === 0) return;
 
-  const cols = results[0].columns;
   let loaded = 0;
-  for (const values of results[0].values) {
-    const row: Record<string, unknown> = {};
-    cols.forEach((col: string, i: number) => { row[col] = values[i]; });
-    registerUiRule(engine, registry, actionExecutor, row as unknown as StoredRule, conditionRegistry);
+  for (const row of rows) {
+    registerUiRule(engine, registry, actionExecutor, row, conditionRegistry);
     loaded++;
   }
   logger.info({ loaded }, "Loaded UI automation rules from database");

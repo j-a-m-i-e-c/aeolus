@@ -1,14 +1,10 @@
 // src/data-store/__tests__/data-store-buckets.test.ts — Unit tests for key-value bucket operations
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import initSqlJs, { type Database } from "sql.js";
+import Database from "better-sqlite3";
+import type { Database as DatabaseType } from "better-sqlite3";
 import { EventEmitter } from "node:events";
 import { DataStore } from "../data-store.js";
-
-// Mock persistDatabase to no-op in tests
-vi.mock("../../db/database.js", () => ({
-  persistDatabase: vi.fn(),
-}));
 
 // Mock logger
 vi.mock("../../logger.js", () => ({
@@ -21,14 +17,13 @@ vi.mock("../../logger.js", () => ({
 }));
 
 describe("DataStore — Key-Value Bucket Operations", () => {
-  let db: Database;
+  let db: DatabaseType;
   let eventBus: EventEmitter;
   let store: DataStore;
 
-  beforeEach(async () => {
-    const SQL = await initSqlJs();
-    db = new SQL.Database();
-    db.run("PRAGMA foreign_keys = ON;");
+  beforeEach(() => {
+    db = new Database(":memory:");
+    db.pragma("foreign_keys = ON");
     eventBus = new EventEmitter();
     store = new DataStore(db, eventBus);
   });
@@ -94,13 +89,6 @@ describe("DataStore — Key-Value Bucket Operations", () => {
       store.set("newBucket", "firstKey", "firstValue");
       expect(store.get("newBucket", "firstKey")).toBe("firstValue");
     });
-
-    it("calls persistDatabase after set", async () => {
-      const { persistDatabase } = await import("../../db/database.js");
-      vi.mocked(persistDatabase).mockClear();
-      store.set("myBucket", "key", "value");
-      expect(persistDatabase).toHaveBeenCalledTimes(1);
-    });
   });
 
   describe("delete()", () => {
@@ -119,13 +107,6 @@ describe("DataStore — Key-Value Bucket Operations", () => {
       store.set("myBucket", "key2", "value2");
       store.delete("myBucket", "key1");
       expect(store.get("myBucket", "key2")).toBe("value2");
-    });
-
-    it("calls persistDatabase after delete", async () => {
-      const { persistDatabase } = await import("../../db/database.js");
-      vi.mocked(persistDatabase).mockClear();
-      store.delete("myBucket", "key");
-      expect(persistDatabase).toHaveBeenCalledTimes(1);
     });
   });
 

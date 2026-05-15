@@ -1,14 +1,10 @@
 // src/data-store/__tests__/data-store-config.test.ts — Unit tests for DataStore schema and config
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import initSqlJs, { type Database } from "sql.js";
+import Database from "better-sqlite3";
+import type { Database as DatabaseType } from "better-sqlite3";
 import { EventEmitter } from "node:events";
 import { DataStore } from "../data-store.js";
-
-// Mock persistDatabase to no-op in tests
-vi.mock("../../db/database.js", () => ({
-  persistDatabase: vi.fn(),
-}));
 
 // Mock logger
 vi.mock("../../logger.js", () => ({
@@ -21,64 +17,63 @@ vi.mock("../../logger.js", () => ({
 }));
 
 describe("DataStore — Schema and Config", () => {
-  let db: Database;
+  let db: DatabaseType;
   let eventBus: EventEmitter;
 
-  beforeEach(async () => {
-    const SQL = await initSqlJs();
-    db = new SQL.Database();
-    db.run("PRAGMA foreign_keys = ON;");
+  beforeEach(() => {
+    db = new Database(":memory:");
+    db.pragma("foreign_keys = ON");
     eventBus = new EventEmitter();
   });
 
   describe("schema initialization", () => {
     it("creates ds_config table", () => {
       new DataStore(db, eventBus);
-      const result = db.exec(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='ds_config'",
-      );
-      expect(result).toHaveLength(1);
-      expect(result[0].values[0][0]).toBe("ds_config");
+      const row = db.prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='ds_config'"
+      ).get() as { name: string } | undefined;
+      expect(row).toBeDefined();
+      expect(row!.name).toBe("ds_config");
     });
 
     it("creates ds_collections table", () => {
       new DataStore(db, eventBus);
-      const result = db.exec(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='ds_collections'",
-      );
-      expect(result).toHaveLength(1);
+      const row = db.prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='ds_collections'"
+      ).get() as { name: string } | undefined;
+      expect(row).toBeDefined();
     });
 
     it("creates ds_records table", () => {
       new DataStore(db, eventBus);
-      const result = db.exec(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='ds_records'",
-      );
-      expect(result).toHaveLength(1);
+      const row = db.prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='ds_records'"
+      ).get() as { name: string } | undefined;
+      expect(row).toBeDefined();
     });
 
     it("creates ds_buckets table", () => {
       new DataStore(db, eventBus);
-      const result = db.exec(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='ds_buckets'",
-      );
-      expect(result).toHaveLength(1);
+      const row = db.prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='ds_buckets'"
+      ).get() as { name: string } | undefined;
+      expect(row).toBeDefined();
     });
 
     it("creates idx_ds_records_collection_ts index", () => {
       new DataStore(db, eventBus);
-      const result = db.exec(
-        "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_ds_records_collection_ts'",
-      );
-      expect(result).toHaveLength(1);
+      const row = db.prepare(
+        "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_ds_records_collection_ts'"
+      ).get() as { name: string } | undefined;
+      expect(row).toBeDefined();
     });
 
     it("creates idx_ds_records_collection_tags index", () => {
       new DataStore(db, eventBus);
-      const result = db.exec(
-        "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_ds_records_collection_tags'",
-      );
-      expect(result).toHaveLength(1);
+      const row = db.prepare(
+        "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_ds_records_collection_tags'"
+      ).get() as { name: string } | undefined;
+      expect(row).toBeDefined();
     });
 
     it("is idempotent — calling constructor twice does not error", () => {
@@ -132,8 +127,8 @@ describe("DataStore — Schema and Config", () => {
       expect(store.getConfig().maxStorageMb).toBe(300);
 
       // Verify persisted to db
-      const result = db.exec("SELECT value FROM ds_config WHERE key = 'enabled'");
-      expect(result[0].values[0][0]).toBe("true");
+      const row = db.prepare("SELECT value FROM ds_config WHERE key = 'enabled'").get() as { value: string };
+      expect(row.value).toBe("true");
     });
 
     it("persists all config keys to ds_config table", () => {
@@ -145,10 +140,10 @@ describe("DataStore — Schema and Config", () => {
         maxCollections: 100,
       });
 
-      const result = db.exec("SELECT key, value FROM ds_config ORDER BY key");
+      const rows = db.prepare("SELECT key, value FROM ds_config ORDER BY key").all() as Array<{ key: string; value: string }>;
       const configMap = new Map<string, string>();
-      for (const row of result[0].values) {
-        configMap.set(row[0] as string, row[1] as string);
+      for (const row of rows) {
+        configMap.set(row.key, row.value);
       }
 
       expect(configMap.get("enabled")).toBe("true");
@@ -182,8 +177,8 @@ describe("DataStore — Schema and Config", () => {
       });
       store.disable();
 
-      const result = db.exec("SELECT value FROM ds_config WHERE key = 'enabled'");
-      expect(result[0].values[0][0]).toBe("false");
+      const row = db.prepare("SELECT value FROM ds_config WHERE key = 'enabled'").get() as { value: string };
+      expect(row.value).toBe("false");
     });
   });
 
@@ -200,8 +195,8 @@ describe("DataStore — Schema and Config", () => {
       const store = new DataStore(db, eventBus);
       store.updateConfig({ maxCollections: 75 });
 
-      const result = db.exec("SELECT value FROM ds_config WHERE key = 'maxCollections'");
-      expect(result[0].values[0][0]).toBe("75");
+      const row = db.prepare("SELECT value FROM ds_config WHERE key = 'maxCollections'").get() as { value: string };
+      expect(row.value).toBe("75");
     });
   });
 

@@ -1,13 +1,9 @@
 // src/core/state-history.test.ts — Unit tests for StateHistory service
 
 import { describe, it, expect, beforeEach } from "vitest";
-import initSqlJs, { type Database } from "sql.js";
+import Database from "better-sqlite3";
+import type { Database as DatabaseType } from "better-sqlite3";
 import { StateHistory, type HistoryEntry } from "./state-history.js";
-
-// Mock persistDatabase to no-op in tests
-vi.mock("../db/database.js", () => ({
-  persistDatabase: vi.fn(),
-}));
 
 // Mock logger
 vi.mock("../logger.js", () => ({
@@ -19,8 +15,8 @@ vi.mock("../logger.js", () => ({
   },
 }));
 
-function createTable(db: Database): void {
-  db.run(`
+function createTable(db: DatabaseType): void {
+  db.exec(`
     CREATE TABLE IF NOT EXISTS device_history (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       device_id TEXT NOT NULL,
@@ -28,18 +24,17 @@ function createTable(db: Database): void {
       timestamp INTEGER NOT NULL
     );
   `);
-  db.run(`
+  db.exec(`
     CREATE INDEX IF NOT EXISTS idx_device_history_device_ts
     ON device_history(device_id, timestamp DESC);
   `);
 }
 
 describe("StateHistory", () => {
-  let db: Database;
+  let db: DatabaseType;
 
-  beforeEach(async () => {
-    const SQL = await initSqlJs();
-    db = new SQL.Database();
+  beforeEach(() => {
+    db = new Database(":memory:");
     createTable(db);
   });
 

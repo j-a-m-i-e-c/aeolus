@@ -1,8 +1,7 @@
-// src/data-store/data-store.ts — Persistent time-series and key-value storage on sql.js SQLite
+// src/data-store/data-store.ts — Persistent time-series and key-value storage on better-sqlite3
 
-import type { Database } from "sql.js";
+import type { Database as DatabaseType } from "better-sqlite3";
 import type { EventEmitter } from "node:events";
-import { persistDatabase } from "../db/database.js";
 import logger from "../logger.js";
 import { parseDuration } from "./duration.js";
 
@@ -78,7 +77,7 @@ export class DataStore {
   private retentionTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(
-    private readonly db: Database,
+    private readonly db: DatabaseType,
     private readonly eventBus: EventEmitter,
     config?: Partial<DataStoreConfig>,
   ) {
@@ -90,14 +89,14 @@ export class DataStore {
   // ─── Schema Initialization ───────────────────────────────────────────────
 
   private initSchema(): void {
-    this.db.run(`
+    this.db.exec(`
       CREATE TABLE IF NOT EXISTS ds_config (
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
       );
     `);
 
-    this.db.run(`
+    this.db.exec(`
       CREATE TABLE IF NOT EXISTS ds_collections (
         name TEXT PRIMARY KEY,
         description TEXT,
@@ -107,7 +106,7 @@ export class DataStore {
       );
     `);
 
-    this.db.run(`
+    this.db.exec(`
       CREATE TABLE IF NOT EXISTS ds_records (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         collection TEXT NOT NULL REFERENCES ds_collections(name) ON DELETE CASCADE,
@@ -117,7 +116,7 @@ export class DataStore {
       );
     `);
 
-    this.db.run(`
+    this.db.exec(`
       CREATE TABLE IF NOT EXISTS ds_buckets (
         bucket TEXT NOT NULL,
         key TEXT NOT NULL,
@@ -127,12 +126,12 @@ export class DataStore {
       );
     `);
 
-    this.db.run(`
+    this.db.exec(`
       CREATE INDEX IF NOT EXISTS idx_ds_records_collection_ts
         ON ds_records(collection, timestamp DESC);
     `);
 
-    this.db.run(`
+    this.db.exec(`
       CREATE INDEX IF NOT EXISTS idx_ds_records_collection_tags
         ON ds_records(collection, tags);
     `);
@@ -145,16 +144,11 @@ export class DataStore {
    * Missing keys fall back to the defaults (or constructor overrides).
    */
   private loadConfig(): void {
-    const results = this.db.exec("SELECT key, value FROM ds_config");
-    if (results.length === 0) return;
+    const rows = this.db.prepare("SELECT key, value FROM ds_config").all() as Array<{ key: string; value: string }>;
 
-    const { columns, values } = results[0];
-    const keyIdx = columns.indexOf("key");
-    const valueIdx = columns.indexOf("value");
-
-    for (const row of values) {
-      const key = row[keyIdx] as string;
-      const raw = row[valueIdx] as string;
+    for (const row of rows) {
+      const key = row.key;
+      const raw = row.value;
 
       switch (key) {
         case "enabled":
@@ -175,10 +169,9 @@ export class DataStore {
 
   /** Persist a single config key to the ds_config table. */
   private saveConfigKey(key: string, value: string): void {
-    this.db.run(
-      "INSERT OR REPLACE INTO ds_config (key, value) VALUES (?, ?)",
-      [key, value],
-    );
+    this.db.prepare(
+      "INSERT OR REPLACE INTO ds_config (key, value) VALUES (?, ?)"
+    ).run(key, value);
   }
 
   /** Persist the full in-memory config to the database. */
@@ -187,7 +180,6 @@ export class DataStore {
     this.saveConfigKey("maxStorageMb", String(this.config.maxStorageMb));
     this.saveConfigKey("maxRecordsPerCollection", String(this.config.maxRecordsPerCollection));
     this.saveConfigKey("maxCollections", String(this.config.maxCollections));
-    persistDatabase();
   }
 
   /** Returns whether the Data Store is currently enabled. */
@@ -206,7 +198,6 @@ export class DataStore {
   disable(): void {
     this.config.enabled = false;
     this.saveConfigKey("enabled", "false");
-    persistDatabase();
     logger.info("Data Store disabled");
   }
 
@@ -241,10 +232,8 @@ export class DataStore {
     }
 
     // Check storage limit before write (rough heuristic: ~200 bytes per record)
-    const totalRecordsResult = this.db.exec("SELECT COUNT(*) FROM ds_records");
-    const totalRecords = totalRecordsResult.length > 0
-      ? (totalRecordsResult[0].values[0][0] as number)
-      : 0;
+    const countRow = this.db.prepare("SELECT COUNT(*) as cnt FROM ds_records").get() as { cnt: number };
+    const totalRecords = countRow.cnt;
     const estimatedStorageMb = (totalRecords * 200) / (1024 * 1024);
     if (estimatedStorageMb >= this.config.maxStorageMb) {
       logger.warn(
@@ -257,35 +246,29 @@ export class DataStore {
     }
 
     // Auto-create collection if it doesn't exist
-    const existsResult = this.db.exec(
-      "SELECT 1 FROM ds_collections WHERE name = ?",
-      [collection],
-    );
-    if (existsResult.length === 0 || existsResult[0].values.length === 0) {
+    const existsRow = this.db.prepare(
+      "SELECT 1 as exists_flag FROM ds_collections WHERE name = ?"
+    ).get(collection) as { exists_flag: number } | undefined;
+    if (!existsRow) {
       const now = Date.now();
-      this.db.run(
-        "INSERT INTO ds_collections (name, description, retention_days, created_at, updated_at) VALUES (?, NULL, NULL, ?, ?)",
-        [collection, now, now],
-      );
+      this.db.prepare(
+        "INSERT INTO ds_collections (name, description, retention_days, created_at, updated_at) VALUES (?, NULL, NULL, ?, ?)"
+      ).run(collection, now, now);
     }
 
     // FIFO eviction: if collection exceeds maxRecordsPerCollection, delete oldest
-    const countResult = this.db.exec(
-      "SELECT COUNT(*) FROM ds_records WHERE collection = ?",
-      [collection],
-    );
-    const currentCount = countResult.length > 0
-      ? (countResult[0].values[0][0] as number)
-      : 0;
+    const collCountRow = this.db.prepare(
+      "SELECT COUNT(*) as cnt FROM ds_records WHERE collection = ?"
+    ).get(collection) as { cnt: number };
+    const currentCount = collCountRow.cnt;
 
     if (currentCount >= this.config.maxRecordsPerCollection) {
       const excess = currentCount - this.config.maxRecordsPerCollection + 1; // +1 to make room for the new record
-      this.db.run(
+      this.db.prepare(
         `DELETE FROM ds_records WHERE id IN (
           SELECT id FROM ds_records WHERE collection = ? ORDER BY timestamp ASC LIMIT ?
-        )`,
-        [collection, excess],
-      );
+        )`
+      ).run(collection, excess);
       logger.info(
         { collection, evicted: excess },
         "FIFO eviction: deleted oldest records to maintain collection size limit",
@@ -297,15 +280,11 @@ export class DataStore {
     const tagsJson = JSON.stringify(tags);
     const timestamp = options?.timestamp ?? Date.now();
 
-    // Insert the record
-    this.db.run(
-      "INSERT INTO ds_records (collection, payload, tags, timestamp) VALUES (?, ?, ?, ?)",
-      [collection, payloadJson, tagsJson, timestamp],
-    );
-
-    // Get the inserted record id
-    const idResult = this.db.exec("SELECT last_insert_rowid()");
-    const id = idResult.length > 0 ? (idResult[0].values[0][0] as number) : 0;
+    // Insert the record and get the id
+    const result = this.db.prepare(
+      "INSERT INTO ds_records (collection, payload, tags, timestamp) VALUES (?, ?, ?, ?)"
+    ).run(collection, payloadJson, tagsJson, timestamp);
+    const id = Number(result.lastInsertRowid);
 
     // Build the record object for the event
     const record: DataRecord = {
@@ -318,18 +297,14 @@ export class DataStore {
 
     // Emit event on eventBus
     this.eventBus.emit("data-store:write", { collection, record });
-
-    // Persist database to disk
-    persistDatabase();
   }
 
   query(collection: string, options?: QueryOptions): QueryResult {
     // Return empty result for non-existent collections (no error)
-    const existsResult = this.db.exec(
-      "SELECT 1 FROM ds_collections WHERE name = ?",
-      [collection],
-    );
-    if (existsResult.length === 0 || existsResult[0].values.length === 0) {
+    const existsRow = this.db.prepare(
+      "SELECT 1 as exists_flag FROM ds_collections WHERE name = ?"
+    ).get(collection) as { exists_flag: number } | undefined;
+    if (!existsRow) {
       if (options?.aggregate) {
         return { value: 0 };
       }
@@ -389,10 +364,8 @@ export class DataStore {
         params.unshift(field);
       }
 
-      const result = this.db.exec(sql, params as (string | number | null | Uint8Array)[]);
-      const value = result.length > 0 && result[0].values.length > 0
-        ? (result[0].values[0][0] as number) ?? 0
-        : 0;
+      const row = this.db.prepare(sql).get(...params) as { agg_value: number | null } | undefined;
+      const value = row?.agg_value ?? 0;
 
       return { value };
     }
@@ -421,11 +394,9 @@ export class DataStore {
     const whereStr = whereClauses.join(" AND ");
 
     // Get total count (before limit/offset)
-    const countSql = `SELECT COUNT(*) FROM ds_records WHERE ${whereStr}`;
-    const countResult = this.db.exec(countSql, params as (string | number | null | Uint8Array)[]);
-    const total = countResult.length > 0
-      ? (countResult[0].values[0][0] as number)
-      : 0;
+    const countSql = `SELECT COUNT(*) as cnt FROM ds_records WHERE ${whereStr}`;
+    const countRow = this.db.prepare(countSql).get(...params) as { cnt: number };
+    const total = countRow.cnt;
 
     // Build the main query with ordering and pagination
     let sql = `SELECT id, collection, payload, tags, timestamp FROM ds_records WHERE ${whereStr} ORDER BY timestamp DESC`;
@@ -444,25 +415,20 @@ export class DataStore {
       queryParams.push(options.offset);
     }
 
-    const result = this.db.exec(sql, queryParams as (string | number | null | Uint8Array)[]);
+    const rows = this.db.prepare(sql).all(...queryParams) as Array<{
+      id: number;
+      collection: string;
+      payload: string;
+      tags: string;
+      timestamp: number;
+    }>;
 
-    if (result.length === 0) {
-      return { records: [], total };
-    }
-
-    const { columns, values } = result[0];
-    const idIdx = columns.indexOf("id");
-    const collIdx = columns.indexOf("collection");
-    const payloadIdx = columns.indexOf("payload");
-    const tagsIdx = columns.indexOf("tags");
-    const tsIdx = columns.indexOf("timestamp");
-
-    const records: DataRecord[] = values.map((row) => ({
-      id: row[idIdx] as number,
-      collection: row[collIdx] as string,
-      payload: JSON.parse(row[payloadIdx] as string) as Record<string, unknown>,
-      tags: JSON.parse(row[tagsIdx] as string) as Record<string, string>,
-      timestamp: row[tsIdx] as number,
+    const records: DataRecord[] = rows.map((row) => ({
+      id: row.id,
+      collection: row.collection,
+      payload: JSON.parse(row.payload) as Record<string, unknown>,
+      tags: JSON.parse(row.tags) as Record<string, string>,
+      timestamp: row.timestamp,
     }));
 
     return { records, total };
@@ -471,70 +437,49 @@ export class DataStore {
   // ─── Key-Value Bucket Operations ─────────────────────────────────────────
 
   get(bucket: string, key: string): unknown | undefined {
-    const result = this.db.exec(
-      "SELECT value FROM ds_buckets WHERE bucket = ? AND key = ?",
-      [bucket, key],
-    );
-    if (result.length === 0 || result[0].values.length === 0) {
+    const row = this.db.prepare(
+      "SELECT value FROM ds_buckets WHERE bucket = ? AND key = ?"
+    ).get(bucket, key) as { value: string } | undefined;
+    if (!row) {
       return undefined;
     }
-    return JSON.parse(result[0].values[0][0] as string);
+    return JSON.parse(row.value);
   }
 
   set(bucket: string, key: string, value: unknown): void {
     const valueJson = JSON.stringify(value);
     const now = Date.now();
-    this.db.run(
-      "INSERT OR REPLACE INTO ds_buckets (bucket, key, value, updated_at) VALUES (?, ?, ?, ?)",
-      [bucket, key, valueJson, now],
-    );
-    persistDatabase();
+    this.db.prepare(
+      "INSERT OR REPLACE INTO ds_buckets (bucket, key, value, updated_at) VALUES (?, ?, ?, ?)"
+    ).run(bucket, key, valueJson, now);
   }
 
   delete(bucket: string, key: string): void {
-    this.db.run(
-      "DELETE FROM ds_buckets WHERE bucket = ? AND key = ?",
-      [bucket, key],
-    );
-    persistDatabase();
+    this.db.prepare(
+      "DELETE FROM ds_buckets WHERE bucket = ? AND key = ?"
+    ).run(bucket, key);
   }
 
   listBucket(bucket: string): Array<{ key: string; value: unknown; updatedAt: number }> {
-    const result = this.db.exec(
-      "SELECT key, value, updated_at FROM ds_buckets WHERE bucket = ?",
-      [bucket],
-    );
-    if (result.length === 0) {
-      return [];
-    }
+    const rows = this.db.prepare(
+      "SELECT key, value, updated_at FROM ds_buckets WHERE bucket = ?"
+    ).all(bucket) as Array<{ key: string; value: string; updated_at: number }>;
 
-    const { columns, values } = result[0];
-    const keyIdx = columns.indexOf("key");
-    const valueIdx = columns.indexOf("value");
-    const updatedAtIdx = columns.indexOf("updated_at");
-
-    return values.map((row) => ({
-      key: row[keyIdx] as string,
-      value: JSON.parse(row[valueIdx] as string),
-      updatedAt: row[updatedAtIdx] as number,
+    return rows.map((row) => ({
+      key: row.key,
+      value: JSON.parse(row.value),
+      updatedAt: row.updated_at,
     }));
   }
 
   listBuckets(): Array<{ bucket: string; keyCount: number }> {
-    const result = this.db.exec(
-      "SELECT bucket, COUNT(*) as key_count FROM ds_buckets GROUP BY bucket",
-    );
-    if (result.length === 0) {
-      return [];
-    }
+    const rows = this.db.prepare(
+      "SELECT bucket, COUNT(*) as key_count FROM ds_buckets GROUP BY bucket"
+    ).all() as Array<{ bucket: string; key_count: number }>;
 
-    const { columns, values } = result[0];
-    const bucketIdx = columns.indexOf("bucket");
-    const countIdx = columns.indexOf("key_count");
-
-    return values.map((row) => ({
-      bucket: row[bucketIdx] as string,
-      keyCount: row[countIdx] as number,
+    return rows.map((row) => ({
+      bucket: row.bucket,
+      keyCount: row.key_count,
     }));
   }
 
@@ -542,10 +487,8 @@ export class DataStore {
 
   createCollection(name: string, description?: string, retentionDays?: number | null): void {
     // Check maxCollections limit
-    const countResult = this.db.exec("SELECT COUNT(*) FROM ds_collections");
-    const currentCount = countResult.length > 0
-      ? (countResult[0].values[0][0] as number)
-      : 0;
+    const countRow = this.db.prepare("SELECT COUNT(*) as cnt FROM ds_collections").get() as { cnt: number };
+    const currentCount = countRow.cnt;
 
     if (currentCount >= this.config.maxCollections) {
       throw new Error(
@@ -554,20 +497,17 @@ export class DataStore {
     }
 
     const now = Date.now();
-    this.db.run(
-      "INSERT INTO ds_collections (name, description, retention_days, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-      [name, description ?? null, retentionDays ?? null, now, now],
-    );
-    persistDatabase();
+    this.db.prepare(
+      "INSERT INTO ds_collections (name, description, retention_days, created_at, updated_at) VALUES (?, ?, ?, ?, ?)"
+    ).run(name, description ?? null, retentionDays ?? null, now, now);
   }
 
   updateCollection(name: string, updates: { description?: string; retentionDays?: number | null }): void {
     // Check collection exists
-    const existsResult = this.db.exec(
-      "SELECT 1 FROM ds_collections WHERE name = ?",
-      [name],
-    );
-    if (existsResult.length === 0 || existsResult[0].values.length === 0) {
+    const existsRow = this.db.prepare(
+      "SELECT 1 as exists_flag FROM ds_collections WHERE name = ?"
+    ).get(name) as { exists_flag: number } | undefined;
+    if (!existsRow) {
       throw new Error(`Collection not found: ${name}`);
     }
 
@@ -585,35 +525,30 @@ export class DataStore {
     }
 
     params.push(name);
-    this.db.run(
-      `UPDATE ds_collections SET ${setClauses.join(", ")} WHERE name = ?`,
-      params as (string | number | null | Uint8Array)[],
-    );
-    persistDatabase();
+    this.db.prepare(
+      `UPDATE ds_collections SET ${setClauses.join(", ")} WHERE name = ?`
+    ).run(...params);
   }
 
   deleteCollection(name: string): void {
     // Check collection exists
-    const existsResult = this.db.exec(
-      "SELECT 1 FROM ds_collections WHERE name = ?",
-      [name],
-    );
-    if (existsResult.length === 0 || existsResult[0].values.length === 0) {
+    const existsRow = this.db.prepare(
+      "SELECT 1 as exists_flag FROM ds_collections WHERE name = ?"
+    ).get(name) as { exists_flag: number } | undefined;
+    if (!existsRow) {
       throw new Error(`Collection not found: ${name}`);
     }
 
-    // Delete records first (CASCADE may not be enforced by sql.js without PRAGMA foreign_keys)
-    this.db.run("DELETE FROM ds_records WHERE collection = ?", [name]);
-    this.db.run("DELETE FROM ds_collections WHERE name = ?", [name]);
+    // Delete records first (CASCADE may not be enforced without PRAGMA foreign_keys)
+    this.db.prepare("DELETE FROM ds_records WHERE collection = ?").run(name);
+    this.db.prepare("DELETE FROM ds_collections WHERE name = ?").run(name);
 
     // Emit event
     this.eventBus.emit("data-store:collection-deleted", { collection: name });
-
-    persistDatabase();
   }
 
   listCollections(): CollectionMetadata[] {
-    const result = this.db.exec(`
+    const rows = this.db.prepare(`
       SELECT
         c.name,
         c.description,
@@ -633,49 +568,38 @@ export class DataStore {
         FROM ds_records
         GROUP BY collection
       ) r ON c.name = r.collection
-    `);
+    `).all() as Array<{
+      name: string;
+      description: string | null;
+      retention_days: number | null;
+      created_at: number;
+      updated_at: number;
+      record_count: number;
+      oldest_record: number | null;
+      newest_record: number | null;
+    }>;
 
-    if (result.length === 0) {
-      return [];
-    }
-
-    const { columns, values } = result[0];
-    const nameIdx = columns.indexOf("name");
-    const descIdx = columns.indexOf("description");
-    const retIdx = columns.indexOf("retention_days");
-    const createdIdx = columns.indexOf("created_at");
-    const updatedIdx = columns.indexOf("updated_at");
-    const countIdx = columns.indexOf("record_count");
-    const oldestIdx = columns.indexOf("oldest_record");
-    const newestIdx = columns.indexOf("newest_record");
-
-    return values.map((row) => ({
-      name: row[nameIdx] as string,
-      description: (row[descIdx] as string) ?? null,
-      retentionDays: (row[retIdx] as number) ?? null,
-      recordCount: row[countIdx] as number,
-      oldestRecord: (row[oldestIdx] as number) ?? null,
-      newestRecord: (row[newestIdx] as number) ?? null,
-      createdAt: row[createdIdx] as number,
-      updatedAt: row[updatedIdx] as number,
+    return rows.map((row) => ({
+      name: row.name,
+      description: row.description ?? null,
+      retentionDays: row.retention_days ?? null,
+      recordCount: row.record_count,
+      oldestRecord: row.oldest_record ?? null,
+      newestRecord: row.newest_record ?? null,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
     }));
   }
 
   getStats(): DataStoreStats {
-    const recordsResult = this.db.exec("SELECT COUNT(*) FROM ds_records");
-    const totalRecords = recordsResult.length > 0
-      ? (recordsResult[0].values[0][0] as number)
-      : 0;
+    const recordsRow = this.db.prepare("SELECT COUNT(*) as cnt FROM ds_records").get() as { cnt: number };
+    const totalRecords = recordsRow.cnt;
 
-    const bucketsResult = this.db.exec("SELECT COUNT(*) FROM ds_buckets");
-    const totalBucketEntries = bucketsResult.length > 0
-      ? (bucketsResult[0].values[0][0] as number)
-      : 0;
+    const bucketsRow = this.db.prepare("SELECT COUNT(*) as cnt FROM ds_buckets").get() as { cnt: number };
+    const totalBucketEntries = bucketsRow.cnt;
 
-    const collectionsResult = this.db.exec("SELECT COUNT(*) FROM ds_collections");
-    const totalCollections = collectionsResult.length > 0
-      ? (collectionsResult[0].values[0][0] as number)
-      : 0;
+    const collectionsRow = this.db.prepare("SELECT COUNT(*) as cnt FROM ds_collections").get() as { cnt: number };
+    const totalCollections = collectionsRow.cnt;
 
     const estimatedStorageMb = (totalRecords * 200) / (1024 * 1024);
     const storagePercent = this.config.maxStorageMb > 0
@@ -696,50 +620,38 @@ export class DataStore {
 
   enforceRetention(): void {
     // Get all collections with a retention policy
-    const result = this.db.exec(
-      "SELECT name, retention_days FROM ds_collections WHERE retention_days IS NOT NULL",
-    );
+    const rows = this.db.prepare(
+      "SELECT name, retention_days FROM ds_collections WHERE retention_days IS NOT NULL"
+    ).all() as Array<{ name: string; retention_days: number }>;
 
-    if (result.length === 0) {
+    if (rows.length === 0) {
       return;
     }
 
-    const { columns, values } = result[0];
-    const nameIdx = columns.indexOf("name");
-    const retIdx = columns.indexOf("retention_days");
-
     let totalPruned = 0;
 
-    for (const row of values) {
-      const collectionName = row[nameIdx] as string;
-      const retentionDays = row[retIdx] as number;
+    for (const row of rows) {
+      const collectionName = row.name;
+      const retentionDays = row.retention_days;
 
       const cutoffMs = Date.now() - retentionDays * 86_400_000;
 
       // Count records to be pruned
-      const countResult = this.db.exec(
-        "SELECT COUNT(*) FROM ds_records WHERE collection = ? AND timestamp < ?",
-        [collectionName, cutoffMs],
-      );
-      const prunedCount = countResult.length > 0
-        ? (countResult[0].values[0][0] as number)
-        : 0;
+      const countRow = this.db.prepare(
+        "SELECT COUNT(*) as cnt FROM ds_records WHERE collection = ? AND timestamp < ?"
+      ).get(collectionName, cutoffMs) as { cnt: number };
+      const prunedCount = countRow.cnt;
 
       if (prunedCount > 0) {
-        this.db.run(
-          "DELETE FROM ds_records WHERE collection = ? AND timestamp < ?",
-          [collectionName, cutoffMs],
-        );
+        this.db.prepare(
+          "DELETE FROM ds_records WHERE collection = ? AND timestamp < ?"
+        ).run(collectionName, cutoffMs);
         totalPruned += prunedCount;
         logger.info(
           { collection: collectionName, pruned: prunedCount, retentionDays },
           "Retention enforcement: pruned expired records",
         );
       }
-    }
-
-    if (totalPruned > 0) {
-      persistDatabase();
     }
   }
 

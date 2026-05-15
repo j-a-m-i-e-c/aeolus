@@ -3,16 +3,12 @@
 // event bus and device registry — previously-rejected topics now flow through.
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "node:events";
-import initSqlJs, { type Database } from "sql.js";
+import Database from "better-sqlite3";
+import type { Database as DatabaseType } from "better-sqlite3";
 import { parseTopic } from "./topic-parser.js";
 import { DEVICE_STATE_CHANGE, MQTT_RAW_MESSAGE } from "../core/event-bus.js";
 import { DeviceRegistry } from "../core/device-registry.js";
 import type { NormalizedEvent } from "../core/types.js";
-
-// Mock persistDatabase to no-op in tests
-vi.mock("../db/database.js", () => ({
-  persistDatabase: vi.fn(),
-}));
 
 // Mock logger
 vi.mock("../logger.js", () => ({
@@ -72,14 +68,13 @@ function simulateHandleMessage(
 }
 
 describe("MQTT Service Integration", () => {
-  let db: Database;
+  let db: DatabaseType;
   let eventBus: EventEmitter;
   let registry: DeviceRegistry;
 
-  beforeEach(async () => {
-    const SQL = await initSqlJs();
-    db = new SQL.Database();
-    db.run(`CREATE TABLE IF NOT EXISTS devices (
+  beforeEach(() => {
+    db = new Database(":memory:");
+    db.exec(`CREATE TABLE IF NOT EXISTS devices (
       id TEXT PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL,
       capabilities TEXT NOT NULL DEFAULT '[]', state TEXT NOT NULL DEFAULT '{}',
       integration TEXT NOT NULL DEFAULT 'mqtt', last_seen INTEGER NOT NULL

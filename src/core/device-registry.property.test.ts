@@ -7,12 +7,7 @@ import { test, fc } from "@fast-check/vitest";
 import { serializeDevice, deserializeDevice, DeviceRegistry } from "./device-registry.js";
 import type { Device, NormalizedEvent, DeviceType } from "./types.js";
 import { EventEmitter } from "node:events";
-import initSqlJs from "sql.js";
-
-// Mock persistDatabase to no-op in tests
-vi.mock("../db/database.js", () => ({
-  persistDatabase: vi.fn(),
-}));
+import Database from "better-sqlite3";
 
 // Mock logger
 vi.mock("../logger.js", () => ({
@@ -84,10 +79,9 @@ describe("Property: Device Registry Upsert Invariant", () => {
 
   test.prop([fc.array(eventArb, { minLength: 1, maxLength: 10 })])(
     "upsert creates new devices and updates existing ones correctly",
-    async (events) => {
-      const SQL = await initSqlJs();
-      const db = new SQL.Database();
-      db.run(`CREATE TABLE IF NOT EXISTS devices (
+    (events) => {
+      const db = new Database(":memory:");
+      db.exec(`CREATE TABLE IF NOT EXISTS devices (
         id TEXT PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL,
         capabilities TEXT NOT NULL DEFAULT '[]', state TEXT NOT NULL DEFAULT '{}',
         integration TEXT NOT NULL DEFAULT 'mqtt', last_seen INTEGER NOT NULL
@@ -131,10 +125,9 @@ describe("Feature: mqtt-topic-overhaul — Property 8: Registry Accepts Any Devi
 
   test.prop([deviceTypeStringArb, fc.stringMatching(/^[a-z]+-[a-z]+$/)], { numRuns: 100 })(
     "Property 8: Registry stores any device type and retrieves it with the exact type string",
-    async (deviceType, deviceId) => {
-      const SQL = await initSqlJs();
-      const db = new SQL.Database();
-      db.run(`CREATE TABLE IF NOT EXISTS devices (
+    (deviceType, deviceId) => {
+      const db = new Database(":memory:");
+      db.exec(`CREATE TABLE IF NOT EXISTS devices (
         id TEXT PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL,
         capabilities TEXT NOT NULL DEFAULT '[]', state TEXT NOT NULL DEFAULT '{}',
         integration TEXT NOT NULL DEFAULT 'mqtt', last_seen INTEGER NOT NULL

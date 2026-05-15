@@ -1,14 +1,10 @@
 // src/data-store/__tests__/data-store-query.test.ts — Unit tests for DataStore.query()
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import initSqlJs, { type Database } from "sql.js";
+import Database from "better-sqlite3";
+import type { Database as DatabaseType } from "better-sqlite3";
 import { EventEmitter } from "node:events";
 import { DataStore } from "../data-store.js";
-
-// Mock persistDatabase to no-op in tests
-vi.mock("../../db/database.js", () => ({
-  persistDatabase: vi.fn(),
-}));
 
 // Mock logger
 vi.mock("../../logger.js", () => ({
@@ -21,14 +17,13 @@ vi.mock("../../logger.js", () => ({
 }));
 
 describe("DataStore — Query Operations", () => {
-  let db: Database;
+  let db: DatabaseType;
   let eventBus: EventEmitter;
   let store: DataStore;
 
-  beforeEach(async () => {
-    const SQL = await initSqlJs();
-    db = new SQL.Database();
-    db.run("PRAGMA foreign_keys = ON;");
+  beforeEach(() => {
+    db = new Database(":memory:");
+    db.pragma("foreign_keys = ON");
     eventBus = new EventEmitter();
     store = new DataStore(db, eventBus);
     store.enable({

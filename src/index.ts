@@ -5,7 +5,7 @@ import { createServer } from "node:http";
 import path from "node:path";
 import { config } from "./config.js";
 import logger from "./logger.js";
-import { getDatabase, persistDatabase } from "./db/database.js";
+import { getDatabase, closeDatabase } from "./db/database.js";
 import { eventBus, DEVICE_STATE_CHANGE, AUTOMATION_STATE_CHANGE, WS_STATE_CHANGE, MQTT_RAW_MESSAGE, AUTOMATION_FIRED, DATA_STORE_WRITE, DATA_STORE_COLLECTION_DELETED } from "./core/event-bus.js";
 import { DeviceRegistry } from "./core/device-registry.js";
 import { MqttService } from "./mqtt/mqtt-service.js";
@@ -54,7 +54,7 @@ async function main(): Promise<void> {
   logger.info("Starting Aeolus...");
 
   // 1. Database
-  const db = await getDatabase();
+  const db = getDatabase();
 
   // 2. Device Registry
   const registry = new DeviceRegistry(db, eventBus);
@@ -235,8 +235,8 @@ async function main(): Promise<void> {
       // 5. Disconnect MQTT cleanly
       await mqttService.disconnect();
 
-      // 6. Persist database to disk
-      persistDatabase();
+      // 6. Close database connection
+      closeDatabase();
     } catch (err) {
       logger.error({ error: (err as Error).message }, "Error during shutdown cleanup");
     } finally {

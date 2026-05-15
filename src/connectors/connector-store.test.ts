@@ -1,14 +1,10 @@
 // src/connectors/connector-store.test.ts — Unit tests for ConnectorStore
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import initSqlJs, { type Database } from "sql.js";
+import Database from "better-sqlite3";
+import type { Database as DatabaseType } from "better-sqlite3";
 import { ConnectorStore } from "./connector-store.js";
 import type { ConnectorRecord } from "./connector.interface.js";
-
-// Mock persistDatabase to no-op in tests
-vi.mock("../db/database.js", () => ({
-  persistDatabase: vi.fn(),
-}));
 
 // Mock logger
 vi.mock("../logger.js", () => ({
@@ -33,13 +29,12 @@ function makeRecord(overrides: Partial<ConnectorRecord> = {}): ConnectorRecord {
 }
 
 describe("ConnectorStore", () => {
-  let db: Database;
+  let db: DatabaseType;
   let store: ConnectorStore;
 
-  beforeEach(async () => {
-    const SQL = await initSqlJs();
-    db = new SQL.Database();
-    db.run(`
+  beforeEach(() => {
+    db = new Database(":memory:");
+    db.exec(`
       CREATE TABLE IF NOT EXISTS connectors (
         id TEXT PRIMARY KEY,
         connector_type TEXT NOT NULL,
@@ -120,11 +115,10 @@ describe("ConnectorStore", () => {
 
   it("should skip records with malformed JSON config", () => {
     // Insert a row with invalid JSON directly
-    db.run(
+    db.prepare(
       `INSERT INTO connectors (id, connector_type, enabled, config, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      ["bad-json", "kasa", 1, "not-valid-json{", 1700000000000, 1700000000000],
-    );
+       VALUES (?, ?, ?, ?, ?, ?)`
+    ).run("bad-json", "kasa", 1, "not-valid-json{", 1700000000000, 1700000000000);
     store.save(makeRecord({ id: "good-record" }));
 
     const loaded = store.loadAll();

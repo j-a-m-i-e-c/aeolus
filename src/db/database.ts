@@ -1,17 +1,16 @@
-// src/db/database.ts — SQLite database using sql.js (pure JS, no native deps)
+// src/db/database.ts — SQLite database using better-sqlite3 (native, disk-backed)
 
-import initSqlJs, { type Database } from "sql.js";
+import Database from "better-sqlite3";
+import type { Database as DatabaseType } from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
 import { config } from "../config.js";
 import logger from "../logger.js";
 
-let db: Database | null = null;
+let db: DatabaseType | null = null;
 
-export function initSchema(database: Database): void {
-  database.run("PRAGMA journal_mode=WAL;");
-  database.run("PRAGMA foreign_keys = ON;");
-  database.run(`
+export function initSchema(database: DatabaseType): void {
+  database.exec(`
     CREATE TABLE IF NOT EXISTS devices (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -22,7 +21,7 @@ export function initSchema(database: Database): void {
       last_seen INTEGER NOT NULL
     );
   `);
-  database.run(`
+  database.exec(`
     CREATE TABLE IF NOT EXISTS automation_rules (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -42,7 +41,7 @@ export function initSchema(database: Database): void {
 
   // Migration: add script rule columns to existing automation_rules tables
   const addColumn = (col: string, def: string) => {
-    try { database.run(`ALTER TABLE automation_rules ADD COLUMN ${col} ${def};`); }
+    try { database.exec(`ALTER TABLE automation_rules ADD COLUMN ${col} ${def};`); }
     catch { /* column already exists */ }
   };
   addColumn("rule_type", "TEXT NOT NULL DEFAULT 'form'");
@@ -55,8 +54,8 @@ export function initSchema(database: Database): void {
   addColumn("cron_expression", "TEXT DEFAULT NULL");
 
   // Backfill existing rows that lack a rule_type value
-  database.run(`UPDATE automation_rules SET rule_type = 'form' WHERE rule_type IS NULL;`);
-  database.run(`
+  database.exec(`UPDATE automation_rules SET rule_type = 'form' WHERE rule_type IS NULL;`);
+  database.exec(`
     CREATE TABLE IF NOT EXISTS tabs (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -66,7 +65,7 @@ export function initSchema(database: Database): void {
       created_at INTEGER NOT NULL
     );
   `);
-  database.run(`
+  database.exec(`
     CREATE TABLE IF NOT EXISTS panes (
       id TEXT PRIMARY KEY,
       tab_id TEXT NOT NULL REFERENCES tabs(id) ON DELETE CASCADE,
@@ -79,7 +78,7 @@ export function initSchema(database: Database): void {
       created_at INTEGER NOT NULL
     );
   `);
-  database.run(`
+  database.exec(`
     CREATE TABLE IF NOT EXISTS connectors (
       id TEXT PRIMARY KEY,
       connector_type TEXT NOT NULL,
@@ -89,7 +88,7 @@ export function initSchema(database: Database): void {
       updated_at INTEGER NOT NULL
     );
   `);
-  database.run(`
+  database.exec(`
     CREATE TABLE IF NOT EXISTS services (
       id TEXT PRIMARY KEY,
       service_type TEXT NOT NULL,
@@ -99,7 +98,7 @@ export function initSchema(database: Database): void {
       updated_at INTEGER NOT NULL
     );
   `);
-  database.run(`
+  database.exec(`
     CREATE TABLE IF NOT EXISTS automation_state (
       rule_id TEXT NOT NULL,
       key TEXT NOT NULL,
@@ -107,7 +106,7 @@ export function initSchema(database: Database): void {
       PRIMARY KEY (rule_id, key)
     );
   `);
-  database.run(`
+  database.exec(`
     CREATE TABLE IF NOT EXISTS device_history (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       device_id TEXT NOT NULL,
@@ -115,7 +114,7 @@ export function initSchema(database: Database): void {
       timestamp INTEGER NOT NULL
     );
   `);
-  database.run(`
+  database.exec(`
     CREATE INDEX IF NOT EXISTS idx_device_history_device_ts
     ON device_history(device_id, timestamp DESC);
   `);
@@ -127,16 +126,16 @@ export function initSchema(database: Database): void {
  * on the devices table. SQLite doesn't support ALTER TABLE DROP CONSTRAINT,
  * so we recreate the table without it: rename → create → copy → drop old.
  */
-function migrateRemoveTypeCheck(database: Database): void {
-  const result = database.exec(
+function migrateRemoveTypeCheck(database: DatabaseType): void {
+  const row = database.prepare(
     `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'devices'`
-  );
+  ).get() as { sql: string } | undefined;
 
-  if (result.length === 0 || result[0].values.length === 0) {
+  if (!row) {
     return; // No devices table found — nothing to migrate
   }
 
-  const createSql = result[0].values[0][0] as string;
+  const createSql = row.sql;
 
   if (!/CHECK\s*\(/i.test(createSql)) {
     return; // No CHECK constraint — already migrated or fresh database
@@ -144,11 +143,11 @@ function migrateRemoveTypeCheck(database: Database): void {
 
   logger.info("Migrating devices table to remove CHECK constraint on type column");
 
-  database.run("PRAGMA foreign_keys = OFF;");
-  database.run("BEGIN TRANSACTION;");
+  database.exec("PRAGMA foreign_keys = OFF;");
+  database.exec("BEGIN TRANSACTION;");
   try {
-    database.run("ALTER TABLE devices RENAME TO devices_old;");
-    database.run(`
+    database.exec("ALTER TABLE devices RENAME TO devices_old;");
+    database.exec(`
       CREATE TABLE devices (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
@@ -159,52 +158,52 @@ function migrateRemoveTypeCheck(database: Database): void {
         last_seen INTEGER NOT NULL
       );
     `);
-    database.run(`
+    database.exec(`
       INSERT INTO devices (id, name, type, capabilities, state, integration, last_seen)
       SELECT id, name, type, capabilities, state, integration, last_seen
       FROM devices_old;
     `);
-    database.run("DROP TABLE devices_old;");
-    database.run("COMMIT;");
+    database.exec("DROP TABLE devices_old;");
+    database.exec("COMMIT;");
     logger.info("Successfully migrated devices table — CHECK constraint removed");
   } catch (err) {
-    database.run("ROLLBACK;");
+    database.exec("ROLLBACK;");
     logger.error({ err }, "Failed to migrate devices table — rolling back");
     throw err;
   } finally {
-    database.run("PRAGMA foreign_keys = ON;");
+    database.exec("PRAGMA foreign_keys = ON;");
   }
 }
 
-function saveToFile(database: Database): void {
-  const data = database.export();
-  const buffer = Buffer.from(data);
-  fs.writeFileSync(config.dbPath, buffer);
-}
-
-export async function getDatabase(): Promise<Database> {
+/**
+ * Get the database instance. Creates and initializes on first call.
+ * Synchronous — no Promise, no WASM compilation.
+ */
+export function getDatabase(): DatabaseType {
   if (db) return db;
 
   const dir = path.dirname(config.dbPath);
   fs.mkdirSync(dir, { recursive: true });
 
-  const SQL = await initSqlJs();
+  db = new Database(config.dbPath);
 
-  if (fs.existsSync(config.dbPath)) {
-    const fileBuffer = fs.readFileSync(config.dbPath);
-    db = new SQL.Database(fileBuffer);
-    logger.info({ dbPath: config.dbPath }, "Loaded existing SQLite database");
-  } else {
-    db = new SQL.Database();
-    logger.info({ dbPath: config.dbPath }, "Created new SQLite database");
-  }
+  // Enable WAL mode for better concurrent read performance
+  db.pragma("journal_mode = WAL");
+  db.pragma("foreign_keys = ON");
 
   initSchema(db);
-  saveToFile(db);
+
+  logger.info({ dbPath: config.dbPath }, "Database initialized (better-sqlite3, WAL mode)");
   return db;
 }
 
-/** Save current database state to disk */
-export function persistDatabase(): void {
-  if (db) saveToFile(db);
+/**
+ * Close the database connection gracefully.
+ * Called during shutdown.
+ */
+export function closeDatabase(): void {
+  if (db) {
+    db.close();
+    db = null;
+  }
 }

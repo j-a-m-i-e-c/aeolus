@@ -1,7 +1,6 @@
 // src/automations/automation-state-store.ts — Per-rule key-value state store with SQLite persistence
 
-import type { Database } from "sql.js";
-import { persistDatabase } from "../db/database.js";
+import type { Database as DatabaseType } from "better-sqlite3";
 import logger from "../logger.js";
 
 /**
@@ -14,19 +13,17 @@ import logger from "../logger.js";
 export class AutomationStateStore {
   private cache = new Map<string, Map<string, unknown>>();
 
-  constructor(private readonly db: Database) {}
+  constructor(private readonly db: DatabaseType) {}
 
   /** Load all state entries from SQLite into the in-memory cache. */
   loadFromDb(): void {
     this.cache.clear();
-    const results = this.db.exec("SELECT rule_id, key, value FROM automation_state");
-    if (results.length === 0) return;
+    const rows = this.db.prepare("SELECT rule_id, key, value FROM automation_state").all() as Array<{ rule_id: string; key: string; value: string }>;
 
-    const { values } = results[0];
-    for (const row of values) {
-      const ruleId = row[0] as string;
-      const key = row[1] as string;
-      const raw = row[2] as string;
+    for (const row of rows) {
+      const ruleId = row.rule_id;
+      const key = row.key;
+      const raw = row.value;
 
       let parsed: unknown;
       try {
@@ -65,12 +62,10 @@ export class AutomationStateStore {
       return;
     }
 
-    this.db.run(
+    this.db.prepare(
       `INSERT INTO automation_state (rule_id, key, value) VALUES (?, ?, ?)
-       ON CONFLICT(rule_id, key) DO UPDATE SET value = excluded.value`,
-      [ruleId, key, serialized],
-    );
-    persistDatabase();
+       ON CONFLICT(rule_id, key) DO UPDATE SET value = excluded.value`
+    ).run(ruleId, key, serialized);
 
     if (!this.cache.has(ruleId)) {
       this.cache.set(ruleId, new Map());
@@ -80,8 +75,7 @@ export class AutomationStateStore {
 
   /** Delete a single key for a rule. */
   delete(ruleId: string, key: string): void {
-    this.db.run("DELETE FROM automation_state WHERE rule_id = ? AND key = ?", [ruleId, key]);
-    persistDatabase();
+    this.db.prepare("DELETE FROM automation_state WHERE rule_id = ? AND key = ?").run(ruleId, key);
 
     const ruleMap = this.cache.get(ruleId);
     if (ruleMap) {
@@ -92,8 +86,7 @@ export class AutomationStateStore {
 
   /** Delete all state entries for a rule (called on rule deletion). */
   deleteAll(ruleId: string): void {
-    this.db.run("DELETE FROM automation_state WHERE rule_id = ?", [ruleId]);
-    persistDatabase();
+    this.db.prepare("DELETE FROM automation_state WHERE rule_id = ?").run(ruleId);
     this.cache.delete(ruleId);
   }
 }

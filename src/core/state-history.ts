@@ -1,7 +1,6 @@
 // src/core/state-history.ts — Stores the last N state snapshots per device
 
-import type { Database } from "sql.js";
-import { persistDatabase } from "../db/database.js";
+import type { Database as DatabaseType } from "better-sqlite3";
 import logger from "../logger.js";
 
 export interface HistoryEntry {
@@ -15,7 +14,7 @@ export class StateHistory {
   private lastRecordTime = new Map<string, number>();
 
   constructor(
-    private db: Database,
+    private db: DatabaseType,
     private maxEntriesPerDevice: number = 100,
     private recordInterval: number = 5000,
   ) {}
@@ -33,17 +32,15 @@ export class StateHistory {
     }
 
     try {
-      this.db.run(
-        "INSERT INTO device_history (device_id, state, timestamp) VALUES (?, ?, ?)",
-        [deviceId, JSON.stringify(state), timestamp],
-      );
+      this.db.prepare(
+        "INSERT INTO device_history (device_id, state, timestamp) VALUES (?, ?, ?)"
+      ).run(deviceId, JSON.stringify(state), timestamp);
 
       this.lastRecordTime.set(deviceId, timestamp);
 
       // Prune oldest entries if we exceed the cap
       this.prune(deviceId);
 
-      persistDatabase();
       return true;
     } catch (err) {
       logger.error({ deviceId, error: (err as Error).message }, "Failed to record state history");
@@ -54,74 +51,61 @@ export class StateHistory {
   /** Get history for a device, newest first */
   getHistory(deviceId: string, limit?: number): HistoryEntry[] {
     const effectiveLimit = limit ?? 50;
-    const results = this.db.exec(
-      "SELECT device_id, state, timestamp FROM device_history WHERE device_id = ? ORDER BY timestamp DESC LIMIT ?",
-      [deviceId, effectiveLimit],
-    );
+    const rows = this.db.prepare(
+      "SELECT device_id, state, timestamp FROM device_history WHERE device_id = ? ORDER BY timestamp DESC LIMIT ?"
+    ).all(deviceId, effectiveLimit) as Array<{ device_id: string; state: string; timestamp: number }>;
 
-    return this.parseResults(results);
+    return rows.map((row) => ({
+      deviceId: row.device_id,
+      state: JSON.parse(row.state) as Record<string, unknown>,
+      timestamp: row.timestamp,
+    }));
   }
 
   /** Get history for a device within a time range, newest first */
   getHistoryRange(deviceId: string, from: number, to: number): HistoryEntry[] {
-    const results = this.db.exec(
-      "SELECT device_id, state, timestamp FROM device_history WHERE device_id = ? AND timestamp >= ? AND timestamp <= ? ORDER BY timestamp DESC",
-      [deviceId, from, to],
-    );
+    const rows = this.db.prepare(
+      "SELECT device_id, state, timestamp FROM device_history WHERE device_id = ? AND timestamp >= ? AND timestamp <= ? ORDER BY timestamp DESC"
+    ).all(deviceId, from, to) as Array<{ device_id: string; state: string; timestamp: number }>;
 
-    return this.parseResults(results);
+    return rows.map((row) => ({
+      deviceId: row.device_id,
+      state: JSON.parse(row.state) as Record<string, unknown>,
+      timestamp: row.timestamp,
+    }));
   }
 
   /** Delete oldest entries for a device when count exceeds maxEntriesPerDevice */
   private prune(deviceId: string): void {
-    this.db.run(
+    this.db.prepare(
       `DELETE FROM device_history WHERE id IN (
         SELECT id FROM device_history
         WHERE device_id = ?
         ORDER BY timestamp DESC
         LIMIT -1 OFFSET ?
-      )`,
-      [deviceId, this.maxEntriesPerDevice],
-    );
-  }
-
-  private parseResults(results: ReturnType<Database["exec"]>): HistoryEntry[] {
-    if (results.length === 0) return [];
-
-    const columns = results[0].columns;
-    const deviceIdIdx = columns.indexOf("device_id");
-    const stateIdx = columns.indexOf("state");
-    const timestampIdx = columns.indexOf("timestamp");
-
-    return results[0].values.map((row) => ({
-      deviceId: row[deviceIdIdx] as string,
-      state: JSON.parse(row[stateIdx] as string) as Record<string, unknown>,
-      timestamp: row[timestampIdx] as number,
-    }));
+      )`
+    ).run(deviceId, this.maxEntriesPerDevice);
   }
 
   /** Clear all history for a specific device */
   clearDevice(deviceId: string): number {
-    const countResult = this.db.exec(
-      "SELECT COUNT(*) as cnt FROM device_history WHERE device_id = ?",
-      [deviceId],
-    );
-    const deleted = countResult.length > 0 ? (countResult[0].values[0][0] as number) : 0;
+    const countRow = this.db.prepare(
+      "SELECT COUNT(*) as cnt FROM device_history WHERE device_id = ?"
+    ).get(deviceId) as { cnt: number };
+    const deleted = countRow.cnt;
 
-    this.db.run("DELETE FROM device_history WHERE device_id = ?", [deviceId]);
+    this.db.prepare("DELETE FROM device_history WHERE device_id = ?").run(deviceId);
     this.lastRecordTime.delete(deviceId);
-    persistDatabase();
     return deleted;
   }
 
   /** Clear all history for all devices */
   clearAll(): number {
-    const countResult = this.db.exec("SELECT COUNT(*) as cnt FROM device_history");
-    const deleted = countResult.length > 0 ? (countResult[0].values[0][0] as number) : 0;
+    const countRow = this.db.prepare("SELECT COUNT(*) as cnt FROM device_history").get() as { cnt: number };
+    const deleted = countRow.cnt;
 
-    this.db.run("DELETE FROM device_history");
+    this.db.prepare("DELETE FROM device_history").run();
     this.lastRecordTime.clear();
-    persistDatabase();
     return deleted;
   }
 }
