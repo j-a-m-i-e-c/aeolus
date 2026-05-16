@@ -1,6 +1,6 @@
 // frontend/src/pages/MqttSecurityPage.tsx — MQTT security level management page
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Shield, Loader2 } from "lucide-react";
 import { useMqttProvisioningStore } from "../store/mqtt-provisioning-store";
 import SecurityLevelSelector from "../components/mqtt/SecurityLevelSelector";
@@ -9,12 +9,13 @@ import DeviceCredentialList from "../components/mqtt/DeviceCredentialList";
 
 export default function MqttSecurityPage() {
   const { level, loading, fetchStatus } = useMqttProvisioningStore();
+  const [initialized, setInitialized] = useState(false);
 
   useEffect(() => {
-    fetchStatus();
-  }, [fetchStatus]);
+    fetchStatus().then(() => setInitialized(true));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (loading) {
+  if (!initialized && loading) {
     return (
       <div className="flex items-center justify-center py-12">
         <Loader2 size={20} className="animate-spin text-muted" />
