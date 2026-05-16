@@ -77,7 +77,7 @@ export function Sidebar() {
   const [dragOverTabId, setDragOverTabId] = useState<string | null>(null);
 
   // Derived tab lists — filtered by user permissions
-  const pinnedTabs = tabs.filter((t) => t.pinned && (isAdmin || hasTabAccess(t.id)) && (t.id !== "default-users" || isAdmin) && (t.id !== "default-mqtt-security" || isAdmin)).sort((a, b) => a.order - b.order);
+  const pinnedTabs = tabs.filter((t) => t.pinned && (isAdmin || hasTabAccess(t.id)) && (t.id !== "default-security" || isAdmin)).sort((a, b) => a.order - b.order);
   const customTabs = tabs.filter((t) => !t.pinned && (isAdmin || hasTabAccess(t.id))).sort((a, b) => a.order - b.order);
 
   // Route helpers
@@ -85,8 +85,7 @@ export function Sidebar() {
     "default-dashboard": "/dashboard",
     "default-connectors": "/connectors",
     "default-data-store": "/data-store",
-    "default-mqtt-security": "/mqtt-security",
-    "default-users": "/users",
+    "default-security": "/security",
   };
 
   const getTabRoute = (tab: { id: string; name: string; pinned: boolean }): string => {
@@ -126,7 +125,7 @@ export function Sidebar() {
   // ---- Add tab handlers ----
 
   const newTabSlug = tabNameToSlug(newTabName);
-  const RESERVED_SLUGS = new Set(["dashboard", "connectors", "data-store", "mqtt-security"]);
+  const RESERVED_SLUGS = new Set(["dashboard", "connectors", "data-store", "security"]);
   const existingSlugs = new Set(tabs.map((t) => tabNameToSlug(t.name)));
   const isNameTaken = !!newTabSlug && (existingSlugs.has(newTabSlug) || RESERVED_SLUGS.has(newTabSlug));
 
