@@ -70,6 +70,9 @@ async function main(): Promise<void> {
   // 2c. Ensure backend MQTT credential exists for authenticated broker access
   const mqttCredential = await ensureBackendCredential();
 
+  // Give Mosquitto a moment to reload the password file after SIGHUP
+  await new Promise((resolve) => setTimeout(resolve, 500));
+
   // 3. MQTT Service (with backend credential for broker authentication)
   const mqttBrokerUrl = new URL(config.mqttBrokerUrl);
   mqttBrokerUrl.username = mqttCredential.username;

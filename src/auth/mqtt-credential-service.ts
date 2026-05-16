@@ -3,6 +3,7 @@
 //             ensureBackendCredential, regeneratePasswordFile
 
 import crypto from "node:crypto";
+import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import bcrypt from "bcrypt";
@@ -51,7 +52,9 @@ function getPasswordFilePath(): string {
   if (process.env.MQTT_PASSWORD_FILE) {
     return process.env.MQTT_PASSWORD_FILE;
   }
-  return path.resolve("mosquitto", "password_file");
+  // In Docker, the project is mounted at AEOLUS_PROJECT_DIR
+  const projectDir = process.env.AEOLUS_PROJECT_DIR || process.cwd();
+  return path.resolve(projectDir, "mosquitto", "password_file");
 }
 
 /**
@@ -190,4 +193,26 @@ export function regeneratePasswordFile(): void {
   fs.writeFileSync(filePath, content + (content.length > 0 ? "\n" : ""), "utf-8");
 
   logger.info({ filePath, credentialCount: rows.length }, "Mosquitto password file regenerated");
+
+  // Signal Mosquitto to reload the password file
+  reloadMosquitto();
+}
+
+/**
+ * Send SIGHUP to the Mosquitto container to reload its password file.
+ * Uses the Docker socket (mounted at /var/run/docker.sock) via docker exec.
+ * Fails silently if the container isn't running or Docker isn't available.
+ */
+function reloadMosquitto(): void {
+  try {
+    execSync("docker kill --signal=SIGHUP aeolus-mosquitto", {
+      timeout: 5000,
+      stdio: "pipe",
+    });
+    logger.info("Sent SIGHUP to aeolus-mosquitto (password file reload)");
+  } catch {
+    // Not critical — Mosquitto may not be running yet (first startup)
+    // or we may not be in Docker. The file will be picked up on next restart.
+    logger.debug("Could not signal Mosquitto to reload password file (container may not be running)");
+  }
 }
