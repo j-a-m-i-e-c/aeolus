@@ -5,6 +5,7 @@ import { Cpu, HardDrive, MemoryStick, Thermometer, Wifi, Server, RefreshCw, Scro
 import { useDeviceStore } from "../store/device-store";
 import { useAuthStore } from "../store/auth-store";
 import { fetchHealth } from "../lib/api-client";
+import { authFetch } from "../lib/auth-fetch";
 import { UserManagementPage } from "../pages/UserManagementPage";
 import { GroupManagementPage } from "../pages/GroupManagementPage";
 import type { HealthStatus } from "../store/device-store";
@@ -72,8 +73,10 @@ export function SystemPage() {
 
   const fetchInfo = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/api/system`);
-      setInfo(await res.json());
+      const res = await authFetch(`${API_URL}/api/system`);
+      if (res.ok) {
+        setInfo(await res.json());
+      }
     } catch {}
     setLoading(false);
   }, []);
@@ -101,7 +104,7 @@ export function SystemPage() {
     if (forceRefresh) setCheckingVersion(true);
     setUpdateMsg("");
     try {
-      const res = await fetch(`${API_URL}/api/system/version${forceRefresh ? "?refresh=true" : ""}`);
+      const res = await authFetch(`${API_URL}/api/system/version${forceRefresh ? "?refresh=true" : ""}`);
       const data = await res.json();
       if (data.error && forceRefresh) {
         setUpdateMsg(data.error);
@@ -129,7 +132,7 @@ export function SystemPage() {
     setUpdating(true);
     setUpdateMsg("");
     try {
-      const res = await fetch(`${API_URL}/api/system/update`, { method: "POST" });
+      const res = await authFetch(`${API_URL}/api/system/update`, { method: "POST" });
       const data = await res.json();
       setUpdateMsg(data.message || "Update started — waiting for restart...");
 
@@ -146,10 +149,10 @@ export function SystemPage() {
         }
 
         try {
-          const healthRes = await fetch(`${API_URL}/api/health`, { signal: AbortSignal.timeout(2000) });
+          const healthRes = await authFetch(`${API_URL}/api/health`, { signal: AbortSignal.timeout(2000) });
           if (healthRes.ok) {
             // Backend is back — refresh the version cache so it doesn't show stale "update available"
-            await fetch(`${API_URL}/api/system/version?refresh=true`, { signal: AbortSignal.timeout(5000) }).catch(() => {});
+            await authFetch(`${API_URL}/api/system/version?refresh=true`, { signal: AbortSignal.timeout(5000) }).catch(() => {});
             window.location.reload();
             return;
           }
@@ -170,7 +173,7 @@ export function SystemPage() {
   const triggerShutdown = async () => {
     if (!confirm("Shut down the Pi? You will need physical access to turn it back on.")) return;
     try {
-      await fetch(`${API_URL}/api/system/shutdown`, { method: "POST" });
+      await authFetch(`${API_URL}/api/system/shutdown`, { method: "POST" });
       setUpdateMsg("Shutting down — the Pi will power off in a few seconds");
     } catch {
       setUpdateMsg("Failed to trigger shutdown");
@@ -180,7 +183,7 @@ export function SystemPage() {
   const triggerReboot = async () => {
     if (!confirm("Reboot the Pi? The dashboard will be unavailable for about a minute.")) return;
     try {
-      await fetch(`${API_URL}/api/system/reboot`, { method: "POST" });
+      await authFetch(`${API_URL}/api/system/reboot`, { method: "POST" });
       setUpdateMsg("Rebooting — refresh the page in about a minute");
     } catch {
       setUpdateMsg("Failed to trigger reboot");
@@ -438,7 +441,7 @@ export function SystemPage() {
                         if (!confirm(`Clean up ${formatBytes(info.docker!.reclaimable)} of Aeolus Docker storage?\n\nThis removes:\n• Old image layers from previous builds\n• Build cache (speeds up rebuilds but safe to clear)\n\nCurrently running containers are not affected. The next update may take slightly longer to rebuild.`)) return;
                         setPruning(true);
                         try {
-                          const res = await fetch(`${API_URL}/api/system/docker-prune`, { method: "POST" });
+                          const res = await authFetch(`${API_URL}/api/system/docker-prune`, { method: "POST" });
                           const data = await res.json();
                           if (data.docker) {
                             setInfo((prev) => prev ? { ...prev, docker: data.docker } : prev);
