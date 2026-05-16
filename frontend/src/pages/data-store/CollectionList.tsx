@@ -10,6 +10,7 @@ import {
   X,
 } from "lucide-react";
 import { useDataStoreStore } from "../../store/data-store-store";
+import { authFetch } from "../../lib/auth-fetch";
 
 const API_URL =
   import.meta.env.VITE_API_URL ||
@@ -34,7 +35,7 @@ export function CollectionList() {
     setCreating(true);
     setError(null);
     try {
-      const res = await fetch(`${API_URL}/api/data-store/collections`, {
+      const res = await authFetch(`${API_URL}/api/data-store/collections`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { GitBranch, Power, PowerOff, Zap, Loader2 } from "lucide-react";
 import type { PaneConfig } from "../../types/dashboard";
+import { authFetch } from "../../lib/auth-fetch";
 
 const API_URL = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:3001`;
 
@@ -32,7 +33,7 @@ export function AutomationCardPane({ config }: Props) {
   const fetchRule = useCallback(async () => {
     if (!ruleId) { setLoading(false); return; }
     try {
-      const res = await fetch(`${API_URL}/api/automations`);
+      const res = await authFetch(`${API_URL}/api/automations`);
       const rules = await res.json() as AutomationRule[];
       const found = rules.find((r) => r.id === ruleId);
       setRule(found ?? null);
@@ -46,7 +47,7 @@ export function AutomationCardPane({ config }: Props) {
     if (!rule) return;
     setToggling(true);
     try {
-      await fetch(`${API_URL}/api/automations/${rule.id}/toggle`, {
+      await authFetch(`${API_URL}/api/automations/${rule.id}/toggle`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled: !rule.enabled }),
@@ -60,7 +61,7 @@ export function AutomationCardPane({ config }: Props) {
     const name = triggerName || rule?.name?.toLowerCase().replace(/\s+/g, "-") || "manual";
     setFiring(true);
     try {
-      await fetch(`${API_URL}/api/services/trigger/${name}`, {
+      await authFetch(`${API_URL}/api/services/trigger/${name}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ruleId: rule?.id }),

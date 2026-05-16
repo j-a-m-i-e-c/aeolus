@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Zap, Loader2, Check } from "lucide-react";
 import type { PaneConfig } from "../../types/dashboard";
+import { authFetch } from "../../lib/auth-fetch";
 
 const API_URL = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:3001`;
 
@@ -22,7 +23,7 @@ export function TriggerButtonPane({ config }: Props) {
   const handleFire = async () => {
     setFiring(true);
     try {
-      await fetch(`${API_URL}/api/services/trigger/${triggerName}`, {
+      await authFetch(`${API_URL}/api/services/trigger/${triggerName}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload ?? {}),

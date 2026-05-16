@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Settings, AlertTriangle, Check } from "lucide-react";
 import { useDataStoreStore } from "../../store/data-store-store";
+import { authFetch } from "../../lib/auth-fetch";
 
 const API_URL =
   import.meta.env.VITE_API_URL ||
@@ -46,7 +47,7 @@ export function SettingsPanel() {
     setSaving(true);
     setError(null);
     try {
-      const res = await fetch(`${API_URL}/api/data-store/config`, {
+      const res = await authFetch(`${API_URL}/api/data-store/config`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

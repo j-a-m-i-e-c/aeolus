@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Search, Loader2, CheckCircle2 } from "lucide-react";
+import { authFetch } from "../../../lib/auth-fetch";
 
 const API_URL = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:3001`;
 
@@ -46,7 +47,7 @@ export function SearchLightsButton({ connectorId }: Props) {
     setCountdown(40);
 
     try {
-      const res = await fetch(`${API_URL}/api/connectors/${connectorId}/search-lights`, {
+      const res = await authFetch(`${API_URL}/api/connectors/${connectorId}/search-lights`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
       });
@@ -75,7 +76,7 @@ export function SearchLightsButton({ connectorId }: Props) {
       // Poll for status every 3 seconds
       pollRef.current = setInterval(async () => {
         try {
-          const statusRes = await fetch(
+          const statusRes = await authFetch(
             `${API_URL}/api/connectors/${connectorId}/search-lights/status`,
           );
           if (statusRes.ok) {
@@ -89,7 +90,7 @@ export function SearchLightsButton({ connectorId }: Props) {
               }
               // Trigger re-discovery so new lights appear in the UI
               try {
-                await fetch(`${API_URL}/api/connectors/${connectorId}/retry`, { method: "POST" });
+                await authFetch(`${API_URL}/api/connectors/${connectorId}/retry`, { method: "POST" });
               } catch {}
             }
           }

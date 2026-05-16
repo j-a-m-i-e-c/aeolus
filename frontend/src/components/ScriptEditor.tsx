@@ -3,6 +3,7 @@
 import { useRef, useEffect, useCallback } from "react";
 import Editor, { OnMount, OnChange } from "@monaco-editor/react";
 import type { editor } from "monaco-editor";
+import { authFetch } from "../lib/auth-fetch";
 
 const API_URL = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:3001`;
 
@@ -89,7 +90,7 @@ function defineAeolusDarkTheme(monaco: Parameters<OnMount>[1]) {
 /** Fetch sandbox type definitions and register them with Monaco TS service */
 async function loadTypeDefinitions(monaco: Parameters<OnMount>[1]) {
   try {
-    const res = await fetch(`${API_URL}/api/automations/types`);
+    const res = await authFetch(`${API_URL}/api/automations/types`);
     if (!res.ok) return;
     const types = await res.text();
     monaco.languages.typescript.typescriptDefaults.addExtraLib(

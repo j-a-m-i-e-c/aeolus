@@ -3,6 +3,7 @@
 import { useRef, useEffect, useCallback } from "react";
 import Editor, { OnMount, OnChange } from "@monaco-editor/react";
 import type { editor } from "monaco-editor";
+import { authFetch } from "../lib/auth-fetch";
 
 const API_URL = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:3001`;
 
@@ -97,7 +98,7 @@ export default React;`,
   );
 
   try {
-    const res = await fetch(`${API_URL}/api/automations/ui-types`);
+    const res = await authFetch(`${API_URL}/api/automations/ui-types`);
     if (!res.ok) return;
     const types = await res.text();
     monaco.languages.typescript.typescriptDefaults.addExtraLib(

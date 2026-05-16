@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { CheckCircle, XCircle, Clock } from "lucide-react";
+import { authFetch } from "../lib/auth-fetch";
 
 const API_URL = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:3001`;
 
@@ -37,7 +38,7 @@ export function ActivityFeed({ ruleId }: ActivityFeedProps) {
 
     const fetchHistory = async () => {
       try {
-        const res = await fetch(`${API_URL}/api/automations/history?ruleId=${ruleId}&limit=5`);
+        const res = await authFetch(`${API_URL}/api/automations/history?ruleId=${ruleId}&limit=5`);
         if (!res.ok) throw new Error("fetch failed");
         const data = await res.json();
         if (!cancelled) {

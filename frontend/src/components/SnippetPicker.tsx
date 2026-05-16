@@ -18,6 +18,7 @@ import {
   LayoutDashboard,
   X,
 } from "lucide-react";
+import { authFetch } from "../lib/auth-fetch";
 
 const API_URL =
   import.meta.env.VITE_API_URL ||
@@ -195,7 +196,7 @@ export function SnippetPicker({ onInsert, onClose, mode }: SnippetPickerProps) {
         const url = mode === "ui"
           ? `${API_URL}/api/automations/snippets?mode=ui`
           : `${API_URL}/api/automations/snippets`;
-        const res = await fetch(url);
+        const res = await authFetch(url);
         if (!res.ok) {
           // Fallback to hardcoded UI snippets if API fails
           if (mode === "ui" && !cancelled) {

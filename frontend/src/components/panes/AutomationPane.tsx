@@ -14,6 +14,7 @@ import {
   Blocks,
   BookOpen,
 } from "lucide-react";
+import { authFetch } from "../../lib/auth-fetch";
 import { ScriptEditor, type TranspileError } from "../ScriptEditor";
 import { UiEditor } from "../UiEditor";
 import { FlowDiagram } from "../FlowDiagram";
@@ -178,7 +179,7 @@ export function AutomationPane({ config, paneId }: Props) {
     setFetchError(null);
     setNotFound(false);
     try {
-      const res = await fetch(`${API_URL}/api/automations`);
+      const res = await authFetch(`${API_URL}/api/automations`);
       if (!res.ok) throw new Error("Failed to load automations");
       const rules: AutomationRule[] = await res.json();
       const found = rules.find((r) => r.id === ruleId);
@@ -198,7 +199,7 @@ export function AutomationPane({ config, paneId }: Props) {
   const fetchLastFired = useCallback(async () => {
     if (!ruleId) return;
     try {
-      const res = await fetch(
+      const res = await authFetch(
         `${API_URL}/api/automations/history?ruleId=${ruleId}&limit=1`,
       );
       if (!res.ok) return;
@@ -215,7 +216,7 @@ export function AutomationPane({ config, paneId }: Props) {
   const fetchExecutionHistory = useCallback(async () => {
     if (!ruleId) return;
     try {
-      const res = await fetch(
+      const res = await authFetch(
         `${API_URL}/api/automations/history?ruleId=${ruleId}&limit=10`,
       );
       if (!res.ok) return;
@@ -230,7 +231,7 @@ export function AutomationPane({ config, paneId }: Props) {
   const fetchInitialState = useCallback(async () => {
     if (!ruleId) return;
     try {
-      const res = await fetch(`${API_URL}/api/automations/${ruleId}/state`);
+      const res = await authFetch(`${API_URL}/api/automations/${ruleId}/state`);
       if (!res.ok) return;
       const state: Record<string, unknown> = await res.json();
       useAutomationStateStore.getState().initRuleState(ruleId, state);
@@ -253,7 +254,7 @@ export function AutomationPane({ config, paneId }: Props) {
     if (mode !== "status" || !ruleId) return;
     const interval = setInterval(async () => {
       try {
-        const res = await fetch(
+        const res = await authFetch(
           `${API_URL}/api/automations/history?ruleId=${ruleId}&limit=1`,
         );
         if (!res.ok) return;
@@ -274,7 +275,7 @@ export function AutomationPane({ config, paneId }: Props) {
     setSaving(true);
     setErrors([]);
     try {
-      const res = await fetch(`${API_URL}/api/automations`, {
+      const res = await authFetch(`${API_URL}/api/automations`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -311,7 +312,7 @@ export function AutomationPane({ config, paneId }: Props) {
     setSaving(true);
     setErrors([]);
     try {
-      const res = await fetch(`${API_URL}/api/automations/${ruleId}`, {
+      const res = await authFetch(`${API_URL}/api/automations/${ruleId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -352,7 +353,7 @@ export function AutomationPane({ config, paneId }: Props) {
     // Optimistic update
     setRule({ ...rule, enabled: newEnabled });
     try {
-      const res = await fetch(`${API_URL}/api/automations/${rule.id}/toggle`, {
+      const res = await authFetch(`${API_URL}/api/automations/${rule.id}/toggle`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled: newEnabled }),
@@ -373,7 +374,7 @@ export function AutomationPane({ config, paneId }: Props) {
     if (!rule || firing) return;
     setFiring(true);
     try {
-      await fetch(`${API_URL}/api/automations/${rule.id}/fire`, {
+      await authFetch(`${API_URL}/api/automations/${rule.id}/fire`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({}),
@@ -429,7 +430,7 @@ export function AutomationPane({ config, paneId }: Props) {
   // Device action helper for custom components
   const deviceAction = useCallback(
     async (deviceId: string, actionType: string, params?: Record<string, unknown>) => {
-      await fetch(`${API_URL}/api/devices/${deviceId}/action`, {
+      await authFetch(`${API_URL}/api/devices/${deviceId}/action`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ type: actionType, params }),
@@ -440,7 +441,7 @@ export function AutomationPane({ config, paneId }: Props) {
 
   // MQTT publish helper for custom components
   const mqttPublish = useCallback((topic: string, payload: string) => {
-    fetch(`${API_URL}/api/mqtt/publish`, {
+    authFetch(`${API_URL}/api/mqtt/publish`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ topic, payload }),

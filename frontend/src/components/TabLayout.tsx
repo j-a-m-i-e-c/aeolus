@@ -12,6 +12,7 @@ import { PanePicker } from "./PanePicker";
 import { PaneConfigPanel } from "./PaneConfigPanel";
 import { motion } from "framer-motion";
 import { useTabPermission } from "../hooks/useTabPermission";
+import { authFetch } from "../lib/auth-fetch";
 
 const API_URL =
   import.meta.env.VITE_API_URL ||
@@ -97,7 +98,7 @@ export function TabLayout({ tabId }: TabLayoutProps) {
       const pane = tabPanes.find((p) => p.id === paneId);
       if (pane?.paneType === "automation" && pane.config.ruleId) {
         // Fire-and-forget DELETE for the linked automation rule
-        fetch(`${API_URL}/api/automations/${pane.config.ruleId}`, {
+        authFetch(`${API_URL}/api/automations/${pane.config.ruleId}`, {
           method: "DELETE",
         }).catch(() => {
           // Do not block removal on failure

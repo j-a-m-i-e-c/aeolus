@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { Database, HardDrive, Settings, Check, Info, Cpu } from "lucide-react";
 import { useDataStoreStore } from "../../store/data-store-store";
+import { authFetch } from "../../lib/auth-fetch";
 
 // ---- Types ----
 
@@ -43,7 +44,7 @@ const API_URL =
   `http://${window.location.hostname}:3001`;
 
 async function enableDataStore(config: ConfigFormValues): Promise<void> {
-  const res = await fetch(`${API_URL}/api/data-store/enable`, {
+  const res = await authFetch(`${API_URL}/api/data-store/enable`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -83,7 +84,7 @@ export function SetupWizard() {
   useEffect(() => {
     async function loadSystemInfo() {
       try {
-        const res = await fetch(`${API_URL}/api/data-store/stats`);
+        const res = await authFetch(`${API_URL}/api/data-store/stats`);
         if (res.ok) {
           const stats = await res.json();
           if (stats.estimatedStorageMb !== undefined) {

@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { CalendarClock, Search, Play, Loader2 } from "lucide-react";
 import type { PaneConfig } from "../../types/dashboard";
 import { describeCron } from "../../lib/cron-utils";
+import { authFetch } from "../../lib/auth-fetch";
 
 const API_URL = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:3001`;
 
@@ -33,7 +34,7 @@ export function ScheduleViewerPane({ config }: Props) {
 
   const fetchAutomations = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/api/automations`);
+      const res = await authFetch(`${API_URL}/api/automations`);
       if (!res.ok) throw new Error("Failed to fetch automations");
       const data: Automation[] = await res.json();
       const cronAutomations = data.filter((a) => a.triggerType === "cron");
@@ -45,7 +46,7 @@ export function ScheduleViewerPane({ config }: Props) {
       await Promise.all(
         cronAutomations.map(async (a) => {
           try {
-            const hRes = await fetch(`${API_URL}/api/automations/history?ruleId=${a.id}&limit=1`);
+            const hRes = await authFetch(`${API_URL}/api/automations/history?ruleId=${a.id}&limit=1`);
             if (hRes.ok) {
               const history = await hRes.json();
               historyMap[a.id] = Array.isArray(history) && history.length > 0
@@ -76,7 +77,7 @@ export function ScheduleViewerPane({ config }: Props) {
   const handleFire = async (id: string) => {
     setFiringIds((prev) => new Set(prev).add(id));
     try {
-      await fetch(`${API_URL}/api/automations/${id}/fire`, { method: "POST" });
+      await authFetch(`${API_URL}/api/automations/${id}/fire`, { method: "POST" });
     } catch {}
     setTimeout(() => {
       setFiringIds((prev) => {
@@ -91,7 +92,7 @@ export function ScheduleViewerPane({ config }: Props) {
   const handleToggle = async (id: string, currentEnabled: boolean) => {
     setTogglingIds((prev) => new Set(prev).add(id));
     try {
-      await fetch(`${API_URL}/api/automations/${id}/toggle`, {
+      await authFetch(`${API_URL}/api/automations/${id}/toggle`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled: !currentEnabled }),

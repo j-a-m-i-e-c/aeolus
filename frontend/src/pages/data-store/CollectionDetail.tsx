@@ -12,6 +12,7 @@ import {
 import { useDataStoreStore } from "../../store/data-store-store";
 import { TimeSeriesChart } from "./TimeSeriesChart";
 import { RecordTable } from "./RecordTable";
+import { authFetch } from "../../lib/auth-fetch";
 
 const API_URL =
   import.meta.env.VITE_API_URL ||
@@ -72,7 +73,7 @@ export function CollectionDetail() {
   const handleSaveEdit = async () => {
     setSaving(true);
     try {
-      const res = await fetch(
+      const res = await authFetch(
         `${API_URL}/api/data-store/collections/${encodeURIComponent(selectedCollection)}`,
         {
           method: "PATCH",
@@ -99,7 +100,7 @@ export function CollectionDetail() {
   const handleDelete = async () => {
     setDeleting(true);
     try {
-      const res = await fetch(
+      const res = await authFetch(
         `${API_URL}/api/data-store/collections/${encodeURIComponent(selectedCollection)}`,
         { method: "DELETE" },
       );

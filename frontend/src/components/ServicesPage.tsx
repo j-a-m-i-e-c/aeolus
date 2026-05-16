@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import * as icons from "lucide-react";
 import { RefreshCw, Power, PowerOff, RotateCcw, Loader2, Plus, Trash2 } from "lucide-react";
+import { authFetch } from "../lib/auth-fetch";
 
 const API_URL = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:3001`;
 
@@ -297,8 +298,8 @@ export function ServicesPage() {
   const refresh = useCallback(async () => {
     try {
       const [availRes, enRes] = await Promise.all([
-        fetch(`${API_URL}/api/services/available`).then((r) => r.json()),
-        fetch(`${API_URL}/api/services`).then((r) => r.json()),
+        authFetch(`${API_URL}/api/services/available`).then((r) => r.json()),
+        authFetch(`${API_URL}/api/services`).then((r) => r.json()),
       ]);
       setAvailable(availRes as ServiceType[]);
       setEnabled(enRes as EnabledService[]);
@@ -330,7 +331,7 @@ export function ServicesPage() {
       if (configuringType === "cron") {
         finalConfig.schedules = cronSchedules;
       }
-      await fetch(`${API_URL}/api/services`, {
+      await authFetch(`${API_URL}/api/services`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ service_type: configuringType, config: finalConfig }),
@@ -346,7 +347,7 @@ export function ServicesPage() {
   const handleDisable = async (id: string) => {
     setActionLoading(id);
     try {
-      await fetch(`${API_URL}/api/services/${id}`, { method: "DELETE" });
+      await authFetch(`${API_URL}/api/services/${id}`, { method: "DELETE" });
       await refresh();
     } catch {}
     setActionLoading(null);
@@ -355,7 +356,7 @@ export function ServicesPage() {
   const handleRetry = async (id: string) => {
     setActionLoading(id);
     try {
-      await fetch(`${API_URL}/api/services/${id}/retry`, { method: "POST" });
+      await authFetch(`${API_URL}/api/services/${id}/retry`, { method: "POST" });
       await refresh();
     } catch {}
     setActionLoading(null);

@@ -13,6 +13,7 @@ import {
   Pencil,
 } from "lucide-react";
 import { ScriptEditor, type TranspileError } from "./ScriptEditor";
+import { authFetch } from "../lib/auth-fetch";
 
 const API_URL =
   import.meta.env.VITE_API_URL ||
@@ -76,7 +77,7 @@ export function AutomationsPage() {
 
   const fetchRules = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/api/automations`);
+      const res = await authFetch(`${API_URL}/api/automations`);
       setRules(await res.json());
     } catch {}
   }, []);
@@ -171,7 +172,7 @@ export function AutomationsPage() {
     if (!form.name || !form.triggerTopic) return;
     const { actionTarget, actionParams } = buildActionFields();
     try {
-      await fetch(`${API_URL}/api/automations`, {
+      await authFetch(`${API_URL}/api/automations`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -201,7 +202,7 @@ export function AutomationsPage() {
     const method = isEditing ? "PUT" : "POST";
 
     try {
-      const res = await fetch(url, {
+      const res = await authFetch(url, {
         method,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -227,12 +228,12 @@ export function AutomationsPage() {
   };
 
   const deleteRule = async (id: string) => {
-    await fetch(`${API_URL}/api/automations/${id}`, { method: "DELETE" });
+    await authFetch(`${API_URL}/api/automations/${id}`, { method: "DELETE" });
     fetchRules();
   };
 
   const toggleRule = async (id: string, enabled: boolean) => {
-    await fetch(`${API_URL}/api/automations/${id}/toggle`, {
+    await authFetch(`${API_URL}/api/automations/${id}/toggle`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ enabled }),
