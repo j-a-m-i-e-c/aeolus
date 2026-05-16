@@ -67,18 +67,12 @@ async function main(): Promise<void> {
   // 2b. State History
   const stateHistory = new StateHistory(db, config.stateHistoryMax, config.historyRecordInterval);
 
-  // 2c. Ensure backend MQTT credential exists for authenticated broker access
-  const mqttCredential = await ensureBackendCredential();
+  // 2c. Ensure backend MQTT credential exists (for future use when anonymous is disabled)
+  await ensureBackendCredential();
 
-  // Give Mosquitto a moment to reload the password file after SIGHUP
-  await new Promise((resolve) => setTimeout(resolve, 500));
-
-  // 3. MQTT Service (with backend credential for broker authentication)
-  const mqttBrokerUrl = new URL(config.mqttBrokerUrl);
-  mqttBrokerUrl.username = mqttCredential.username;
-  mqttBrokerUrl.password = mqttCredential.password;
+  // 3. MQTT Service
   const mqttService = new MqttService(
-    { brokerUrl: mqttBrokerUrl.toString(), topics: config.mqttTopics },
+    { brokerUrl: config.mqttBrokerUrl, topics: config.mqttTopics },
     eventBus
   );
 
