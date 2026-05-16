@@ -7,7 +7,6 @@ services:
       - "${MQTT_PORT:-1883}:1883"
     volumes:
       - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf
-      - ./mosquitto/password_file:/mosquitto/password_file
       - mosquitto_data:/mosquitto/data
       - mosquitto_log:/mosquitto/log
     logging:
