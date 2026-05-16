@@ -4,9 +4,11 @@ import { AeolusLogo } from "./AeolusLogo";
 import { useDeviceStore } from "../store/device-store";
 import { useDashboardStore, tabNameToSlug } from "../store/dashboard-store";
 import { useDataStoreStore } from "../store/data-store-store";
+import { useAuthStore } from "../store/auth-store";
+import { usePermissionsStore } from "../store/permissions-store";
 import { useNavigate, useLocation } from "react-router-dom";
 import * as icons from "lucide-react";
-import { Plus, Trash2, GripVertical } from "lucide-react";
+import { Plus, Trash2, GripVertical, LogOut } from "lucide-react";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { fetchHealth } from "../lib/api-client";
 import type { HealthStatus } from "../store/device-store";
@@ -46,6 +48,12 @@ export function Sidebar() {
   const navigate = useNavigate();
   const location = useLocation();
 
+  // Auth state
+  const user = useAuthStore((s) => s.user);
+  const logout = useAuthStore((s) => s.logout);
+  const isAdmin = user?.role === "admin";
+  const hasTabAccess = usePermissionsStore((s) => s.hasTabAccess);
+
   // Fetch data store config once on mount so the sidebar dot is accurate
   useEffect(() => { fetchDataStoreConfig(); }, [fetchDataStoreConfig]);  const tabs = useDashboardStore((s) => s.tabs);
   const addTab = useDashboardStore((s) => s.addTab);
@@ -68,9 +76,9 @@ export function Sidebar() {
   const [dragTabId, setDragTabId] = useState<string | null>(null);
   const [dragOverTabId, setDragOverTabId] = useState<string | null>(null);
 
-  // Derived tab lists
-  const pinnedTabs = tabs.filter((t) => t.pinned).sort((a, b) => a.order - b.order);
-  const customTabs = tabs.filter((t) => !t.pinned).sort((a, b) => a.order - b.order);
+  // Derived tab lists — filtered by user permissions
+  const pinnedTabs = tabs.filter((t) => t.pinned && (isAdmin || hasTabAccess(t.id))).sort((a, b) => a.order - b.order);
+  const customTabs = tabs.filter((t) => !t.pinned && (isAdmin || hasTabAccess(t.id))).sort((a, b) => a.order - b.order);
 
   // Route helpers
   const PINNED_ROUTES: Record<string, string> = {
@@ -239,15 +247,15 @@ export function Sidebar() {
           isActive ? "bg-elevated text-[#E6EDF3]" : "text-[#6B7785] hover:text-[#9AA6B2] hover:bg-elevated/50"
         } ${isDragOver ? "border border-primary/50" : ""} ${dragTabId === tab.id ? "opacity-50" : ""}`}
         onClick={() => navigate(getTabRoute(tab))}
-        onDoubleClick={!isPinned ? () => startRename(tab.id, tab.name) : undefined}
-        draggable={!isPinned}
-        onDragStart={!isPinned ? (e) => handleDragStart(e, tab.id) : undefined}
-        onDragOver={!isPinned ? (e) => handleDragOver(e, tab.id) : undefined}
-        onDrop={!isPinned ? (e) => handleDrop(e, tab.id) : undefined}
-        onDragEnd={!isPinned ? handleDragEnd : undefined}
+        onDoubleClick={!isPinned && isAdmin ? () => startRename(tab.id, tab.name) : undefined}
+        draggable={!isPinned && isAdmin}
+        onDragStart={!isPinned && isAdmin ? (e) => handleDragStart(e, tab.id) : undefined}
+        onDragOver={!isPinned && isAdmin ? (e) => handleDragOver(e, tab.id) : undefined}
+        onDrop={!isPinned && isAdmin ? (e) => handleDrop(e, tab.id) : undefined}
+        onDragEnd={!isPinned && isAdmin ? handleDragEnd : undefined}
       >
-        {/* Drag handle for custom tabs */}
-        {!isPinned && (
+        {/* Drag handle for custom tabs — admin only */}
+        {!isPinned && isAdmin && (
           <GripVertical size={12} className="text-[#6B7785] opacity-0 group-hover:opacity-100 transition-opacity shrink-0 cursor-grab" />
         )}
 
@@ -273,8 +281,8 @@ export function Sidebar() {
           <span className="flex-1 truncate">{tab.name}</span>
         )}
 
-        {/* Delete button for custom tabs */}
-        {!isPinned && !isRenaming && (
+        {/* Delete button for custom tabs — admin only */}
+        {!isPinned && !isRenaming && isAdmin && (
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -310,8 +318,8 @@ export function Sidebar() {
       <nav className="flex flex-col gap-1 flex-1 overflow-y-auto min-h-0">
         {customTabs.map((tab) => tabButton(tab, false))}
 
-        {/* Add Tab button / inline form */}
-        {showAddForm ? (
+        {/* Add Tab button / inline form — admin only */}
+        {isAdmin && (showAddForm ? (
           <div className="flex flex-col gap-2 px-2 py-2 rounded-lg bg-elevated">
             <input
               ref={addNameRef}
@@ -369,7 +377,7 @@ export function Sidebar() {
             <Plus size={16} />
             Add Tab
           </button>
-        )}
+        ))}
       </nav>
 
       {/* System status — pinned to bottom */}
@@ -390,6 +398,22 @@ export function Sidebar() {
           </div>
           WebSocket {wsConnected ? "Live" : "Offline"}
         </div>
+
+        {/* User info and logout */}
+        {user && (
+          <div className="flex items-center justify-between pt-2 border-t border-[#2A3441]">
+            <span className="text-xs text-[#9AA6B2] truncate">
+              {user.username} {isAdmin && <span className="text-[#3BA4FF]">(admin)</span>}
+            </span>
+            <button
+              onClick={() => logout()}
+              className="text-[#6B7785] hover:text-[#EF4444] transition-colors shrink-0"
+              title="Sign out"
+            >
+              <LogOut size={14} />
+            </button>
+          </div>
+        )}
       </div>
     </aside>
   );

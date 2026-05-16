@@ -6,6 +6,7 @@ import type { ConnectorManager } from "../../connectors/connector-manager.js";
 import type { StateHistory } from "../../core/state-history.js";
 import { NotFoundError } from "../middleware/error-handler.js";
 import { validateAction } from "../middleware/validators.js";
+import { requireTabPermission } from "../../auth/auth-middleware.js";
 import logger from "../../logger.js";
 
 export function createDeviceRoutes(
@@ -82,7 +83,7 @@ export function createDeviceRoutes(
   });
 
   /** POST /api/devices/:id/action — execute action on device */
-  router.post("/:id/action", validateAction, async (req, res, next) => {
+  router.post("/:id/action", requireTabPermission("interact"), validateAction, async (req, res, next) => {
     try {
       const id = req.params.id as string;
       const device = registry.getById(id);

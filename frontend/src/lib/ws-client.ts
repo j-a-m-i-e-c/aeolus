@@ -3,6 +3,7 @@
 import { useDeviceStore } from "../store/device-store";
 import { useAutomationStateStore } from "../store/automation-state-store";
 import { useDataStoreStore } from "../store/data-store-store";
+import { useAuthStore } from "../store/auth-store";
 
 const WS_URL = import.meta.env.VITE_WS_URL || `ws://${window.location.hostname}:3001/ws`;
 const RECONNECT_DELAY = 3000;
@@ -13,7 +14,10 @@ let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 export function connectWebSocket(): void {
   if (ws?.readyState === WebSocket.OPEN) return;
 
-  ws = new WebSocket(WS_URL);
+  const { accessToken } = useAuthStore.getState();
+  const url = accessToken ? `${WS_URL}?token=${encodeURIComponent(accessToken)}` : WS_URL;
+
+  ws = new WebSocket(url);
 
   ws.onopen = () => {
     useDeviceStore.getState().setWsConnected(true);

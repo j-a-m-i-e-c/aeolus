@@ -3,13 +3,14 @@
 import { Router } from "express";
 import type { MqttService } from "../../mqtt/mqtt-service.js";
 import { BadRequestError } from "../middleware/error-handler.js";
+import { requireTabPermission } from "../../auth/auth-middleware.js";
 import logger from "../../logger.js";
 
 export function createMqttRoutes(mqttService: MqttService): Router {
   const router = Router();
 
   /** POST /api/mqtt/publish — publish a message to the MQTT broker */
-  router.post("/publish", (req, res, next) => {
+  router.post("/publish", requireTabPermission("interact"), (req, res, next) => {
     try {
       const { topic, payload } = req.body;
 

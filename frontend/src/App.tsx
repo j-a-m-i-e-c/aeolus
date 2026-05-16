@@ -1,4 +1,4 @@
-// frontend/src/App.tsx — Main application component with client-side routing
+// frontend/src/App.tsx — Main application component with client-side routing and auth guard
 
 import { useEffect, useState } from "react";
 import { Routes, Route, Navigate, useParams } from "react-router-dom";
@@ -11,11 +11,15 @@ import { DataStorePage } from "./pages/DataStorePage";
 import { SystemPage } from "./components/SystemPage";
 import { TabLayout } from "./components/TabLayout";
 import { WelcomeScreen } from "./components/WelcomeScreen";
+import { LoginPage } from "./pages/LoginPage";
+import { SetupPage } from "./pages/SetupPage";
 import { AnimatePresence } from "framer-motion";
 import { connectWebSocket, disconnectWebSocket } from "./lib/ws-client";
 import { fetchDevices } from "./lib/api-client";
 import { useDeviceStore } from "./store/device-store";
 import { useDashboardStore, tabNameToSlug } from "./store/dashboard-store";
+import { useAuthStore } from "./store/auth-store";
+import { usePermissionsStore } from "./store/permissions-store";
 import type { Device } from "./store/device-store";
 
 // ---------------------------------------------------------------------------
@@ -60,16 +64,18 @@ function CustomTabPage() {
 }
 
 // ---------------------------------------------------------------------------
-// App
+// Authenticated App — shown when user is logged in
 // ---------------------------------------------------------------------------
 
-export default function App() {
+function AuthenticatedApp() {
   const setDevices = useDeviceStore((s) => s.setDevices);
   const initialized = useDashboardStore((s) => s.initialized);
   const initialize = useDashboardStore((s) => s.initialize);
+  const fetchPermissions = usePermissionsStore((s) => s.fetchPermissions);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
 
   useEffect(() => { initialize(); }, [initialize]);
+  useEffect(() => { fetchPermissions(); }, [fetchPermissions]);
 
   useEffect(() => {
     fetchDevices()
@@ -121,4 +127,41 @@ export default function App() {
       <CommandPalette onSelectDevice={setSelectedDeviceId} />
     </Layout>
   );
+}
+
+// ---------------------------------------------------------------------------
+// App — auth routing guard
+// ---------------------------------------------------------------------------
+
+export default function App() {
+  const loading = useAuthStore((s) => s.loading);
+  const needsSetup = useAuthStore((s) => s.needsSetup);
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const checkSetupNeeded = useAuthStore((s) => s.checkSetupNeeded);
+
+  useEffect(() => {
+    checkSetupNeeded();
+  }, [checkSetupNeeded]);
+
+  // Show loading spinner while checking auth state
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#0B0F14]">
+        <div className="text-[#6B7785] text-sm animate-pulse">Loading…</div>
+      </div>
+    );
+  }
+
+  // First-run setup — no admin exists
+  if (needsSetup) {
+    return <SetupPage />;
+  }
+
+  // Not authenticated — show login
+  if (!isAuthenticated) {
+    return <LoginPage />;
+  }
+
+  // Authenticated — show the full dashboard
+  return <AuthenticatedApp />;
 }

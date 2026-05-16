@@ -11,6 +11,7 @@ import { Settings, X, Plus, Zap } from "lucide-react";
 import { PanePicker } from "./PanePicker";
 import { PaneConfigPanel } from "./PaneConfigPanel";
 import { motion } from "framer-motion";
+import { useTabPermission } from "../hooks/useTabPermission";
 
 const API_URL =
   import.meta.env.VITE_API_URL ||
@@ -25,6 +26,9 @@ export function TabLayout({ tabId }: TabLayoutProps) {
   const updatePanePosition = useDashboardStore((s) => s.updatePanePosition);
   const updatePaneSize = useDashboardStore((s) => s.updatePaneSize);
   const removePane = useDashboardStore((s) => s.removePane);
+
+  // Permission-based controls
+  const { canInteract, canWrite } = useTabPermission(tabId);
 
   // PanePicker visibility
   const [showPicker, setShowPicker] = useState(false);
@@ -106,7 +110,8 @@ export function TabLayout({ tabId }: TabLayoutProps) {
 
   return (
     <div ref={containerRef} className="w-full">
-      {/* Header area with New Automation Pane + Browse Panes buttons */}
+      {/* Header area with New Automation Pane + Browse Panes buttons — write permission required */}
+      {canWrite && (
       <div className="flex items-center justify-end gap-2 px-4 py-2">
         <motion.button
           whileHover={{ scale: 1.02 }}
@@ -128,6 +133,7 @@ export function TabLayout({ tabId }: TabLayoutProps) {
           Browse Panes
         </button>
       </div>
+      )}
 
       {/* PanePicker modal */}
       {showPicker && (
@@ -142,8 +148,8 @@ export function TabLayout({ tabId }: TabLayoutProps) {
         cols={{ lg: 12, md: 12, sm: 6, xs: 4, xxs: 2 }}
         rowHeight={60}
         onLayoutChange={handleLayoutChange}
-        dragConfig={{ enabled: true, handle: ".pane-drag-handle" }}
-        resizeConfig={{ enabled: true, handles: ["se"] }}
+        dragConfig={{ enabled: canWrite, handle: ".pane-drag-handle" }}
+        resizeConfig={{ enabled: canWrite, handles: ["se"] }}
         compactor={verticalCompactor}
       >
         {tabPanes.map((pane) => {
@@ -155,10 +161,11 @@ export function TabLayout({ tabId }: TabLayoutProps) {
               className="relative bg-surface border border-[#2A3441] rounded-xl overflow-hidden flex flex-col"
             >
               {/* Header bar */}
-              <div className="pane-drag-handle flex items-center justify-between px-3 py-2 border-b border-[#2A3441] cursor-grab bg-elevated/50">
+              <div className={`pane-drag-handle flex items-center justify-between px-3 py-2 border-b border-[#2A3441] ${canWrite ? "cursor-grab" : "cursor-default"} bg-elevated/50`}>
                 <span className="text-xs font-medium text-[#9AA6B2] truncate select-none">
                   {(pane.config.ruleName as string) || entry?.displayName || pane.paneType}
                 </span>
+                {canWrite && (
                 <div className="flex items-center gap-1 shrink-0">
                   <button
                     className="p-1 rounded text-[#6B7785] hover:text-[#9AA6B2] hover:bg-elevated transition-colors"
@@ -177,10 +184,11 @@ export function TabLayout({ tabId }: TabLayoutProps) {
                     <X size={13} />
                   </button>
                 </div>
+                )}
               </div>
 
-              {/* Pane content */}
-              <div className="flex-1 overflow-auto p-2">
+              {/* Pane content — wrapped with read-only overlay for read permission */}
+              <div className={`flex-1 overflow-auto p-2 ${!canInteract ? "pointer-events-none opacity-75" : ""}`}>
                 {entry ? (
                   <entry.component config={pane.config} paneId={pane.id} />
                 ) : (
@@ -190,7 +198,8 @@ export function TabLayout({ tabId }: TabLayoutProps) {
                 )}
               </div>
 
-              {/* Resize grip indicator */}
+              {/* Resize grip indicator — only shown for write permission */}
+              {canWrite && (
               <div className="absolute bottom-1 right-1 text-[#2A3441] hover:text-[#6B7785] transition-colors pointer-events-none">
                 <svg width="12" height="12" viewBox="0 0 12 12">
                   <circle cx="9" cy="9" r="1.5" fill="currentColor" />
@@ -198,6 +207,7 @@ export function TabLayout({ tabId }: TabLayoutProps) {
                   <circle cx="9" cy="5" r="1.5" fill="currentColor" />
                 </svg>
               </div>
+              )}
             </div>
           );
         })}

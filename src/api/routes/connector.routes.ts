@@ -4,6 +4,7 @@ import { Router } from "express";
 import type { ConnectorManager } from "../../connectors/connector-manager.js";
 import type { ConnectorRegistry } from "../../connectors/connector-registry.js";
 import { BadRequestError, NotFoundError } from "../middleware/error-handler.js";
+import { requireAdmin } from "../../auth/auth-middleware.js";
 import logger from "../../logger.js";
 
 /**
@@ -38,7 +39,7 @@ export function createConnectorRoutes(
   });
 
   /** POST /api/connectors — enable a new connector instance */
-  router.post("/", async (req, res, next) => {
+  router.post("/", requireAdmin, async (req, res, next) => {
     try {
       const { connector_type, config } = req.body;
 
@@ -64,9 +65,9 @@ export function createConnectorRoutes(
   });
 
   /** PATCH /api/connectors/:id — update connector config */
-  router.patch("/:id", async (req, res, next) => {
+  router.patch("/:id", requireAdmin, async (req, res, next) => {
     try {
-      const { id } = req.params;
+      const id = req.params.id as string;
       const { config } = req.body;
 
       await connectorManager.updateConfig(id, config ?? {});
@@ -77,9 +78,9 @@ export function createConnectorRoutes(
   });
 
   /** DELETE /api/connectors/:id — disable a connector */
-  router.delete("/:id", async (req, res, next) => {
+  router.delete("/:id", requireAdmin, async (req, res, next) => {
     try {
-      const { id } = req.params;
+      const id = req.params.id as string;
       await connectorManager.disable(id);
       res.json({ success: true });
     } catch (err) {
@@ -88,8 +89,8 @@ export function createConnectorRoutes(
   });
 
   /** GET /api/connectors/:id/setup-steps — get setup step descriptors for a connector instance */
-  router.get("/:id/setup-steps", (req, res) => {
-    const { id } = req.params;
+  router.get("/:id/setup-steps", requireAdmin, (req, res) => {
+    const id = req.params.id as string;
     const instance = connectorManager.getStatus(id);
     if (!instance) {
       res.status(404).json({ error: `Connector instance '${id}' not found` });
@@ -101,7 +102,7 @@ export function createConnectorRoutes(
 
   /** GET /api/connectors/:id/status — get connector health status */
   router.get("/:id/status", (req, res) => {
-    const { id } = req.params;
+    const id = req.params.id as string;
     const status = connectorManager.getStatus(id);
 
     if (!status) {
@@ -113,9 +114,10 @@ export function createConnectorRoutes(
   });
 
   /** POST /api/connectors/:id/setup/:stepId — execute a setup step */
-  router.post("/:id/setup/:stepId", async (req, res, next) => {
+  router.post("/:id/setup/:stepId", requireAdmin, async (req, res, next) => {
     try {
-      const { id, stepId } = req.params;
+      const id = req.params.id as string;
+      const stepId = req.params.stepId as string;
       const params = req.body ?? {};
 
       const result = await connectorManager.executeSetupStep(id, stepId, params);
@@ -126,9 +128,9 @@ export function createConnectorRoutes(
   });
 
   /** POST /api/connectors/:id/retry — retry connection */
-  router.post("/:id/retry", async (req, res, next) => {
+  router.post("/:id/retry", requireAdmin, async (req, res, next) => {
     try {
-      const { id } = req.params;
+      const id = req.params.id as string;
       await connectorManager.retry(id);
       res.json({ success: true });
     } catch (err) {
@@ -139,7 +141,7 @@ export function createConnectorRoutes(
   /** POST /api/connectors/:id/search-lights — start Zigbee light search */
   router.post("/:id/search-lights", async (req, res, next) => {
     try {
-      const { id } = req.params;
+      const id = req.params.id as string;
       const status = connectorManager.getStatus(id);
       if (!status) {
         throw new NotFoundError(`Connector instance '${id}' not found`);
@@ -162,7 +164,7 @@ export function createConnectorRoutes(
   /** GET /api/connectors/:id/search-lights/status — get search progress */
   router.get("/:id/search-lights/status", (req, res, next) => {
     try {
-      const { id } = req.params;
+      const id = req.params.id as string;
       const status = connectorManager.getStatus(id);
       if (!status) {
         throw new NotFoundError(`Connector instance '${id}' not found`);

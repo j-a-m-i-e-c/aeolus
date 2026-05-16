@@ -118,6 +118,66 @@ export function initSchema(database: DatabaseType): void {
     CREATE INDEX IF NOT EXISTS idx_device_history_device_ts
     ON device_history(device_id, timestamp DESC);
   `);
+
+  // Auth tables
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS groups (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      created_at INTEGER NOT NULL
+    );
+  `);
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      username TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'user' CHECK(role IN ('admin', 'user')),
+      group_id TEXT REFERENCES groups(id) ON DELETE SET NULL,
+      created_at INTEGER NOT NULL
+    );
+  `);
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS group_tab_assignments (
+      group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+      tab_id TEXT NOT NULL,
+      permission TEXT NOT NULL CHECK(permission IN ('read', 'interact', 'write')),
+      PRIMARY KEY (group_id, tab_id)
+    );
+  `);
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS refresh_tokens (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      token_hash TEXT NOT NULL UNIQUE,
+      expires_at INTEGER NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+  `);
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user
+    ON refresh_tokens(user_id);
+  `);
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS idx_refresh_tokens_hash
+    ON refresh_tokens(token_hash);
+  `);
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS mqtt_credentials (
+      id TEXT PRIMARY KEY,
+      device_name TEXT NOT NULL,
+      username TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+  `);
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS system_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+  `);
+
   migrateRemoveTypeCheck(database);
 }
 

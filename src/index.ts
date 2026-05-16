@@ -1,6 +1,7 @@
 // src/index.ts — Aeolus backend entry point
 
 import express from "express";
+import cookieParser from "cookie-parser";
 import { createServer } from "node:http";
 import path from "node:path";
 import { config } from "./config.js";
@@ -40,6 +41,9 @@ import { requestLogger } from "./api/middleware/request-logger.js";
 import { errorHandler } from "./api/middleware/error-handler.js";
 import { corsMiddleware } from "./api/middleware/cors-config.js";
 import { apiRateLimiter } from "./api/middleware/rate-limiter.js";
+import { authenticate } from "./auth/auth-middleware.js";
+import { createAuthRoutes } from "./api/routes/auth.routes.js";
+import { ensureBackendCredential } from "./auth/mqtt-credential-service.js";
 
 import { createSystemRoutes } from "./api/routes/system.routes.js";
 import { createLayoutRoutes } from "./api/routes/layout.routes.js";
@@ -63,9 +67,15 @@ async function main(): Promise<void> {
   // 2b. State History
   const stateHistory = new StateHistory(db, config.stateHistoryMax, config.historyRecordInterval);
 
-  // 3. MQTT Service
+  // 2c. Ensure backend MQTT credential exists for authenticated broker access
+  const mqttCredential = await ensureBackendCredential();
+
+  // 3. MQTT Service (with backend credential for broker authentication)
+  const mqttBrokerUrl = new URL(config.mqttBrokerUrl);
+  mqttBrokerUrl.username = mqttCredential.username;
+  mqttBrokerUrl.password = mqttCredential.password;
   const mqttService = new MqttService(
-    { brokerUrl: config.mqttBrokerUrl, topics: config.mqttTopics },
+    { brokerUrl: mqttBrokerUrl.toString(), topics: config.mqttTopics },
     eventBus
   );
 
@@ -160,8 +170,11 @@ async function main(): Promise<void> {
   const app = express();
   app.use(corsMiddleware);
   app.use(express.json({ limit: "1mb" }));
+  app.use(cookieParser());
   app.use(requestLogger);
+  app.use(authenticate);
 
+  app.use("/api/auth", createAuthRoutes());
   app.use("/api/devices", createDeviceRoutes(registry, connectorManager, stateHistory));
   app.use("/api/state", createStateRoutes(registry));
   app.use("/api/health", createHealthRoutes(mqttService, registry, engine, startTime));

@@ -18,6 +18,12 @@ vi.mock("../../logger.js", () => ({
   },
 }));
 
+// Mock auth middleware to pass through — these tests focus on connector route logic, not auth
+vi.mock("../../auth/auth-middleware.js", () => ({
+  authenticate: (_req: any, _res: any, next: any) => next(),
+  requireAdmin: (_req: any, _res: any, next: any) => next(),
+}));
+
 /** Minimal HTTP helper — sends a request to an Express app and returns status + body */
 async function request(
   app: express.Express,

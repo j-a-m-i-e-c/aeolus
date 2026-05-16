@@ -3,6 +3,7 @@
 import { Router } from "express";
 import type { Database as DatabaseType } from "better-sqlite3";
 import { BadRequestError } from "../middleware/error-handler.js";
+import { requireAdmin } from "../../auth/auth-middleware.js";
 import logger from "../../logger.js";
 
 interface TabRow {
@@ -64,7 +65,7 @@ export function createLayoutRoutes(db: DatabaseType): Router {
   });
 
   /** PUT /api/layout ← { tabs, panes } → { success: true } */
-  router.put("/", (req, res, next) => {
+  router.put("/", requireAdmin, (req, res, next) => {
     try {
       const { tabs, panes } = req.body;
 

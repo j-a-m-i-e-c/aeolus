@@ -5,6 +5,7 @@ import type { ServiceManager } from "../../services/service-manager.js";
 import type { ServiceRegistry } from "../../services/service-registry.js";
 import { TriggerServiceInstance } from "../../services/trigger/index.js";
 import { BadRequestError, NotFoundError } from "../middleware/error-handler.js";
+import { requireAdmin } from "../../auth/auth-middleware.js";
 import logger from "../../logger.js";
 
 /**
@@ -57,7 +58,7 @@ export function createServiceRoutes(
   });
 
   /** POST /api/services — enable a service */
-  router.post("/", async (req, res, next) => {
+  router.post("/", requireAdmin, async (req, res, next) => {
     try {
       const { service_type, config } = req.body;
 
@@ -97,9 +98,9 @@ export function createServiceRoutes(
   });
 
   /** PATCH /api/services/:id — update service config */
-  router.patch("/:id", async (req, res, next) => {
+  router.patch("/:id", requireAdmin, async (req, res, next) => {
     try {
-      const { id } = req.params;
+      const id = req.params.id as string;
       const { config } = req.body;
 
       await serviceManager.updateConfig(id, config ?? {});
@@ -110,9 +111,9 @@ export function createServiceRoutes(
   });
 
   /** DELETE /api/services/:id — disable and dispose a service */
-  router.delete("/:id", async (req, res, next) => {
+  router.delete("/:id", requireAdmin, async (req, res, next) => {
     try {
-      const { id } = req.params;
+      const id = req.params.id as string;
       await serviceManager.disable(id);
       res.json({ success: true });
     } catch (err) {
@@ -122,7 +123,7 @@ export function createServiceRoutes(
 
   /** GET /api/services/:id/status — get detailed health status */
   router.get("/:id/status", (req, res) => {
-    const { id } = req.params;
+    const id = req.params.id as string;
     const status = serviceManager.getStatus(id);
 
     if (!status) {
@@ -134,9 +135,9 @@ export function createServiceRoutes(
   });
 
   /** POST /api/services/:id/retry — retry starting a stopped service */
-  router.post("/:id/retry", async (req, res, next) => {
+  router.post("/:id/retry", requireAdmin, async (req, res, next) => {
     try {
-      const { id } = req.params;
+      const id = req.params.id as string;
       await serviceManager.retry(id);
       res.json({ success: true });
     } catch (err) {

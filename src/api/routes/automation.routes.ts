@@ -18,6 +18,7 @@ import type { ConnectorRegistry } from "../../connectors/connector-registry.js";
 import { BadRequestError, NotFoundError } from "../middleware/error-handler.js";
 import { validate } from "../middleware/validate.js";
 import { createAutomationBodySchema, updateAutomationBodySchema, automationIdParamsSchema, toggleAutomationBodySchema, automationStateBodySchema } from "../schemas/automation.schemas.js";
+import { requireTabPermission } from "../../auth/auth-middleware.js";
 import { eventBus, AUTOMATION_STATE_CHANGE } from "../../core/event-bus.js";
 import type { AutomationStateStore } from "../../automations/automation-state-store.js";
 import logger from "../../logger.js";
@@ -192,7 +193,7 @@ export function createAutomationRoutes(
   });
 
   /** POST /api/automations — create a new UI rule (form or script) */
-  router.post("/", validate({ body: createAutomationBodySchema }), (req, res, next) => {
+  router.post("/", requireTabPermission("write"), validate({ body: createAutomationBodySchema }), (req, res, next) => {
     try {
       const { name, triggerTopic, ruleType, conditionType, conditionValue, actionType, actionTarget, actionParams, scriptSource, uiSource, triggerType: rawTriggerType, cronExpression } = req.body;
 
@@ -314,7 +315,7 @@ export function createAutomationRoutes(
   });
 
   /** PUT /api/automations/:id — update an existing UI rule */
-  router.put("/:id", validate({ body: updateAutomationBodySchema, params: automationIdParamsSchema }), (req, res, next) => {
+  router.put("/:id", requireTabPermission("write"), validate({ body: updateAutomationBodySchema, params: automationIdParamsSchema }), (req, res, next) => {
     try {
       const id = req.params.id as string;
 
@@ -479,7 +480,7 @@ export function createAutomationRoutes(
   });
 
   /** DELETE /api/automations/:id — delete a UI rule */
-  router.delete("/:id", (req, res, next) => {
+  router.delete("/:id", requireTabPermission("write"), (req, res, next) => {
     try {
       const id = req.params.id as string;
       const existing = queryRuleById(db, id);
@@ -499,7 +500,7 @@ export function createAutomationRoutes(
   });
 
   /** PATCH /api/automations/:id/toggle — enable/disable a UI rule */
-  router.patch("/:id/toggle", validate({ body: toggleAutomationBodySchema, params: automationIdParamsSchema }), (req, res, next) => {
+  router.patch("/:id/toggle", requireTabPermission("write"), validate({ body: toggleAutomationBodySchema, params: automationIdParamsSchema }), (req, res, next) => {
     try {
       const id = req.params.id as string;
       const { enabled } = req.body;
@@ -526,7 +527,7 @@ export function createAutomationRoutes(
   });
 
   /** POST /api/automations/:id/fire — manually fire a specific automation rule */
-  router.post("/:id/fire", async (req, res, next) => {
+  router.post("/:id/fire", requireTabPermission("interact"), async (req, res, next) => {
     try {
       const id = req.params.id as string;
       const rule = engine.getRule(id);
