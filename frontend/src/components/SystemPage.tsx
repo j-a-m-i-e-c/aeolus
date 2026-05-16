@@ -3,11 +3,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { Cpu, HardDrive, MemoryStick, Thermometer, Wifi, Server, RefreshCw, ScrollText, ChevronDown, Download, Loader2, Activity, Zap, Power, RotateCcw, Trash2 } from "lucide-react";
 import { useDeviceStore } from "../store/device-store";
-import { useAuthStore } from "../store/auth-store";
 import { fetchHealth } from "../lib/api-client";
 import { authFetch } from "../lib/auth-fetch";
-import { UserManagementPage } from "../pages/UserManagementPage";
-import { GroupManagementPage } from "../pages/GroupManagementPage";
 import type { HealthStatus } from "../store/device-store";
 
 const API_URL = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:3001`;
@@ -62,10 +59,6 @@ export function SystemPage() {
   const [commitsBehind, setCommitsBehind] = useState(0);
   const [versionChecked, setVersionChecked] = useState(false);
   const [pruning, setPruning] = useState(false);
-
-  // Auth state — admin-only sections
-  const user = useAuthStore((s) => s.user);
-  const isAdmin = user?.role === "admin";
 
   // Health polling (device count, rule count, uptime, MQTT status)
   const health = useDeviceStore((s) => s.health);
@@ -483,12 +476,7 @@ export function SystemPage() {
       </div>
 
       {/* Admin-only: User & Group Management */}
-      {isAdmin && (
-        <>
-          <GroupManagementPage />
-          <UserManagementPage />
-        </>
-      )}
+
 
       {/* Application Logs */}
       <LogViewer />
