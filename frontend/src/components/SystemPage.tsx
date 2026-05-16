@@ -535,8 +535,10 @@ function LogViewer() {
       const url = filter === "all"
         ? `${API_URL}/api/system/logs?count=100`
         : `${API_URL}/api/system/logs?count=100&level=${filter}`;
-      const res = await fetch(url);
-      setLogs(await res.json());
+      const res = await authFetch(url);
+      if (res.ok) {
+        setLogs(await res.json());
+      }
     } catch {}
   }, [filter]);
 

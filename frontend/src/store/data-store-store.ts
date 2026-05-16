@@ -67,7 +67,8 @@ const API_URL =
   `http://${window.location.hostname}:3001`;
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_URL}${path}`, {
+  const { authFetch } = await import("../lib/auth-fetch");
+  const res = await authFetch(`${API_URL}${path}`, {
     headers: { "Content-Type": "application/json" },
     ...options,
   });
