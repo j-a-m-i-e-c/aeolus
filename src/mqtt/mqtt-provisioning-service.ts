@@ -224,17 +224,17 @@ export class MqttProvisioningService {
 
   /**
    * Switch to open mode: no authentication required.
-   * Writes open config, reconnects MQTT without credentials, reloads broker, persists level.
+   * Writes open config, reloads broker, then reconnects MQTT without credentials.
    */
   private async setOpenMode(): Promise<SecurityStatus> {
     // 1. Write open config (files first)
     this.configWriter.writeOpenConfig();
 
-    // 2. Reconnect MQTT without credentials
-    await this.mqttService.reconnectWithCredentials(null);
-
-    // 3. Reload broker
+    // 2. Reload broker (so it picks up the new config before we reconnect)
     await this.reloader.reload();
+
+    // 3. Reconnect MQTT without credentials (broker now allows anonymous)
+    await this.mqttService.reconnectWithCredentials(null);
 
     // 4. Persist level
     this.writeSetting(SETTING_SECURITY_LEVEL, "open");
@@ -269,14 +269,14 @@ export class MqttProvisioningService {
     // 2. Write authenticated config
     this.configWriter.writeAuthenticatedConfig(getPasswordFilePath());
 
-    // 3. Reconnect MQTT with backend credentials
+    // 3. Reload broker (so it picks up new config + password file before we reconnect)
+    await this.reloader.reload();
+
+    // 4. Reconnect MQTT with backend credentials (broker now requires auth)
     await this.mqttService.reconnectWithCredentials({
       username: BACKEND_USERNAME,
       password: backendPassword,
     });
-
-    // 4. Reload broker
-    await this.reloader.reload();
 
     // 5. Persist level + shared credential
     this.writeSetting(SETTING_SECURITY_LEVEL, "shared_password");
@@ -309,14 +309,14 @@ export class MqttProvisioningService {
     // 2. Write authenticated config
     this.configWriter.writeAuthenticatedConfig(getPasswordFilePath());
 
-    // 3. Reconnect MQTT with backend credentials
+    // 3. Reload broker (so it picks up new config + password file before we reconnect)
+    await this.reloader.reload();
+
+    // 4. Reconnect MQTT with backend credentials (broker now requires auth)
     await this.mqttService.reconnectWithCredentials({
       username: BACKEND_USERNAME,
       password: backendPassword,
     });
-
-    // 4. Reload broker
-    await this.reloader.reload();
 
     // 5. Persist level
     this.writeSetting(SETTING_SECURITY_LEVEL, "per_device");
