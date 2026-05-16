@@ -1,6 +1,7 @@
 // frontend/src/hooks/useDynamicComponent.ts — Dynamic loader for custom automation UI modules
 
 import { useState, useEffect, useRef, type ComponentType } from "react";
+import { authFetch } from "../lib/auth-fetch";
 
 const API_URL =
   import.meta.env.VITE_API_URL ||
@@ -123,7 +124,6 @@ export function useDynamicComponent(
 
       try {
         const url = moduleUrl || `${API_URL}/api/automations/${entityId}/ui-module`;
-        const { authFetch } = await import("../lib/auth-fetch");
         const res = await authFetch(url);
 
         // Check if this request is still current
