@@ -123,7 +123,8 @@ export function useDynamicComponent(
 
       try {
         const url = moduleUrl || `${API_URL}/api/automations/${entityId}/ui-module`;
-        const res = await fetch(url);
+        const { authFetch } = await import("../lib/auth-fetch");
+        const res = await authFetch(url);
 
         // Check if this request is still current
         if (currentVersion !== versionRef.current) return;
