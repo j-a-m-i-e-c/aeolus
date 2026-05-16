@@ -48,8 +48,12 @@ import { ensureBackendCredential } from "./auth/mqtt-credential-service.js";
 import { createSystemRoutes } from "./api/routes/system.routes.js";
 import { createLayoutRoutes } from "./api/routes/layout.routes.js";
 import { createDataStoreRoutes } from "./api/routes/data-store.routes.js";
+import { createProvisioningRoutes } from "./api/routes/provisioning.routes.js";
 import { StateHistory } from "./core/state-history.js";
 import { DataStore } from "./data-store/data-store.js";
+import { MosquittoConfigWriter } from "./mqtt/mosquitto-config-writer.js";
+import { MosquittoReloader } from "./mqtt/mosquitto-reloader.js";
+import { MqttProvisioningService } from "./mqtt/mqtt-provisioning-service.js";
 
 
 const startTime = Date.now();
@@ -75,6 +79,15 @@ async function main(): Promise<void> {
     { brokerUrl: config.mqttBrokerUrl, topics: config.mqttTopics },
     eventBus
   );
+
+  // 3b. MQTT Provisioning Service
+  const projectDir = process.env.AEOLUS_PROJECT_DIR || process.cwd();
+  const configWriter = new MosquittoConfigWriter({
+    configPath: path.resolve(projectDir, "mosquitto", "mosquitto.conf"),
+  });
+  const reloader = new MosquittoReloader();
+  const provisioningService = new MqttProvisioningService(mqttService, configWriter, reloader);
+  await provisioningService.initialize();
 
   // 4. Connector Framework (needed before ActionExecutor)
   const connectorStore = new ConnectorStore(db);
@@ -176,6 +189,7 @@ async function main(): Promise<void> {
   app.use("/api/state", createStateRoutes(registry));
   app.use("/api/health", createHealthRoutes(mqttService, registry, engine, startTime));
   app.use("/api/mqtt", createMqttRoutes(mqttService));
+  app.use("/api/mqtt/provisioning", createProvisioningRoutes(provisioningService));
   const sandboxTypesPath = path.resolve(import.meta.dirname, "automations/sandbox-types.d.ts");
   app.use("/api/automations", createAutomationRoutes(engine, db, registry, actionExecutor, executionLog, sandboxTypesPath, connectorRegistry, stateStore, conditionRegistry));
   app.use("/api/connectors", createConnectorRoutes(connectorManager, connectorRegistry));

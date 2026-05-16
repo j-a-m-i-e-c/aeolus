@@ -9,6 +9,7 @@ import { CommandPalette } from "./components/CommandPalette";
 import { ConnectorsPage } from "./components/ConnectorsPage";
 import { DataStorePage } from "./pages/DataStorePage";
 import { UsersPage } from "./pages/UsersPage";
+import MqttSecurityPage from "./pages/MqttSecurityPage";
 import { SystemPage } from "./components/SystemPage";
 import { TabLayout } from "./components/TabLayout";
 import { WelcomeScreen } from "./components/WelcomeScreen";
@@ -111,6 +112,7 @@ function AuthenticatedApp() {
         <Route path="/connectors" element={<ConnectorsPage />} />
         <Route path="/data-store" element={<DataStorePage />} />
         <Route path="/users" element={<UsersPage />} />
+        <Route path="/mqtt-security" element={<MqttSecurityPage />} />
         <Route path="/system" element={<Navigate to="/dashboard" replace />} />
         <Route path="/tab/:slug" element={<CustomTabPage />} />
         <Route path="*" element={<Navigate to="/dashboard" replace />} />

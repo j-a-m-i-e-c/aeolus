@@ -34,7 +34,7 @@ export interface MqttCredentialListItem {
  * Sanitize a device name into a valid MQTT username.
  * Lowercase, replace spaces/special chars with hyphens, prefix with "mqtt-".
  */
-function sanitizeUsername(deviceName: string): string {
+export function sanitizeUsername(deviceName: string): string {
   const sanitized = deviceName
     .toLowerCase()
     .trim()
@@ -48,13 +48,138 @@ function sanitizeUsername(deviceName: string): string {
  * Get the password file path. Configurable via MQTT_PASSWORD_FILE env var,
  * defaults to `mosquitto/password_file` relative to project root.
  */
-function getPasswordFilePath(): string {
+export function getPasswordFilePath(): string {
   if (process.env.MQTT_PASSWORD_FILE) {
     return process.env.MQTT_PASSWORD_FILE;
   }
   // In Docker, the project is mounted at AEOLUS_PROJECT_DIR
   const projectDir = process.env.AEOLUS_PROJECT_DIR || process.cwd();
   return path.resolve(projectDir, "mosquitto", "password_file");
+}
+
+export interface PasswordFileEntry {
+  username: string;
+  plaintextPassword: string;
+}
+
+const RETRY_INTERVAL_MS = 10_000;
+const MAX_RETRY_ATTEMPTS = 30;
+
+let retryTimer: ReturnType<typeof setInterval> | null = null;
+let retryAttempts = 0;
+
+/**
+ * Generate a Mosquitto-native hash for a single entry by executing
+ * `mosquitto_passwd -b /dev/null <username> <password>` inside the container.
+ * Returns the full hash line (e.g. `username:$7$101$...`).
+ */
+function getMosquittoHash(username: string, password: string): string {
+  const output = execSync(
+    `docker exec aeolus-mosquitto mosquitto_passwd -b /dev/null ${username} ${password}`,
+    { encoding: "utf-8", timeout: 10000, stdio: "pipe" }
+  );
+  return output.trim();
+}
+
+/**
+ * Clear any pending retry timer.
+ */
+function clearRetryQueue(): void {
+  if (retryTimer !== null) {
+    clearInterval(retryTimer);
+    retryTimer = null;
+  }
+  retryAttempts = 0;
+}
+
+/**
+ * Start the retry queue for password file generation.
+ * Retries every 10 seconds, up to 30 attempts (5 minutes).
+ */
+function startRetryQueue(entries: PasswordFileEntry[]): void {
+  // Clear any existing retry
+  clearRetryQueue();
+
+  retryTimer = setInterval(() => {
+    retryAttempts++;
+    logger.info(
+      { attempt: retryAttempts, maxAttempts: MAX_RETRY_ATTEMPTS },
+      "Retrying password file generation with mosquitto_passwd"
+    );
+
+    try {
+      writePasswordFileFromEntries(entries);
+      logger.info("Password file generation retry succeeded");
+      clearRetryQueue();
+    } catch {
+      if (retryAttempts >= MAX_RETRY_ATTEMPTS) {
+        logger.error(
+          { attempts: retryAttempts },
+          "Password file generation failed after maximum retry attempts"
+        );
+        clearRetryQueue();
+      } else {
+        logger.warn(
+          { attempt: retryAttempts, maxAttempts: MAX_RETRY_ATTEMPTS },
+          "Password file generation retry failed, will try again"
+        );
+      }
+    }
+  }, RETRY_INTERVAL_MS);
+}
+
+/**
+ * Write the password file atomically from pre-generated hash lines.
+ * Writes to a temp file first, then renames to the target path.
+ */
+function writePasswordFileAtomic(hashLines: string[]): void {
+  const filePath = getPasswordFilePath();
+  const dir = path.dirname(filePath);
+  const tempPath = path.join(dir, `.password_file.tmp.${Date.now()}`);
+
+  fs.mkdirSync(dir, { recursive: true });
+
+  const content = hashLines.join("\n") + (hashLines.length > 0 ? "\n" : "");
+  fs.writeFileSync(tempPath, content, "utf-8");
+  fs.renameSync(tempPath, filePath);
+
+  logger.info({ filePath, entryCount: hashLines.length }, "Password file written atomically");
+}
+
+/**
+ * Generate hash lines for all entries using mosquitto_passwd.
+ * Throws if the container is unavailable.
+ */
+function writePasswordFileFromEntries(entries: PasswordFileEntry[]): void {
+  const hashLines: string[] = [];
+
+  for (const entry of entries) {
+    const hashLine = getMosquittoHash(entry.username, entry.plaintextPassword);
+    hashLines.push(hashLine);
+  }
+
+  writePasswordFileAtomic(hashLines);
+}
+
+/**
+ * Generate the Mosquitto password file using native `mosquitto_passwd` hashes.
+ * Executes `docker exec aeolus-mosquitto mosquitto_passwd -b /dev/null <username> <password>`
+ * for each entry to produce Mosquitto-compatible PBKDF2-SHA512 hashes.
+ *
+ * If the container is unavailable, queues the operation for retry (every 10s, up to 30 attempts).
+ */
+export function generatePasswordFileWithMosquittoPasswd(entries: PasswordFileEntry[]): void {
+  try {
+    writePasswordFileFromEntries(entries);
+    // Clear any pending retry since we succeeded
+    clearRetryQueue();
+  } catch (error) {
+    logger.warn(
+      { error, entryCount: entries.length },
+      "Mosquitto container unavailable for password hashing, queuing for retry"
+    );
+    startRetryQueue(entries);
+  }
 }
 
 /**

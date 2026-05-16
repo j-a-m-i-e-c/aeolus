@@ -38,6 +38,7 @@ export class MqttService {
   private reconnectAttempt = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private intentionalDisconnect = false;
+  private credentials: { username?: string; password?: string } | null = null;
 
   constructor(config: Partial<MqttServiceConfig> & Pick<MqttServiceConfig, "brokerUrl" | "topics">, eventBus: EventEmitter) {
     this.config = { ...DEFAULT_CONFIG, ...config } as MqttServiceConfig;
@@ -54,10 +55,17 @@ export class MqttService {
     this.setConnectionState("connecting");
 
     return new Promise<void>((resolve, reject) => {
-      this.client = mqtt.connect(this.config.brokerUrl, {
+      const connectOptions: mqtt.IClientOptions = {
         reconnectPeriod: 0, // We handle reconnection ourselves
         protocolVersion: 5, // MQTT 5.0 — enables message expiry, user properties, etc.
-      });
+      };
+
+      if (this.credentials) {
+        connectOptions.username = this.credentials.username;
+        connectOptions.password = this.credentials.password;
+      }
+
+      this.client = mqtt.connect(this.config.brokerUrl, connectOptions);
 
       const onConnect = () => {
         cleanup();
@@ -229,6 +237,13 @@ export class MqttService {
         resolve();
       });
     });
+  }
+
+  /** Update connection credentials and reconnect to the broker. Pass null to connect without auth (open mode). */
+  async reconnectWithCredentials(credentials: { username?: string; password?: string } | null): Promise<void> {
+    await this.disconnect();
+    this.credentials = credentials;
+    await this.connect();
   }
 
   isConnected(): boolean {

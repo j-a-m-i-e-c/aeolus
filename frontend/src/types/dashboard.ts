@@ -44,12 +44,13 @@ export interface LayoutPayload {
 
 const NOW = Date.now();
 
-/** Default tabs: 3 pinned system tabs */
+/** Default tabs: pinned system tabs */
 export const DEFAULT_TABS: Tab[] = [
-  { id: "default-dashboard",   name: "System",      icon: "server",    order: 0, pinned: true,  createdAt: NOW },
-  { id: "default-connectors",  name: "Connectors",  icon: "plug",      order: 1, pinned: true,  createdAt: NOW },
-  { id: "default-data-store",  name: "Data",        icon: "database",  order: 2, pinned: true,  createdAt: NOW },
-  { id: "default-users",       name: "Users",       icon: "users",     order: 3, pinned: true,  createdAt: NOW },
+  { id: "default-dashboard",      name: "System",        icon: "server",    order: 0, pinned: true,  createdAt: NOW },
+  { id: "default-connectors",     name: "Connectors",    icon: "plug",      order: 1, pinned: true,  createdAt: NOW },
+  { id: "default-data-store",     name: "Data",          icon: "database",  order: 2, pinned: true,  createdAt: NOW },
+  { id: "default-mqtt-security",  name: "MQTT Security", icon: "shield",    order: 3, pinned: true,  createdAt: NOW },
+  { id: "default-users",          name: "Users",         icon: "users",     order: 4, pinned: true,  createdAt: NOW },
 ];
 
 /** Default panes — empty, users add their own via PanePicker. */
