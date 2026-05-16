@@ -211,28 +211,23 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         return;
       }
 
-      // Refresh failed — check if setup is needed via /api/auth/me
-      const meRes = await fetch(`${API_URL}/api/auth/me`, {
+      // Refresh failed — check if setup is needed via public status endpoint
+      const statusRes = await fetch(`${API_URL}/api/auth/status`, {
         headers: { "Content-Type": "application/json" },
-        credentials: "include",
       });
 
-      if (meRes.status === 401) {
-        // Not authenticated but server is set up
-        set({ needsSetup: false, isAuthenticated: false, loading: false });
-        return;
+      if (statusRes.ok) {
+        const statusData = await statusRes.json();
+        if (statusData.needsSetup) {
+          set({ needsSetup: true, isAuthenticated: false, loading: false });
+          return;
+        }
       }
 
-      // If we get a specific "setup needed" indicator
-      const meData = await meRes.json().catch(() => ({}));
-      if (meData.needsSetup) {
-        set({ needsSetup: true, isAuthenticated: false, loading: false });
-        return;
-      }
-
+      // Server is set up but user is not authenticated — show login
       set({ needsSetup: false, isAuthenticated: false, loading: false });
     } catch {
-      // Network error — assume not set up or not reachable
+      // Network error — assume not reachable
       set({ needsSetup: false, isAuthenticated: false, loading: false });
     }
   },

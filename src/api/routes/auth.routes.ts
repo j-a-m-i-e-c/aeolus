@@ -75,6 +75,13 @@ export function createAuthRoutes(): Router {
   const router = Router();
   const setupGuard = createSetupGuard(() => authService.needsSetup());
 
+  // ─── Public Status Endpoint ──────────────────────────────────────────────
+
+  /** GET /api/auth/status — Public endpoint to check if setup is needed */
+  router.get("/status", (_req, res) => {
+    res.json({ needsSetup: authService.needsSetup() });
+  });
+
   // ─── Core Auth Endpoints (Task 8.1) ──────────────────────────────────────
 
   /** POST /api/auth/setup — First-run admin creation */
