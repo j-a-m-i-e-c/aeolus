@@ -3,7 +3,7 @@
 import mqtt, { type MqttClient } from "mqtt";
 import type { EventEmitter } from "node:events";
 import { parseTopic } from "./topic-parser.js";
-import { DEVICE_STATE_CHANGE, MQTT_RAW_MESSAGE, MQTT_CONNECTION_STATE } from "../core/event-bus.js";
+import { DEVICE_STATE_CHANGE, MQTT_RAW_MESSAGE, MQTT_CONNECTION_STATE, MQTT_MESSAGE_PROCESSED, MQTT_MESSAGE_PUBLISHED } from "../core/event-bus.js";
 import type { NormalizedEvent } from "../core/types.js";
 import logger from "../logger.js";
 
@@ -170,6 +170,7 @@ export class MqttService {
   }
 
   private handleMessage(topic: string, payload: Buffer): void {
+    const start = Date.now();
     const raw = payload.toString();
 
     // Emit raw message for MQTT inspector
@@ -213,6 +214,10 @@ export class MqttService {
     };
 
     this.eventBus.emit(DEVICE_STATE_CHANGE, event);
+
+    // Emit processing complete event for MetricsService histogram
+    const durationMs = Date.now() - start;
+    this.eventBus.emit(MQTT_MESSAGE_PROCESSED, { topic, durationMs });
   }
 
   async disconnect(): Promise<void> {
@@ -268,6 +273,7 @@ export class MqttService {
         logger.error({ topic, error: err.message }, "Failed to publish MQTT message");
       } else {
         logger.debug({ topic, payloadLength: payload.length }, "MQTT message published");
+        this.eventBus.emit(MQTT_MESSAGE_PUBLISHED, { topic });
       }
     });
   }

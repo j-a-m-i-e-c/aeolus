@@ -5,7 +5,7 @@ import { pathToFileURL } from "node:url";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { DEVICE_STATE_CHANGE, AUTOMATION_FIRED } from "../core/event-bus.js";
+import { DEVICE_STATE_CHANGE, AUTOMATION_FIRED, AUTOMATION_EXECUTION_COMPLETE, AUTOMATION_RULE_REGISTERED, AUTOMATION_RULE_UNREGISTERED } from "../core/event-bus.js";
 import type { NormalizedEvent, EventContext, Rule } from "../core/types.js";
 import type { Sandbox, SandboxContext } from "./sandbox.js";
 import type { ActionExecutor } from "./action-executor.js";
@@ -45,6 +45,9 @@ export class AutomationEngine {
   register(rule: Rule): void {
     this.registry.register(rule);
 
+    // Emit rule registered event for MetricsService
+    this.eventBus.emit(AUTOMATION_RULE_REGISTERED, { ruleId: rule.id, ruleName: rule.name || "Unnamed Rule" });
+
     // If this is a cron-triggered rule, start a timer
     if (rule.triggerType === "cron" && rule.cronExpression) {
       const started = this.cronTimerManager.start(rule.id, rule.cronExpression, () => {
@@ -68,6 +71,7 @@ export class AutomationEngine {
   unregister(ruleId: string): void {
     this.cronTimerManager.stop(ruleId);
     this.registry.unregister(ruleId);
+    this.eventBus.emit(AUTOMATION_RULE_UNREGISTERED, { ruleId });
   }
 
   /** List all rules */
@@ -239,6 +243,14 @@ export class AutomationEngine {
     success: boolean,
     error?: string,
   ): void {
+    // Emit AUTOMATION_EXECUTION_COMPLETE for MetricsService (counters + histograms)
+    this.eventBus.emit(AUTOMATION_EXECUTION_COMPLETE, {
+      ruleId: rule.id,
+      ruleName: rule.name || "Unnamed Rule",
+      status: success ? "success" : "error",
+      durationMs: duration,
+    });
+
     if (!this.executionLog) return;
 
     const compiledJs = (rule as unknown as Record<string, unknown>).compiled_js as string | undefined;

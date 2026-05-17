@@ -4,7 +4,7 @@ import crypto from "node:crypto";
 import type { EventEmitter } from "node:events";
 import type { DeviceRegistry } from "../core/device-registry.js";
 import type { Device, Action, NormalizedEvent } from "../core/types.js";
-import { DEVICE_STATE_CHANGE } from "../core/event-bus.js";
+import { DEVICE_STATE_CHANGE, CONNECTOR_POLL, CONNECTOR_ERROR } from "../core/event-bus.js";
 import type {
   Connector,
   ConnectorInstanceInfo,
@@ -143,7 +143,7 @@ export class ConnectorManager {
     this.store.save(record);
 
     // Start polling
-    const pollingTimer = this.startPolling(instanceId, connector, devices);
+    const pollingTimer = this.startPolling(instanceId, connector, devices, connectorType);
 
     this.instances.set(instanceId, { connector, record, pollingTimer, devices });
 
@@ -501,7 +501,7 @@ export class ConnectorManager {
         this.contributedConditions.set(record.id, types);
       }
 
-      const pollingTimer = this.startPolling(record.id, connector, devices);
+      const pollingTimer = this.startPolling(record.id, connector, devices, record.connectorType);
 
       this.instances.set(record.id, { connector, record, pollingTimer, devices });
 
@@ -549,6 +549,7 @@ export class ConnectorManager {
     instanceId: string,
     connector: Connector,
     devices: Set<string>,
+    connectorType: string,
   ): ReturnType<typeof setInterval> {
     return setInterval(async () => {
       try {
@@ -563,11 +564,15 @@ export class ConnectorManager {
           }
         }
         // If discovered is empty, keep the existing set — don't wipe devices on a transient miss
+
+        // Emit successful poll event for metrics (regardless of device count)
+        this.eventBus.emit(CONNECTOR_POLL, { connectorType, instanceId, devicesDiscovered: discovered.length });
       } catch (err) {
         logger.error(
           { instanceId, error: (err as Error).message },
           "discoverDevices() failed during poll",
         );
+        this.eventBus.emit(CONNECTOR_ERROR, { connectorType, instanceId, error: (err as Error).message });
       }
     }, DEFAULT_POLL_INTERVAL_MS);
   }

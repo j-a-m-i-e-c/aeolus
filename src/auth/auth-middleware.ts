@@ -36,6 +36,7 @@ export const PUBLIC_ROUTES: { method: string; path: string }[] = [
   { method: "POST", path: "/api/auth/login" },
   { method: "POST", path: "/api/auth/refresh" },
   { method: "POST", path: "/api/auth/setup" },
+  { method: "GET", path: "/metrics" },
 ];
 
 /**

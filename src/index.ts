@@ -54,6 +54,9 @@ import { DataStore } from "./data-store/data-store.js";
 import { MosquittoConfigWriter } from "./mqtt/mosquitto-config-writer.js";
 import { MosquittoReloader } from "./mqtt/mosquitto-reloader.js";
 import { MqttProvisioningService } from "./mqtt/mqtt-provisioning-service.js";
+import { metricsService } from "./metrics/metrics-service.js";
+import { metricsMiddleware } from "./metrics/metrics-middleware.js";
+import { createPrometheusMetricsRoute, createMetricsSummaryRoute } from "./api/routes/metrics.routes.js";
 
 
 const startTime = Date.now();
@@ -163,7 +166,14 @@ async function main(): Promise<void> {
   loadUiRules(engine, db, registry, actionExecutor, conditionRegistry);
 
 
-  // 7. Wire MQTT events to device registry
+  // 7b. Initialize MetricsService
+  metricsService.initialize({
+    eventBus,
+    getDeviceCount: () => registry.getAll().length,
+    getRuleCount: () => engine.ruleCount,
+  });
+
+  // 7c. Wire MQTT events to device registry
   eventBus.on(DEVICE_STATE_CHANGE, (event) => {
     registry.upsert(event);
     stateHistory.record(event.deviceId, event.state, event.timestamp);
@@ -178,10 +188,18 @@ async function main(): Promise<void> {
 
   // 9. Express app
   const app = express();
+
+  // Prometheus metrics endpoint — BEFORE authenticate (uses its own bearer token auth)
+  app.use(createPrometheusMetricsRoute(metricsService));
+
   app.use(corsMiddleware);
   app.use(express.json({ limit: "1mb" }));
   app.use(cookieParser());
   app.use(requestLogger);
+
+  // HTTP metrics middleware — records request duration for all subsequent routes
+  app.use(metricsMiddleware());
+
   app.use(authenticate);
 
   app.use("/api/auth", createAuthRoutes());
@@ -194,6 +212,7 @@ async function main(): Promise<void> {
   app.use("/api/automations", createAutomationRoutes(engine, db, registry, actionExecutor, executionLog, sandboxTypesPath, connectorRegistry, stateStore, conditionRegistry));
   app.use("/api/connectors", createConnectorRoutes(connectorManager, connectorRegistry));
   app.use("/api/services", createServiceRoutes(serviceManager, serviceRegistry));
+  app.use("/api/metrics", createMetricsSummaryRoute(metricsService));
   app.use("/api/system", createSystemRoutes());
   app.use("/api/layout", createLayoutRoutes(db));
   app.use("/api/data-store", createDataStoreRoutes(dataStore));
@@ -254,6 +273,9 @@ async function main(): Promise<void> {
 
       // 4. Stop automation engine (cron timers)
       engine.dispose();
+
+      // 4b. Dispose MetricsService
+      metricsService.dispose();
 
       // 5. Disconnect MQTT cleanly
       await mqttService.disconnect();

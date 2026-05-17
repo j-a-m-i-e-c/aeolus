@@ -3,6 +3,7 @@
 import type { Database as DatabaseType } from "better-sqlite3";
 import type { EventEmitter } from "node:events";
 import logger from "../logger.js";
+import { DATA_STORE_QUERY } from "../core/event-bus.js";
 import { parseDuration } from "./duration.js";
 
 // ─── Interfaces ──────────────────────────────────────────────────────────────
@@ -300,14 +301,20 @@ export class DataStore {
   }
 
   query(collection: string, options?: QueryOptions): QueryResult {
+    const start = Date.now();
+
     // Return empty result for non-existent collections (no error)
     const existsRow = this.db.prepare(
       "SELECT 1 as exists_flag FROM ds_collections WHERE name = ?"
     ).get(collection) as { exists_flag: number } | undefined;
     if (!existsRow) {
       if (options?.aggregate) {
+        const durationMs = Date.now() - start;
+        this.eventBus.emit(DATA_STORE_QUERY, { collection, durationMs });
         return { value: 0 };
       }
+      const durationMs = Date.now() - start;
+      this.eventBus.emit(DATA_STORE_QUERY, { collection, durationMs });
       return { records: [], total: 0 };
     }
 
@@ -367,6 +374,8 @@ export class DataStore {
       const row = this.db.prepare(sql).get(...params) as { agg_value: number | null } | undefined;
       const value = row?.agg_value ?? 0;
 
+      const durationMs = Date.now() - start;
+      this.eventBus.emit(DATA_STORE_QUERY, { collection, durationMs });
       return { value };
     }
 
@@ -431,6 +440,8 @@ export class DataStore {
       timestamp: row.timestamp,
     }));
 
+    const durationMs = Date.now() - start;
+    this.eventBus.emit(DATA_STORE_QUERY, { collection, durationMs });
     return { records, total };
   }
 

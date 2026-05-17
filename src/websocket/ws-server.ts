@@ -8,6 +8,7 @@ import type { DeviceRegistry } from "../core/device-registry.js";
 import type { Device } from "../core/types.js";
 import { verifyAccessToken } from "../auth/token-service.js";
 import { getUserAccessibleTabs } from "../auth/permission-service.js";
+import { WS_CLIENT_CONNECT, WS_CLIENT_DISCONNECT, WS_BROADCAST } from "../core/event-bus.js";
 import logger from "../logger.js";
 
 /** Maps an internal event bus event to a WebSocket message type string */
@@ -28,8 +29,10 @@ export interface AuthenticatedClient {
 export class WsServer {
   private wss: WebSocketServer;
   private clients = new Map<WebSocket, AuthenticatedClient>();
+  private eventBus: EventEmitter;
 
   constructor(server: Server, registry: DeviceRegistry, eventBus: EventEmitter, mappings: WsEventMapping[]) {
+    this.eventBus = eventBus;
     this.wss = new WebSocketServer({ server, path: "/ws" });
 
     this.wss.on("connection", (ws, req) => {
@@ -80,6 +83,8 @@ export class WsServer {
         "WebSocket client connected (authenticated)",
       );
 
+      this.eventBus.emit(WS_CLIENT_CONNECT, { userId: payload.userId, clientCount: this.clients.size });
+
       // Send initial snapshot
       const devices = registry.getAll();
       const snapshot: Record<string, Device> = {};
@@ -90,6 +95,7 @@ export class WsServer {
 
       ws.on("close", () => {
         this.clients.delete(ws);
+        this.eventBus.emit(WS_CLIENT_DISCONNECT, { clientCount: this.clients.size });
         logger.debug({ clientCount: this.clients.size }, "WebSocket client disconnected");
       });
 
@@ -144,6 +150,9 @@ export class WsServer {
       // Messages without a tabId are sent to all authenticated clients
       client.ws.send(json);
     }
+
+    const msgType = (message as { type?: string })?.type || "unknown";
+    this.eventBus.emit(WS_BROADCAST, { messageType: msgType, clientCount: this.clients.size });
   }
 
   /** Send close frames to all connected clients and close the WebSocket server */
