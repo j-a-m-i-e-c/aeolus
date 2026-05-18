@@ -162,7 +162,7 @@ export class MetricsHistoryService {
    *
    * Exposed for testing.
    */
-  sampleOnce(): void {
+  async sampleOnce(): Promise<void> {
     // Skip writes when DataStore is disabled
     if (!this.dataStore.isEnabled()) {
       return;
@@ -178,9 +178,9 @@ export class MetricsHistoryService {
 
     // ─── System metrics ────────────────────────────────────────────────────
     try {
-      const memoryUsageMb = this.readGaugeValue(METRIC_NAMES.memoryBytes, 0) / (1024 * 1024);
-      const eventLoopLagMs = this.readGaugeValue(METRIC_NAMES.eventLoopLag, 0) * 1000;
-      const uptimeSeconds = this.readGaugeValue(METRIC_NAMES.uptimeSeconds, 0);
+      const memoryUsageMb = (await this.readGaugeValue(METRIC_NAMES.memoryBytes, 0)) / (1024 * 1024);
+      const eventLoopLagMs = (await this.readGaugeValue(METRIC_NAMES.eventLoopLag, 0)) * 1000;
+      const uptimeSeconds = await this.readGaugeValue(METRIC_NAMES.uptimeSeconds, 0);
 
       this.safeWrite(LIVE_COLLECTIONS.system, {
         memoryUsageMb,
@@ -194,9 +194,9 @@ export class MetricsHistoryService {
 
     // ─── MQTT metrics ──────────────────────────────────────────────────────
     try {
-      const receivedTotal = this.readCounterValue(METRIC_NAMES.mqttReceived);
-      const publishedTotal = this.readCounterValue(METRIC_NAMES.mqttPublished);
-      const connected = this.readGaugeValue(METRIC_NAMES.mqttConnected, 0);
+      const receivedTotal = await this.readCounterValue(METRIC_NAMES.mqttReceived);
+      const publishedTotal = await this.readCounterValue(METRIC_NAMES.mqttPublished);
+      const connected = await this.readGaugeValue(METRIC_NAMES.mqttConnected, 0);
 
       const messagesReceivedRate = this.rateComputer.computeRate(
         METRIC_NAMES.mqttReceived,
@@ -221,8 +221,8 @@ export class MetricsHistoryService {
 
     // ─── Automation metrics ────────────────────────────────────────────────
     try {
-      const executionsTotal = this.readCounterValue(METRIC_NAMES.automationExecutions);
-      const activeRules = this.readGaugeValue(METRIC_NAMES.automationActiveRules, 0);
+      const executionsTotal = await this.readCounterValue(METRIC_NAMES.automationExecutions);
+      const activeRules = await this.readGaugeValue(METRIC_NAMES.automationActiveRules, 0);
 
       const executionRate = this.rateComputer.computeRate(
         METRIC_NAMES.automationExecutions,
@@ -231,7 +231,7 @@ export class MetricsHistoryService {
       );
 
       // Automation errors: filter executions counter by status="error" label
-      const errorsTotal = this.readCounterValueWithLabels(
+      const errorsTotal = await this.readCounterValueWithLabels(
         METRIC_NAMES.automationExecutions,
         { status: "error" },
       );
@@ -253,7 +253,7 @@ export class MetricsHistoryService {
 
     // ─── HTTP metrics ──────────────────────────────────────────────────────
     try {
-      const requestsTotal = this.readCounterValue(METRIC_NAMES.httpRequests);
+      const requestsTotal = await this.readCounterValue(METRIC_NAMES.httpRequests);
 
       const requestRate = this.rateComputer.computeRate(
         METRIC_NAMES.httpRequests,
@@ -292,13 +292,13 @@ export class MetricsHistoryService {
   /**
    * Read the total value of a counter metric (summing across all label combinations).
    */
-  private readCounterValue(metricName: string): number {
+  private async readCounterValue(metricName: string): Promise<number> {
     const metric = this.registry.getSingleMetric(metricName);
     if (!metric) {
       return 0;
     }
 
-    const data = (metric as unknown as { get(): { values: Array<{ value: number }> } }).get();
+    const data = await (metric as unknown as { get(): Promise<{ values: Array<{ value: number }> }> }).get();
     if (!data || !data.values || data.values.length === 0) {
       return 0;
     }
@@ -314,16 +314,16 @@ export class MetricsHistoryService {
   /**
    * Read the value of a counter metric filtered by specific labels.
    */
-  private readCounterValueWithLabels(
+  private async readCounterValueWithLabels(
     metricName: string,
     labels: Record<string, string>,
-  ): number {
+  ): Promise<number> {
     const metric = this.registry.getSingleMetric(metricName);
     if (!metric) {
       return 0;
     }
 
-    const data = (metric as unknown as { get(): { values: Array<{ value: number; labels: Record<string, string> }> } }).get();
+    const data = await (metric as unknown as { get(): Promise<{ values: Array<{ value: number; labels: Record<string, string> }> }> }).get();
     if (!data || !data.values || data.values.length === 0) {
       return 0;
     }
@@ -343,13 +343,13 @@ export class MetricsHistoryService {
   /**
    * Read the value of a gauge metric. Returns defaultValue if metric not found.
    */
-  private readGaugeValue(metricName: string, defaultValue: number): number {
+  private async readGaugeValue(metricName: string, defaultValue: number): Promise<number> {
     const metric = this.registry.getSingleMetric(metricName);
     if (!metric) {
       return defaultValue;
     }
 
-    const data = (metric as unknown as { get(): { values: Array<{ value: number }> } }).get();
+    const data = await (metric as unknown as { get(): Promise<{ values: Array<{ value: number }> }> }).get();
     if (!data || !data.values || data.values.length === 0) {
       return defaultValue;
     }
