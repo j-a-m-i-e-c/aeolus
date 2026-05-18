@@ -186,8 +186,7 @@ export class MetricsHistoryService {
         memoryUsageMb,
         eventLoopLagMs,
         uptimeSeconds,
-        timestamp,
-      });
+      }, timestamp);
     } catch (err) {
       this.logger.warn({ err }, "Failed to sample system metrics");
     }
@@ -213,8 +212,7 @@ export class MetricsHistoryService {
         messagesReceivedRate: messagesReceivedRate ?? 0,
         messagesPublishedRate: messagesPublishedRate ?? 0,
         connected,
-        timestamp,
-      });
+      }, timestamp);
     } catch (err) {
       this.logger.warn({ err }, "Failed to sample MQTT metrics");
     }
@@ -245,8 +243,7 @@ export class MetricsHistoryService {
         executionRate: executionRate ?? 0,
         errorRate: errorRate ?? 0,
         activeRules,
-        timestamp,
-      });
+      }, timestamp);
     } catch (err) {
       this.logger.warn({ err }, "Failed to sample automation metrics");
     }
@@ -263,8 +260,7 @@ export class MetricsHistoryService {
 
       this.safeWrite(LIVE_COLLECTIONS.http, {
         requestRate: requestRate ?? 0,
-        timestamp,
-      });
+      }, timestamp);
     } catch (err) {
       this.logger.warn({ err }, "Failed to sample HTTP metrics");
     }
@@ -361,9 +357,9 @@ export class MetricsHistoryService {
   /**
    * Write to DataStore with error handling — logs and continues on failure.
    */
-  private safeWrite(collection: string, payload: Record<string, unknown>): void {
+  private safeWrite(collection: string, payload: Record<string, unknown>, timestamp?: number): void {
     try {
-      this.dataStore.write(collection, payload);
+      this.dataStore.write(collection, payload, { timestamp });
     } catch (err) {
       this.logger.warn({ err, collection }, "Failed to write metrics to DataStore collection");
     }
