@@ -180,12 +180,10 @@ export class MetricsHistoryService {
     try {
       const memoryUsageMb = (await this.readGaugeValue(METRIC_NAMES.memoryBytes, 0)) / (1024 * 1024);
       const eventLoopLagMs = (await this.readGaugeValue(METRIC_NAMES.eventLoopLag, 0)) * 1000;
-      const uptimeSeconds = await this.readGaugeValue(METRIC_NAMES.uptimeSeconds, 0);
 
       this.safeWrite(LIVE_COLLECTIONS.system, {
         memoryUsageMb,
         eventLoopLagMs,
-        uptimeSeconds,
       }, timestamp);
     } catch (err) {
       this.logger.warn({ err }, "Failed to sample system metrics");
