@@ -131,9 +131,12 @@ export function createDataStoreRoutes(dataStore: DataStore): Router {
 
       const options: QueryOptions = {};
 
-      // Parse 'from' — can be a duration string or epoch ms
+      // Parse 'from' — can be a duration string (e.g. "1h") or epoch ms (numeric)
       if (from !== undefined) {
-        options.from = from as string;
+        const fromStr = from as string;
+        const fromNum = Number(fromStr);
+        // If it's a valid number, treat as epoch ms; otherwise pass as duration string
+        options.from = !isNaN(fromNum) && fromStr.trim() !== "" ? fromNum : fromStr;
       }
 
       // Parse 'to' — must be numeric (epoch ms)
