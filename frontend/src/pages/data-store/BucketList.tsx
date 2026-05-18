@@ -56,7 +56,7 @@ export function BucketList() {
   return (
     <div className="space-y-2">
       <p className="text-sm text-[#6B7785]">
-        Key-value buckets shared across automations.
+        Key-value buckets store persistent named values that can be read and written from any automation. Use them for cross-rule shared state, computed results, or configuration that needs to survive restarts.
       </p>
 
       {buckets.map((bucket) => {

@@ -121,7 +121,7 @@ export function CollectionList() {
       {/* Header with New Collection button */}
       <div className="flex items-center justify-between">
         <p className="text-sm text-[#6B7785]">
-          Browse collections and view time-series data.
+          Time-series collections store timestamped records that accumulate over time. Use them to log sensor readings, track energy usage, or record any data you want to query and chart by time range.
         </p>
         <button
           onClick={() => setShowCreate(true)}
