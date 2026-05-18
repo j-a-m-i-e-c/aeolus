@@ -8,18 +8,31 @@ import {
   Calendar,
   HardDrive,
   X,
-  Eye,
-  EyeOff,
+  Activity,
 } from "lucide-react";
 import { useDataStoreStore } from "../../store/data-store-store";
 import { authFetch } from "../../lib/auth-fetch";
 
-/** Collections with this prefix are system/internal and hidden by default */
+/** Collections with this prefix are system/internal (observability) */
 const SYSTEM_COLLECTION_PREFIX = "_metrics:";
 
 const API_URL =
   import.meta.env.VITE_API_URL ||
   `http://${window.location.hostname}:3001`;
+
+/**
+ * Format retention days into a human-readable string.
+ * Handles fractional days (e.g., 0.00694 days = 10 minutes).
+ */
+function formatRetention(retentionDays: number | null): string {
+  if (!retentionDays) return "Forever";
+
+  const totalMinutes = Math.round(retentionDays * 24 * 60);
+
+  if (totalMinutes < 60) return `${totalMinutes}m retention`;
+  if (totalMinutes < 1440) return `${Math.round(totalMinutes / 60)}h retention`;
+  return `${Math.round(retentionDays)}d retention`;
+}
 
 export function CollectionList() {
   const collections = useDataStoreStore((s) => s.collections);
@@ -29,10 +42,9 @@ export function CollectionList() {
   const [showCreate, setShowCreate] = useState(false);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [showSystemCollections, setShowSystemCollections] = useState(false);
 
-  // Filter out system collections unless the toggle is enabled
-  const { visibleCollections, systemCount } = useMemo(() => {
+  // Split collections into user and system (observability)
+  const { userCollections, systemCollections } = useMemo(() => {
     const systemCols = collections.filter((c) =>
       c.name.startsWith(SYSTEM_COLLECTION_PREFIX),
     );
@@ -40,12 +52,10 @@ export function CollectionList() {
       (c) => !c.name.startsWith(SYSTEM_COLLECTION_PREFIX),
     );
     return {
-      visibleCollections: showSystemCollections
-        ? [...userCols, ...systemCols]
-        : userCols,
-      systemCount: systemCols.length,
+      userCollections: userCols,
+      systemCollections: systemCols,
     };
-  }, [collections, showSystemCollections]);
+  }, [collections]);
 
   // Form state
   const [name, setName] = useState("");
@@ -95,48 +105,31 @@ export function CollectionList() {
   }
 
   function estimateSize(recordCount: number): string {
-    // Rough estimate: ~200 bytes per record
     const bytes = recordCount * 200;
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   }
 
+  /** Strip the _metrics: prefix for cleaner display in the observability section */
+  function formatSystemName(name: string): string {
+    return name.replace(SYSTEM_COLLECTION_PREFIX, "");
+  }
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       {/* Header with New Collection button */}
       <div className="flex items-center justify-between">
         <p className="text-sm text-[#6B7785]">
           Browse collections and view time-series data.
         </p>
-        <div className="flex items-center gap-2">
-          {/* System collections toggle */}
-          {systemCount > 0 && (
-            <button
-              onClick={() => setShowSystemCollections((prev) => !prev)}
-              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors border ${
-                showSystemCollections
-                  ? "bg-[#161B22] border-primary/50 text-primary"
-                  : "bg-[#161B22] border-[#30363D] text-[#6B7785] hover:text-[#9AA6B2] hover:border-[#6B7785]"
-              }`}
-              title={
-                showSystemCollections
-                  ? "Hide system collections"
-                  : `Show ${systemCount} system collection${systemCount !== 1 ? "s" : ""}`
-              }
-            >
-              {showSystemCollections ? <EyeOff size={14} /> : <Eye size={14} />}
-              {showSystemCollections ? "Hide system" : `System (${systemCount})`}
-            </button>
-          )}
-          <button
-            onClick={() => setShowCreate(true)}
-            className="flex items-center gap-1.5 bg-primary hover:bg-primary/90 text-white rounded-lg px-3 py-1.5 text-xs font-medium transition-colors"
-          >
-            <Plus size={14} />
-            New Collection
-          </button>
-        </div>
+        <button
+          onClick={() => setShowCreate(true)}
+          className="flex items-center gap-1.5 bg-primary hover:bg-primary/90 text-white rounded-lg px-3 py-1.5 text-xs font-medium transition-colors"
+        >
+          <Plus size={14} />
+          New Collection
+        </button>
       </div>
 
       {/* Creation form */}
@@ -217,8 +210,8 @@ export function CollectionList() {
         </div>
       )}
 
-      {/* Collection cards grid */}
-      {visibleCollections.length === 0 ? (
+      {/* ─── User Collections ─────────────────────────────────────────────── */}
+      {userCollections.length === 0 ? (
         <div className="bg-[#161B22] border border-[#30363D] rounded-xl p-8 text-center">
           <Database size={32} className="text-[#6B7785] mx-auto mb-3" />
           <p className="text-sm text-[#6B7785]">
@@ -227,62 +220,81 @@ export function CollectionList() {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-          {visibleCollections.map((col) => {
-            const isSystem = col.name.startsWith(SYSTEM_COLLECTION_PREFIX);
-            return (
+          {userCollections.map((col) => (
+            <button
+              key={col.name}
+              onClick={() => selectCollection(col.name)}
+              className="bg-[#161B22] border border-[#30363D] rounded-xl p-4 text-left transition-colors group hover:border-primary/50"
+            >
+              <div className="flex items-start justify-between mb-2">
+                <h3 className="text-sm font-semibold text-[#E6EDF3] group-hover:text-primary transition-colors truncate">
+                  {col.name}
+                </h3>
+              </div>
+
+              {col.description && (
+                <p className="text-xs text-[#6B7785] mb-3 line-clamp-2">
+                  {col.description}
+                </p>
+              )}
+
+              <div className="grid grid-cols-2 gap-2 text-[10px]">
+                <div className="flex items-center gap-1 text-[#9AA6B2]">
+                  <Database size={10} className="text-[#6B7785]" />
+                  <span>{col.recordCount.toLocaleString()} records</span>
+                </div>
+                <div className="flex items-center gap-1 text-[#9AA6B2]">
+                  <Clock size={10} className="text-[#6B7785]" />
+                  <span>{formatRetention(col.retentionDays)}</span>
+                </div>
+                <div className="flex items-center gap-1 text-[#9AA6B2]">
+                  <Calendar size={10} className="text-[#6B7785]" />
+                  <span>{formatTimestamp(col.newestRecord)}</span>
+                </div>
+                <div className="flex items-center gap-1 text-[#9AA6B2]">
+                  <HardDrive size={10} className="text-[#6B7785]" />
+                  <span>{estimateSize(col.recordCount)}</span>
+                </div>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* ─── Observability Collections ────────────────────────────────────── */}
+      {systemCollections.length > 0 && (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2 pt-2 border-t border-[#30363D]/50">
+            <Activity size={14} className="text-[#5CE1E6]" />
+            <h3 className="text-xs font-semibold text-[#9AA6B2] uppercase tracking-wider">
+              Observability
+            </h3>
+            <span className="text-[10px] text-[#6B7785]">
+              Auto-managed metrics collections
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2">
+            {systemCollections.map((col) => (
               <button
                 key={col.name}
                 onClick={() => selectCollection(col.name)}
-                className={`bg-[#161B22] border rounded-xl p-4 text-left transition-colors group ${
-                  isSystem
-                    ? "border-[#30363D]/60 opacity-70 hover:opacity-100 hover:border-primary/30"
-                    : "border-[#30363D] hover:border-primary/50"
-                }`}
+                className="bg-[#161B22]/70 border border-[#30363D]/50 rounded-lg p-3 text-left transition-colors group hover:border-[#5CE1E6]/30 hover:bg-[#161B22]"
               >
-                <div className="flex items-start justify-between mb-2">
-                  <h3
-                    className={`text-sm font-semibold group-hover:text-primary transition-colors truncate ${
-                      isSystem ? "text-[#9AA6B2]" : "text-[#E6EDF3]"
-                    }`}
-                  >
-                    {col.name}
-                  </h3>
-                  {isSystem && (
-                    <span className="shrink-0 ml-2 inline-flex items-center rounded-md bg-[#30363D] px-1.5 py-0.5 text-[9px] font-medium text-[#9AA6B2] ring-1 ring-inset ring-[#6B7785]/30">
-                      system
-                    </span>
-                  )}
+                <div className="flex items-center gap-1.5 mb-1.5">
+                  <Activity size={10} className="text-[#5CE1E6] shrink-0" />
+                  <h4 className="text-xs font-medium text-[#9AA6B2] group-hover:text-[#5CE1E6] transition-colors truncate">
+                    {formatSystemName(col.name)}
+                  </h4>
                 </div>
 
-                {col.description && (
-                  <p className="text-xs text-[#6B7785] mb-3 line-clamp-2">
-                    {col.description}
-                  </p>
-                )}
-
-                <div className="grid grid-cols-2 gap-2 text-[10px]">
-                  <div className="flex items-center gap-1 text-[#9AA6B2]">
-                    <Database size={10} className="text-[#6B7785]" />
-                    <span>{col.recordCount.toLocaleString()} records</span>
-                  </div>
-                  <div className="flex items-center gap-1 text-[#9AA6B2]">
-                    <Clock size={10} className="text-[#6B7785]" />
-                    <span>
-                      {col.retentionDays ? `${col.retentionDays}d retention` : "Forever"}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-1 text-[#9AA6B2]">
-                    <Calendar size={10} className="text-[#6B7785]" />
-                    <span>{formatTimestamp(col.newestRecord)}</span>
-                  </div>
-                  <div className="flex items-center gap-1 text-[#9AA6B2]">
-                    <HardDrive size={10} className="text-[#6B7785]" />
-                    <span>{estimateSize(col.recordCount)}</span>
-                  </div>
+                <div className="flex items-center justify-between text-[9px] text-[#6B7785]">
+                  <span>{col.recordCount.toLocaleString()} records</span>
+                  <span>{formatRetention(col.retentionDays)}</span>
                 </div>
               </button>
-            );
-          })}
+            ))}
+          </div>
         </div>
       )}
     </div>
