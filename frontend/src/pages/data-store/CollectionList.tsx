@@ -1,6 +1,6 @@
 // frontend/src/pages/data-store/CollectionList.tsx — Card grid of collections with creation form
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import {
   Plus,
   Clock,
@@ -8,9 +8,14 @@ import {
   Calendar,
   HardDrive,
   X,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import { useDataStoreStore } from "../../store/data-store-store";
 import { authFetch } from "../../lib/auth-fetch";
+
+/** Collections with this prefix are system/internal and hidden by default */
+const SYSTEM_COLLECTION_PREFIX = "_metrics:";
 
 const API_URL =
   import.meta.env.VITE_API_URL ||
@@ -24,6 +29,23 @@ export function CollectionList() {
   const [showCreate, setShowCreate] = useState(false);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showSystemCollections, setShowSystemCollections] = useState(false);
+
+  // Filter out system collections unless the toggle is enabled
+  const { visibleCollections, systemCount } = useMemo(() => {
+    const systemCols = collections.filter((c) =>
+      c.name.startsWith(SYSTEM_COLLECTION_PREFIX),
+    );
+    const userCols = collections.filter(
+      (c) => !c.name.startsWith(SYSTEM_COLLECTION_PREFIX),
+    );
+    return {
+      visibleCollections: showSystemCollections
+        ? [...userCols, ...systemCols]
+        : userCols,
+      systemCount: systemCols.length,
+    };
+  }, [collections, showSystemCollections]);
 
   // Form state
   const [name, setName] = useState("");
@@ -87,13 +109,34 @@ export function CollectionList() {
         <p className="text-sm text-[#6B7785]">
           Browse collections and view time-series data.
         </p>
-        <button
-          onClick={() => setShowCreate(true)}
-          className="flex items-center gap-1.5 bg-primary hover:bg-primary/90 text-white rounded-lg px-3 py-1.5 text-xs font-medium transition-colors"
-        >
-          <Plus size={14} />
-          New Collection
-        </button>
+        <div className="flex items-center gap-2">
+          {/* System collections toggle */}
+          {systemCount > 0 && (
+            <button
+              onClick={() => setShowSystemCollections((prev) => !prev)}
+              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors border ${
+                showSystemCollections
+                  ? "bg-[#161B22] border-primary/50 text-primary"
+                  : "bg-[#161B22] border-[#30363D] text-[#6B7785] hover:text-[#9AA6B2] hover:border-[#6B7785]"
+              }`}
+              title={
+                showSystemCollections
+                  ? "Hide system collections"
+                  : `Show ${systemCount} system collection${systemCount !== 1 ? "s" : ""}`
+              }
+            >
+              {showSystemCollections ? <EyeOff size={14} /> : <Eye size={14} />}
+              {showSystemCollections ? "Hide system" : `System (${systemCount})`}
+            </button>
+          )}
+          <button
+            onClick={() => setShowCreate(true)}
+            className="flex items-center gap-1.5 bg-primary hover:bg-primary/90 text-white rounded-lg px-3 py-1.5 text-xs font-medium transition-colors"
+          >
+            <Plus size={14} />
+            New Collection
+          </button>
+        </div>
       </div>
 
       {/* Creation form */}
@@ -175,7 +218,7 @@ export function CollectionList() {
       )}
 
       {/* Collection cards grid */}
-      {collections.length === 0 ? (
+      {visibleCollections.length === 0 ? (
         <div className="bg-[#161B22] border border-[#30363D] rounded-xl p-8 text-center">
           <Database size={32} className="text-[#6B7785] mx-auto mb-3" />
           <p className="text-sm text-[#6B7785]">
@@ -184,46 +227,62 @@ export function CollectionList() {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-          {collections.map((col) => (
-            <button
-              key={col.name}
-              onClick={() => selectCollection(col.name)}
-              className="bg-[#161B22] border border-[#30363D] rounded-xl p-4 text-left hover:border-primary/50 transition-colors group"
-            >
-              <div className="flex items-start justify-between mb-2">
-                <h3 className="text-sm font-semibold text-[#E6EDF3] group-hover:text-primary transition-colors truncate">
-                  {col.name}
-                </h3>
-              </div>
+          {visibleCollections.map((col) => {
+            const isSystem = col.name.startsWith(SYSTEM_COLLECTION_PREFIX);
+            return (
+              <button
+                key={col.name}
+                onClick={() => selectCollection(col.name)}
+                className={`bg-[#161B22] border rounded-xl p-4 text-left transition-colors group ${
+                  isSystem
+                    ? "border-[#30363D]/60 opacity-70 hover:opacity-100 hover:border-primary/30"
+                    : "border-[#30363D] hover:border-primary/50"
+                }`}
+              >
+                <div className="flex items-start justify-between mb-2">
+                  <h3
+                    className={`text-sm font-semibold group-hover:text-primary transition-colors truncate ${
+                      isSystem ? "text-[#9AA6B2]" : "text-[#E6EDF3]"
+                    }`}
+                  >
+                    {col.name}
+                  </h3>
+                  {isSystem && (
+                    <span className="shrink-0 ml-2 inline-flex items-center rounded-md bg-[#30363D] px-1.5 py-0.5 text-[9px] font-medium text-[#9AA6B2] ring-1 ring-inset ring-[#6B7785]/30">
+                      system
+                    </span>
+                  )}
+                </div>
 
-              {col.description && (
-                <p className="text-xs text-[#6B7785] mb-3 line-clamp-2">
-                  {col.description}
-                </p>
-              )}
+                {col.description && (
+                  <p className="text-xs text-[#6B7785] mb-3 line-clamp-2">
+                    {col.description}
+                  </p>
+                )}
 
-              <div className="grid grid-cols-2 gap-2 text-[10px]">
-                <div className="flex items-center gap-1 text-[#9AA6B2]">
-                  <Database size={10} className="text-[#6B7785]" />
-                  <span>{col.recordCount.toLocaleString()} records</span>
+                <div className="grid grid-cols-2 gap-2 text-[10px]">
+                  <div className="flex items-center gap-1 text-[#9AA6B2]">
+                    <Database size={10} className="text-[#6B7785]" />
+                    <span>{col.recordCount.toLocaleString()} records</span>
+                  </div>
+                  <div className="flex items-center gap-1 text-[#9AA6B2]">
+                    <Clock size={10} className="text-[#6B7785]" />
+                    <span>
+                      {col.retentionDays ? `${col.retentionDays}d retention` : "Forever"}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1 text-[#9AA6B2]">
+                    <Calendar size={10} className="text-[#6B7785]" />
+                    <span>{formatTimestamp(col.newestRecord)}</span>
+                  </div>
+                  <div className="flex items-center gap-1 text-[#9AA6B2]">
+                    <HardDrive size={10} className="text-[#6B7785]" />
+                    <span>{estimateSize(col.recordCount)}</span>
+                  </div>
                 </div>
-                <div className="flex items-center gap-1 text-[#9AA6B2]">
-                  <Clock size={10} className="text-[#6B7785]" />
-                  <span>
-                    {col.retentionDays ? `${col.retentionDays}d retention` : "Forever"}
-                  </span>
-                </div>
-                <div className="flex items-center gap-1 text-[#9AA6B2]">
-                  <Calendar size={10} className="text-[#6B7785]" />
-                  <span>{formatTimestamp(col.newestRecord)}</span>
-                </div>
-                <div className="flex items-center gap-1 text-[#9AA6B2]">
-                  <HardDrive size={10} className="text-[#6B7785]" />
-                  <span>{estimateSize(col.recordCount)}</span>
-                </div>
-              </div>
-            </button>
-          ))}
+              </button>
+            );
+          })}
         </div>
       )}
     </div>

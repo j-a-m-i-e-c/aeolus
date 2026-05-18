@@ -57,6 +57,7 @@ import { MqttProvisioningService } from "./mqtt/mqtt-provisioning-service.js";
 import { metricsService } from "./metrics/metrics-service.js";
 import { metricsMiddleware } from "./metrics/metrics-middleware.js";
 import { createPrometheusMetricsRoute, createMetricsSummaryRoute } from "./api/routes/metrics.routes.js";
+import { MetricsHistoryService } from "./metrics/metrics-history-service.js";
 
 
 const startTime = Date.now();
@@ -173,7 +174,15 @@ async function main(): Promise<void> {
     getRuleCount: () => engine.ruleCount,
   });
 
-  // 7c. Wire MQTT events to device registry
+  // 7c. Initialize MetricsHistoryService (after DataStore and MetricsService)
+  const metricsHistoryService = new MetricsHistoryService({
+    dataStore,
+    registry: metricsService.getRegistry(),
+    logger,
+  });
+  metricsHistoryService.start();
+
+  // 7d. Wire MQTT events to device registry
   eventBus.on(DEVICE_STATE_CHANGE, (event) => {
     registry.upsert(event);
     stateHistory.record(event.deviceId, event.state, event.timestamp);
@@ -267,6 +276,7 @@ async function main(): Promise<void> {
       wsServer.closeAll();
 
       // 3. Stop all active timers (retention timers, polling intervals, cron schedules)
+      await metricsHistoryService.dispose();
       dataStore.dispose();
       await serviceManager.disposeAll();
       await connectorManager.disposeAll();

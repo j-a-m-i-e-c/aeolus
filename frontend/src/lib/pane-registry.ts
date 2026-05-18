@@ -17,6 +17,7 @@ import { TriggerButtonPane } from "../components/panes/TriggerButtonPane";
 import { StateHistoryPane } from "../components/panes/StateHistoryPane";
 import { ScheduleViewerPane } from "../components/panes/ScheduleViewerPane";
 import { MetricsPane } from "../components/panes/MetricsPane";
+import { MetricsChartsPane } from "../components/panes/MetricsChartsPane";
 
 export interface PaneRegistryEntry {
   component: ComponentType<{ config: PaneConfig; paneId?: string }>;
@@ -134,6 +135,14 @@ export const PANE_REGISTRY: Record<string, PaneRegistryEntry> = {
     defaultIcon: "activity",
     defaultConfig: {},
     defaultSize: { w: 12, h: 5 },
+    category: "monitoring",
+  },
+  "metrics-charts": {
+    component: MetricsChartsPane,
+    displayName: "Metrics History",
+    defaultIcon: "bar-chart-3",
+    defaultConfig: {},
+    defaultSize: { w: 12, h: 6 },
     category: "monitoring",
   },
 
