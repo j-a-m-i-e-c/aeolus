@@ -275,25 +275,50 @@ export function CollectionList() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2">
-            {systemCollections.map((col) => (
-              <button
-                key={col.name}
-                onClick={() => selectCollection(col.name)}
-                className="bg-[#161B22]/70 border border-[#30363D]/50 rounded-lg p-3 text-left transition-colors group hover:border-[#5CE1E6]/30 hover:bg-[#161B22]"
-              >
-                <div className="flex items-center gap-1.5 mb-1.5">
-                  <Activity size={10} className="text-[#5CE1E6] shrink-0" />
-                  <h4 className="text-xs font-medium text-[#9AA6B2] group-hover:text-[#5CE1E6] transition-colors truncate">
-                    {formatSystemName(col.name)}
-                  </h4>
-                </div>
+            {(() => {
+              // Group live + history pairs into single cards by category
+              const categories = new Map<string, { live?: typeof systemCollections[0]; history?: typeof systemCollections[0] }>();
+              for (const col of systemCollections) {
+                const stripped = col.name.replace(SYSTEM_COLLECTION_PREFIX, "");
+                const isLive = stripped.startsWith("live:");
+                const category = stripped.replace(/^(live|history):/, "");
+                if (!categories.has(category)) categories.set(category, {});
+                const entry = categories.get(category)!;
+                if (isLive) entry.live = col;
+                else entry.history = col;
+              }
 
-                <div className="flex items-center justify-between text-[9px] text-[#6B7785]">
-                  <span>{col.recordCount.toLocaleString()} records</span>
-                  <span>{formatRetention(col.retentionDays)}</span>
-                </div>
-              </button>
-            ))}
+              return Array.from(categories.entries()).map(([category, { live, history }]) => {
+                const totalRecords = (live?.recordCount ?? 0) + (history?.recordCount ?? 0);
+                const liveRetention = live ? formatRetention(live.retentionDays) : null;
+                const newestTs = Math.max(live?.newestRecord ?? 0, history?.newestRecord ?? 0) || null;
+
+                return (
+                  <button
+                    key={category}
+                    onClick={() => selectCollection(history?.name ?? live?.name ?? "")}
+                    className="bg-[#161B22]/70 border border-[#30363D]/50 rounded-lg p-3 text-left transition-colors group hover:border-[#5CE1E6]/30 hover:bg-[#161B22]"
+                  >
+                    <div className="flex items-center gap-1.5 mb-1.5">
+                      <Activity size={10} className="text-[#5CE1E6] shrink-0" />
+                      <h4 className="text-xs font-medium text-[#9AA6B2] group-hover:text-[#5CE1E6] transition-colors truncate">
+                        {category}
+                      </h4>
+                    </div>
+
+                    <div className="flex items-center justify-between text-[9px] text-[#6B7785]">
+                      <span>{totalRecords.toLocaleString()} records</span>
+                      <span>{liveRetention ?? "Forever"}</span>
+                    </div>
+                    {newestTs && (
+                      <div className="text-[9px] text-[#6B7785] mt-1">
+                        Last: {formatTimestamp(newestTs)}
+                      </div>
+                    )}
+                  </button>
+                );
+              });
+            })()}
           </div>
         </div>
       )}
