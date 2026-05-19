@@ -96,7 +96,7 @@ Installs Docker, clones Aeolus, builds containers, and starts everything. Auto-s
 
 ## Dashboard
 
-The dashboard has three permanent tabs — **System** (device grid, health, diagnostics), **Connectors** (manage integrations), and **Data** (time-series explorer and key-value buckets) — plus as many custom tabs as you want.
+The dashboard has three pinned sidebar tabs — **System** (device grid, health, diagnostics, user management), **Connectors** (manage integrations), and **Data** (time-series explorer, key-value buckets, and metrics history charts) — plus as many custom tabs as you want. Admins can create tabs and assign them to user groups with read/interact/write permissions.
 
 Custom tabs are where the real work happens. Each tab has two buttons in the header:
 
@@ -109,8 +109,8 @@ Custom tabs are where the real work happens. Each tab has two buttons in the hea
 |----------|-------|
 | Controls | Device Grid · Hue Lights · Kasa Devices · Trigger Button |
 | Automations | Automation (one-pane-one-rule) · Automation List |
-| Monitoring | Sensor Panel · MQTT Inspector · Topic Tree · Event Log · State History |
-| System | System Stats · Connectors |
+| Monitoring | Sensor Panel · MQTT Inspector · Topic Tree · Event Log · State History · Metrics |
+| System | System Stats · Connectors · User Management |
 
 Every pane is draggable and resizable. Layout persists to SQLite automatically.
 
@@ -468,7 +468,7 @@ Three event source layers feed the same internal bus: MQTT devices (bidirectiona
 
 | Layer | Tech |
 |-------|------|
-| Backend | Express · TypeScript · SQLite (sql.js) · MQTT (mqtt.js) · WebSocket (ws) · isolated-vm · pino |
+| Backend | Express · TypeScript · SQLite (better-sqlite3) · MQTT (mqtt.js) · WebSocket (ws) · isolated-vm · pino · prom-client |
 | Frontend | React 19 · Vite · Zustand · Tailwind CSS · Monaco Editor · Lucide · Framer Motion |
 | Infra | Docker Compose · Eclipse Mosquitto 2 · Node.js 22 |
 
