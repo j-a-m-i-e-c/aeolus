@@ -536,21 +536,15 @@ export function createAutomationRoutes(
       }
 
       // Build a synthetic context for manual firing
-      const context = {
+      const context: EventContext = {
         topic: rule.topic,
         deviceId: "manual-fire",
         state: req.body ?? {},
         timestamp: Date.now(),
       };
 
-      // Check if it's a script rule (has compiled_js)
-      const compiledJs = (rule as unknown as Record<string, unknown>).compiled_js as string | undefined;
-
-      if (compiledJs) {
-        await rule.action(context);
-      } else {
-        await rule.action(context);
-      }
+      // Fire through the engine (routes script rules through sandbox)
+      await engine.fire(id, context);
 
       logger.info({ ruleId: id, ruleName: rule.name }, "Automation rule manually fired");
       res.json({ success: true, ruleId: id });

@@ -126,6 +126,7 @@ function createMockEngine() {
     register: vi.fn(),
     unregister: vi.fn(),
     getRule: vi.fn(() => null),
+    fire: vi.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -614,12 +615,11 @@ describe("automation.routes", () => {
     });
 
     it("should fire a rule and return success", async () => {
-      const mockAction = vi.fn().mockResolvedValue(undefined);
       mockEngine.getRule.mockReturnValue({
         id: "fire-rule",
         topic: "sensors/temp",
         name: "Fire Me",
-        action: mockAction,
+        action: vi.fn(),
       });
 
       const res = await request(app, "POST", "/api/automations/fire-rule/fire", {
@@ -629,7 +629,10 @@ describe("automation.routes", () => {
       const body = res.body as any;
       expect(body.success).toBe(true);
       expect(body.ruleId).toBe("fire-rule");
-      expect(mockAction).toHaveBeenCalled();
+      expect(mockEngine.fire).toHaveBeenCalledWith("fire-rule", expect.objectContaining({
+        topic: "sensors/temp",
+        deviceId: "manual-fire",
+      }));
     });
   });
 

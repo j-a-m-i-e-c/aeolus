@@ -57,7 +57,12 @@ export class AutomationEngine {
           state: { ruleId: rule.id, cronExpression: rule.cronExpression, firedAt: Date.now() },
           timestamp: Date.now(),
         };
-        this.executeDirectRule(rule, context);
+        const compiledJs = (rule as unknown as Record<string, unknown>).compiled_js as string | undefined;
+        if (compiledJs && this.sandbox) {
+          this.executeScriptRule(rule, compiledJs, context);
+        } else {
+          this.executeDirectRule(rule, context);
+        }
       });
       if (started) {
         logger.debug({ ruleId: rule.id, cronExpression: rule.cronExpression }, "Cron timer started for rule");
@@ -82,6 +87,19 @@ export class AutomationEngine {
   /** Get a rule by ID */
   getRule(id: string): Rule | undefined {
     return this.registry.getRule(id);
+  }
+
+  /** Manually fire a rule by ID, routing through the sandbox for script rules. */
+  async fire(ruleId: string, context: EventContext): Promise<void> {
+    const rule = this.registry.getRule(ruleId);
+    if (!rule) throw new Error(`Rule ${ruleId} not found`);
+
+    const compiledJs = (rule as unknown as Record<string, unknown>).compiled_js as string | undefined;
+    if (compiledJs && this.sandbox) {
+      this.executeScriptRule(rule, compiledJs, context);
+    } else {
+      this.executeDirectRule(rule, context);
+    }
   }
 
   /** Get rule count */
