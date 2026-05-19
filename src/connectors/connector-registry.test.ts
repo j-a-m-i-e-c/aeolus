@@ -139,4 +139,95 @@ describe("ConnectorRegistry", () => {
       expect(registry.getModule("hue")).toBeUndefined();
     });
   });
+
+  describe("discoverFromDirectory()", () => {
+    it("should handle non-existent directory gracefully", async () => {
+      const logger = await import("../logger.js");
+      await registry.discoverFromDirectory("/nonexistent/path");
+      expect(logger.default.error).toHaveBeenCalled();
+      expect(registry.listAvailable()).toHaveLength(0);
+    });
+
+    it("should skip non-directory entries", async () => {
+      const fs = await import("node:fs");
+      const tmpDir = "/tmp/aeolus-registry-test-files";
+      fs.mkdirSync(tmpDir, { recursive: true });
+      // Create a file (not a directory)
+      fs.writeFileSync(`${tmpDir}/somefile.ts`, "export default {}");
+      try {
+        await registry.discoverFromDirectory(tmpDir);
+        expect(registry.listAvailable()).toHaveLength(0);
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it("should skip _template directory", async () => {
+      const fs = await import("node:fs");
+      const tmpDir = "/tmp/aeolus-registry-test-template";
+      const templateDir = `${tmpDir}/_template`;
+      fs.mkdirSync(templateDir, { recursive: true });
+      fs.writeFileSync(`${templateDir}/index.ts`, "export const metadata = { id: 'template' };");
+      try {
+        await registry.discoverFromDirectory(tmpDir);
+        expect(registry.listAvailable()).toHaveLength(0);
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it("should skip directories starting with 'connector'", async () => {
+      const fs = await import("node:fs");
+      const tmpDir = "/tmp/aeolus-registry-test-connector";
+      const connDir = `${tmpDir}/connector-utils`;
+      fs.mkdirSync(connDir, { recursive: true });
+      fs.writeFileSync(`${connDir}/index.ts`, "export const metadata = { id: 'utils' };");
+      try {
+        await registry.discoverFromDirectory(tmpDir);
+        expect(registry.listAvailable()).toHaveLength(0);
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it("should warn when subdirectory has no index file", async () => {
+      const fs = await import("node:fs");
+      const logger = await import("../logger.js");
+      const tmpDir = "/tmp/aeolus-registry-test-noindex";
+      const subDir = `${tmpDir}/myconnector`;
+      fs.mkdirSync(subDir, { recursive: true });
+      // No index.ts or index.js
+      fs.writeFileSync(`${subDir}/other.ts`, "export default {}");
+      try {
+        await registry.discoverFromDirectory(tmpDir);
+        expect(logger.default.warn).toHaveBeenCalledWith(
+          expect.objectContaining({ dir: "myconnector" }),
+          expect.stringContaining("no index.ts or index.js"),
+        );
+        expect(registry.listAvailable()).toHaveLength(0);
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it("should warn when module has invalid exports", async () => {
+      const fs = await import("node:fs");
+      const logger = await import("../logger.js");
+      const tmpDir = "/tmp/aeolus-registry-test-invalid";
+      const subDir = `${tmpDir}/badmod`;
+      fs.mkdirSync(subDir, { recursive: true });
+      // Create an index.ts that exports an invalid module (no metadata, no configSchema, no createConnector)
+      fs.writeFileSync(`${subDir}/index.ts`, "export const foo = 'bar';");
+      try {
+        await registry.discoverFromDirectory(tmpDir);
+        expect(logger.default.warn).toHaveBeenCalledWith(
+          expect.objectContaining({ dir: "badmod", missing: expect.any(Array) }),
+          expect.stringContaining("missing required exports"),
+        );
+        expect(registry.listAvailable()).toHaveLength(0);
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+  });
 });

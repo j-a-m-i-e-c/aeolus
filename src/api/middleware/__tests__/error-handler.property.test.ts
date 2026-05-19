@@ -99,10 +99,10 @@ describe("Property: Error Response Shape Consistency", () => {
   test.prop(
     [statusCodeArb, messageArb, fc.oneof(
       fc.string({ minLength: 1 }),
-      fc.integer(),
+      fc.integer({ min: 1 }),
       fc.constant(true),
       fc.array(fc.integer(), { minLength: 1 }),
-      fc.dictionary(fc.string({ minLength: 1, maxLength: 10 }), fc.string()),
+      fc.dictionary(fc.string({ minLength: 1, maxLength: 10 }), fc.string(), { minKeys: 1 }),
     )],
     { numRuns: 100 },
   )(

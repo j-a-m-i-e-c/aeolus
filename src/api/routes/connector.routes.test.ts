@@ -299,4 +299,75 @@ describe("connector.routes", () => {
       expect(mockManager.retry).toHaveBeenCalledWith("inst-1");
     });
   });
+
+  describe("GET /api/connectors/:id/setup-steps", () => {
+    it("should return 404 when instance not found", async () => {
+      mockManager.getStatus.mockReturnValue(undefined);
+      const res = await request(app, "GET", "/api/connectors/unknown/setup-steps");
+      expect(res.status).toBe(404);
+    });
+
+    it("should return setup steps when instance exists", async () => {
+      mockManager.getStatus.mockReturnValue(makeInstanceInfo("inst-1"));
+      mockManager.getSetupSteps = vi.fn().mockReturnValue([{ id: "step-1", title: "Configure" }]);
+      const res = await request(app, "GET", "/api/connectors/inst-1/setup-steps");
+      expect(res.status).toBe(200);
+      expect((res.body as any[])[0].id).toBe("step-1");
+    });
+  });
+
+  describe("POST /api/connectors/:id/search-lights", () => {
+    it("should return 404 when instance not found", async () => {
+      mockManager.getStatus.mockReturnValue(undefined);
+      mockManager.getConnectorInstance = vi.fn().mockReturnValue(undefined);
+      const res = await request(app, "POST", "/api/connectors/unknown/search-lights");
+      expect(res.status).toBe(404);
+    });
+
+    it("should return 400 when connector does not support light search", async () => {
+      mockManager.getStatus.mockReturnValue(makeInstanceInfo("inst-1"));
+      mockManager.getConnectorInstance = vi.fn().mockReturnValue({});
+      const res = await request(app, "POST", "/api/connectors/inst-1/search-lights");
+      expect(res.status).toBe(400);
+      expect((res.body as any).error).toContain("does not support");
+    });
+
+    it("should call searchForNewLights and return result", async () => {
+      mockManager.getStatus.mockReturnValue(makeInstanceInfo("inst-1"));
+      mockManager.getConnectorInstance = vi.fn().mockReturnValue({
+        searchForNewLights: vi.fn().mockResolvedValue({ active: true, startedAt: 1000, newLights: [] }),
+      });
+      const res = await request(app, "POST", "/api/connectors/inst-1/search-lights");
+      expect(res.status).toBe(200);
+      expect((res.body as any).active).toBe(true);
+    });
+  });
+
+  describe("GET /api/connectors/:id/search-lights/status", () => {
+    it("should return 404 when instance not found", async () => {
+      mockManager.getStatus.mockReturnValue(undefined);
+      mockManager.getConnectorInstance = vi.fn().mockReturnValue(undefined);
+      const res = await request(app, "GET", "/api/connectors/unknown/search-lights/status");
+      expect(res.status).toBe(404);
+    });
+
+    it("should return 400 when connector does not support getSearchStatus", async () => {
+      mockManager.getStatus.mockReturnValue(makeInstanceInfo("inst-1"));
+      mockManager.getConnectorInstance = vi.fn().mockReturnValue({});
+      const res = await request(app, "GET", "/api/connectors/inst-1/search-lights/status");
+      expect(res.status).toBe(400);
+      expect((res.body as any).error).toContain("does not support");
+    });
+
+    it("should return search status when supported", async () => {
+      mockManager.getStatus.mockReturnValue(makeInstanceInfo("inst-1"));
+      mockManager.getConnectorInstance = vi.fn().mockReturnValue({
+        getSearchStatus: vi.fn().mockReturnValue({ active: false, newLights: [{ id: "1", name: "New Light" }] }),
+      });
+      const res = await request(app, "GET", "/api/connectors/inst-1/search-lights/status");
+      expect(res.status).toBe(200);
+      expect((res.body as any).active).toBe(false);
+      expect((res.body as any).newLights).toHaveLength(1);
+    });
+  });
 });

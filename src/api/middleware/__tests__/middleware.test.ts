@@ -168,5 +168,27 @@ describe("Middleware Integration Tests", () => {
       expect(res.body).toHaveProperty("details");
       expect(res.body.details).toEqual({ field: "name", issue: "too long" });
     });
+
+    it("returns 500 with structured JSON error for unhandled route handler errors", async () => {
+      app.get("/explode", (_req: Request, _res: Response) => {
+        throw new Error("unexpected failure");
+      });
+      app.use(errorHandler);
+
+      const res = await request(app).get("/explode");
+
+      // Verify status code
+      expect(res.status).toBe(500);
+      // Verify response is JSON with structured error shape
+      expect(res.headers["content-type"]).toMatch(/json/);
+      expect(res.body).toBeTypeOf("object");
+      expect(res.body).toHaveProperty("error");
+      expect(typeof res.body.error).toBe("string");
+      // In production mode (mocked above), internal details are suppressed
+      expect(res.body.error).toBe("Internal server error");
+      // No stack trace or other sensitive info leaked
+      expect(res.body).not.toHaveProperty("stack");
+      expect(res.body).not.toHaveProperty("details");
+    });
   });
 });

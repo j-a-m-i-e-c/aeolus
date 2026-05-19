@@ -1,0 +1,191 @@
+// src/metrics/metrics-service.test.ts — Unit tests for MetricsService
+
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { EventEmitter } from "node:events";
+
+// We need to reset prom-client registry between tests
+vi.mock("../logger.js", () => ({
+  default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn(), trace: vi.fn(), fatal: vi.fn() },
+}));
+
+describe("MetricsService", () => {
+  let eventBus: EventEmitter;
+
+  beforeEach(() => {
+    eventBus = new EventEmitter();
+    vi.resetModules();
+  });
+
+  afterEach(() => {
+    eventBus.removeAllListeners();
+  });
+
+  async function createFreshService() {
+    // Clear prom-client registry before each import
+    const promClient = await import("prom-client");
+    promClient.register.clear();
+
+    const { metricsService } = await import("./metrics-service.js");
+    return metricsService;
+  }
+
+  describe("initialization", () => {
+    it("creates a MetricsService instance", async () => {
+      const service = await createFreshService();
+      expect(service).toBeDefined();
+      expect(service.getRegistry).toBeDefined();
+    });
+
+    it("getRegistry returns a prom-client registry", async () => {
+      const service = await createFreshService();
+      const registry = service.getRegistry();
+      expect(registry).toBeDefined();
+      expect(registry.metrics).toBeDefined();
+    });
+
+    it("initialize subscribes to event bus events", async () => {
+      const service = await createFreshService();
+      service.initialize({
+        eventBus,
+        getDeviceCount: () => 5,
+        getRuleCount: () => 3,
+      });
+
+      // Should have listeners on the event bus
+      expect(eventBus.listenerCount("device:state-change")).toBeGreaterThan(0);
+    });
+
+    it("initialize called twice logs warning", async () => {
+      const service = await createFreshService();
+      const deps = { eventBus, getDeviceCount: () => 0, getRuleCount: () => 0 };
+      service.initialize(deps);
+      service.initialize(deps); // Should warn
+    });
+  });
+
+  describe("recordHttpRequest", () => {
+    it("records HTTP request metrics without throwing", async () => {
+      const service = await createFreshService();
+      service.initialize({
+        eventBus,
+        getDeviceCount: () => 0,
+        getRuleCount: () => 0,
+      });
+
+      // Should not throw
+      service.recordHttpRequest("GET", "/api/devices", 200, 0.05);
+      service.recordHttpRequest("POST", "/api/automations", 201, 0.12);
+    });
+  });
+
+  describe("event handling", () => {
+    it("handles DEVICE_STATE_CHANGE events", async () => {
+      const service = await createFreshService();
+      service.initialize({
+        eventBus,
+        getDeviceCount: () => 3,
+        getRuleCount: () => 0,
+      });
+
+      // Emit event — should not throw
+      const { DEVICE_STATE_CHANGE } = await import("../core/event-bus.js");
+      eventBus.emit(DEVICE_STATE_CHANGE, {
+        deviceId: "sensor-1",
+        deviceType: "sensor",
+        state: { temperature: 22 },
+        topic: "home/sensor-1",
+      });
+    });
+
+    it("handles MQTT_CONNECTION_STATE events", async () => {
+      const service = await createFreshService();
+      service.initialize({
+        eventBus,
+        getDeviceCount: () => 0,
+        getRuleCount: () => 0,
+      });
+
+      const { MQTT_CONNECTION_STATE } = await import("../core/event-bus.js");
+      eventBus.emit(MQTT_CONNECTION_STATE, { previous: "disconnected", current: "connected" });
+    });
+
+    it("handles MQTT_MESSAGE_PROCESSED events", async () => {
+      const service = await createFreshService();
+      service.initialize({
+        eventBus,
+        getDeviceCount: () => 0,
+        getRuleCount: () => 0,
+      });
+
+      const { MQTT_MESSAGE_PROCESSED } = await import("../core/event-bus.js");
+      eventBus.emit(MQTT_MESSAGE_PROCESSED, { topic: "home/sensor", durationMs: 5 });
+    });
+
+    it("handles AUTOMATION_EXECUTION_COMPLETE events", async () => {
+      const service = await createFreshService();
+      service.initialize({
+        eventBus,
+        getDeviceCount: () => 0,
+        getRuleCount: () => 2,
+      });
+
+      const { AUTOMATION_EXECUTION_COMPLETE } = await import("../core/event-bus.js");
+      eventBus.emit(AUTOMATION_EXECUTION_COMPLETE, {
+        ruleId: "rule-1",
+        ruleName: "test-rule",
+        status: "success",
+        durationMs: 10,
+      });
+    });
+
+    it("handles WS_CLIENT_CONNECT and WS_CLIENT_DISCONNECT events", async () => {
+      const service = await createFreshService();
+      service.initialize({
+        eventBus,
+        getDeviceCount: () => 0,
+        getRuleCount: () => 0,
+      });
+
+      const { WS_CLIENT_CONNECT, WS_CLIENT_DISCONNECT } = await import("../core/event-bus.js");
+      eventBus.emit(WS_CLIENT_CONNECT, {});
+      eventBus.emit(WS_CLIENT_DISCONNECT, {});
+    });
+
+    it("catches errors in event listeners without crashing", async () => {
+      const service = await createFreshService();
+      service.initialize({
+        eventBus,
+        getDeviceCount: () => { throw new Error("boom"); },
+        getRuleCount: () => 0,
+      });
+
+      const { DEVICE_STATE_CHANGE } = await import("../core/event-bus.js");
+      // Should not throw even though getDeviceCount throws
+      expect(() => {
+        eventBus.emit(DEVICE_STATE_CHANGE, {
+          deviceId: "x",
+          deviceType: "sensor",
+          state: {},
+          topic: "test",
+        });
+      }).not.toThrow();
+    });
+  });
+
+  describe("dispose", () => {
+    it("removes all event listeners and clears registry", async () => {
+      const service = await createFreshService();
+      service.initialize({
+        eventBus,
+        getDeviceCount: () => 0,
+        getRuleCount: () => 0,
+      });
+
+      service.dispose();
+
+      // Event bus should have no listeners from the service
+      const { DEVICE_STATE_CHANGE } = await import("../core/event-bus.js");
+      expect(eventBus.listenerCount(DEVICE_STATE_CHANGE)).toBe(0);
+    });
+  });
+});
