@@ -21,8 +21,9 @@
   <a href="#features">Features</a> •
   <a href="#dashboard">Dashboard</a> •
   <a href="#automations">Automations</a> •
+  <a href="#security">Security</a> •
+  <a href="#observability">Observability</a> •
   <a href="#data-store">Data Store</a> •
-  <a href="#microcontrollers">Microcontrollers</a> •
   <a href="#connectors">Connectors</a> •
   <a href="#architecture">Architecture</a> •
   <a href="docs/ROADMAP.md">Roadmap</a>
@@ -85,6 +86,11 @@ Installs Docker, clones Aeolus, builds containers, and starts everything. Auto-s
 | 💾 | **Data Store** | Persistent time-series collections and key-value buckets — accumulate sensor data, query with aggregation, share state across automations |
 | 📊 | **State history & charts** | Per-device state history with SVG trend charts, time range filtering, and data cleanup |
 | 🔒 | **100% local** | Everything stays on your network — no cloud dependency |
+| 🔐 | **Authentication & RBAC** | JWT-based auth with admin setup, user groups, per-tab read/interact/write permissions, rate-limited login |
+| 🛡️ | **MQTT Security** | Three configurable levels — Open, Shared Password, or Per-Device credentials — managed from the dashboard |
+| 📈 | **Prometheus Metrics** | `/metrics` endpoint with MQTT throughput, device counts, automation execution, HTTP stats, and system resources |
+| 📉 | **Metrics History** | Two-tier system — 30s live sparklines (10min retention) + 5min aggregates (permanent) with trend charts |
+| ✅ | **92% test coverage** | 1200+ tests with 90% coverage enforced in CI — unit, integration, and property-based tests |
 
 ---
 
@@ -319,6 +325,67 @@ Services emit events on the standard event bus using `service/{type}/{name}` top
 
 ---
 
+## Security
+
+Aeolus ships with a complete authentication and authorization system — no external auth provider needed.
+
+### Authentication
+- **First-run setup** — guided admin account creation on first launch
+- **JWT-based** — short-lived access tokens (15min) + httpOnly refresh cookies (7 days)
+- **Rate-limited login** — 5 attempts/min per IP to prevent brute-force
+- **bcrypt password hashing** — cost factor 12
+- **WebSocket auth** — token required for real-time connections
+
+### Authorization (RBAC)
+- **Admin** — full platform control, manages users/groups/tabs
+- **User Groups** — each group gets a set of tab assignments
+- **Three permission levels per tab:**
+  - `read` — view only, all controls disabled
+  - `interact` — control devices, fire automations
+  - `write` — full control including editing automation code
+
+### MQTT Security
+Three configurable levels managed from the dashboard:
+
+| Level | Description |
+|-------|-------------|
+| **Open** | No authentication (development/trusted networks) |
+| **Shared Password** | Single credential for all devices |
+| **Per-Device** | Unique username/password per device |
+
+Switching levels regenerates the Mosquitto password file and reloads the broker config automatically. The backend maintains its own dedicated credential across all modes.
+
+---
+
+## Observability
+
+### Prometheus Metrics (`/metrics`)
+
+Exposes 19+ metrics in Prometheus text exposition format, covering:
+
+| Category | Metrics |
+|----------|---------|
+| MQTT | Messages received/published, connection state, processing duration |
+| Devices | Active count by type, state changes per second |
+| Automations | Execution count, duration, error rate |
+| Connectors | Health status, action latency |
+| HTTP | Request rate, duration histogram, status codes |
+| WebSocket | Active connections, messages sent |
+| System | Node.js memory, event loop lag, CPU usage |
+
+Optional bearer token protection via `METRICS_TOKEN` env var. Bypasses JWT auth so Prometheus can scrape without a user account.
+
+### Metrics History (built-in, no Grafana required)
+
+Two-tier system for historical metrics without external tooling:
+
+- **Tier 1 (Live)** — samples every 30s, 10-minute retention, powers 1-hour sparkline charts
+- **Tier 2 (Permanent)** — 5-minute aggregates (avg, peak, spike detection), kept forever, powers 6h/24h/7d/30d trend charts
+
+Storage footprint: ~70 MB/year for the permanent tier. The frontend renders SVG sparklines and trend charts with time-range selection directly in the metrics dashboard pane.
+
+---
+
 ## Data Store
 
 Persistent time-series collections and key-value buckets built on the existing SQLite infrastructure. Accumulate sensor data over time, query with aggregation, and share computed state across automations.
@@ -527,6 +594,8 @@ All configuration is via environment variables. Defaults work out of the box wit
 | `DB_PATH` | `./data/aeolus.db` | SQLite database path |
 | `LOG_LEVEL` | `info` | Log level (debug, info, warn, error) |
 | `NODE_ENV` | `development` | Environment mode |
+| `JWT_SECRET` | *(auto-generated)* | JWT signing key (auto-generated on first run if not set) |
+| `METRICS_TOKEN` | *(unset)* | Bearer token for `/metrics` endpoint (optional — unset = open access) |
 
 ---
 
@@ -612,9 +681,7 @@ aeolus/
 
 The full roadmap lives in [`docs/ROADMAP.md`](docs/ROADMAP.md). Some highlights:
 
-- 🔐 **Authentication** — user accounts, sessions, role-based access
 - 🌍 **Cloudflare Tunnel** — secure HTTPS access without port forwarding
-- 📊 **State history & charts** — trend charts for sensor data over time
 - 📡 **More connectors** — Zigbee, Z-Wave, Tasmota, Shelly, BLE, LoRa
 - 📱 **Mobile app** — React Native companion for quick control and notifications
 - 🤖 **Local AI assistant** — on-device LLM for natural language device control-
