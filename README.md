@@ -132,18 +132,20 @@ Each automation has two tabs: **Logic** (code that runs on the backend in a secu
 ### How data flows between Logic and UI
 
 ```
-Logic tab (backend sandbox)          UI tab (React component)
-─────────────────────────           ─────────────────────────
-state.set("mode", "evening")  ──→  props.state.get("mode")
-                               WS   (live via WebSocket)
-state.set("avgTemp", 22.5)    ──→  props.state.get("avgTemp")
-
-props.stateSet("target", 25)  ←──  user clicks a button
-                               WS   (persisted + broadcast)
-state.get("target")            ←──
+┌─────────────────────────┐         ┌─────────────────────────┐
+│   Logic tab (backend)   │         │   UI tab (React)        │
+│                         │         │                         │
+│  state.set("mode", "…") ├────────►│  props.state.get("mode")│
+│                         │   WS    │                         │
+│  state.get("target")    │◄────────┤  props.stateSet("…", 25)│
+│                         │   WS    │                         │
+└─────────────────────────┘         └─────────────────────────┘
+              │                                   │
+              └──────────── SQLite ───────────────┘
+                    (persisted + synced)
 ```
 
-The `state` global in the Logic tab and `props.state` / `props.stateSet` in the UI tab read and write to the same per-rule key-value store. Values are persisted to SQLite and synced in real time over WebSocket — so the Logic tab can compute something (a rolling average, a mode flag, a counter) and the UI tab sees it instantly, and vice versa.
+Both sides read/write the same per-rule key-value store. Values persist to SQLite and sync over WebSocket in real time.
 
 ### Logic Tab — `automation()` helper
 
@@ -263,7 +265,9 @@ The Monaco editor provides full IntelliSense for all globals — autocomplete, p
 
 ## Microcontrollers
 
-Aeolus communicates with custom hardware (ESP32, Arduino, etc.) over MQTT. Your microcontroller connects to the Mosquitto broker on the Pi (`aeolus.local:1883`), publishes sensor data, and optionally subscribes to command topics. Devices appear in the dashboard automatically — no registration needed. Any MQTT topic is accepted; the recommended convention is `{type}/{location}/{metric}` for cleaner auto-generated names, but it's not required.
+Aeolus communicates with custom hardware (ESP32, Arduino, etc.) over MQTT. Your microcontroller connects to the Mosquitto broker on the Pi (`aeolus.local:1883`), publishes sensor data, and optionally subscribes to command topics. Devices appear in the dashboard automatically when messages arrive.
+
+**MQTT authentication** is configurable from the dashboard — choose Open (no auth), Shared Password, or Per-Device credentials. See the [Security](#security) section for details. When credentials are enabled, you'll configure them in your firmware's MQTT connect call.
 
 **Full guide with templates: [`docs/MICROCONTROLLERS.md`](docs/MICROCONTROLLERS.md)**
 
@@ -599,51 +603,6 @@ All configuration is via environment variables. Defaults work out of the box wit
 
 ---
 
-## Project Structure
-
-<details>
-<summary>Click to expand</summary>
-
-```
-aeolus/
-├── src/                          # Backend (Express + TypeScript)
-│   ├── api/                      # REST routes + middleware
-│   ├── core/                     # Device registry, event bus, types
-│   ├── mqtt/                     # MQTT connection + message handling
-│   ├── automations/              # Automation engine, sandbox, transpiler, state store
-│   ├── connectors/               # Pluggable connector framework
-│   │   ├── hue/                  # Philips Hue connector
-│   │   ├── kasa/                 # TP-Link Kasa connector
-│   │   └── _template/            # Skeleton for new connectors
-│   ├── services/                 # Pluggable service framework (cron, triggers, system)
-│   ├── data-store/               # Persistent time-series + key-value storage
-│   │   ├── data-store.ts         # DataStore class (write, query, buckets, retention)
-│   │   ├── duration.ts           # Duration string parser (pure module)
-│   │   └── __tests__/            # Property-based + unit tests
-│   ├── websocket/                # WebSocket server
-│   └── db/                       # SQLite setup + schema
-├── frontend/                     # React + Vite dashboard
-│   └── src/
-│       ├── components/           # UI components + pane wrappers
-│       │   └── panes/custom/     # Custom automation UI component types
-│       ├── hooks/                # React hooks (useDynamicComponent for runtime UI loading)
-│       ├── store/                # Zustand stores
-│       ├── lib/                  # API client, WebSocket client, pane registry
-│       └── types/                # Dashboard type definitions
-├── automations/                  # User-defined automation rule files
-├── scripts/                      # Pi setup + deploy scripts
-├── docker-compose.yml
-├── Dockerfile
-└── docs/
-    ├── COMPREHENSIVE_DOCUMENTATION.md
-    ├── BRANDING.md
-    └── ROADMAP.md
-```
-
-</details>
-
----
-
 ## Screenshots
 
 > Screenshots coming soon — the sections below are placeholders for dashboard captures.
@@ -681,10 +640,12 @@ aeolus/
 
 The full roadmap lives in [`docs/ROADMAP.md`](docs/ROADMAP.md). Some highlights:
 
-- 🌍 **Cloudflare Tunnel** — secure HTTPS access without port forwarding
-- 📡 **More connectors** — Zigbee, Z-Wave, Tasmota, Shelly, BLE, LoRa
-- 📱 **Mobile app** — React Native companion for quick control and notifications
-- 🤖 **Local AI assistant** — on-device LLM for natural language device control-
+- 🖼️ **Visual flow editor** — drag-and-drop automation builder as an alternative to code
+- 📡 **More connectors** — Zigbee (via zigbee2mqtt), Z-Wave, Tasmota, Shelly
+- 🌍 **Cloudflare Tunnel** — secure remote access without port forwarding
+- ⚡ **Energy analytics** — track power consumption across Kasa plugs with cost estimates
+- 📱 **Mobile companion** — React Native app for quick control and push notifications
+- 🤖 **Local AI assistant** — on-device LLM for natural language device control
 ---
 
 ## Contributing
