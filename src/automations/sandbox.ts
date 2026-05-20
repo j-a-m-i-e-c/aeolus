@@ -13,7 +13,9 @@ import logger from "../logger.js";
 // The actual build happens in Docker on the Raspberry Pi (ARM64).
 let ivm: typeof import("isolated-vm") | null = null;
 try {
-  ivm = await import("isolated-vm");
+  const mod = await import("isolated-vm");
+  // Handle CJS/ESM interop — the module may expose Isolate on .default or directly
+  ivm = (mod.default ?? mod) as typeof import("isolated-vm");
 } catch {
   logger.warn("isolated-vm not available — sandbox execution disabled (expected on Windows dev)");
 }

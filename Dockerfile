@@ -5,7 +5,7 @@ COPY package.json package-lock.json* ./
 RUN npm install
 COPY tsconfig.json ./
 COPY src/ ./src/
-RUN npx tsup src/index.ts --format esm --target node22
+RUN npx tsup src/index.ts --format esm --target node22 --external isolated-vm --external better-sqlite3 --external bcrypt
 
 # Production stage — build tools needed for native addon compilation (isolated-vm, better-sqlite3)
 FROM node:22-alpine AS production
