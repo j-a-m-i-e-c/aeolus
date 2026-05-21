@@ -52,8 +52,12 @@ export function errorHandler(
   res: Response,
   _next: NextFunction,
 ): void {
-  // Log full error details server-side always
-  logger.error(err, "Request error");
+  // Log at appropriate level based on error type
+  if (err instanceof AppError && err.statusCode < 500) {
+    logger.debug(err, "Request error");
+  } else {
+    logger.error(err, "Request error");
+  }
 
   // Handle Zod validation errors
   if (err instanceof ZodError) {
