@@ -1,7 +1,7 @@
-// frontend/src/components/SystemPage.tsx — Host system diagnostics
+// frontend/src/components/SystemPage.tsx — Read-only host system diagnostics
 
 import { useState, useEffect, useCallback } from "react";
-import { Cpu, HardDrive, MemoryStick, Thermometer, Wifi, Server, RefreshCw, ScrollText, ChevronDown, Download, Loader2, Activity, Zap, Power, RotateCcw, Trash2 } from "lucide-react";
+import { Cpu, HardDrive, MemoryStick, Thermometer, Wifi, Server, RefreshCw, ScrollText, ChevronDown, Activity, Zap, Info } from "lucide-react";
 import { useDeviceStore } from "../store/device-store";
 import { fetchHealth } from "../lib/api-client";
 import { authFetch } from "../lib/auth-fetch";
@@ -20,9 +20,13 @@ interface SystemInfo {
   loadAvg: { "1m": number; "5m": number; "15m": number };
   memory: { total: number; used: number; free: number; usagePercent: number };
   disk: { total: number; used: number; free: number; usagePercent: number } | null;
-  docker: { images: number; buildCache: number; containers: number; volumes: number; total: number; reclaimable: number } | null;
   network: { name: string; address: string }[];
   uptime: number;
+}
+
+interface BuildVersionInfo {
+  commit: string;
+  buildDate: string;
 }
 
 function formatBytes(bytes: number): string {
@@ -52,13 +56,8 @@ function UsageBar({ percent, color = "#3BA4FF" }: { percent: number; color?: str
 export function SystemPage() {
   const [info, setInfo] = useState<SystemInfo | null>(null);
   const [loading, setLoading] = useState(true);
-  const [updating, setUpdating] = useState(false);
-  const [updateMsg, setUpdateMsg] = useState("");
-  const [checkingVersion, setCheckingVersion] = useState(false);
-  const [updateAvailable, setUpdateAvailable] = useState(false);
-  const [commitsBehind, setCommitsBehind] = useState(0);
-  const [versionChecked, setVersionChecked] = useState(false);
-  const [pruning, setPruning] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [version, setVersion] = useState<BuildVersionInfo | null>(null);
 
   // Health polling (device count, rule count, uptime, MQTT status)
   const health = useDeviceStore((s) => s.health);
@@ -69,16 +68,31 @@ export function SystemPage() {
       const res = await authFetch(`${API_URL}/api/system`);
       if (res.ok) {
         setInfo(await res.json());
+        setError(null);
+      } else {
+        setError("Failed to load system information");
+      }
+    } catch {
+      setError("Failed to load system information");
+    }
+    setLoading(false);
+  }, []);
+
+  const fetchVersion = useCallback(async () => {
+    try {
+      const res = await authFetch(`${API_URL}/api/system/version`);
+      if (res.ok) {
+        setVersion(await res.json());
       }
     } catch {}
-    setLoading(false);
   }, []);
 
   useEffect(() => {
     fetchInfo();
+    fetchVersion();
     const interval = setInterval(fetchInfo, 30000);
     return () => clearInterval(interval);
-  }, [fetchInfo]);
+  }, [fetchInfo, fetchVersion]);
 
   // Poll health alongside system info
   useEffect(() => {
@@ -93,103 +107,32 @@ export function SystemPage() {
     return () => clearInterval(interval);
   }, [setHealth]);
 
-  const checkForUpdates = async (forceRefresh = true) => {
-    if (forceRefresh) setCheckingVersion(true);
-    setUpdateMsg("");
-    try {
-      const res = await authFetch(`${API_URL}/api/system/version${forceRefresh ? "?refresh=true" : ""}`);
-      const data = await res.json();
-      if (data.error && forceRefresh) {
-        setUpdateMsg(data.error);
-      } else if (data.updateAvailable) {
-        setUpdateAvailable(true);
-        setCommitsBehind(data.commitsBehind);
-      } else if (forceRefresh) {
-        setUpdateMsg("You're on the latest version");
-      }
-      setVersionChecked(true);
-    } catch {
-      if (forceRefresh) setUpdateMsg("Failed to check for updates");
-    } finally {
-      setCheckingVersion(false);
-    }
-  };
-
-  // On mount, load the cached version status (no network fetch to GitHub)
-  useEffect(() => {
-    checkForUpdates(false);
-  }, []);
-
-  const triggerUpdate = async () => {
-    if (!confirm("Pull latest code and rebuild? The system will restart automatically.")) return;
-    setUpdating(true);
-    setUpdateMsg("");
-    try {
-      const res = await authFetch(`${API_URL}/api/system/update`, { method: "POST" });
-      const data = await res.json();
-      setUpdateMsg(data.message || "Update started — waiting for restart...");
-
-      // Poll until the backend comes back, then auto-refresh
-      const pollStart = Date.now();
-      const maxWait = 180_000; // 3 minutes max
-      const pollInterval = 3_000; // check every 3 seconds
-
-      const poll = async () => {
-        if (Date.now() - pollStart > maxWait) {
-          setUpdateMsg("Update is taking longer than expected. Try refreshing manually.");
-          setUpdating(false);
-          return;
-        }
-
-        try {
-          const healthRes = await authFetch(`${API_URL}/api/health`, { signal: AbortSignal.timeout(2000) });
-          if (healthRes.ok) {
-            // Backend is back — refresh the version cache so it doesn't show stale "update available"
-            await authFetch(`${API_URL}/api/system/version?refresh=true`, { signal: AbortSignal.timeout(5000) }).catch(() => {});
-            window.location.reload();
-            return;
-          }
-        } catch {
-          // Still down — keep polling
-        }
-        setTimeout(poll, pollInterval);
-      };
-
-      // Wait a few seconds for the rebuild to start before polling
-      setTimeout(poll, 10_000);
-    } catch (err) {
-      setUpdateMsg("Failed to trigger update");
-      setUpdating(false);
-    }
-  };
-
-  const triggerShutdown = async () => {
-    if (!confirm("Shut down the Pi? You will need physical access to turn it back on.")) return;
-    try {
-      await authFetch(`${API_URL}/api/system/shutdown`, { method: "POST" });
-      setUpdateMsg("Shutting down — the Pi will power off in a few seconds");
-    } catch {
-      setUpdateMsg("Failed to trigger shutdown");
-    }
-  };
-
-  const triggerReboot = async () => {
-    if (!confirm("Reboot the Pi? The dashboard will be unavailable for about a minute.")) return;
-    try {
-      await authFetch(`${API_URL}/api/system/reboot`, { method: "POST" });
-      setUpdateMsg("Rebooting — refresh the page in about a minute");
-    } catch {
-      setUpdateMsg("Failed to trigger reboot");
-    }
-  };
-
   const formatHealthUptime = (seconds: number) => {
     const h = Math.floor(seconds / 3600);
     const m = Math.floor((seconds % 3600) / 60);
     return h > 0 ? `${h}h ${m}m` : `${m}m`;
   };
 
-  if (loading || !info) {
+  if (loading) {
+    return <div className="text-center py-12 text-[#6B7785]">Loading system info...</div>;
+  }
+
+  if (error && !info) {
+    return (
+      <div className="text-center py-12">
+        <div className="text-[#EF4444] text-lg font-semibold mb-2">System Information Unavailable</div>
+        <div className="text-[#6B7785] text-sm">{error}</div>
+        <button
+          onClick={fetchInfo}
+          className="mt-4 px-4 py-2 text-xs font-medium rounded-lg bg-primary/20 text-primary border border-primary/30 hover:bg-primary/30 transition-colors"
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
+
+  if (!info) {
     return <div className="text-center py-12 text-[#6B7785]">Loading system info...</div>;
   }
 
@@ -201,45 +144,20 @@ export function SystemPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-[#E6EDF3]">System</h1>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={updateAvailable ? triggerUpdate : () => checkForUpdates(true)}
-            disabled={updating || checkingVersion}
-            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors disabled:opacity-50 ${
-              updateAvailable
-                ? "bg-[#22C55E]/20 text-[#22C55E] border-[#22C55E]/30 hover:bg-[#22C55E]/30"
-                : "bg-primary/20 text-primary border-primary/30 hover:bg-primary/30"
-            }`}
-            title={updateAvailable ? `${commitsBehind} commit${commitsBehind > 1 ? "s" : ""} behind — pull and rebuild` : "Check GitHub for new commits"}
-          >
-            {updating ? <Loader2 size={12} className="animate-spin" /> : checkingVersion ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
-            {updating ? "Updating..." : checkingVersion ? "Checking..." : updateAvailable ? `Update Aeolus (${commitsBehind} new)` : "Check for Updates"}
-          </button>
-          <button
-            onClick={triggerReboot}
-            className="group flex items-center gap-0 px-2.5 py-1.5 text-xs font-medium rounded-lg bg-[#F59E0B]/10 text-[#F59E0B] border border-[#F59E0B]/30 hover:bg-[#F59E0B]/20 hover:gap-1.5 hover:px-3 transition-all duration-200 overflow-hidden"
-            title="Reboot the Pi"
-          >
-            <RotateCcw size={14} className="shrink-0" />
-            <span className="max-w-0 group-hover:max-w-[4rem] overflow-hidden whitespace-nowrap transition-all duration-200">Reboot</span>
-          </button>
-          <button
-            onClick={triggerShutdown}
-            className="group flex items-center gap-0 px-2.5 py-1.5 text-xs font-medium rounded-lg bg-[#EF4444]/10 text-[#EF4444] border border-[#EF4444]/30 hover:bg-[#EF4444]/20 hover:gap-1.5 hover:px-3 transition-all duration-200 overflow-hidden"
-            title="Shut down the Pi"
-          >
-            <Power size={14} className="shrink-0" />
-            <span className="max-w-0 group-hover:max-w-[5rem] overflow-hidden whitespace-nowrap transition-all duration-200">Shutdown</span>
-          </button>
-        </div>
+        {version && (
+          <div className="flex items-center gap-1.5 text-xs text-[#6B7785]">
+            <Info size={12} />
+            <span className="font-mono">
+              {version.commit !== "unknown" ? version.commit : "dev"}
+            </span>
+            {version.buildDate !== "unknown" && (
+              <span className="hidden sm:inline">
+                · {new Date(version.buildDate).toLocaleDateString()}
+              </span>
+            )}
+          </div>
+        )}
       </div>
-
-      {updateMsg && (
-        <div className="bg-primary/10 border border-primary/20 rounded-xl px-4 py-3 text-sm text-primary">
-          {updateMsg}
-          {updating && <span className="text-[10px] text-[#6B7785] ml-2">The page will refresh automatically when ready</span>}
-        </div>
-      )}
 
       {/* Health summary — device count, rule count, uptime, MQTT status */}
       {health && (
@@ -349,7 +267,7 @@ export function SystemPage() {
               </div>
             </div>
           ) : (
-            <div className="text-center text-[#6B7785] text-sm py-4">Not available (non-Pi host)</div>
+            <div className="text-center text-[#6B7785] text-sm py-4">Not available</div>
           )}
         </div>
 
@@ -378,80 +296,7 @@ export function SystemPage() {
                 <span className="text-[#6B7785]">{formatBytes(info.disk.used)} / {formatBytes(info.disk.total)}</span>
                 <span style={{ color: diskColor }} className="font-semibold">{info.disk.usagePercent}%</span>
               </div>
-              {/* Stacked bar showing Docker vs other usage */}
-              {info.docker ? (
-                <div className="w-full h-2 bg-background rounded-full overflow-hidden flex">
-                  <div
-                    className="h-full transition-all duration-300"
-                    style={{
-                      width: `${Math.round(((info.disk.used - info.docker.total) / info.disk.total) * 100)}%`,
-                      backgroundColor: diskColor,
-                    }}
-                    title={`System: ${formatBytes(info.disk.used - info.docker.total)}`}
-                  />
-                  <div
-                    className="h-full transition-all duration-300"
-                    style={{
-                      width: `${Math.round((info.docker.total / info.disk.total) * 100)}%`,
-                      backgroundColor: "#F59E0B",
-                    }}
-                    title={`Docker: ${formatBytes(info.docker.total)}`}
-                  />
-                </div>
-              ) : (
-                <UsageBar percent={info.disk.usagePercent} color={diskColor} />
-              )}
-              {/* Docker breakdown */}
-              {info.docker && (
-                <div className="mt-3 space-y-1.5">
-                  <div className="flex items-center gap-2 text-[10px] text-[#6B7785]">
-                    <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: diskColor }} />
-                    System: {formatBytes(info.disk.used - info.docker.total)}
-                    <span className="inline-block w-2 h-2 rounded-full ml-2" style={{ backgroundColor: "#F59E0B" }} />
-                    Aeolus Docker: {formatBytes(info.docker.total)}
-                  </div>
-                  <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[10px]">
-                    <div className="flex justify-between">
-                      <span className="text-[#6B7785]">Images</span>
-                      <span className="text-[#9AA6B2] font-mono">{formatBytes(info.docker.images)}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-[#6B7785]">Build Cache</span>
-                      <span className="text-[#9AA6B2] font-mono">{formatBytes(info.docker.buildCache)}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-[#6B7785]">Containers</span>
-                      <span className="text-[#9AA6B2] font-mono">{formatBytes(info.docker.containers)}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-[#6B7785]">Volumes</span>
-                      <span className="text-[#9AA6B2] font-mono">{formatBytes(info.docker.volumes)}</span>
-                    </div>
-                  </div>
-                  {info.docker.reclaimable > 1024 * 1024 && (
-                    <button
-                      onClick={async () => {
-                        if (!confirm(`Clean up ${formatBytes(info.docker!.reclaimable)} of Aeolus Docker storage?\n\nThis removes:\n• Old image layers from previous builds\n• Build cache (speeds up rebuilds but safe to clear)\n\nCurrently running containers are not affected. The next update may take slightly longer to rebuild.`)) return;
-                        setPruning(true);
-                        try {
-                          const res = await authFetch(`${API_URL}/api/system/docker-prune`, { method: "POST" });
-                          const data = await res.json();
-                          if (data.docker) {
-                            setInfo((prev) => prev ? { ...prev, docker: data.docker } : prev);
-                          }
-                          fetchInfo();
-                        } catch {}
-                        setPruning(false);
-                      }}
-                      disabled={pruning}
-                      className="flex items-center gap-1.5 text-[10px] text-[#F59E0B] hover:text-[#E6EDF3] transition-colors disabled:opacity-50"
-                    >
-                      <Trash2 size={10} />
-                      {pruning ? "Clearing..." : `${formatBytes(info.docker.reclaimable)} reclaimable — clean up`}
-                    </button>
-                  )}
-                </div>
-              )}
+              <UsageBar percent={info.disk.usagePercent} color={diskColor} />
             </>
           ) : (
             <div className="text-center text-[#6B7785] text-sm py-2">Not available</div>
@@ -474,9 +319,6 @@ export function SystemPage() {
           ))}
         </div>
       </div>
-
-      {/* Admin-only: User & Group Management */}
-
 
       {/* Application Logs */}
       <LogViewer />
@@ -535,7 +377,7 @@ function LogViewer() {
     if (!expanded) return;
     fetchLogs();
     if (!autoRefresh) return;
-    const interval = setInterval(fetchLogs, 10000); // 10s refresh
+    const interval = setInterval(fetchLogs, 10000);
     return () => clearInterval(interval);
   }, [fetchLogs, autoRefresh, expanded]);
 

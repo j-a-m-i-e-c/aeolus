@@ -1,4 +1,4 @@
-// src/api/routes/system.routes.test.ts — Unit tests for system routes
+// src/api/routes/system.routes.test.ts — Unit tests for hardened system routes
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import express from "express";
@@ -19,33 +19,14 @@ vi.mock("../../log-buffer.js", () => ({
 
 const mockExecSync = vi.fn().mockImplementation((cmd: string) => {
   if (cmd.includes("df -B1")) return "/dev/sda1 50000000000 25000000000 25000000000 50% /\n";
-  if (cmd.includes("docker images --format") && cmd.includes("grep")) return "aeolus-backend|500MB\naeolus-frontend|200MB\n";
-  if (cmd.includes("dangling=true")) return "100MB\n";
-  if (cmd.includes("docker system df --format")) return "Build Cache|1GB|500MB (50%)\n";
-  if (cmd.includes("docker ps -s")) return "aeolus-backend|10MB (virtual 500MB)\n";
-  if (cmd.includes("docker system df -v")) return "aeolus_data|200MB\n";
-  if (cmd.includes("docker")) return "";
-  if (cmd.includes("git rev-parse --short HEAD")) return "abc1234\n";
-  if (cmd.includes("git log -1 --format=%s")) return "feat: latest commit\n";
-  if (cmd.includes("git log -1 --format=%ci")) return "2024-01-01 12:00:00 +0000\n";
-  if (cmd.includes("git fetch")) return "";
-  if (cmd.includes("git rev-parse --short origin/main")) return "def5678\n";
-  if (cmd.includes("git log origin/main -1 --format=%s")) return "feat: newer commit\n";
-  if (cmd.includes("git log origin/main -1 --format=%ci")) return "2024-01-02 12:00:00 +0000\n";
-  if (cmd.includes("git rev-list")) return "3\n";
-  if (cmd.includes("git -C") && cmd.includes("pull")) return "Already up to date.\n";
   return "";
 });
 
-const mockSpawn = vi.fn().mockReturnValue({ unref: vi.fn() });
-
-// Mock child_process to avoid actual system calls
+// Mock child_process — only execSync is used in the hardened routes
 vi.mock("node:child_process", () => ({
   execSync: (...args: unknown[]) => mockExecSync(...args),
-  spawn: (...args: unknown[]) => mockSpawn(...args),
 }));
 
-const mockExistsSync = vi.fn().mockReturnValue(false);
 const mockReadFileSync = vi.fn().mockImplementation((path: string) => {
   if (path.includes("thermal_zone0")) return "45000";
   throw new Error("ENOENT");
@@ -59,12 +40,8 @@ vi.mock("node:fs", async () => {
     default: {
       ...(actual as any).default,
       readFileSync: (...args: unknown[]) => mockReadFileSync(...args),
-      existsSync: (...args: unknown[]) => mockExistsSync(...args),
-      mkdirSync: vi.fn(),
     },
     readFileSync: (...args: unknown[]) => mockReadFileSync(...args),
-    existsSync: (...args: unknown[]) => mockExistsSync(...args),
-    mkdirSync: vi.fn(),
   };
 });
 
@@ -125,6 +102,19 @@ describe("system.routes", () => {
       expect(res.body.uptime).toBeGreaterThan(0);
       expect(res.body.network).toBeDefined();
     });
+
+    it("does NOT return a docker field", async () => {
+      const res = await request(app, "GET", "/api/system");
+      expect(res.status).toBe(200);
+      expect(res.body.docker).toBeUndefined();
+    });
+
+    it("returns cpuTemp when thermal zone is readable", async () => {
+      const res = await request(app, "GET", "/api/system");
+      expect(res.status).toBe(200);
+      // cpuTemp should be 45.0 (45000 / 100 / 10)
+      expect(res.body.cpuTemp).toBe(45);
+    });
   });
 
   describe("GET /api/system/logs", () => {
@@ -149,164 +139,55 @@ describe("system.routes", () => {
   });
 
   describe("GET /api/system/version", () => {
-    it("returns version info", async () => {
+    it("returns version info with commit and buildDate", async () => {
       const res = await request(app, "GET", "/api/system/version");
       expect(res.status).toBe(200);
-      expect(res.body).toHaveProperty("lastChecked");
-      expect(res.body).toHaveProperty("updateAvailable");
-      expect(res.body).toHaveProperty("commitsBehind");
+      expect(res.body).toHaveProperty("commit");
+      expect(res.body).toHaveProperty("buildDate");
     });
 
-    it("supports force refresh", async () => {
-      const res = await request(app, "GET", "/api/system/version?refresh=true");
+    it("returns 'unknown' defaults when env vars are not set", async () => {
+      const res = await request(app, "GET", "/api/system/version");
       expect(res.status).toBe(200);
-      expect(res.body).toHaveProperty("lastChecked");
+      expect(res.body.commit).toBe("unknown");
+      expect(res.body.buildDate).toBe("unknown");
     });
   });
 
-  describe("POST /api/system/update", () => {
-    it("returns 400 when project directory not mounted", async () => {
+  describe("Removed POST endpoints return 404", () => {
+    it("POST /api/system/update returns 404", async () => {
       const res = await request(app, "POST", "/api/system/update");
-      expect(res.status).toBe(400);
-      expect(res.body.error).toContain("not mounted");
+      expect(res.status).toBe(404);
     });
 
-    it("pulls and rebuilds when project directory exists", async () => {
-      mockExistsSync.mockReturnValue(true);
-      mockExecSync.mockImplementation((cmd: string) => {
-        if (cmd.includes("git -C") && cmd.includes("pull")) return "Already up to date.\n";
-        return "";
-      });
-      const res = await request(app, "POST", "/api/system/update");
-      expect(res.status).toBe(200);
-      expect(res.body.success).toBe(true);
-      expect(res.body.message).toContain("Update started");
-    });
-
-    it("sends success response even when git pull fails (response already sent)", async () => {
-      // Note: The route sends res.json() before attempting git pull,
-      // so the first response is always 200. The git pull error is logged but
-      // the 500 response is never sent because headers are already sent.
-      mockExistsSync.mockReturnValue(true);
-      mockExecSync.mockImplementation((cmd: string) => {
-        if (cmd.includes("git -C") && cmd.includes("pull")) {
-          throw new Error("merge conflict");
-        }
-        return "";
-      });
-      const res = await request(app, "POST", "/api/system/update");
-      expect(res.status).toBe(200);
-      expect(res.body.success).toBe(true);
-    });
-  });
-
-  describe("POST /api/system/docker-prune", () => {
-    it("returns success on prune", async () => {
-      const res = await request(app, "POST", "/api/system/docker-prune");
-      expect(res.status).toBe(200);
-      expect(res.body.success).toBe(true);
-    });
-
-    it("returns 500 when docker prune fails", async () => {
-      mockExecSync.mockImplementation((cmd: string) => {
-        if (cmd.includes("docker image prune")) {
-          throw new Error("docker daemon not running");
-        }
-        if (cmd.includes("xargs")) return "";
-        throw new Error("docker daemon not running");
-      });
-      const res = await request(app, "POST", "/api/system/docker-prune");
-      expect(res.status).toBe(500);
-      expect(res.body.error).toContain("Docker prune failed");
-    });
-  });
-
-  describe("POST /api/system/shutdown", () => {
-    it("returns success message", async () => {
+    it("POST /api/system/shutdown returns 404", async () => {
       const res = await request(app, "POST", "/api/system/shutdown");
-      expect(res.status).toBe(200);
-      expect(res.body.success).toBe(true);
-      expect(res.body.message).toContain("Shutting down");
+      expect(res.status).toBe(404);
     });
-  });
 
-  describe("POST /api/system/reboot", () => {
-    it("returns success message", async () => {
+    it("POST /api/system/reboot returns 404", async () => {
       const res = await request(app, "POST", "/api/system/reboot");
-      expect(res.status).toBe(200);
-      expect(res.body.success).toBe(true);
-      expect(res.body.message).toContain("Rebooting");
-    });
-  });
-
-  describe("GET /api/system/version", () => {
-    it("returns version info with force refresh (project dir not found)", async () => {
-      mockExistsSync.mockReturnValue(false);
-      const res = await request(app, "GET", "/api/system/version?refresh=true");
-      expect(res.status).toBe(200);
-      expect(res.body.error).toContain("not mounted");
+      expect(res.status).toBe(404);
     });
 
-    it("returns error when project directory is not a git repo", async () => {
-      mockExistsSync.mockImplementation((p: string) => {
-        if (typeof p === "string" && p.includes(".git")) return false;
-        return true;
-      });
-      const res = await request(app, "GET", "/api/system/version?refresh=true");
-      expect(res.status).toBe(200);
-      expect(res.body.error).toContain("Not a git repository");
+    it("POST /api/system/docker-prune returns 404", async () => {
+      const res = await request(app, "POST", "/api/system/docker-prune");
+      expect(res.status).toBe(404);
     });
 
-    it("returns version with update available when behind", async () => {
-      mockExistsSync.mockReturnValue(true);
-      mockExecSync.mockImplementation((cmd: string) => {
-        if (cmd.includes("git rev-parse --short HEAD")) return "abc1234\n";
-        if (cmd.includes("git log -1 --format=%s")) return "feat: latest commit\n";
-        if (cmd.includes("git log -1 --format=%ci")) return "2024-01-01 12:00:00 +0000\n";
-        if (cmd.includes("git fetch")) return "";
-        if (cmd.includes("git rev-parse --short origin/main")) return "def5678\n";
-        if (cmd.includes("git log origin/main -1 --format=%s")) return "feat: newer commit\n";
-        if (cmd.includes("git log origin/main -1 --format=%ci")) return "2024-01-02 12:00:00 +0000\n";
-        if (cmd.includes("git rev-list")) return "3\n";
-        return "";
-      });
-      const res = await request(app, "GET", "/api/system/version?refresh=true");
-      expect(res.status).toBe(200);
-      expect(res.body.updateAvailable).toBe(true);
-      expect(res.body.commitsBehind).toBe(3);
-      expect(res.body.current).toBeDefined();
-      expect(res.body.latest).toBeDefined();
+    it("PUT on /api/system returns 404", async () => {
+      const res = await request(app, "PUT", "/api/system");
+      expect(res.status).toBe(404);
     });
 
-    it("returns error when git commands fail", async () => {
-      mockExistsSync.mockReturnValue(true);
-      mockExecSync.mockImplementation((cmd: string) => {
-        if (typeof cmd === "string" && cmd.includes("git")) throw new Error("git not found");
-        return "";
-      });
-      const res = await request(app, "GET", "/api/system/version?refresh=true");
-      expect(res.status).toBe(200);
-      expect(res.body.error).toBeDefined();
-    });
-  });
-
-  describe("GET /api/system (docker disk usage)", () => {
-    it("returns docker disk usage when docker commands succeed", async () => {
-      const res = await request(app, "GET", "/api/system");
-      expect(res.status).toBe(200);
-      expect(res.body.docker).toBeDefined();
-      if (res.body.docker) {
-        expect(res.body.docker).toHaveProperty("images");
-        expect(res.body.docker).toHaveProperty("buildCache");
-        expect(res.body.docker).toHaveProperty("total");
-      }
+    it("DELETE on /api/system returns 404", async () => {
+      const res = await request(app, "DELETE", "/api/system");
+      expect(res.status).toBe(404);
     });
 
-    it("returns cpuTemp when thermal zone is readable", async () => {
-      const res = await request(app, "GET", "/api/system");
-      expect(res.status).toBe(200);
-      // cpuTemp should be 45.0 (45000 / 100 / 10)
-      expect(res.body.cpuTemp).toBe(45);
+    it("PATCH on /api/system returns 404", async () => {
+      const res = await request(app, "PATCH", "/api/system");
+      expect(res.status).toBe(404);
     });
   });
 });

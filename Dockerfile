@@ -10,15 +10,20 @@ RUN npx tsup src/index.ts --format esm --target node22 --external isolated-vm --
 # Production stage
 FROM node:22-slim AS production
 WORKDIR /app
-RUN apt-get update && apt-get install -y git python3 make g++ wget && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ wget curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+ARG BUILD_COMMIT=unknown
+ARG BUILD_DATE=unknown
+ENV BUILD_COMMIT=$BUILD_COMMIT
+ENV BUILD_DATE=$BUILD_DATE
+
 COPY package.json package-lock.json* ./
 RUN npm install --omit=dev && npm cache clean --force
 COPY --from=builder /app/dist ./dist/
 COPY src/automations/sandbox-types.d.ts ./dist/automations/sandbox-types.d.ts
 COPY automations/ ./automations/
 RUN mkdir -p /app/data
-# Allow git to operate on the mounted host project directory (different owner)
-RUN git config --global --add safe.directory /aeolus-host
 EXPOSE 3001
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD wget --no-verbose --tries=1 -O /dev/null http://localhost:3001/api/health || exit 1
