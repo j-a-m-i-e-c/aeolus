@@ -457,6 +457,18 @@ export function AutomationPane({ config, paneId }: Props) {
     [ruleId],
   );
 
+  // emit helper — fires the Logic tab script with a synthetic event
+  const emit = useCallback(
+    (eventName: string, payload?: Record<string, unknown>) => {
+      authFetch(`${API_URL}/api/automations/${ruleId}/fire`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ eventName, ...(payload ?? {}) }),
+      }).catch(() => {});
+    },
+    [ruleId],
+  );
+
   // ═══════════════════════════════════════════════════════════════════
   // RENDER
   // ═══════════════════════════════════════════════════════════════════
@@ -576,6 +588,7 @@ export function AutomationPane({ config, paneId }: Props) {
             executionHistory={executionHistory}
             stateMap={stateMap}
             stateSet={stateSet}
+            emit={emit}
           />
         </div>
       </div>
@@ -855,6 +868,12 @@ export function AutomationPane({ config, paneId }: Props) {
                   <div className="text-[#9AA6B2] pl-2">Publish an MQTT message</div>
                 </div>
 
+                {/* props.emit */}
+                <div>
+                  <div className="text-primary font-semibold mb-1">props.emit(eventName, payload?)</div>
+                  <div className="text-[#9AA6B2] pl-2">Fire the Logic tab with a UI event</div>
+                </div>
+
                 {/* props.executionHistory */}
                 <div>
                   <div className="text-primary font-semibold mb-1">props.executionHistory</div>
@@ -954,6 +973,7 @@ interface DynamicCustomSectionProps {
   executionHistory: ExecutionEntry[];
   stateMap: Map<string, unknown>;
   stateSet: (key: string, value: unknown) => void;
+  emit: (eventName: string, payload?: Record<string, unknown>) => void;
 }
 
 function DynamicCustomSection({
@@ -967,6 +987,7 @@ function DynamicCustomSection({
   executionHistory,
   stateMap,
   stateSet,
+  emit,
 }: DynamicCustomSectionProps) {
   const { Component, loading: dynamicLoading, error: dynamicError } = useDynamicComponent(ruleId, hasUiSource);
   const [customFallback, setCustomFallback] = useState(false);
@@ -1002,6 +1023,7 @@ function DynamicCustomSection({
           executionHistory={executionHistory}
           state={stateMap}
           stateSet={stateSet}
+          emit={emit}
         />
       </CustomComponentBoundary>
     );

@@ -11,58 +11,56 @@ The system runs as three Docker services: a Mosquitto MQTT broker, an Express.js
 ## Architecture
 
 ```
-                        ┌──────── Event Sources ────────┐
-                        │                               │
-  [ MQTT Devices ]      │  [ Connectors ]               │  [ Services ]
-   ESP32 / Arduino      │   Hue / Kasa / ...            │   Cron · Triggers · System
-        ↕               │       ↕                       │       ↕
-  [ Mosquitto :1883 ]   │  [ Connector Manager ]        │  [ Service Manager ]
-        │               │       │                       │       │
-        │  sensor data  │  device state (synthetic      │  events (synthetic
-        │  + commands   │  connector/{id}/{device} )     │  service/{type}/{name} )
-        │               │       │                       │       │
-        └───────────────┴───────┴───────────────────────┴───────┘
-                                │
-                    ┌───────────▼───────────┐
-                    │   Internal Event Bus  │
-                    │   (DEVICE_STATE_CHANGE │
-                    │    + AUTOMATION_STATE)  │
-                    └───┬──────────────┬────┘
-                        │              │
-                        ▼              ▼
-              ┌─────────────┐  ┌────────────────┐
-              │   Device    │  │  Automation     │
-              │  Registry   │  │   Engine        │
-              │  (SQLite)   │  │  (V8 Sandbox)   │
-              └──────┬──────┘  └───────┬─────────┘
-                     │                 │
-                     │          ┌──────▼──────────┐
-                     │          │  Action Executor │
-                     │          │  MQTT publish    │
-                     │          │  Device actions  │
-                     │          │  HTTP webhooks   │
-                     │          │  Logging         │
-                     │          └─────────────────┘
-                     │
-              ┌──────▼──────┐  ┌──────────────────┐
-              │  WebSocket  │  │   Data Store      │
-              │   Server    │  │   (SQLite)        │
-              └──────┬──────┘  └──────┬────────────┘
-                     │                 │
-                     │    ┌────────────┘
-                     │    │  db global in Sandbox
-                     │    │  + REST API
-              ┌──────▼────▼─┐      ┌──────────────┐
-              │  REST API   │◄────►│    React     │
-              │  (Express)  │      │  Dashboard   │
-              └─────────────┘      └──────────────┘
+                    ┌──── Event Sources ────┐
+                    │                       │
+  [ MQTT Devices ]  │    [ Connectors ]     │
+   ESP32 / Arduino  │     Hue / Kasa / ...  │
+        ↕           │         ↕             │
+  [ Mosquitto :1883 ]    [ Connector Mgr ]  │
+        │           │         │             │
+        └───────────┴─────────┴─────────────┘
+                          │
+              ┌───────────▼───────────┐
+              │   Internal Event Bus  │
+              │   (DEVICE_STATE_CHANGE │
+              │    + AUTOMATION_STATE)  │
+              └───┬──────────────┬────┘
+                  │              │
+                  ▼              ▼
+        ┌─────────────┐  ┌────────────────┐
+        │   Device    │  │  Automation     │
+        │  Registry   │  │   Engine        │
+        │  (SQLite)   │  │  (V8 Sandbox)   │
+        └──────┬──────┘  └───────┬─────────┘
+               │                 │
+               │          ┌──────▼──────────┐
+               │          │  Action Executor │
+               │          │  MQTT publish    │
+               │          │  Device actions  │
+               │          │  HTTP webhooks   │
+               │          │  Logging         │
+               │          └─────────────────┘
+               │
+        ┌──────▼──────┐  ┌──────────────────┐
+        │  WebSocket  │  │   Data Store      │
+        │   Server    │  │   (SQLite)        │
+        └──────┬──────┘  └──────┬────────────┘
+               │                 │
+               │    ┌────────────┘
+               │    │  db global in Sandbox
+               │    │  + REST API
+        ┌──────▼────▼─┐      ┌──────────────┐
+        │  REST API   │◄────►│    React     │
+        │  (Express)  │      │  Dashboard   │
+        └─────────────┘      └──────────────┘
 ```
 
-Three event source layers feed the same internal bus:
+Two event source layers feed the same internal bus:
 
 - **MQTT devices** — bidirectional via Mosquitto. Sensors publish data to topics like `sensor/tank/level`, and Aeolus publishes commands to topics like `valve/irrigation/command` that microcontrollers subscribe to.
 - **Connectors** — commercial devices (Hue, Kasa, etc.) emit state through synthetic `connector/{integration}/{deviceId}` topics, unifying them with MQTT devices in the automation pipeline.
-- **Services** — non-device event producers (cron schedules, API triggers, system lifecycle) emit events through synthetic `service/{type}/{name}` topics.
+
+Cron triggers, manual fire (`POST /api/automations/:id/fire`), and API-triggered execution are handled natively by the automation engine — no separate service layer required.
 
 This enables the full IoT loop — sense, decide, act — across any combination of custom hardware, commercial devices, and time/event-based triggers.
 
@@ -109,7 +107,6 @@ aeolus/
 │   │   │   ├── mqtt.routes.ts        # POST /api/mqtt/publish
 │   │   │   ├── automation.routes.ts  # CRUD for UI-created automation rules
 │   │   │   ├── connector.routes.ts   # Generic connector REST API (replaces hue.routes.ts)
-│   │   │   ├── service.routes.ts     # Generic service REST API
 │   │   │   ├── data-store.routes.ts  # Data Store REST API (collections, records, buckets, config)
 │   │   │   ├── layout.routes.ts      # GET/PUT /api/layout (tab + pane persistence)
 │   │   │   └── system.routes.ts      # Host diagnostics, application logs, version check (read-only)
@@ -167,18 +164,6 @@ aeolus/
 │   │   │   ├── index.ts             # Template module exports
 │   │   │   └── connector.ts         # Template connector class
 │   │   └── README.md                 # Developer guide for creating new connectors
-│   ├── services/                     # Pluggable service framework (non-device event producers)
-│   │   ├── service.interface.ts      # Core TypeScript interfaces (ServiceModule, ServiceInstance, etc.)
-│   │   ├── service-registry.ts       # Manual registration and lookup of service modules
-│   │   ├── service-manager.ts        # Lifecycle management (enable/disable/retry/restore)
-│   │   ├── service-store.ts          # SQLite persistence for service records
-│   │   ├── cron/                     # Cron Scheduler service
-│   │   │   └── index.ts             # Module exports (metadata, configSchema, createService)
-│   │   ├── trigger/                  # API Trigger service
-│   │   │   └── index.ts             # Module exports (metadata, configSchema, createService)
-│   │   ├── system/                   # System Events service
-│   │   │   └── index.ts             # Module exports (metadata, configSchema, createService)
-│   │   └── README.md                 # Developer guide for creating services
 │   ├── data-store/                   # Persistent time-series + key-value storage
 │   │   ├── data-store.ts            # DataStore class (write, query, buckets, retention, config)
 │   │   ├── duration.ts              # Duration string parser (pure module, no dependencies)
@@ -190,7 +175,7 @@ aeolus/
 │   ├── websocket/
 │   │   └── ws-server.ts              # WebSocket server
 │   ├── db/
-│   │   └── database.ts              # sql.js setup + schema (devices, automation_rules, automation_state, tabs, panes, connectors, services)
+│   │   └── database.ts              # sql.js setup + schema (devices, automation_rules, automation_state, tabs, panes, connectors)
 │   ├── types/
 │   │   └── sql.js.d.ts              # Type declarations for sql.js
 │   ├── config.ts                     # Environment variable loading
@@ -226,7 +211,6 @@ aeolus/
 │       │   ├── CustomComponentBoundary.tsx  # Error boundary for custom automation UI components
 │       │   ├── WelcomeScreen.tsx     # Onboarding screen for empty dashboard (no devices)
 │       │   ├── ConnectorsPage.tsx    # Connector management (enable/disable, config, generic setup wizard)
-│       │   ├── ServicesPage.tsx     # Service management dashboard (available but not routed as a pinned tab)
 │       │   ├── SystemPage.tsx        # Host diagnostics, application log viewer, version display (read-only)
 │       │   ├── StateHistoryChart.tsx  # SVG trend chart for device state history
 │       │   ├── CommandPalette.tsx    # Ctrl+K command palette
@@ -322,7 +306,7 @@ A single universal `parseTopic()` function that always succeeds for any valid MQ
 In-memory device cache backed by SQLite for persistence across restarts.
 
 - Upsert: creates new device on first message, updates state on subsequent
-- For new devices, uses `event.name` from the NormalizedEvent when present (populated by the MQTT service from `ParsedTopic.name`). Falls back to `deriveNameFromId(deviceId)` — splitting on hyphens and title-casing segments — for non-MQTT event sources (connectors, services) that don't provide a name
+- For new devices, uses `event.name` from the NormalizedEvent when present (populated by the MQTT service from `ParsedTopic.name`). Falls back to `deriveNameFromId(deviceId)` — splitting on hyphens and title-casing segments — for non-MQTT event sources (connectors) that don't provide a name
 - Infers capabilities from the device type string using a `KNOWN_TYPES`-based heuristic (light → on/off + brightness, sensor → temperature, plug → on/off + energy, valve → on/off, fan → on/off + speed, etc.). Unknown device types get an empty capabilities array — they are still stored and tracked, just without inferred capabilities.
 - Emits `ws:state-change` events for WebSocket broadcast
 - Serialize/deserialize round-trip for SQLite storage
@@ -466,15 +450,13 @@ Secure execution environment for user-authored automation scripts using `isolate
 
 - Creates a fresh V8 isolate per execution with a 32 MB memory limit
 - Enforces a 5-second execution timeout to prevent infinite loops
-- Exposes a controlled API surface as globals: `devices`, `mqtt`, `log`, `context`, `services`, `http`, `automation`, `state`, `db`
+- Exposes a controlled API surface as globals: `devices`, `mqtt`, `log`, `context`, `http`, `automation`, `state`, `db`
 - `devices.get/list/filter` — synchronous, data copied into isolate via `ivm.ExternalCopy`
 - `devices.action()` — host-side callback via `ivm.Reference` delegating to ConnectorManager.executeAction(); returns `ActionResult { success, data?, error? }` (never throws)
 - `devices.actionAll(filter, actionType, params)` — bulk execution across all devices matching the filter via `Promise.allSettled`; returns `BulkActionResult { total, succeeded, failed, results[] }` (never throws)
 - `mqtt.publish()` — host-side callback via `ivm.Reference` delegating to MqttService
 - `log.info/warn/error` — host-side callbacks delegating to the application logger with ruleId context
 - `context` — frozen object with `topic`, `deviceId`, `state`, `timestamp` from the triggering event
-- `services.get(type)` — returns read-only snapshot of a service's state, or `undefined` if not running
-- `services.list()` — returns `[{ type, displayName, running }]` for all registered services
 - `http.get(url, opts?)` — async GET request via host-side `fetch()` with 10-second timeout, returns `{ status, body }`. Logs a warning if plain HTTP is used for non-local URLs (HTTPS recommended for external APIs)
 - `http.post(url, opts?)` — async POST request via host-side `fetch()` with 10-second timeout, returns `{ status, body }`. Logs a warning if plain HTTP is used for non-local URLs (HTTPS recommended for external APIs)
 - `automation({ conditions?, actions })` — structured helper that evaluates conditions (AND logic) and runs actions; supports arrays of named functions for flow diagram visualization
@@ -507,7 +489,7 @@ Best-effort extraction of `automation()` call metadata from transpiled JavaScrip
 
 Aggregates platform-level and connector-provided code snippets for the automation script editor.
 
-- Platform snippets organized into categories: MQTT, HTTP, Conditions, Devices, Services, Templates
+- Platform snippets organized into categories: MQTT, HTTP, Conditions, Devices, Templates
 - Connector snippets pulled from each registered connector's optional `snippets` export
 - Connector snippets are grouped under the connector's display name (e.g. "Philips Hue", "TP-Link Kasa")
 - Served via `GET /api/automations/snippets` as an array of `SnippetGroup` objects
@@ -721,69 +703,6 @@ One-time migration of legacy `hue-credentials.json` into the ConnectorStore.
 - Renames the file to `.migrated` to prevent re-import
 
 
-### Services Framework
-
-The Services Framework is a pluggable architecture for non-device event producers — timers, API triggers, system lifecycle events — that sits alongside the Connector Framework as a peer event source layer. Services emit events on the standard event bus using synthetic `service/{type}/{name}` topics, so automations match on service events identically to how they match on `sensor/` or `connector/` topics. Zero changes to the automation engine were required.
-
-The framework mirrors the Connector Framework's architecture: `ServiceModule` → `ServiceRegistry` → `ServiceManager` → `ServiceStore`. Three built-in services ship with the framework; future services (weather, energy pricing, calendar) plug in without touching core files.
-
-#### Service Interfaces (`src/services/service.interface.ts`)
-
-Every service module exports three members:
-
-- `metadata: ServiceMetadata` — static descriptor with `id`, `displayName`, `icon`, `description`, `category`
-- `configSchema: ServiceConfigSchema` — reuses `ConfigFieldDescriptor[]` from the Connector framework
-- `createService(config, deps): ServiceInstance` — factory function accepting config and `{ eventBus }` dependencies
-
-`ServiceInstance` exposes lifecycle methods: `start()`, `stop()`, `dispose()`, `getHealthStatus()`, `onConfigUpdate(config)`, and optional `getState()` for sandbox queries.
-
-#### ServiceRegistry (`src/services/service-registry.ts`)
-
-Manual registration and lookup of service modules. Validates that each module exports `metadata` (with string `id`), `configSchema` (array), and `createService` (function). Invalid modules are skipped with a warning; duplicate IDs overwrite with a warning.
-
-#### ServiceManager (`src/services/service-manager.ts`)
-
-Lifecycle management for enabled service instances. Handles enable (instantiate → start → persist), disable (stop → dispose → update store), config update, retry, restore from store on startup, and disposeAll on shutdown. Exposes `getServiceInstance(serviceType)` for sandbox queries.
-
-Key differences from ConnectorManager: no device discovery or polling (services emit events on their own schedule), no action routing (services are event producers only).
-
-#### ServiceStore (`src/services/service-store.ts`)
-
-SQLite persistence layer for service records. CRUD operations on the `services` table with JSON serialization for the config column. Disabling preserves the record (sets `enabled = 0`) rather than deleting it.
-
-#### Event Emission Pattern
-
-Services emit events through the existing `DEVICE_STATE_CHANGE` pipeline using synthetic topics:
-
-```typescript
-const event: NormalizedEvent = {
-  deviceId: `service-${serviceType}`,    // e.g. "service-cron"
-  deviceType: "sensor",                   // All service events use "sensor" type
-  state: { scheduleName, cronExpression, firedAt: Date.now() },
-  topic: `service/cron/${scheduleName}`,  // Synthetic topic
-  timestamp: Date.now(),
-  integration: "service",
-};
-eventBus.emit(DEVICE_STATE_CHANGE, event);
-```
-
-Automations match `service/cron/every-5m` or `service/+/+` or `service/#` using existing topic matching. Events flow through DeviceRegistry → WebSocket broadcast → frontend automatically.
-
-#### Built-in Services
-
-**Cron Scheduler** (`src/services/cron/index.ts`) — Time-based event scheduling using `node-cron`. Config accepts a `schedules` array of `{ name, cron }` objects. On each schedule fire, emits `service/cron/{scheduleName}` with state `{ scheduleName, cronExpression, firedAt }`. Invalid cron expressions are skipped with a warning. `getState()` returns all schedules with active status.
-
-**API Trigger** (`src/services/trigger/index.ts`) — Fire automation events via HTTP requests. No configuration needed. The route handler for `POST /api/services/trigger/{name}` calls `emitTrigger(name, body)` which emits `service/trigger/{name}` with state `{ triggerName, payload, firedAt }`. Accepts any trigger name without pre-registration. `getState()` returns `{ triggerCount, lastTriggerAt }`.
-
-**System Events** (`src/services/system/index.ts`) — Emits `service/system/startup` on start and `service/system/shutdown` on stop. No configuration needed. `getState()` returns `{ startupTimestamp, uptimeSeconds }`.
-
-#### Sandbox Services API
-
-The `services` global is available in automation scripts alongside `devices`, `mqtt`, `log`, `context`, `http`, `automation`, and `state`:
-
-- `services.get(serviceType)` — returns a read-only snapshot of the service's `getState()`, or `undefined` if not running
-- `services.list()` — returns `[{ type, displayName, running }]` for all registered services
-
 ### Data Store (`src/data-store/data-store.ts`)
 
 Persistent time-series and key-value storage system built on the existing sql.js (pure JS SQLite) infrastructure. Enables automations to accumulate structured data over time, share computed values across rules, and query historical records with aggregation.
@@ -956,7 +875,7 @@ Return the snippet catalog — platform-level snippets plus connector-provided s
 Returns an array of `SnippetGroup` objects: `[{ category, icon, snippets: [{ id, name, description, code }] }]`.
 
 **GET /api/automations/types**
-Serve the sandbox type definition bundle (`sandbox-types.d.ts`) as `text/plain`. The Monaco editor fetches this on mount to provide IntelliSense for `devices`, `mqtt`, `log`, `context`, `services`, `http`, `automation`, and `state` globals.
+Serve the sandbox type definition bundle (`sandbox-types.d.ts`) as `text/plain`. The Monaco editor fetches this on mount to provide IntelliSense for `devices`, `mqtt`, `log`, `context`, `http`, `automation`, and `state` globals.
 
 **GET /api/automations/ui-types**
 Serve the custom UI component type definition bundle (`ui-types.d.ts`) as `text/plain`. The UiEditor fetches this on mount to provide IntelliSense for `CustomComponentProps`, React hooks, and JSX types.
@@ -1038,49 +957,6 @@ Returns the current search state: `{ "active": true, "startedAt": ..., "newLight
 **GET /api/connectors/:id/search-lights/status**
 Get the current status of an in-progress Zigbee light search, including any newly discovered lights.
 Returns `{ "active": boolean, "startedAt": number | null, "newLights": [...], "error": string | null }`.
-
-### Service API
-
-**GET /api/services/available**
-List all registered service types with metadata and config schemas.
-
-**GET /api/services**
-List enabled service instances with health status, config, and service type.
-
-**POST /api/services**
-Enable a new service instance.
-```json
-{ "service_type": "cron", "config": { "schedules": [{ "name": "every-5m", "cron": "*/5 * * * *" }] } }
-```
-Returns `{ "success": true, "id": "<uuid>" }`. 404 if service type not found, 400 if required config fields missing.
-
-**PATCH /api/services/:id**
-Update service configuration.
-```json
-{ "config": { "schedules": [...] } }
-```
-Returns `{ "success": true }`.
-
-**DELETE /api/services/:id**
-Disable and dispose a service instance.
-Returns `{ "success": true }`.
-
-**GET /api/services/:id/status**
-Get detailed health status for a specific service instance.
-
-**POST /api/services/:id/retry**
-Retry starting a stopped service.
-Returns `{ "success": true }`.
-
-**POST /api/services/trigger/:name**
-Fire an API trigger event. Emits `service/trigger/{name}` on the event bus with the request body as payload.
-```json
-{ "key": "value" }
-```
-Returns `{ "success": true, "trigger": "<name>" }`.
-
-**GET /api/services/topics**
-List available service event topics for all enabled services (e.g. `service/cron/every-5m`, `service/trigger/{name}`, `service/system/startup`).
 
 ### Data Store API
 
@@ -1537,53 +1413,6 @@ interface ConnectorInstanceInfo {
 }
 ```
 
-### ServiceMetadata
-```typescript
-interface ServiceMetadata {
-  id: string;           // Unique service type ID (e.g. "cron", "trigger", "system")
-  displayName: string;  // Human-readable name for the UI
-  icon: string;         // Lucide icon name
-  description: string;  // Short description for the service card
-  category: string;     // Grouping category (e.g. "scheduling", "integration", "system")
-}
-
-type ServiceConfigSchema = ConfigFieldDescriptor[];
-```
-
-### ServiceHealthStatus
-```typescript
-interface ServiceHealthStatus {
-  status: "running" | "degraded" | "stopped";
-  lastActivity: number;       // Unix timestamp of last event emission
-  errorMessage?: string;      // Present when status is degraded or stopped
-}
-```
-
-### ServiceInstanceInfo
-```typescript
-interface ServiceInstanceInfo {
-  id: string;                        // UUID instance identifier
-  serviceType: string;               // Matches ServiceMetadata.id
-  displayName: string;               // From metadata
-  icon: string;                      // From metadata
-  config: Record<string, unknown>;   // Current config
-  health: ServiceHealthStatus;       // Live health status
-  enabled: boolean;                  // Whether the instance is active
-}
-```
-
-### ServiceRecord
-```typescript
-interface ServiceRecord {
-  id: string;                        // UUID primary key
-  serviceType: string;               // Service type ID
-  enabled: boolean;                  // Whether the service is active
-  config: Record<string, unknown>;   // JSON-serialized config
-  createdAt: number;                 // Unix timestamp ms
-  updatedAt: number;                 // Unix timestamp ms
-}
-```
-
 ### SQLite Schema
 ```sql
 CREATE TABLE devices (
@@ -1641,15 +1470,6 @@ CREATE TABLE panes (
 CREATE TABLE connectors (
   id TEXT PRIMARY KEY,
   connector_type TEXT NOT NULL,
-  enabled INTEGER NOT NULL DEFAULT 1,
-  config TEXT NOT NULL DEFAULT '{}',
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL
-);
-
-CREATE TABLE services (
-  id TEXT PRIMARY KEY,
-  service_type TEXT NOT NULL,
   enabled INTEGER NOT NULL DEFAULT 1,
   config TEXT NOT NULL DEFAULT '{}',
   created_at INTEGER NOT NULL,
@@ -1807,15 +1627,6 @@ Flat config at `eslint.config.js` using `typescript-eslint`.
 | Connector | Unknown connector type on restore | Log warning, skip record |
 | Connector | Setup step fails | Return error message to dashboard wizard |
 | Connector | Legacy migration file unreadable | Log warning, skip migration |
-| Service | Service type not found in registry | 404 JSON error |
-| Service | Missing required config fields | 400 JSON error with field names |
-| Service | `start()` throws | Mark health as "stopped", log error, allow retry |
-| Service | Invalid cron expression | Log warning, skip schedule, continue with valid ones |
-| Service | `stop()` throws during disable | Log error, continue with disposal |
-| Service | `dispose()` throws during shutdown | Log error, continue with next service |
-| Service | Duplicate service type registration | Log warning, overwrite existing |
-| Service | ServiceStore JSON parse failure | Log warning, skip malformed record |
-| Service | Sandbox `services.get()` for non-running service | Return `undefined` |
 | Layout | Invalid layout payload | 400 JSON error |
 | Layout | Database write failure | Rollback transaction, return 500 |
 | Log Viewer | Unparseable log line | Silently ignored by log buffer |
@@ -1879,16 +1690,15 @@ Three configurable levels managed from the dashboard: Open, Shared Password, or 
 - **Pluggable connector architecture over hardcoded integrations:** Each connector is a self-contained module with metadata, config schema, and factory function. The ConnectorRegistry discovers modules at startup, the ConnectorManager handles lifecycle (enable/disable/poll/action routing), and the ConnectorStore persists state to SQLite. This replaces the previous `src/integrations/` approach where each integration required its own route file and manual wiring. New connectors can be added by creating a directory in `src/connectors/` with the standard module exports — no changes to backend core code required. A `_template/` skeleton is provided for developers. Connector devices automatically appear in the Device Grid pane and can be targeted by automations. For connector-specific controls (colour pickers, energy stats, thermostat setpoints), a dedicated frontend pane component is recommended but optional — see `HueControlPane.tsx` and `KasaControlPane.tsx` as reference implementations.
 - **Host networking for LAN device discovery:** The backend container uses `network_mode: host` instead of the shared bridge network. This is required for Kasa's UDP broadcast discovery (which doesn't work across Docker bridge networks) and for direct LAN access to Hue bridges. The trade-off is that the backend port is exposed directly on the host rather than through Docker port mapping, and the MQTT broker URL must use `localhost` instead of the Docker service name.
 - **Pinned tabs render dedicated components:** Pinned system tabs (System, Connectors, Data) render their own full-page components directly via React Router `<Route>` elements in `App.tsx`, bypassing the modular pane grid. The System tab (`/dashboard`) renders `SystemHealth`, `DeviceGrid`, and `SystemPage` inline. The Connectors tab (`/connectors`) renders the `ConnectorsPage` component. The Data tab (`/data-store`) renders the `DataStorePage` component (setup wizard when disabled, data explorer when enabled). This gives each system page full control over its layout and styling. Custom (unpinned) tabs use the `TabLayout` component with the pane grid system. This separation keeps system pages polished while maintaining flexibility for user-created tabs.
-- **Services Framework mirrors Connector Framework architecture:** The Services Framework deliberately mirrors the Connector Framework's architecture (Module → Registry → Manager → Store) so that anyone familiar with the connector code can immediately understand the services code. Services differ in that they are event producers only — no device discovery, no polling, no action routing. They emit events through the existing `DEVICE_STATE_CHANGE` pipeline using synthetic `service/{type}/{name}` topics, requiring zero changes to the automation engine.
 - **`isolated-vm` over Node.js `vm` for sandbox execution:** The Node.js `vm` module is explicitly documented as "not a security mechanism" — it runs code in the same V8 isolate as the host process, allowing escape via prototype pollution and `Function` constructor access. The `vm2` library was deprecated after repeated critical sandbox escape CVEs. `isolated-vm` creates a separate V8 isolate with its own heap, no access to the host's global scope, and built-in support for memory limits (32 MB) and execution timeouts (5 seconds). This is the same isolation primitive used by Cloudflare Workers. For a Raspberry Pi deployment where the automation engine shares a process with the MQTT broker connection and device registry, true V8-level isolation is essential. The tradeoff is that `isolated-vm` is a native addon requiring C++ compilation — the Dockerfile includes `build-essential` and `python3` for ARM64 builds.
 - **Monaco over CodeMirror for the script editor:** Monaco is the editor engine behind VS Code. It provides native TypeScript language service integration — IntelliSense, type checking, and error squiggles work out of the box when you register `.d.ts` type definitions via `addExtraLib()`. CodeMirror 6 is lighter but requires significant custom work to achieve comparable TypeScript support. Since the code editor is the centrepiece of the automation overhaul and developer experience is paramount, Monaco is the right choice. The `@monaco-editor/react` wrapper provides clean React integration.
 - **TypeScript as a runtime dependency:** The TypeScript compiler API (`ts.transpileModule()`) is used at runtime to transpile user-authored automation scripts on save. This means `typescript` is a production dependency, not just a dev dependency. The tradeoff is a larger production bundle, but it enables on-the-fly transpilation without a separate build step or external service.
 - **Generic backend-driven setup wizard:** The ConnectorsPage setup wizard is fully generic — it fetches step descriptors from `GET /api/connectors/:id/setup-steps` and renders them dynamically. No connector-specific UI code exists in the frontend. Each step can include input fields, and the wizard accumulates data across steps, passing it to subsequent step executions and patching the connector config on completion. This means adding a new connector with a multi-step setup flow requires zero frontend changes.
-- **3 pinned tabs instead of 5:** Simplified from 5 pinned tabs (Dashboard, Automations, Connectors, Services, System) to 3 (System, Connectors, Data). The System tab renders the device grid, system health, and host diagnostics inline. The Data tab renders the Data Store explorer (setup wizard when disabled, data explorer when enabled). Automations moved to self-contained panes in custom tabs — each automation is one pane, reflecting the code-first philosophy. Services are infrastructure that auto-enable on startup and don't need a dedicated tab. Pinned tabs are hardcoded in the frontend, not stored in the database.
+- **3 pinned tabs instead of 5:** Simplified from 5 pinned tabs (Dashboard, Automations, Connectors, Services, System) to 3 (System, Connectors, Data). The System tab renders the device grid, system health, and host diagnostics inline. The Data tab renders the Data Store explorer (setup wizard when disabled, data explorer when enabled). Automations moved to self-contained panes in custom tabs — each automation is one pane, reflecting the code-first philosophy. Pinned tabs are hardcoded in the frontend, not stored in the database.
 - **One-pane-one-automation pattern:** Each AutomationPane manages a single automation rule through a setup → status → editing state machine. This replaces the previous list-based approach where all automations lived in one page. The pane pattern means automations live alongside the controls they manage in custom tabs, and users can see the flow diagram or activity feed at a glance.
 - **Structured `automation()` helper with named function arrays:** The `automation({ conditions: [...], actions: [...] })` helper accepts arrays of named functions. Named functions become labeled nodes in the FlowDiagram SVG. This gives users the flexibility of free-form TypeScript while enabling automatic visualization. Backward compatible with single-function form.
 - **Host-side HTTP for sandbox `http` global:** The `http.get/post` sandbox globals delegate to host-side `fetch()` via `ivm.Reference` callbacks rather than allowing network access inside the isolate. This maintains the security boundary — the isolate has no network stack — while enabling external API calls with a 10-second timeout. Errors are caught and returned as `{ status: 0, body: errorMessage }` rather than throwing. Both HTTP and HTTPS are allowed (local LAN services often don't have TLS), but a warning is logged when plain HTTP is used for non-local URLs to nudge users toward HTTPS for internet-facing requests. Local/private network addresses (localhost, 10.x, 172.16-31.x, 192.168.x) are exempt from the warning.
-- **Connector-provided code snippets:** Each connector module can optionally export a `snippets` array alongside `metadata`, `configSchema`, and `createConnector`. These snippets appear grouped under the connector's display name in the automation editor's snippet picker. This makes the snippet system extensible — new connectors automatically contribute code templates without any changes to the snippet catalog or frontend. Platform-level snippets (MQTT, HTTP, Conditions, Devices, Services, Templates) are always available regardless of which connectors are installed.
+- **Connector-provided code snippets:** Each connector module can optionally export a `snippets` array alongside `metadata`, `configSchema`, and `createConnector`. These snippets appear grouped under the connector's display name in the automation editor's snippet picker. This makes the snippet system extensible — new connectors automatically contribute code templates without any changes to the snippet catalog or frontend. Platform-level snippets (MQTT, HTTP, Conditions, Devices, Templates) are always available regardless of which connectors are installed.
 - **Runtime loading for custom UI components via blob URL + dynamic `import()`:** Custom automation UI components are transpiled on the backend at save time (via `transpileUi()`) and stored in the `compiled_ui` column. The frontend loads them at runtime by fetching the compiled JS from `/api/automations/:id/ui-module`, rewriting React import specifiers to reference `window.__AEOLUS_EXTERNALS__`, creating a blob URL, and using dynamic `import()`. This replaces the previous build-time approach (CustomUiManager writing `.tsx` files + Docker frontend rebuild) with instant activation — save and it renders immediately, no rebuild or refresh needed. The tradeoff is that dynamically loaded modules can't be tree-shaken or statically analyzed by Vite, but for small per-automation UI components this is negligible.
 - **`window.__AEOLUS_EXTERNALS__` for React dependency resolution:** Dynamically loaded UI modules need access to React, ReactDOM, and the JSX runtime without bundling their own copies (which would cause hook state mismatches). The solution registers these as globals on `window.__AEOLUS_EXTERNALS__` in `main.tsx`, and the `rewriteImports()` function rewrites ES module import statements into destructuring assignments from these globals. This is similar to Webpack's `externals` configuration but works at the source text level for blob URL imports.
 - **Per-rule key-value state store for backend↔frontend communication:** The AutomationStateStore provides a simple key-value interface (`state.set/get/getAll/delete`) scoped per automation rule. Values are JSON-serialized to SQLite for persistence and kept in an in-memory cache for fast sandbox reads. State changes emit `AUTOMATION_STATE_CHANGE` events on the event bus, which the WebSocket server broadcasts to all clients. The frontend Zustand store (`automation-state-store.ts`) listens for `automation-state` WebSocket messages and updates reactively. This enables automation scripts to compute values (e.g. rolling averages, counters) that custom UI components can display in real time.
@@ -1899,7 +1709,7 @@ Three configurable levels managed from the dashboard: Open, Shared Password, or 
 
 ## Dashboard Features
 
-The React dashboard provides a comprehensive developer-focused interface with a modular tab-and-pane layout. The sidebar displays dynamic tabs — 3 pinned system tabs (System, Connectors, Data) plus user-created custom tabs. Pinned tabs are hardcoded in the frontend (not from DB) and render dedicated full-page components via React Router routes; custom tabs use the modular pane grid. Automations and services are accessed through panes in custom tabs rather than dedicated pinned tabs — this reflects the code-first philosophy where automations are self-contained units that live alongside the controls they manage.
+The React dashboard provides a comprehensive developer-focused interface with a modular tab-and-pane layout. The sidebar displays dynamic tabs — 3 pinned system tabs (System, Connectors, Data) plus user-created custom tabs. Pinned tabs are hardcoded in the frontend (not from DB) and render dedicated full-page components via React Router routes; custom tabs use the modular pane grid. Automations are accessed through panes in custom tabs rather than a dedicated pinned tab — this reflects the code-first philosophy where automations are self-contained units that live alongside the controls they manage.
 
 ### Sidebar
 - **Pinned System Tabs** — System, Connectors, Data (hardcoded, cannot be deleted or reordered)
@@ -1933,9 +1743,6 @@ The React dashboard provides a comprehensive developer-focused interface with a 
 - **Retry** — Re-attempt connection for disconnected connectors
 - **Health Indicators** — Real-time status: connected (green), degraded (amber), disconnected (red)
 
-### Services (removed as pinned tab)
-Services are infrastructure that auto-enable on startup — they don't need a dedicated pinned tab. The three built-in services (Cron, API Trigger, System Events) start automatically and emit events on synthetic `service/{type}/{name}` topics. Services are managed via the REST API (`/api/services/*`).
-
 ### Data Tab (pinned — route: `/data-store`)
 
 The Data tab provides a persistent time-series and key-value storage explorer. It renders either the SetupWizard (when Data Store is disabled) or the DataExplorer (when enabled).
@@ -1965,7 +1772,7 @@ Self-contained one-pane-one-automation component with a 3-mode state machine. Ea
 
 **Setup Mode** (no ruleId yet):
 - Name input and trigger topic input
-- Monaco code editor with the default template showing all available globals (`devices`, `mqtt`, `log`, `context`, `services`, `http`, `automation`, `state`)
+- Monaco code editor with the default template showing all available globals (`devices`, `mqtt`, `log`, `context`, `http`, `automation`, `state`)
 - Collapsible snippet picker panel (toggle via "Snippets" button) — shows categorized code templates from platform and connectors, click to insert at cursor
 - Save button creates the rule via `POST /api/automations` and transitions to status mode
 - Transpilation errors displayed inline in the editor and in an error summary panel
@@ -2013,10 +1820,9 @@ Recent execution feed for free-form automations (scripts that don't use the `aut
 
 ### Trigger Button Pane (`trigger-button` pane type)
 
-Configurable button that fires an API trigger event via `POST /api/services/trigger/{name}`.
+Configurable button that manually fires an automation via `POST /api/automations/:id/fire`.
 
-- Configurable trigger name, button label, color (primary/accent/red/green), and payload
-- Shows the synthetic topic (`service/trigger/{name}`) below the button
+- Configurable automation target, button label, color (primary/accent/red/green), and payload
 - Last fired timestamp display
 - Useful for manual automation triggers from the dashboard
 
@@ -2025,7 +1831,7 @@ Configurable button that fires an API trigger event via `POST /api/services/trig
 A React component wrapping `@monaco-editor/react` with Aeolus theming and sandbox API IntelliSense.
 
 - Fetches type definitions from `GET /api/automations/types` on mount
-- Registers types via `monaco.languages.typescript.typescriptDefaults.addExtraLib()` for IntelliSense on `devices`, `mqtt`, `log`, `context`, `services`, `http`, `automation`, and `state`
+- Registers types via `monaco.languages.typescript.typescriptDefaults.addExtraLib()` for IntelliSense on `devices`, `mqtt`, `log`, `context`, `http`, `automation`, and `state`
 - Custom `aeolus-dark` Monaco theme mapping Aeolus brand colours to token types:
   - Keywords (`if`, `const`, `await`): `#3BA4FF` (Aeolus Blue)
   - Strings: `#5CE1E6` (Wind Cyan)
@@ -2128,15 +1934,6 @@ Custom tabs use the modular pane grid powered by `react-grid-layout`. Users crea
 | POST | `/api/connectors/:id/retry` | Retry connection for disconnected connector |
 | POST | `/api/connectors/:id/search-lights` | Start Zigbee light search (Hue connector) |
 | GET | `/api/connectors/:id/search-lights/status` | Get Zigbee search progress and new lights |
-| GET | `/api/services/available` | List registered service types with metadata + config schemas |
-| GET | `/api/services` | List enabled service instances with health and config |
-| POST | `/api/services` | Enable a new service `{ service_type, config }` |
-| PATCH | `/api/services/:id` | Update service config `{ config }` |
-| DELETE | `/api/services/:id` | Disable and dispose a service instance |
-| GET | `/api/services/:id/status` | Service health status |
-| POST | `/api/services/:id/retry` | Retry starting a stopped service |
-| POST | `/api/services/trigger/:name` | Fire an API trigger event |
-| GET | `/api/services/topics` | List available service event topics |
 | GET | `/api/layout` | Get saved dashboard layout (tabs + panes) |
 | PUT | `/api/layout` | Save dashboard layout (atomic replace) |
 | GET | `/api/system` | Host system diagnostics (CPU, memory, disk, temp) |

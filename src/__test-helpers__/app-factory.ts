@@ -16,7 +16,6 @@ import { createAutomationRoutes } from "../api/routes/automation.routes.js";
 import { createDataStoreRoutes } from "../api/routes/data-store.routes.js";
 import { createLayoutRoutes } from "../api/routes/layout.routes.js";
 import { createSystemRoutes } from "../api/routes/system.routes.js";
-import { createServiceRoutes } from "../api/routes/service.routes.js";
 import { DeviceRegistry } from "../core/device-registry.js";
 import { AutomationEngine } from "../automations/automation-engine.js";
 import { ActionExecutor, handlePublish, handleToggle, handleDeviceAction, handleLog, handleDelay, handleWebhook, type ActionExecutorDeps } from "../automations/action-executor.js";
@@ -24,9 +23,6 @@ import { ConditionRegistry } from "../automations/condition-registry.js";
 import { ExecutionLog } from "../automations/execution-log.js";
 import { AutomationStateStore } from "../automations/automation-state-store.js";
 import { DataStore } from "../data-store/data-store.js";
-import { ServiceRegistry } from "../services/service-registry.js";
-import { ServiceStore } from "../services/service-store.js";
-import { ServiceManager } from "../services/service-manager.js";
 import { _resetSecretCache } from "../auth/token-service.js";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -95,10 +91,6 @@ export function createTestApp(
 
   const engine = new AutomationEngine(eventBus, { actionExecutor, executionLog });
 
-  const serviceStore = new ServiceStore(db);
-  const serviceRegistry = new ServiceRegistry();
-  const serviceManager = new ServiceManager(serviceRegistry, serviceStore, eventBus);
-
   // Stub MQTT service for health route
   const stubMqttService = createStubMqttService();
   const startTime = Date.now();
@@ -120,7 +112,6 @@ export function createTestApp(
     stateStore,
     conditionRegistry,
   ));
-  app.use("/api/services", createServiceRoutes(serviceManager, serviceRegistry));
   app.use("/api/system", createSystemRoutes());
   app.use("/api/layout", createLayoutRoutes(db));
   app.use("/api/data-store", createDataStoreRoutes(dataStore));

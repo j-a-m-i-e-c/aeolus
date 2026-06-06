@@ -89,16 +89,6 @@ export function initSchema(database: DatabaseType): void {
     );
   `);
   database.exec(`
-    CREATE TABLE IF NOT EXISTS services (
-      id TEXT PRIMARY KEY,
-      service_type TEXT NOT NULL,
-      enabled INTEGER NOT NULL DEFAULT 1,
-      config TEXT NOT NULL DEFAULT '{}',
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
-    );
-  `);
-  database.exec(`
     CREATE TABLE IF NOT EXISTS automation_state (
       rule_id TEXT NOT NULL,
       key TEXT NOT NULL,

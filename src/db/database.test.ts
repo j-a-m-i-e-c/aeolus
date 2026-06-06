@@ -34,7 +34,6 @@ describe("database", () => {
       expect(tableNames).toContain("tabs");
       expect(tableNames).toContain("panes");
       expect(tableNames).toContain("connectors");
-      expect(tableNames).toContain("services");
       expect(tableNames).toContain("automation_state");
       expect(tableNames).toContain("device_history");
       expect(tableNames).toContain("groups");

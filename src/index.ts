@@ -30,13 +30,7 @@ import { createHealthRoutes } from "./api/routes/health.routes.js";
 import { createMqttRoutes } from "./api/routes/mqtt.routes.js";
 import { createAutomationRoutes, loadUiRules } from "./api/routes/automation.routes.js";
 import { createConnectorRoutes } from "./api/routes/connector.routes.js";
-import { createServiceRoutes } from "./api/routes/service.routes.js";
-import { ServiceRegistry } from "./services/service-registry.js";
-import { ServiceStore } from "./services/service-store.js";
-import { ServiceManager } from "./services/service-manager.js";
-import cronModule from "./services/cron/index.js";
-import triggerModule from "./services/trigger/index.js";
-import systemModule from "./services/system/index.js";
+
 import { requestLogger } from "./api/middleware/request-logger.js";
 import { errorHandler } from "./api/middleware/error-handler.js";
 import { corsMiddleware } from "./api/middleware/cors-config.js";
@@ -103,25 +97,7 @@ async function main(): Promise<void> {
 
   migrateLegacyHueCredentials(connectorStore);
 
-  // 5. Services Framework
-  const serviceStore = new ServiceStore(db);
-  const serviceRegistry = new ServiceRegistry();
-  const serviceManager = new ServiceManager(serviceRegistry, serviceStore, eventBus);
-
-  serviceRegistry.register(cronModule);
-  serviceRegistry.register(triggerModule);
-  serviceRegistry.register(systemModule);
-
-  await serviceManager.restoreFromStore();
-
-  // Auto-enable built-in services if not already enabled
-  const enabledServices = serviceManager.listEnabled();
-  const enabledTypes = new Set(enabledServices.map(s => s.serviceType));
-  if (!enabledTypes.has("system")) await serviceManager.enable("system", {});
-  if (!enabledTypes.has("trigger")) await serviceManager.enable("trigger", {});
-  if (!enabledTypes.has("cron")) await serviceManager.enable("cron", { schedules: [] });
-
-  // 6. Action Executor, Execution Log, and Sandbox
+  // 5. Action Executor, Execution Log, and Sandbox
   const actionExecutor = new ActionExecutor({
     mqttService,
     connectorManager,
@@ -156,7 +132,7 @@ async function main(): Promise<void> {
     dataStore.startRetentionTimer();
   }
 
-  const sandbox = new Sandbox({ actionExecutor, deviceRegistry: registry, serviceManager, stateStore, dataStore, onStateChange: (ruleId, key, value) => {
+  const sandbox = new Sandbox({ actionExecutor, deviceRegistry: registry, stateStore, dataStore, onStateChange: (ruleId, key, value) => {
     eventBus.emit(AUTOMATION_STATE_CHANGE, { ruleId, key, value });
   } });
 
@@ -220,7 +196,6 @@ async function main(): Promise<void> {
   const sandboxTypesPath = path.resolve(import.meta.dirname, "automations/sandbox-types.d.ts");
   app.use("/api/automations", createAutomationRoutes(engine, db, registry, actionExecutor, executionLog, sandboxTypesPath, connectorRegistry, stateStore, conditionRegistry));
   app.use("/api/connectors", createConnectorRoutes(connectorManager, connectorRegistry));
-  app.use("/api/services", createServiceRoutes(serviceManager, serviceRegistry));
   app.use("/api/metrics", createMetricsSummaryRoute(metricsService));
   app.use("/api/system", createSystemRoutes());
   app.use("/api/layout", createLayoutRoutes(db));
@@ -278,7 +253,6 @@ async function main(): Promise<void> {
       // 3. Stop all active timers (retention timers, polling intervals, cron schedules)
       await metricsHistoryService.dispose();
       dataStore.dispose();
-      await serviceManager.disposeAll();
       await connectorManager.disposeAll();
 
       // 4. Stop automation engine (cron timers)

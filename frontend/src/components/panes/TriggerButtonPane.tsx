@@ -23,7 +23,7 @@ export function TriggerButtonPane({ config }: Props) {
   const handleFire = async () => {
     setFiring(true);
     try {
-      await authFetch(`${API_URL}/api/services/trigger/${triggerName}`, {
+      await authFetch(`${API_URL}/api/automations/trigger/${triggerName}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload ?? {}),

@@ -8,7 +8,7 @@ import type { AutomationEngine } from "../../automations/automation-engine.js";
 import type { DeviceRegistry } from "../../core/device-registry.js";
 import type { ActionExecutor, ActionDescriptor } from "../../automations/action-executor.js";
 import type { ExecutionLog } from "../../automations/execution-log.js";
-import type { EventContext } from "../../core/types.js";
+import type { EventContext, NormalizedEvent } from "../../core/types.js";
 import type { ConditionRegistry } from "../../automations/condition-registry.js";
 import { transpile, transpileUi } from "../../automations/transpiler.js";
 import { extractStructuredMetadata } from "../../automations/structured-metadata-extractor.js";
@@ -19,7 +19,7 @@ import { BadRequestError, NotFoundError } from "../middleware/error-handler.js";
 import { validate } from "../middleware/validate.js";
 import { createAutomationBodySchema, updateAutomationBodySchema, automationIdParamsSchema, toggleAutomationBodySchema, automationStateBodySchema } from "../schemas/automation.schemas.js";
 import { requireTabPermission } from "../../auth/auth-middleware.js";
-import { eventBus, AUTOMATION_STATE_CHANGE } from "../../core/event-bus.js";
+import { eventBus, AUTOMATION_STATE_CHANGE, DEVICE_STATE_CHANGE } from "../../core/event-bus.js";
 import type { AutomationStateStore } from "../../automations/automation-state-store.js";
 import logger from "../../logger.js";
 
@@ -112,6 +112,31 @@ export function createAutomationRoutes(
     }
 
     res.json(entries);
+  });
+
+  /** POST /api/automations/trigger/:name — fire a named trigger event (replaces services trigger) */
+  router.post("/trigger/:name", (req, res) => {
+    const { name } = req.params;
+    const body = req.body ?? {};
+    const firedAt = Date.now();
+
+    const event: NormalizedEvent = {
+      deviceId: "service-trigger",
+      deviceType: "sensor",
+      state: {
+        triggerName: name,
+        payload: body,
+        firedAt,
+      },
+      topic: `service/trigger/${name}`,
+      timestamp: firedAt,
+      integration: "service",
+    };
+
+    eventBus.emit(DEVICE_STATE_CHANGE, event);
+
+    logger.info({ triggerName: name }, "API trigger fired");
+    res.json({ success: true, trigger: name });
   });
 
   /** GET /api/automations/:id/ui-module — serve compiled UI module as JavaScript */
@@ -535,18 +560,22 @@ export function createAutomationRoutes(
         throw new NotFoundError(`Automation rule ${id} not found or not enabled`);
       }
 
-      // Build a synthetic context for manual firing
+      // Build context — if eventName is provided (from UI emit), use ui/{ruleId}/{eventName} topic
+      const body = req.body ?? {};
+      const eventName = typeof body.eventName === "string" ? body.eventName : undefined;
+      const { eventName: _discarded, ...statePayload } = body;
+
       const context: EventContext = {
-        topic: rule.topic,
-        deviceId: "manual-fire",
-        state: req.body ?? {},
+        topic: eventName ? `ui/${id}/${eventName}` : rule.topic,
+        deviceId: eventName ? `ui-${id}` : "manual-fire",
+        state: statePayload,
         timestamp: Date.now(),
       };
 
       // Fire through the engine (routes script rules through sandbox)
       await engine.fire(id, context);
 
-      logger.info({ ruleId: id, ruleName: rule.name }, "Automation rule manually fired");
+      logger.info({ ruleId: id, ruleName: rule.name, eventName }, "Automation rule manually fired");
       res.json({ success: true, ruleId: id });
     } catch (err) {
       next(err);

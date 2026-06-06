@@ -3,7 +3,6 @@
 import type { ActionExecutor } from "./action-executor.js";
 import type { AutomationStateStore } from "./automation-state-store.js";
 import type { DeviceRegistry } from "../core/device-registry.js";
-import type { ServiceManager } from "../services/service-manager.js";
 import type { DataStore } from "../data-store/data-store.js";
 import type { Device, ActionResult, BulkActionResult } from "../core/types.js";
 import logger from "../logger.js";
@@ -24,7 +23,6 @@ try {
 export interface SandboxDeps {
   actionExecutor: ActionExecutor;
   deviceRegistry: DeviceRegistry;
-  serviceManager?: ServiceManager;
   stateStore?: AutomationStateStore;
   dataStore?: DataStore;
   onStateChange?: (ruleId: string, key: string, value: unknown) => void;
@@ -62,8 +60,6 @@ const BOOTSTRAP_SCRIPT = `
   var logWarnRef = __logWarnRef;
   var logErrorRef = __logErrorRef;
   var ctx = __contextData;
-  var servicesGetRef = __servicesGetRef;
-  var servicesListRef = __servicesListRef;
   var httpGetRef = __httpGetRef;
   var httpPostRef = __httpPostRef;
   var stateGetRef = __stateGetRef;
@@ -102,15 +98,6 @@ const BOOTSTRAP_SCRIPT = `
   };
 
   globalThis.context = Object.freeze(ctx);
-
-  globalThis.services = {
-    get: function(serviceType) {
-      return servicesGetRef.applySync(undefined, [serviceType]);
-    },
-    list: function() {
-      return servicesListRef.applySync(undefined, []);
-    }
-  };
 
   globalThis.http = {
     get: function(url, options) {
@@ -185,8 +172,6 @@ const BOOTSTRAP_SCRIPT = `
   delete globalThis.__logWarnRef;
   delete globalThis.__logErrorRef;
   delete globalThis.__contextData;
-  delete globalThis.__servicesGetRef;
-  delete globalThis.__servicesListRef;
   delete globalThis.__httpGetRef;
   delete globalThis.__httpPostRef;
   delete globalThis.__stateGetRef;
@@ -214,7 +199,6 @@ const BOOTSTRAP_SCRIPT = `
 export class Sandbox {
   private actionExecutor: ActionExecutor;
   private deviceRegistry: DeviceRegistry;
-  private serviceManager?: ServiceManager;
   private stateStore?: AutomationStateStore;
   private dataStore?: DataStore;
   private onStateChange?: (ruleId: string, key: string, value: unknown) => void;
@@ -222,7 +206,6 @@ export class Sandbox {
   constructor(deps: SandboxDeps) {
     this.actionExecutor = deps.actionExecutor;
     this.deviceRegistry = deps.deviceRegistry;
-    this.serviceManager = deps.serviceManager;
     this.stateStore = deps.stateStore;
     this.dataStore = deps.dataStore;
     this.onStateChange = deps.onStateChange;
@@ -250,7 +233,6 @@ export class Sandbox {
       await this.setMqttRefs(jail, ruleId);
       await this.setLogRefs(jail, ruleId);
       await this.setContextData(jail, context);
-      await this.setServicesRefs(jail);
       await this.setHttpRefs(jail, ruleId);
       await this.setStateRefs(jail, ruleId);
       await this.setDataStoreRefs(jail, ruleId);
@@ -441,43 +423,6 @@ export class Sandbox {
   private async setContextData(jail: IvmGlobal, context: SandboxContext): Promise<void> {
     if (!ivm) return;
     await jail.set("__contextData", new ivm.ExternalCopy(context).copyInto());
-  }
-
-  /**
-   * Set services references on the jail for the bootstrap script.
-   * Provides `services.get(type)` and `services.list()` via host-side callbacks.
-   */
-  private async setServicesRefs(jail: IvmGlobal): Promise<void> {
-    if (!ivm) return;
-
-    const serviceManager = this.serviceManager;
-
-    // Host-side callback for services.get(serviceType)
-    await jail.set(
-      "__servicesGetRef",
-      new ivm.Reference(function (serviceType: string) {
-        if (!serviceManager) return undefined;
-        const instance = serviceManager.getServiceInstance(serviceType);
-        const state = instance?.getState?.();
-        if (state === undefined) return undefined;
-        return new ivm.ExternalCopy(state).copyInto();
-      }),
-    );
-
-    // Host-side callback for services.list()
-    await jail.set(
-      "__servicesListRef",
-      new ivm.Reference(function () {
-        if (!serviceManager) return new ivm.ExternalCopy([]).copyInto();
-        const enabled = serviceManager.listEnabled();
-        const list = enabled.map((s) => ({
-          type: s.serviceType,
-          displayName: s.displayName,
-          running: s.health.status === "running",
-        }));
-        return new ivm.ExternalCopy(list).copyInto();
-      }),
-    );
   }
 
   /** HTTP request timeout in milliseconds. */

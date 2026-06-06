@@ -114,13 +114,6 @@ declare const context: {
 };
 
 /**
- * Query service state from automation scripts.
- *
- * Provides read-only access to running service instances.
- * Use `services.get()` to inspect a specific service's state,
- * or `services.list()` to enumerate all registered services.
- */
-/**
  * Declare a structured automation with optional conditions and required actions.
  *
  * The trigger topic is configured separately in the pane UI — this call
@@ -180,21 +173,6 @@ declare const http: {
    * @returns A promise resolving to `{ status, body }`.
    */
   post(url: string, options?: { headers?: Record<string, string>; body?: string }): Promise<{ status: number; body: string }>;
-};
-
-declare const services: {
-  /**
-   * Get a read-only snapshot of a service's current state.
-   * @param serviceType - The service type identifier (e.g. "cron", "trigger", "system").
-   * @returns The service state object, or `undefined` if the service is not running.
-   */
-  get(serviceType: string): Record<string, unknown> | undefined;
-
-  /**
-   * List all registered services with their current status.
-   * @returns An array of service info objects.
-   */
-  list(): Array<{ type: string; displayName: string; running: boolean }>;
 };
 
 /**

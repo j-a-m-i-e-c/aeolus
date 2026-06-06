@@ -93,6 +93,7 @@ export default React;`,
   executionHistory: any[];
   state: Map<string, unknown>;
   stateSet: (key: string, value: unknown) => void;
+  emit: (eventName: string, payload?: Record<string, unknown>) => void;
 }`,
     "file:///types.ts"
   );

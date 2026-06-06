@@ -126,6 +126,17 @@ const UI_SNIPPETS: SnippetGroup[] = [
 </button>`,
       },
       {
+        id: "ui-emit-event",
+        name: "Emit UI Event",
+        description: "Button that fires the Logic tab with a named event",
+        code: `<button
+  onClick={() => props.emit("my-event", { value: 42 })}
+  className="px-3 py-1.5 rounded-lg text-xs font-medium bg-[#A855F7]/20 text-[#A855F7] border border-[#A855F7]/30"
+>
+  Fire Logic
+</button>`,
+      },
+      {
         id: "ui-device-list",
         name: "Device List",
         description: "Render a list of devices filtered by type",

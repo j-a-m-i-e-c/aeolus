@@ -75,6 +75,18 @@ interface CustomComponentProps {
    * @param value - A JSON-serializable value.
    */
   stateSet: (key: string, value: unknown) => void;
+  /**
+   * Fire the Logic tab script with a named UI event.
+   *
+   * Use this when the UI needs to delegate a decision to the Logic tab
+   * rather than issuing a direct device command. The Logic tab receives
+   * the event as `context.topic = "ui/{ruleId}/{eventName}"` with
+   * `context.state` containing the payload.
+   *
+   * @param eventName - A short name for the event (e.g. "target-changed", "mode-selected").
+   * @param payload - Optional data to pass to the Logic tab in `context.state`.
+   */
+  emit: (eventName: string, payload?: Record<string, unknown>) => void;
 }
 
 // ── Minimal React type declarations for IntelliSense ──
