@@ -103,12 +103,41 @@ export function createSystemRoutes(): Router {
     res.json(logs);
   });
 
-  /** GET /api/system/version — build-time version info */
-  router.get("/version", (_req, res) => {
-    res.json({
-      commit: process.env.BUILD_COMMIT || "unknown",
-      buildDate: process.env.BUILD_DATE || "unknown",
-    });
+  /** GET /api/system/version — build-time version info + update check */
+  router.get("/version", async (_req, res) => {
+    const commit = process.env.BUILD_COMMIT || "unknown";
+    const buildDate = process.env.BUILD_DATE || "unknown";
+
+    // Check GitHub for latest commit on main
+    let updateAvailable = false;
+    let latestCommit: string | null = null;
+    let commitsBehind = 0;
+
+    if (commit !== "unknown") {
+      try {
+        const response = await fetch(
+          "https://api.github.com/repos/j-a-m-i-e-c/aeolus/commits?sha=main&per_page=20",
+          { headers: { "Accept": "application/vnd.github.v3+json" }, signal: AbortSignal.timeout(5000) }
+        );
+        if (response.ok) {
+          const commits = await response.json() as Array<{ sha: string }>;
+          latestCommit = commits[0]?.sha.slice(0, 7) ?? null;
+          const currentIndex = commits.findIndex((c) => c.sha.startsWith(commit));
+          if (currentIndex > 0) {
+            updateAvailable = true;
+            commitsBehind = currentIndex;
+          } else if (currentIndex === -1 && latestCommit && latestCommit !== commit) {
+            // Current commit not found in recent 20 — likely far behind
+            updateAvailable = true;
+            commitsBehind = -1; // unknown how far behind
+          }
+        }
+      } catch {
+        // GitHub unreachable — skip update check silently
+      }
+    }
+
+    res.json({ commit, buildDate, updateAvailable, latestCommit, commitsBehind });
   });
 
   return router;

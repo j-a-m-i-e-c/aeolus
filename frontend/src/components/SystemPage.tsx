@@ -27,6 +27,9 @@ interface SystemInfo {
 interface BuildVersionInfo {
   commit: string;
   buildDate: string;
+  updateAvailable: boolean;
+  latestCommit: string | null;
+  commitsBehind: number;
 }
 
 function formatBytes(bytes: number): string {
@@ -145,7 +148,7 @@ export function SystemPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-[#E6EDF3]">System</h1>
         {version && (
-          <div className="flex items-center gap-1.5 text-xs text-[#6B7785]">
+          <div className="flex items-center gap-2 text-xs text-[#6B7785]">
             <Info size={12} />
             <span className="font-mono">
               {version.commit !== "unknown" ? version.commit : "dev"}
@@ -153,6 +156,11 @@ export function SystemPage() {
             {version.buildDate !== "unknown" && (
               <span className="hidden sm:inline">
                 · {new Date(version.buildDate).toLocaleDateString()}
+              </span>
+            )}
+            {version.updateAvailable && (
+              <span className="ml-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-[#F59E0B]/15 text-[#F59E0B] border border-[#F59E0B]/30">
+                Update available{version.commitsBehind > 0 ? ` (${version.commitsBehind} commit${version.commitsBehind > 1 ? "s" : ""} behind)` : ""}
               </span>
             )}
           </div>
