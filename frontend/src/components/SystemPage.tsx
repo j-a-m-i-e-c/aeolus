@@ -154,7 +154,7 @@ export function SystemPage() {
               {version.commit !== "unknown" ? version.commit : "dev"}
             </span>
             {version.buildDate !== "unknown" && (
-              <span className="hidden sm:inline" title="Commit date">
+              <span className="hidden sm:inline" title={`Commit date: ${new Date(version.buildDate).toLocaleString()}`}>
                 · {new Date(version.buildDate).toLocaleDateString()}
               </span>
             )}
