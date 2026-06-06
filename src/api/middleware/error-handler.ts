@@ -54,9 +54,9 @@ export function errorHandler(
 ): void {
   // Log at appropriate level based on error type
   if (err instanceof AppError && err.statusCode < 500) {
-    logger.debug(err, "Request error");
+    logger.debug({ err, method: _req.method, path: _req.path }, "Request error");
   } else {
-    logger.error(err, "Request error");
+    logger.error({ err, method: _req.method, path: _req.path }, "Request error");
   }
 
   // Handle Zod validation errors
