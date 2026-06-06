@@ -2,7 +2,7 @@ FROM node:22-slim AS builder
 WORKDIR /app
 RUN apt-get update && apt-get install -y python3 make g++ git && rm -rf /var/lib/apt/lists/*
 COPY .git ./.git
-RUN echo "{\"commit\":\"$(git rev-parse --short HEAD)\",\"buildDate\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" > /tmp/build-info.json
+RUN echo "{\"commit\":\"$(git rev-parse --short HEAD)\",\"buildDate\":\"$(git log -1 --format=%cI HEAD)\"}" > /tmp/build-info.json
 COPY package.json package-lock.json* ./
 RUN npm install
 COPY tsconfig.json ./
