@@ -3,6 +3,7 @@
 import type { Logger } from "pino";
 import type { MqttService } from "../mqtt/mqtt-service.js";
 import type { ConnectorManager } from "../connectors/connector-manager.js";
+import type { ActionResult } from "../core/types.js";
 import { eventBus, AUTOMATION_FIRED } from "../core/event-bus.js";
 
 /** Descriptor for a single automation action to be dispatched. */
@@ -51,8 +52,15 @@ export class ActionExecutor {
     this.handlers.delete(type);
   }
 
-  /** Execute a single action descriptor. Never throws — logs errors and continues. */
-  async execute(action: ActionDescriptor, ruleId: string): Promise<void> {
+  /**
+   * Execute a single action descriptor.
+   *
+   * Returns an ActionResult — never throws. All error paths are captured and
+   * returned as ActionResult { success: false, error: ... }.
+   *
+   * Requirements: 2.1, 2.4, 2.5
+   */
+  async execute(action: ActionDescriptor, ruleId: string): Promise<ActionResult> {
     try {
       const handler = this.handlers.get(action.type);
       if (!handler) {
@@ -60,7 +68,7 @@ export class ActionExecutor {
           { ruleId, actionType: action.type },
           `No handler for action type: ${action.type}`,
         );
-        return;
+        return { success: false, error: `No handler for action type: '${action.type}'` };
       }
 
       await handler(action, ruleId, this.deps);
@@ -71,11 +79,15 @@ export class ActionExecutor {
         target: action.target,
         timestamp: Date.now(),
       });
+
+      return { success: true };
     } catch (err) {
+      const message = (err as Error).message;
       this.deps.logger.error(
-        { ruleId, actionType: action.type, target: action.target, error: (err as Error).message },
+        { ruleId, actionType: action.type, target: action.target, error: message },
         `Action execution failed for rule ${ruleId}`,
       );
+      return { success: false, error: message };
     }
   }
 

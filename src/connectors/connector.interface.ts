@@ -234,6 +234,25 @@ export interface SetupStepResult {
 }
 
 /**
+ * Machine-readable record declaring one action type a device supports.
+ * Connectors return arrays of these from getActionCatalog().
+ * The GET /api/devices/:id/actions endpoint returns them to the frontend.
+ */
+export interface CapabilityDescriptor {
+  /** Action type string passed to devices.action() / POST /api/devices/:id/action. */
+  type: string;
+  /** Human-readable label for the action button (e.g. "Toggle", "Set Brightness"). */
+  label: string;
+  /** One-line description of what the action does. */
+  description: string;
+  /**
+   * JSON Schema object describing accepted parameters.
+   * Empty object {} when the action takes no parameters.
+   */
+  params: Record<string, unknown>;
+}
+
+/**
  * The core Connector interface that all connector implementations must satisfy.
  *
  * Instances are created by the module's `createConnector(config)` factory
@@ -350,6 +369,17 @@ export interface Connector {
     stepId: string,
     params: Record<string, unknown>,
   ): Promise<SetupStepResult>;
+
+  /**
+   * Return the action catalog for a specific device managed by this connector.
+   * When provided, ConnectorManager uses these descriptors directly for the
+   * GET /api/devices/:id/actions endpoint and pre-flight validation.
+   * When absent, ConnectorManager falls back to CAPABILITY_ACTION_MAP.
+   *
+   * @param deviceId - The device to return descriptors for.
+   * @returns Array of CapabilityDescriptor, or undefined to use the fallback map.
+   */
+  getActionCatalog?(deviceId: string): CapabilityDescriptor[] | undefined;
 }
 
 /**
@@ -447,6 +477,17 @@ export interface ConnectorModule {
    * them when the connector is disabled. Keys are condition type strings.
    */
   conditions?: Record<string, ConditionFactory>;
+
+  /**
+   * Optional module-level action catalog factory.
+   *
+   * Called by ConnectorManager when the connector instance does not implement
+   * getActionCatalog() at the instance level. Receives the device to describe.
+   * Returns undefined to fall back to CAPABILITY_ACTION_MAP.
+   *
+   * Requirements: 4.2
+   */
+  getActionCatalog?: (device: Device) => CapabilityDescriptor[] | undefined;
 }
 
 /**

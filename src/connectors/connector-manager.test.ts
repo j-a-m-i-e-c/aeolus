@@ -275,45 +275,56 @@ describe("ConnectorManager", () => {
   });
 
   describe("executeAction", () => {
-    it("routes action to correct connector", async () => {
+    it("routes action to correct connector and returns success", async () => {
       mockDeviceRegistry.getById.mockReturnValue({
         id: "device-1",
         integration: "mock",
         state: { on: true },
+        capabilities: [],
       });
 
       await manager.enable("mock", {});
-      await manager.executeAction("device-1", { type: "toggle", params: {} });
+      const result = await manager.executeAction("device-1", { type: "toggle", deviceId: "device-1", params: {} });
 
-      expect(mockConnector.execute).toHaveBeenCalledWith({ type: "toggle", params: {} });
+      expect(result.success).toBe(true);
+      expect(mockConnector.execute).toHaveBeenCalledWith({ type: "toggle", deviceId: "device-1", params: {} });
     });
 
-    it("throws when device not found", async () => {
+    it("returns ActionResult { success: false } when device not found", async () => {
       mockDeviceRegistry.getById.mockReturnValue(null);
-      await expect(manager.executeAction("unknown", { type: "toggle", params: {} })).rejects.toThrow("not found");
+      const result = await manager.executeAction("unknown", { type: "toggle", deviceId: "unknown", params: {} });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("not found");
     });
 
-    it("skips MQTT devices", async () => {
+    it("skips MQTT devices and returns success", async () => {
       mockDeviceRegistry.getById.mockReturnValue({
         id: "mqtt-device",
         integration: "mqtt",
         state: {},
+        capabilities: [],
       });
 
       await manager.enable("mock", {});
-      await manager.executeAction("mqtt-device", { type: "toggle", params: {} });
+      const result = await manager.executeAction("mqtt-device", { type: "command", deviceId: "mqtt-device", params: { payload: "ON" } });
+      // No MQTT service set, so returns error about broker not connected
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("MQTT broker not connected");
       expect(mockConnector.execute).not.toHaveBeenCalled();
     });
 
-    it("throws when no connector matches device integration", async () => {
+    it("returns ActionResult { success: false } when no connector matches device integration", async () => {
       mockDeviceRegistry.getById.mockReturnValue({
         id: "device-1",
         integration: "other-connector",
         state: {},
+        capabilities: [],
       });
 
       await manager.enable("mock", {});
-      await expect(manager.executeAction("device-1", { type: "toggle", params: {} })).rejects.toThrow("No enabled connector");
+      const result = await manager.executeAction("device-1", { type: "toggle", deviceId: "device-1", params: {} });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("No enabled connector");
     });
   });
 

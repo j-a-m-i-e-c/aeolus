@@ -61,6 +61,28 @@ export interface ActionRequest {
   params?: Record<string, unknown>;
 }
 
+/** Result returned by ConnectorManager.executeAction() and devices.action(). */
+export interface ActionResult {
+  /** Whether the action completed without error. Always a boolean, never undefined. */
+  success: boolean;
+  /** Connector-supplied data payload (e.g. energy readings). Present on success when the connector returns data. */
+  data?: Record<string, unknown>;
+  /** Human-readable error message. Present when success is false. */
+  error?: string;
+}
+
+/** Result returned by devices.actionAll(). */
+export interface BulkActionResult {
+  /** Total number of devices the filter matched. */
+  total: number;
+  /** Number of individual actions that returned success: true. */
+  succeeded: number;
+  /** Number of individual actions that returned success: false. */
+  failed: number;
+  /** Per-device results. succeeded + failed === total always holds. */
+  results: Array<{ deviceId: string } & ActionResult>;
+}
+
 /** Response shape for GET /api/health */
 export interface HealthStatus {
   mqtt: "connected" | "disconnected";

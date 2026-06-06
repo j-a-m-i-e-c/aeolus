@@ -89,7 +89,8 @@ describe("device.routes", () => {
     };
 
     mockConnectorManager = {
-      executeAction: vi.fn().mockResolvedValue(undefined),
+      executeAction: vi.fn().mockResolvedValue({ success: true }),
+      getActionCatalog: vi.fn().mockReturnValue([]),
     };
 
     mockStateHistory = {
@@ -287,11 +288,19 @@ describe("device.routes", () => {
 
   describe("POST /api/devices/:id/action", () => {
     it("should return 404 when device not found", async () => {
+      // executeAction now handles not-found and returns ActionResult { success: false }
+      mockConnectorManager.executeAction.mockResolvedValue({
+        success: false,
+        error: "Device 'nonexistent' not found",
+      });
+
       const res = await request(app, "POST", "/api/devices/nonexistent/action", {
         type: "toggle",
       });
-      expect(res.status).toBe(404);
-      expect((res.body as any).error).toContain("Device not found");
+      // HTTP 200 with ActionResult — callers inspect success field
+      expect(res.status).toBe(200);
+      expect((res.body as any).success).toBe(false);
+      expect((res.body as any).error).toContain("not found");
     });
 
     it("should return 400 when action type is missing", async () => {
@@ -303,16 +312,17 @@ describe("device.routes", () => {
       expect((res.body as any).error).toContain("Action type is required");
     });
 
-    it("should execute action and return success", async () => {
+    it("should execute action and return ActionResult", async () => {
       const device = makeDevice("dev-1");
       mockRegistry.getById.mockReturnValue(device);
+      mockConnectorManager.executeAction.mockResolvedValue({ success: true });
 
       const res = await request(app, "POST", "/api/devices/dev-1/action", {
         type: "toggle",
         params: { on: false },
       });
       expect(res.status).toBe(200);
-      expect(res.body).toEqual({ success: true, deviceId: "dev-1" });
+      expect((res.body as any).success).toBe(true);
       expect(mockConnectorManager.executeAction).toHaveBeenCalledWith("dev-1", {
         type: "toggle",
         deviceId: "dev-1",
@@ -323,6 +333,7 @@ describe("device.routes", () => {
     it("should pass empty params when not provided in body", async () => {
       const device = makeDevice("dev-1");
       mockRegistry.getById.mockReturnValue(device);
+      mockConnectorManager.executeAction.mockResolvedValue({ success: true });
 
       const res = await request(app, "POST", "/api/devices/dev-1/action", {
         type: "setBrightness",
@@ -335,15 +346,20 @@ describe("device.routes", () => {
       });
     });
 
-    it("should return 500 when action execution fails", async () => {
+    it("should return HTTP 200 with success: false when action fails (not HTTP 500)", async () => {
       const device = makeDevice("dev-1");
       mockRegistry.getById.mockReturnValue(device);
-      mockConnectorManager.executeAction.mockRejectedValue(new Error("Connector offline"));
+      mockConnectorManager.executeAction.mockResolvedValue({
+        success: false,
+        error: "Connector offline",
+      });
 
       const res = await request(app, "POST", "/api/devices/dev-1/action", {
         type: "toggle",
       });
-      expect(res.status).toBe(500);
+      // Per design: domain failures return HTTP 200 with ActionResult, not HTTP 500
+      expect(res.status).toBe(200);
+      expect((res.body as any).success).toBe(false);
       expect((res.body as any).error).toContain("Connector offline");
     });
   });

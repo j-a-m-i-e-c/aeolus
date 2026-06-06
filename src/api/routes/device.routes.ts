@@ -31,6 +31,20 @@ export function createDeviceRoutes(
     res.json(device);
   });
 
+  /** GET /api/devices/:id/actions — return the action catalog for a device */
+  router.get("/:id/actions", (req, res) => {
+    const id = req.params.id as string;
+    const device = registry.getById(id);
+    if (!device) {
+      res.status(404).json({ error: `Device not found: ${id}` });
+      return;
+    }
+
+    // Delegate catalog resolution to ConnectorManager
+    const catalog = connectorManager.getActionCatalog(id);
+    res.json(catalog);
+  });
+
   /** GET /api/devices/:id/history — get state history for a device */
   router.get("/:id/history", (req, res, next) => {
     if (!stateHistory) {
@@ -86,19 +100,21 @@ export function createDeviceRoutes(
   router.post("/:id/action", requireTabPermission("interact"), validateAction, async (req, res, next) => {
     try {
       const id = req.params.id as string;
-      const device = registry.getById(id);
-      if (!device) {
-        return next(new NotFoundError(`Device not found: ${id}`));
-      }
 
-      await connectorManager.executeAction(id, {
+      const result = await connectorManager.executeAction(id, {
         type: req.body.type,
         deviceId: id,
         params: req.body.params || {},
       });
 
-      logger.info({ deviceId: id, action: req.body.type }, "Action executed");
-      res.json({ success: true, deviceId: id });
+      if (result.success) {
+        logger.info({ deviceId: id, action: req.body.type }, "Action executed");
+      } else {
+        logger.warn({ deviceId: id, action: req.body.type, error: result.error }, "Action failed");
+      }
+
+      // Always HTTP 200 — callers must inspect ActionResult.success
+      res.json(result);
     } catch (err) {
       next(err);
     }

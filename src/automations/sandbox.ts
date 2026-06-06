@@ -5,7 +5,7 @@ import type { AutomationStateStore } from "./automation-state-store.js";
 import type { DeviceRegistry } from "../core/device-registry.js";
 import type { ServiceManager } from "../services/service-manager.js";
 import type { DataStore } from "../data-store/data-store.js";
-import type { Device } from "../core/types.js";
+import type { Device, ActionResult, BulkActionResult } from "../core/types.js";
 import logger from "../logger.js";
 
 // isolated-vm is a native addon that requires C++ compilation.
@@ -56,6 +56,7 @@ const BOOTSTRAP_SCRIPT = `
   var data = __devicesData;
   var map = __devicesMap;
   var actionRef = __actionRef;
+  var actionAllRef = __actionAllRef;
   var mqttRef = __mqttPublishRef;
   var logInfoRef = __logInfoRef;
   var logWarnRef = __logWarnRef;
@@ -82,6 +83,9 @@ const BOOTSTRAP_SCRIPT = `
     filter: function(predicate) { return data.filter(predicate); },
     action: function(deviceId, actionType, params) {
       return actionRef.apply(undefined, [deviceId, actionType, params], { result: { promise: true } });
+    },
+    actionAll: function(filter, actionType, params) {
+      return actionAllRef.apply(undefined, [filter, actionType, params], { result: { promise: true } });
     }
   };
 
@@ -175,6 +179,7 @@ const BOOTSTRAP_SCRIPT = `
   delete globalThis.__devicesData;
   delete globalThis.__devicesMap;
   delete globalThis.__actionRef;
+  delete globalThis.__actionAllRef;
   delete globalThis.__mqttPublishRef;
   delete globalThis.__logInfoRef;
   delete globalThis.__logWarnRef;
@@ -306,19 +311,81 @@ export class Sandbox {
     }
     await jail.set("__devicesMap", new ivm.ExternalCopy(devicesMap).copyInto());
 
-    // Host-side callback for devices.action()
+    // Host-side callback for devices.action() — returns ActionResult
+    // Requirements: 1.5, 1.6, 9.1
     const actionExecutor = this.actionExecutor;
     await jail.set(
       "__actionRef",
-      new ivm.Reference(function (
+      new ivm.Reference(async function (
         deviceId: string,
         actionType: string,
         params?: Record<string, unknown>,
-      ) {
-        return actionExecutor.execute(
-          { type: "device_action", target: deviceId, params: { actionType, ...(params ?? {}) } },
-          ruleId,
+      ): Promise<ActionResult> {
+        try {
+          const result = await actionExecutor.execute(
+            { type: "device_action", target: deviceId, params: { actionType, ...(params ?? {}) } },
+            ruleId,
+          );
+          return result;
+        } catch {
+          // Should never reach here since execute() never throws, but guard anyway
+          return { success: false, error: "Unexpected error in devices.action()" };
+        }
+      }),
+    );
+
+    // Host-side callback for devices.actionAll() — returns BulkActionResult
+    // Requirements: 7.1–7.7, 9.2
+    const deviceRegistry = this.deviceRegistry;
+    await jail.set(
+      "__actionAllRef",
+      new ivm.Reference(async function (
+        filter: (device: Device) => boolean,
+        actionType: string,
+        params?: Record<string, unknown>,
+      ): Promise<BulkActionResult> {
+        // Catch predicate throws
+        let matched: Device[];
+        try {
+          const all = deviceRegistry.getAll();
+          matched = all.filter(filter);
+        } catch (err) {
+          return {
+            total: 0,
+            succeeded: 0,
+            failed: 0,
+            results: [{ deviceId: "", success: false, error: (err as Error).message }],
+          };
+        }
+
+        if (matched.length === 0) {
+          return { total: 0, succeeded: 0, failed: 0, results: [] };
+        }
+
+        const settled = await Promise.allSettled(
+          matched.map((device) =>
+            actionExecutor.execute(
+              { type: "device_action", target: device.id, params: { actionType, ...(params ?? {}) } },
+              ruleId,
+            ).then((result): { deviceId: string } & ActionResult => ({ deviceId: device.id, ...result }))
+             .catch((err): { deviceId: string } & ActionResult => ({
+               deviceId: device.id,
+               success: false,
+               error: (err as Error).message,
+             })),
+          ),
         );
+
+        const results = settled.map((s) =>
+          s.status === "fulfilled"
+            ? s.value
+            : { deviceId: "", success: false as const, error: String(s.reason) },
+        );
+
+        const succeeded = results.filter((r) => r.success).length;
+        const failed = results.length - succeeded;
+
+        return { total: results.length, succeeded, failed, results };
       }),
     );
   }
