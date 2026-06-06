@@ -76,6 +76,13 @@ interface CustomComponentProps {
    */
   stateSet: (key: string, value: unknown) => void;
   /**
+   * Persist value to state store AND immediately fire the Logic tab with
+   * topic "ui/{ruleId}/state-set" and state { key, value }.
+   * @param key - The state key to persist.
+   * @param value - A JSON-serializable value.
+   */
+  stateSetAndFire: (key: string, value: unknown) => void;
+  /**
    * Fire the Logic tab script with a named UI event.
    *
    * Use this when the UI needs to delegate a decision to the Logic tab

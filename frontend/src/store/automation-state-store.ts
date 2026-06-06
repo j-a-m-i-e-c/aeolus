@@ -1,6 +1,7 @@
 // frontend/src/store/automation-state-store.ts — Zustand store for per-rule automation state
 
 import { create } from "zustand";
+import { authFetch } from "../lib/auth-fetch";
 
 const API_URL =
   import.meta.env.VITE_API_URL ||
@@ -45,5 +46,28 @@ export function sendStateUpdate(ruleId: string, key: string, value: unknown): vo
     body: JSON.stringify({ key, value }),
   }).catch(() => {
     // Silently degrade — WebSocket will sync state
+  });
+}
+
+/**
+ * Persist a state value AND immediately fire the Logic tab with
+ * topic "ui/{ruleId}/state-set" and state { key, value }.
+ */
+export function sendStateUpdateAndFire(ruleId: string, key: string, value: unknown): void {
+  // 1. Persist to state store
+  sendStateUpdate(ruleId, key, value);
+
+  // 2. Fire the Logic tab with context override
+  authFetch(`${API_URL}/api/automations/${ruleId}/fire`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      context: {
+        topic: `ui/${ruleId}/state-set`,
+        state: { key, value },
+      },
+    }),
+  }).catch(() => {
+    // Silently degrade
   });
 }

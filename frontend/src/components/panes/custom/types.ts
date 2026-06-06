@@ -34,4 +34,9 @@ export interface CustomComponentProps {
   state: Map<string, unknown>;
   /** Write a key-value pair back to the Automation State Store (persisted + broadcast). */
   stateSet: (key: string, value: unknown) => void;
+  /**
+   * Persist the value to the state store AND immediately fire the Logic tab
+   * with topic `ui/{ruleId}/state-set` and state `{ key, value }`.
+   */
+  stateSetAndFire: (key: string, value: unknown) => void;
 }

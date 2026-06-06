@@ -560,22 +560,39 @@ export function createAutomationRoutes(
         throw new NotFoundError(`Automation rule ${id} not found or not enabled`);
       }
 
-      // Build context — if eventName is provided (from UI emit), use ui/{ruleId}/{eventName} topic
+      // Build context — supports three modes:
+      // 1. body.context = { topic, state } — full context override (used by stateSetAndFire)
+      // 2. body.eventName — UI emit helper (topic = ui/{ruleId}/{eventName})
+      // 3. Default — synthetic manual-fire context
       const body = req.body ?? {};
-      const eventName = typeof body.eventName === "string" ? body.eventName : undefined;
-      const { eventName: _discarded, ...statePayload } = body;
 
-      const context: EventContext = {
-        topic: eventName ? `ui/${id}/${eventName}` : rule.topic,
-        deviceId: eventName ? `ui-${id}` : "manual-fire",
-        state: statePayload,
-        timestamp: Date.now(),
-      };
+      let context: EventContext;
+
+      if (body.context && typeof body.context === "object" && typeof body.context.topic === "string") {
+        // Mode 1: Full context override
+        context = {
+          topic: body.context.topic,
+          deviceId: `ui-${id}`,
+          state: body.context.state ?? {},
+          timestamp: Date.now(),
+        };
+      } else {
+        // Mode 2/3: eventName-based or default
+        const eventName = typeof body.eventName === "string" ? body.eventName : undefined;
+        const { eventName: _discarded, ...statePayload } = body;
+
+        context = {
+          topic: eventName ? `ui/${id}/${eventName}` : rule.topic,
+          deviceId: eventName ? `ui-${id}` : "manual-fire",
+          state: statePayload,
+          timestamp: Date.now(),
+        };
+      }
 
       // Fire through the engine (routes script rules through sandbox)
       await engine.fire(id, context);
 
-      logger.info({ ruleId: id, ruleName: rule.name, eventName }, "Automation rule manually fired");
+      logger.info({ ruleId: id, ruleName: rule.name }, "Automation rule manually fired");
       res.json({ success: true, ruleId: id });
     } catch (err) {
       next(err);

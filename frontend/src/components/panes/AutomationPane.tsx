@@ -26,7 +26,7 @@ import { useDynamicComponent } from "../../hooks/useDynamicComponent";
 import type { ExecutionEntry } from "./custom/types";
 import { useDashboardStore } from "../../store/dashboard-store";
 import { useDeviceStore } from "../../store/device-store";
-import { useAutomationStateStore, sendStateUpdate } from "../../store/automation-state-store";
+import { useAutomationStateStore, sendStateUpdate, sendStateUpdateAndFire } from "../../store/automation-state-store";
 import type { PaneConfig } from "../../types/dashboard";
 
 const API_URL =
@@ -457,6 +457,12 @@ export function AutomationPane({ config, paneId }: Props) {
     [ruleId],
   );
 
+  // stateSetAndFire helper — persist state AND fire the Logic tab
+  const stateSetAndFire = useCallback(
+    (key: string, value: unknown) => sendStateUpdateAndFire(ruleId, key, value),
+    [ruleId],
+  );
+
   // emit helper — fires the Logic tab script with a synthetic event
   const emit = useCallback(
     (eventName: string, payload?: Record<string, unknown>) => {
@@ -588,6 +594,7 @@ export function AutomationPane({ config, paneId }: Props) {
             executionHistory={executionHistory}
             stateMap={stateMap}
             stateSet={stateSet}
+            stateSetAndFire={stateSetAndFire}
             emit={emit}
           />
         </div>
@@ -856,6 +863,12 @@ export function AutomationPane({ config, paneId }: Props) {
                   <div className="text-[#9AA6B2] pl-2">Write state back to the automation</div>
                 </div>
 
+                {/* props.stateSetAndFire */}
+                <div>
+                  <div className="text-primary font-semibold mb-1">props.stateSetAndFire(key, value)</div>
+                  <div className="text-[#9AA6B2] pl-2">Persist state + fire the Logic tab</div>
+                </div>
+
                 {/* props.deviceAction */}
                 <div>
                   <div className="text-primary font-semibold mb-1">props.deviceAction(id, type, params?)</div>
@@ -973,6 +986,7 @@ interface DynamicCustomSectionProps {
   executionHistory: ExecutionEntry[];
   stateMap: Map<string, unknown>;
   stateSet: (key: string, value: unknown) => void;
+  stateSetAndFire: (key: string, value: unknown) => void;
   emit: (eventName: string, payload?: Record<string, unknown>) => void;
 }
 
@@ -987,6 +1001,7 @@ function DynamicCustomSection({
   executionHistory,
   stateMap,
   stateSet,
+  stateSetAndFire,
   emit,
 }: DynamicCustomSectionProps) {
   const { Component, loading: dynamicLoading, error: dynamicError } = useDynamicComponent(ruleId, hasUiSource);
@@ -1023,6 +1038,7 @@ function DynamicCustomSection({
           executionHistory={executionHistory}
           state={stateMap}
           stateSet={stateSet}
+          stateSetAndFire={stateSetAndFire}
           emit={emit}
         />
       </CustomComponentBoundary>
