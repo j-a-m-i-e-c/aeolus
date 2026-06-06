@@ -3,6 +3,7 @@
 import { Router } from "express";
 import os from "node:os";
 import fs from "node:fs";
+import path from "node:path";
 import { execSync } from "node:child_process";
 import { getRecentLogs } from "../../log-buffer.js";
 
@@ -109,11 +110,20 @@ export function createSystemRoutes(): Router {
     let commit = "unknown";
     let buildDate = "unknown";
     try {
-      const infoPath = new URL("../build-info.json", import.meta.url);
-      const raw = fs.readFileSync(infoPath, "utf-8");
-      const info = JSON.parse(raw) as { commit?: string; buildDate?: string };
-      if (info.commit) commit = info.commit;
-      if (info.buildDate) buildDate = info.buildDate;
+      // In Docker: /app/dist/build-info.json. Locally: try relative to cwd.
+      const candidates = [
+        path.join(process.cwd(), "dist", "build-info.json"),
+        path.join(process.cwd(), "build-info.json"),
+      ];
+      for (const candidate of candidates) {
+        try {
+          const raw = fs.readFileSync(candidate, "utf-8");
+          const info = JSON.parse(raw) as { commit?: string; buildDate?: string };
+          if (info.commit) commit = info.commit;
+          if (info.buildDate) buildDate = info.buildDate;
+          break;
+        } catch { continue; }
+      }
     } catch {
       // Fall back to env vars (for local dev without Docker)
       commit = process.env.BUILD_COMMIT || "unknown";
