@@ -105,8 +105,20 @@ export function createSystemRoutes(): Router {
 
   /** GET /api/system/version — build-time version info + update check */
   router.get("/version", async (_req, res) => {
-    const commit = process.env.BUILD_COMMIT || "unknown";
-    const buildDate = process.env.BUILD_DATE || "unknown";
+    // Read build info from file baked at Docker build time
+    let commit = "unknown";
+    let buildDate = "unknown";
+    try {
+      const infoPath = new URL("../build-info.json", import.meta.url);
+      const raw = fs.readFileSync(infoPath, "utf-8");
+      const info = JSON.parse(raw) as { commit?: string; buildDate?: string };
+      if (info.commit) commit = info.commit;
+      if (info.buildDate) buildDate = info.buildDate;
+    } catch {
+      // Fall back to env vars (for local dev without Docker)
+      commit = process.env.BUILD_COMMIT || "unknown";
+      buildDate = process.env.BUILD_DATE || "unknown";
+    }
 
     // Check GitHub for latest commit on main
     let updateAvailable = false;
@@ -127,9 +139,8 @@ export function createSystemRoutes(): Router {
             updateAvailable = true;
             commitsBehind = currentIndex;
           } else if (currentIndex === -1 && latestCommit && latestCommit !== commit) {
-            // Current commit not found in recent 20 — likely far behind
             updateAvailable = true;
-            commitsBehind = -1; // unknown how far behind
+            commitsBehind = -1;
           }
         }
       } catch {
