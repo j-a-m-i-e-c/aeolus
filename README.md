@@ -34,7 +34,13 @@
 
 ## What is Aeolus?
 
-Aeolus is a local-first IoT platform that bridges custom microcontrollers, commercial smart devices , and external APIs into one unified system. Write automation scripts in a code editor with full IntelliSense and autocomplete, build custom React dashboard components, and control everything from a single interface — all running on a Raspberry Pi with one command.
+Aeolus is a local-first IoT platform that bridges custom microcontrollers, commercial smart devices, and external APIs into one unified system — all running on a Raspberry Pi with one command.
+
+Any MQTT device appears in the dashboard automatically when it publishes a message. Commercial ecosystems like Philips Hue and TP-Link Kasa plug in through a connector framework that handles discovery, pairing, and control without touching core code. Everything feeds the same internal event bus, so an ESP32 sensor, a Hue bulb, and a weather API all look the same to your automation logic.
+
+Automations are paired backend scripts and frontend components that talk through a reactive state bus. The backend runs in a secure V8 sandbox with access to devices, MQTT, HTTP, and a built-in time-series data store. The frontend is a live React component that renders the moment you save — no rebuild, no deploy. The Monaco editor gives you full IntelliSense across both.
+
+The dashboard is fully modular — create custom tabs, drag in panes, assign permissions per user group. Persistent storage runs on SQLite with configurable retention. Prometheus metrics are built in. The whole stack is three Docker containers and zero cloud dependencies.
 
 No cloud. No subscriptions. Just your LAN.
 
@@ -79,40 +85,30 @@ Installs Docker, clones Aeolus, builds containers, and starts everything. Auto-s
 | 🧩 | **Connector framework** | Add new device integrations without touching core code — [developer guide included](src/connectors/README.md) |
 | 💡 | **Philips Hue (Connector)** | Toggle, brightness, colour picker with guided bridge pairing wizard |
 | 🔌 | **TP-Link Kasa (Connector)** | Smart plugs with auto-discovery and energy monitoring |
+| 🎯 | **Structured action results** | Every device action returns `ActionResult { success, data?, error? }` — pre-flight validation, MQTT command publishing, and bulk execution via `devices.actionAll()` |
+| 📡 | **MQTT command support** | Publish commands to MQTT device command topics directly from automations — topic auto-derived from device state |
 | 🔗 | **Automation state store** | Per-rule key-value store for backend↔frontend communication via WebSocket |
 | 📡 | **Internal event bus** | Typed pub/sub bus decouples MQTT ingestion, device state changes, automation triggers, and WebSocket pushes |
-| ⏱️ | **Services framework** | Cron schedules, API triggers, and system events as automation triggers |
 | 🍓 | **Raspberry Pi ready** | One-line install, auto-start on boot, runs on a Pi 4/5 |
 | 💾 | **Data Store** | Persistent time-series collections and key-value buckets — accumulate sensor data, query with aggregation, share state across automations |
 | 📊 | **State history & charts** | Per-device state history with SVG trend charts, time range filtering, and data cleanup |
 | 🔒 | **100% local** | Everything stays on your network — no cloud dependency |
 | 🔐 | **Authentication & RBAC** | JWT-based auth with admin setup, user groups, per-tab read/interact/write permissions, rate-limited login |
+| 🛡️ | **Security hardened** | Read-only system router, no Docker socket mount, no dangerous CLI tools in production image, version auto-detected at build time |
 | 🛡️ | **MQTT Security** | Three configurable levels — Open, Shared Password, or Per-Device credentials — managed from the dashboard |
 | 📈 | **Prometheus Metrics** | `/metrics` endpoint with MQTT throughput, device counts, automation execution, HTTP stats, and system resources |
 | 📉 | **Metrics History** | Two-tier system — 30s live sparklines (10min retention) + 5min aggregates (permanent) with trend charts |
-| ✅ | **92% test coverage** | 1200+ tests with 90% coverage enforced in CI — unit, integration, and property-based tests |
 
 ---
 
 ## Dashboard
 
-The dashboard has three pinned sidebar tabs — **System** (device grid, health, diagnostics, user management), **Connectors** (manage integrations), and **Data** (time-series explorer, key-value buckets, and metrics history charts) — plus as many custom tabs as you want. Admins can create tabs and assign them to user groups with read/interact/write permissions.
+The dashboard has four pinned sidebar tabs — **System** (device grid, health, diagnostics, version display with update-available badge, user management), **Connectors** (manage integrations), **Data** (time-series explorer, key-value buckets, and metrics history charts), and **Security** (MQTT security levels, per-device credentials) — plus as many custom tabs as you want. Admins can create tabs and assign them to user groups with read/interact/write permissions.
 
 Custom tabs are where the real work happens. Each tab has two buttons in the header:
 
 - **New Automation** — the primary action. Drops a fresh automation pane straight into setup mode with a Monaco editor, no extra clicks. Automations are the core of Aeolus so they get their own entry point.
-- **Add Pane** — everything else. Opens a picker with device grids, MQTT inspectors, sensor panels, system stats, and more.
-
-### Available panes
-
-| Category | Panes |
-|----------|-------|
-| Controls | Device Grid · Hue Lights · Kasa Devices · Trigger Button |
-| Automations | Automation (one-pane-one-rule) · Automation List |
-| Monitoring | Sensor Panel · MQTT Inspector · Topic Tree · Event Log · State History · Metrics |
-| System | System Stats · Connectors · User Management |
-
-Every pane is draggable and resizable. Layout persists to SQLite automatically.
+- **Browse Panes** — everything else. Opens a picker with device grids, MQTT inspectors, sensor panels, system stats, and more.
 
 <!-- TODO: Add screenshot of a custom tab with automation panes here -->
 <!-- ![Custom Tab](docs/screenshots/custom-tab.png) -->
@@ -129,6 +125,8 @@ Every pane is draggable and resizable. Layout persists to SQLite automatically.
 
 Each automation has two tabs: **Logic** (code that runs on the backend in a secure V8 sandbox) and **UI** (React/TSX that renders in the dashboard). They communicate through a shared per-rule state store.
 
+Both sides are user-authored code running in sandboxes — the Logic tab in isolated-vm on the backend, the UI tab as a dynamically-loaded React module on the frontend. The platform provides the communication channel and the runtime, but you write both halves. It's a full-stack framework where the "backend" is a 50-line script and the "frontend" is a 30-line component, and they talk to each other through a reactive state bus with zero boilerplate.
+
 ### How data flows between Logic and UI
 
 ```
@@ -137,15 +135,17 @@ Each automation has two tabs: **Logic** (code that runs on the backend in a secu
 │                         │         │                         │
 │  state.set("mode", "…") ├────────►│  props.state.get("mode")│
 │                         │   WS    │                         │
-│  state.get("target")    │◄────────┤  props.stateSet("…", 25)│
-│                         │   WS    │                         │
+│  // reads on next run   │◄────────┤  props.stateSet("…", 25)│
+│  state.get("target")    │  SQLite │                         │
+│                         │         │                         │
+│  // fires immediately   │◄────────┤  props.emit("changed",  │
+│  context.state.value    │  HTTP   │    { value: 25 })       │
 └─────────────────────────┘         └─────────────────────────┘
-              │                                   │
-              └──────────── SQLite ───────────────┘
-                    (persisted + synced)
 ```
 
-Both sides read/write the same per-rule key-value store. Values persist to SQLite and sync over WebSocket in real time.
+- **Logic → UI** (real-time): `state.set()` persists to SQLite and pushes via WebSocket. The UI re-renders immediately.
+- **UI → Logic** (passive): `props.stateSet()` writes to SQLite. The Logic tab reads it on its next trigger.
+- **UI → Logic** (immediate): `props.emit(eventName, payload)` fires the Logic tab now with `context.topic = "ui/{ruleId}/{eventName}"` and `context.state = payload`.
 
 ### Logic Tab — `automation()` helper
 
@@ -209,7 +209,7 @@ state.set("fansActive", temp > 28);
 state.set("lastUpdate", Date.now());
 ```
 
-Free-form scripts have full access to the same globals (`devices`, `mqtt`, `http`, `state`, `log`, `services`, `context`) — you just don't get the visual flow diagram. Use whichever style fits: the structured helper for simple condition→action flows, free-form for complex logic with API calls, loops, and data aggregation.
+Free-form scripts have full access to the same globals (`devices`, `mqtt`, `http`, `state`, `log`, `context`) — you just don't get the visual flow diagram. Use whichever style fits: the structured helper for simple condition→action flows, free-form for complex logic with API calls, loops, and data aggregation.
 
 ### UI Tab — Custom React Components
 
@@ -228,12 +228,20 @@ export default function EveningMode(props: CustomComponentProps) {
       >
         Toggle Light
       </button>
+      <input
+        type="range" min={16} max={28} defaultValue={22}
+        onChange={e => {
+          const target = Number(e.target.value);
+          props.stateSet("target", target);
+          props.emit("target-changed", { value: target });
+        }}
+      />
     </div>
   );
 }
 ```
 
-`props.state.get("mode")` reads the value the Logic tab wrote. `props.deviceAction` and `props.mqttPublish` let the UI tab control devices directly. Write TSX, save, and your component renders live in the pane — no rebuild or refresh needed.
+`props.state.get("mode")` reads the value the Logic tab wrote. `props.deviceAction` lets the UI control devices directly. `props.emit("target-changed", { value })` fires the Logic tab immediately with the new value in `context.state` — use it when the UI needs to delegate a decision to the backend rather than issuing a direct command. Write TSX, save, and your component renders live in the pane — no rebuild or refresh needed.
 
 **How it works under the hood:** When you save, the backend transpiles your TSX into an ES module using the TypeScript compiler API with the React JSX transform. The compiled JavaScript is stored in the database and served via a dedicated API endpoint. The frontend fetches it, rewrites the React imports to reference the host app's shared React instance, loads it as a module via a blob URL and dynamic `import()`, and renders it inside an error boundary. The whole round-trip happens in milliseconds — no Docker rebuild, no Vite recompilation, no page refresh.
 
@@ -251,12 +259,11 @@ The Monaco editor provides full IntelliSense for all globals — autocomplete, p
 
 | Global | Description |
 |--------|-------------|
-| `devices` | Query, filter, and send actions to any device |
+| `devices` | Query, filter, and send actions to any device — `devices.action()` returns `ActionResult`, `devices.actionAll()` executes bulk actions |
 | `mqtt` | Publish messages to MQTT topics |
 | `log` | Structured logging (info, warn, error) |
 | `context` | Triggering event data (topic, deviceId, state, timestamp) |
 | `state` | Per-rule key-value store (persisted, synced to frontend via WebSocket) |
-| `services` | Read-only access to service state (cron, triggers, system events) |
 | `http` | GET/POST requests to external APIs (10s timeout, HTTPS recommended for non-local URLs) |
 | `automation()` | Structured helper with conditions + actions for flow diagram visualization |
 | `db` | Time-series write/query and key-value get/set/delete (available when Data Store is enabled) |
@@ -315,23 +322,15 @@ Connector devices automatically appear in the Device Grid pane. But for connecto
 
 ---
 
-## Services
-
-The services framework provides non-device event sources for automations:
-
-| Service | Description |
-|---------|-------------|
-| **Cron Scheduler** | Time-based triggers using cron expressions |
-| **API Trigger** | HTTP endpoint triggers for external integrations |
-| **System Events** | Startup, shutdown, and lifecycle events |
-
-Services emit events on the standard event bus using `service/{type}/{name}` topics, so automations match on service events the same way they match on device events.
-
----
-
 ## Security
 
 Aeolus ships with a complete authentication and authorization system — no external auth provider needed.
+
+### System Hardening
+- **Read-only system router** — no shutdown, reboot, update, or Docker prune endpoints; system control is via SSH/Docker externally
+- **No Docker socket mount** — the backend container has no access to the host Docker daemon
+- **Minimal production image** — no git, docker-cli, or build tools in the final image
+- **Version auto-detected at build time** — git commit hash baked into the image, no runtime git needed
 
 ### Authentication
 - **First-run setup** — guided admin account creation on first launch
@@ -426,47 +425,47 @@ const target = db.get("config", "heating-target"); // 22
 ## Architecture
 
 ```
-                        ┌─── Event Sources ───┐
-                        │                     │
-  [ MQTT Devices ]      │  [ Connectors ]     │  [ Services ]
-   ESP32 / Arduino      │   Hue / Kasa / ...  │   Cron · Triggers · System
-        ↕               │       ↕              │       ↕
-  [ Mosquitto :1883 ]   │  [ Connector Mgr ]  │  [ Service Mgr ]
-        │               │       │              │       │
-        └───────────────┴───────┴──────────────┴───────┘
-                                │
-                    ┌───────────▼───────────┐
-                    │   Internal Event Bus  │
-                    └───┬──────────────┬────┘
-                        │              │
-                        ▼              ▼
-              ┌─────────────┐  ┌───────────────┐
-              │   Device    │  │  Automation    │
-              │  Registry   │  │   Engine       │
-              │  (SQLite)   │  │  (V8 Sandbox)  │
-              └──────┬──────┘  └───────┬────────┘
-                     │                 │
-                     │          ┌──────▼──────┐
-                     │          │   Actions   │
-                     │          │ MQTT · HTTP  │
-                     │          │ Devices · Log│
-                     │          └─────────────┘
-                     │
-              ┌──────▼──────┐  ┌──────────────┐
-              │  WebSocket  │  │  Data Store   │
-              │   Server    │  │  (SQLite)     │
-              └──────┬──────┘  └──────┬────────┘
-                     │                 │
-                     │    ┌────────────┘
-                     │    │  db global in Sandbox
-                     │    │  + REST API
-              ┌──────▼────▼─┐      ┌──────────────┐
-              │  REST API   │◄────►│    React     │
-              │  (Express)  │      │  Dashboard   │
-              └─────────────┘      └──────────────┘
+                    ┌──── Event Sources ────┐
+                    │                       │
+  [ MQTT Devices ]  │    [ Connectors ]     │
+   ESP32 / Arduino  │     Hue / Kasa / ...  │
+        ↕           │         ↕             │
+  [ Mosquitto :1883 ]    [ Connector Mgr ]  │
+        │           │         │             │
+        └───────────┴─────────┴─────────────┘
+                          │
+              ┌───────────▼───────────┐
+              │   Internal Event Bus  │
+              └───┬──────────────┬────┘
+                  │              │
+                  ▼              ▼
+        ┌─────────────┐  ┌───────────────┐
+        │   Device    │  │  Automation    │
+        │  Registry   │  │   Engine       │
+        │  (SQLite)   │  │  (V8 Sandbox)  │
+        └──────┬──────┘  └───────┬────────┘
+               │                 │
+               │          ┌──────▼──────┐
+               │          │   Actions   │
+               │          │ MQTT · HTTP  │
+               │          │ Devices · Log│
+               │          └─────────────┘
+               │
+        ┌──────▼──────┐  ┌──────────────┐
+        │  WebSocket  │  │  Data Store   │
+        │   Server    │  │  (SQLite)     │
+        └──────┬──────┘  └──────┬────────┘
+               │                 │
+               │    ┌────────────┘
+               │    │  db global in Sandbox
+               │    │  + REST API
+        ┌──────▼────▼─┐      ┌──────────────┐
+        │  REST API   │◄────►│    React     │
+        │  (Express)  │      │  Dashboard   │
+        └─────────────┘      └──────────────┘
 ```
 
-Three event source layers feed the same internal bus: MQTT devices (bidirectional via Mosquitto), commercial devices (via the pluggable connector framework), and services (cron schedules, API triggers, system events). The automation engine evaluates rules against every event and dispatches actions back out. The device registry persists state to SQLite and pushes updates to the React dashboard over WebSocket.
+Two event source layers feed the internal bus: MQTT devices (bidirectional via Mosquitto) and commercial devices (via the pluggable connector framework). The automation engine evaluates rules against every event and dispatches actions back out. The device registry persists state to SQLite and pushes updates to the React dashboard over WebSocket.
 
 ### Tech Stack
 
@@ -536,19 +535,6 @@ Three event source layers feed the same internal bus: MQTT devices (bidirectiona
 | POST | `/api/connectors/:id/setup/:stepId` | Execute a setup wizard step |
 | POST | `/api/connectors/:id/retry` | Retry connector connection |
 
-#### Services
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/services/available` | List registered service types |
-| GET | `/api/services` | List enabled service instances |
-| POST | `/api/services` | Enable a service |
-| PATCH | `/api/services/:id` | Update service config |
-| DELETE | `/api/services/:id` | Disable a service |
-| GET | `/api/services/:id/status` | Service health status |
-| POST | `/api/services/:id/retry` | Retry a stopped service |
-| POST | `/api/services/trigger/:name` | Fire an API trigger event |
-| GET | `/api/services/topics` | List available service event topics |
-
 #### Data Store
 | Method | Path | Description |
 |--------|------|-------------|
@@ -576,10 +562,8 @@ Three event source layers feed the same internal bus: MQTT devices (bidirectiona
 | PUT | `/api/layout` | Save dashboard layout |
 | GET | `/api/system` | Host system diagnostics |
 | GET | `/api/system/logs` | Application log entries |
-| POST | `/api/system/update` | Trigger self-update + restart |
-| POST | `/api/system/shutdown` | Gracefully shut down the host Pi |
-| POST | `/api/system/reboot` | Gracefully reboot the host Pi |
-| POST | `/api/system/docker-prune` | Clean up unused Aeolus Docker resources |
+| GET | `/api/system/version` | Build version info + update availability |
+| GET | `/api/devices/:id/actions` | Action catalog for a device |
 | WS | `/ws` | Real-time state updates |
 
 </details>

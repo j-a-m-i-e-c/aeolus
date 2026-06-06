@@ -112,7 +112,7 @@ aeolus/
 │   │   │   ├── service.routes.ts     # Generic service REST API
 │   │   │   ├── data-store.routes.ts  # Data Store REST API (collections, records, buckets, config)
 │   │   │   ├── layout.routes.ts      # GET/PUT /api/layout (tab + pane persistence)
-│   │   │   └── system.routes.ts      # Host diagnostics, application logs, self-update
+│   │   │   └── system.routes.ts      # Host diagnostics, application logs, version check (read-only)
 │   │   ├── middleware/
 │   │   │   ├── cors-config.ts        # CORS configuration (local network + configurable origins)
 │   │   │   ├── error-handler.ts      # AppError hierarchy + global handler
@@ -150,7 +150,8 @@ aeolus/
 │   │   ├── dsl.ts                    # when/if/then builder
 │   │   └── rule-registry.ts          # In-memory rule store
 │   ├── connectors/                   # Pluggable connector framework
-│   │   ├── connector.interface.ts    # Core interfaces (Connector, ConnectorMetadata, etc.)
+│   │   ├── connector.interface.ts    # Core interfaces (Connector, ConnectorMetadata, CapabilityDescriptor, etc.)
+│   │   ├── capability-action-map.ts  # Fallback capability → action descriptor mapping + MQTT_COMMAND_DESCRIPTOR
 │   │   ├── connector-registry.ts     # Auto-discovery + manual registration of connector modules
 │   │   ├── connector-manager.ts      # Lifecycle management (enable/disable/poll/action routing)
 │   │   ├── connector-store.ts        # SQLite persistence for connector records
@@ -226,7 +227,7 @@ aeolus/
 │       │   ├── WelcomeScreen.tsx     # Onboarding screen for empty dashboard (no devices)
 │       │   ├── ConnectorsPage.tsx    # Connector management (enable/disable, config, generic setup wizard)
 │       │   ├── ServicesPage.tsx     # Service management dashboard (available but not routed as a pinned tab)
-│       │   ├── SystemPage.tsx        # Host diagnostics, application log viewer, version check, self-update
+│       │   ├── SystemPage.tsx        # Host diagnostics, application log viewer, version display (read-only)
 │       │   ├── StateHistoryChart.tsx  # SVG trend chart for device state history
 │       │   ├── CommandPalette.tsx    # Ctrl+K command palette
 │       │   ├── ToastContainer.tsx    # Animated toast notifications
@@ -281,9 +282,12 @@ aeolus/
 │   ├── setup-pi.sh                   # One-line Raspberry Pi install script
 │   └── deploy-pi.sh                  # Pull + rebuild deploy script
 ├── docker-compose.yml
-├── Dockerfile                        # Backend multi-stage build (includes git + docker-cli)
+├── Dockerfile                        # Backend multi-stage build (auto-detects git commit at build time)
 └── frontend/Dockerfile               # Frontend build + nginx
 ```
+
+**Generated at build time:**
+- `dist/build-info.json` — `{ commit, buildDate }` auto-generated in the Docker builder stage from git metadata. Read at runtime by the version endpoint.
 
 ## Core Components
 
@@ -420,7 +424,7 @@ Factory registry for condition predicates, keyed by condition type string. Repla
 
 ### Action Executor (`src/automations/action-executor.ts`)
 
-Central dispatch service for all automation actions. Every action — whether from a form rule, script rule, or file-based rule — flows through this single pipeline. Uses a **handler registry** pattern — a `Map<string, ActionHandler>` — instead of a switch statement, so adding a new action type means calling `registerHandler()` and nothing else.
+Central dispatch service for all automation actions. Every action — whether from a form rule, script rule, or file-based rule — flows through this single pipeline. Uses a **handler registry** pattern — a `Map<string, ActionHandler>` — instead of a switch statement, so adding a new action type means calling `registerHandler()` and nothing else. The `execute()` method returns an `ActionResult { success, data?, error? }` — it never throws.
 
 - `ActionDescriptor.type` is an open `string`, not a fixed union — any action type is accepted
 - `registerHandler(type, handler)` — register a handler for an action type (overwrites if already registered)
@@ -464,7 +468,9 @@ Secure execution environment for user-authored automation scripts using `isolate
 - Enforces a 5-second execution timeout to prevent infinite loops
 - Exposes a controlled API surface as globals: `devices`, `mqtt`, `log`, `context`, `services`, `http`, `automation`, `state`, `db`
 - `devices.get/list/filter` — synchronous, data copied into isolate via `ivm.ExternalCopy`
-- `devices.action()` and `mqtt.publish()` — host-side callbacks via `ivm.Reference` delegating to ActionExecutor
+- `devices.action()` — host-side callback via `ivm.Reference` delegating to ConnectorManager.executeAction(); returns `ActionResult { success, data?, error? }` (never throws)
+- `devices.actionAll(filter, actionType, params)` — bulk execution across all devices matching the filter via `Promise.allSettled`; returns `BulkActionResult { total, succeeded, failed, results[] }` (never throws)
+- `mqtt.publish()` — host-side callback via `ivm.Reference` delegating to MqttService
 - `log.info/warn/error` — host-side callbacks delegating to the application logger with ruleId context
 - `context` — frozen object with `topic`, `deviceId`, `state`, `timestamp` from the triggering event
 - `services.get(type)` — returns read-only snapshot of a service's state, or `undefined` if not running
@@ -606,7 +612,8 @@ Lifecycle management for enabled connector instances.
 - Config update: apply new config at runtime without full reconnect
 - Retry: re-attempt connection for disconnected connectors
 - Setup steps: `getSetupSteps(instanceId)` returns setup step descriptors for a connector; `executeSetupStep()` delegates multi-step setup flows (e.g. Hue button-press pairing)
-- Action routing: route device actions to the correct connector by `integration` field; emits an immediate `DEVICE_STATE_CHANGE` event with optimistic state after action succeeds (for toggle actions, flips the `on` state; for other actions, merges params) — no waiting for the 60-second polling cycle
+- Action routing: route device actions to the correct connector by `integration` field. Returns `ActionResult { success, data?, error? }` — never throws. Pre-flight validation checks the action type against the device's capability catalog and validates params against the descriptor's schema before dispatching. MQTT devices get commands published to their derived command topic. Emits an immediate `DEVICE_STATE_CHANGE` event with optimistic state after action succeeds (for toggle actions, flips the `on` state; for other actions, merges params) — no waiting for the 60-second polling cycle
+- Action catalog: `getActionCatalog(deviceId)` derives the available actions for a device by checking connector instance `getActionCatalog()`, module-level `getActionCatalog()`, or falling back to the `CAPABILITY_ACTION_MAP`. MQTT devices always include the `MQTT_COMMAND_DESCRIPTOR`
 - Restore: re-enable previously enabled connectors from SQLite on startup, including re-registering contributed handlers and conditions
 - Periodic device discovery via 60-second polling interval
 
@@ -689,6 +696,21 @@ New connectors should consider building a frontend pane when they have device-sp
 3. Use `useDeviceStore` for live state and `sendAction()` from `lib/api-client.ts` for device actions
 
 See `HueControlPane.tsx` and `KasaControlPane.tsx` for reference implementations, and `src/connectors/README.md` for the full developer guide including a pane component template.
+
+#### Capability Action Map (`src/connectors/capability-action-map.ts`)
+
+Fallback mapping from device capability strings to `CapabilityDescriptor[]` arrays. Used when a connector does not implement `getActionCatalog()` — the ConnectorManager derives the action catalog for a device by looking up each entry in `device.capabilities` against this map and flattening the results.
+
+**Mappings:**
+| Capability | Action Types | Params |
+|-----------|-------------|--------|
+| `on/off` | `toggle`, `on`, `off` | _(none)_ |
+| `brightness` | `brightness` | `level` (0–100, required) |
+| `color` | `color` | `hue` (0–65535), `saturation` (0–254), both required |
+| `color-temp` | `color-temp` | `ct` (mireds, required) |
+| `energy-monitoring` | `read-energy` | _(none)_ |
+
+**MQTT_COMMAND_DESCRIPTOR:** A special descriptor (`type: "command"`) that is always included in the action catalog for devices with `integration === "mqtt"`. Enables sending arbitrary payloads to a device's derived command topic.
 
 #### Legacy Migration (`src/connectors/migrate-legacy-hue.ts`)
 
@@ -863,12 +885,24 @@ Returns array of all devices.
 **GET /api/devices/:id**
 Returns single device. 404 if not found.
 
+**GET /api/devices/:id/actions**
+Returns the action catalog for a device — an array of `CapabilityDescriptor` objects describing all supported actions with their parameter schemas. The catalog is derived from connector `getActionCatalog()` implementations or the fallback `CAPABILITY_ACTION_MAP`. MQTT devices always include the `command` action type.
+Returns `CapabilityDescriptor[]`. Empty array if no catalog is derivable. 404 if device not found.
+
 **POST /api/devices/:id/action**
-Execute an action on a device.
+Execute an action on a device. Always returns HTTP 200 with an `ActionResult` body — domain failures are communicated via `success: false` rather than HTTP error codes.
 ```json
 { "type": "toggle", "params": {} }
 ```
-Returns `{ "success": true, "deviceId": "..." }`. 400 if type missing, 404 if device not found.
+Returns `ActionResult`:
+```json
+{ "success": true, "data": { ... } }
+```
+Or on failure:
+```json
+{ "success": false, "error": "Device 'xyz': unsupported action 'blink'. Supported: toggle, on, off" }
+```
+Pre-flight validation checks the action type against the device's capability catalog and validates params against the descriptor's schema before dispatching.
 
 **GET /api/state**
 Returns all devices keyed by ID.
@@ -1155,10 +1189,22 @@ Query parameters:
 
 Returns an array of log entry objects with `level`, `levelLabel`, `msg`, `time`, and any additional context fields.
 
-**POST /api/system/update**
-Triggers a self-update: runs `git pull` followed by `docker compose up -d --build` in the mounted project directory. The process is fire-and-forget — the response is returned immediately and the container is replaced during rebuild.
-Returns `{ "success": true, "message": "Update started — the system will restart shortly" }`.
-Returns 400 if the project directory is not mounted (only works on deployed Pi).
+**GET /api/system/version**
+Returns build-time version information and update availability status. Reads commit hash and build date from `build-info.json` (auto-generated during Docker build from git metadata). Checks the GitHub API for newer commits on main to determine if an update is available.
+```json
+{
+  "commit": "a1b2c3d",
+  "buildDate": "2026-06-10T14:30:00+00:00",
+  "updateAvailable": true,
+  "latestCommit": "e4f5g6h",
+  "commitsBehind": 3
+}
+```
+- `commit` — short SHA of the commit baked into the running image (`"unknown"` in local dev without git)
+- `buildDate` — ISO 8601 timestamp of the commit used for the build
+- `updateAvailable` — `true` when the running commit is not the latest on main
+- `latestCommit` — short SHA of the latest commit on main (null if GitHub unreachable)
+- `commitsBehind` — number of commits behind main (0 = up to date, -1 = too far behind to count within 20 commits)
 
 ### Layout API
 
@@ -1306,6 +1352,62 @@ interface ActionDescriptor {
   type: string;                 // Open string — any registered action type (e.g. "publish", "toggle", "hue_scene")
   target: string;               // topic for publish, deviceId for toggle/device_action, URL for webhook
   params: Record<string, unknown>;
+}
+```
+
+### ActionResult
+```typescript
+interface ActionResult {
+  /** Whether the action completed without error. Always a boolean, never undefined. */
+  success: boolean;
+  /** Connector-supplied data payload (e.g. energy readings). Present on success when the connector returns data. */
+  data?: Record<string, unknown>;
+  /** Human-readable error message. Present when success is false. */
+  error?: string;
+}
+```
+
+### BulkActionResult
+```typescript
+interface BulkActionResult {
+  /** Total number of devices the filter matched. */
+  total: number;
+  /** Number of individual actions that returned success: true. */
+  succeeded: number;
+  /** Number of individual actions that returned success: false. */
+  failed: number;
+  /** Per-device results. succeeded + failed === total always holds. */
+  results: Array<{ deviceId: string } & ActionResult>;
+}
+```
+
+### CapabilityDescriptor
+```typescript
+interface CapabilityDescriptor {
+  /** Action type string passed to devices.action() / POST /api/devices/:id/action. */
+  type: string;
+  /** Human-readable label for the action button (e.g. "Toggle", "Set Brightness"). */
+  label: string;
+  /** One-line description of what the action does. */
+  description: string;
+  /** JSON Schema object describing accepted parameters. Empty object {} when the action takes no parameters. */
+  params: Record<string, unknown>;
+}
+```
+
+### BuildVersionInfo
+```typescript
+interface BuildVersionInfo {
+  /** Short git commit SHA baked at Docker build time. "unknown" in local dev. */
+  commit: string;
+  /** ISO 8601 timestamp of the commit used for the build. */
+  buildDate: string;
+  /** Whether the running commit is behind the latest on main. */
+  updateAvailable: boolean;
+  /** Short SHA of the latest commit on main (null if GitHub unreachable). */
+  latestCommit: string | null;
+  /** Number of commits behind main. 0 = up to date, -1 = too far behind to count. */
+  commitsBehind: number;
 }
 ```
 
@@ -1609,7 +1711,6 @@ CREATE INDEX idx_ds_records_collection_tags
 | DB_PATH | ./data/aeolus.db | SQLite database file path |
 | LOG_LEVEL | debug | pino log level |
 | NODE_ENV | development | Environment |
-| AEOLUS_PROJECT_DIR | /aeolus-host | Host project directory mounted into the backend container (used by self-update) |
 | STATE_HISTORY_MAX | 100 | Maximum history entries stored per device |
 | HISTORY_RECORD_INTERVAL | 5000 | Minimum ms between history records per device |
 | RATE_LIMIT_RPM | 1000 | Maximum API requests per minute before rate limiting (429 response) |
@@ -1633,10 +1734,10 @@ Backend waits for Mosquitto healthcheck before starting. Named volumes persist b
 
 Backend container mounts:
 - `backend_data:/app/data` — SQLite database persistence
-- `/var/run/docker.sock:/var/run/docker.sock` — Docker socket for self-update rebuild
-- `.:/aeolus-host` — Project directory for `git pull` during self-update
 
-The Dockerfile uses a **multi-stage build**: the `builder` stage installs Python, Make, and g++ for native addon compilation, then the `production` stage copies only the compiled output — no build tools in the final image. The production stage installs `git`, `docker-cli`, and `docker-cli-compose` to support the self-update feature.
+The Dockerfile uses a **multi-stage build**: the `builder` stage installs Python, Make, g++, and git for native addon compilation and version detection, then auto-generates `build-info.json` containing the git commit hash and build date. The `production` stage copies only the compiled output and `build-info.json` — no build tools, git, or Docker CLI in the final image. The version endpoint reads `build-info.json` at runtime for display and update checks against GitHub.
+
+**Version detection:** The builder stage runs `git rev-parse --short HEAD` and `git log -1 --format=%cI HEAD` to produce `build-info.json` with `{ commit, buildDate }`. This is fully automatic — no manual environment variables or build arguments needed. The version endpoint checks GitHub's API to compare the baked commit against the latest on main and reports update availability.
 
 **Health checks:**
 - Mosquitto: `mosquitto_sub -t '$SYS/#' -C 1 -W 10` (30s interval, 15s timeout)
@@ -1719,8 +1820,7 @@ Flat config at `eslint.config.js` using `typescript-eslint`.
 | Layout | Database write failure | Rollback transaction, return 500 |
 | Log Viewer | Unparseable log line | Silently ignored by log buffer |
 | Log Viewer | Fetch failure | Frontend shows empty log list, retries on next auto-refresh cycle |
-| Self-Update | Project directory not mounted | 400 JSON error with explanation |
-| Self-Update | git pull or docker compose fails | Fire-and-forget — container may restart or remain on current version |
+| System Version | GitHub API unreachable | Update check skipped silently, returns `updateAvailable: false` |
 | State Store | Non-serializable value in `state.set()` | Log warning with ruleId and key, silently skip the set operation |
 | State Store | Malformed JSON in `automation_state` table | Log warning, skip entry during `loadFromDb()`, continue with remaining entries |
 | State Store | Missing rule on state API request | 404 JSON error |
@@ -1733,8 +1833,41 @@ Flat config at `eslint.config.js` using `typescript-eslint`.
 | Custom UI | Dynamic `import()` fails (syntax error in rewritten module) | Hook catches error, sets error message, revokes blob URL to prevent memory leak |
 | Custom UI | `rewriteImports()` encounters unknown specifier | Leaves the import statement unchanged (only rewrites `react`, `react-dom`, `react/jsx-runtime`) |
 
+## Security
+
+### System Security Hardening
+
+The backend system router is **read-only** — all POST system control endpoints have been removed. The system routes only expose:
+- `GET /api/system` — host diagnostics (CPU, memory, disk, network)
+- `GET /api/system/logs` — application log entries
+- `GET /api/system/version` — build version info and update availability
+
+Previously available endpoints (`POST /api/system/shutdown`, `POST /api/system/reboot`, `POST /api/system/update`, `POST /api/system/docker-prune`) now return 404. These operations are handled externally via Docker commands or SSH.
+
+**Removed attack surfaces:**
+- **No Docker socket mount** — the backend container no longer requires access to `/var/run/docker.sock`. This eliminates the risk of container escape via Docker API manipulation.
+- **No dangerous CLI tools in production image** — `docker-ce-cli` and `git` are not installed in the production Docker image. The builder stage uses git only for commit hash detection during build.
+- **No system control via HTTP** — shutdown, reboot, and update operations cannot be triggered from the web interface, preventing privilege escalation through compromised JWT tokens or XSS.
+
+### Authentication & Authorization
+
+- JWT-based authentication with short-lived access tokens (15min) and httpOnly refresh cookies (7 days)
+- Rate-limited login: 5 attempts/min per IP
+- bcrypt password hashing (cost factor 12)
+- WebSocket connections require a valid token
+- RBAC: admin, user groups, per-tab read/interact/write permissions
+
+### MQTT Security
+
+Three configurable levels managed from the dashboard: Open, Shared Password, or Per-Device credentials. Switching levels regenerates the Mosquitto password file and reloads the broker config automatically.
+
 ## Design Decisions
 
+- **System security hardening — read-only system router:** All POST system control endpoints (shutdown, reboot, update, docker-prune) have been removed. The system router is now GET-only: diagnostics, logs, and version check. System control operations (restart, update, prune) are handled externally via Docker commands or SSH — the web application should observe and report, not control the host. This eliminates an entire class of privilege escalation attacks and removes the need for the Docker socket mount.
+- **Build-time version baking via git metadata:** The Dockerfile builder stage auto-detects the git commit hash and build date, writing them to `build-info.json`. The production image reads this at runtime — no manual `BUILD_COMMIT` env vars needed. The version endpoint compares the baked commit against GitHub's latest on main to show update availability. This is more reliable than runtime git commands (which required git in the production image) and works in air-gapped environments with a graceful fallback.
+- **Removed Docker socket mount:** The previous self-update feature required mounting `/var/run/docker.sock` into the backend container — a significant security risk that gives the container full control over the host's Docker daemon. With the self-update feature removed, this mount is no longer needed. Updates are now triggered externally (e.g. `docker compose pull && docker compose up -d` via SSH or a deploy script).
+- **Structured ActionResult over HTTP error codes for device actions:** `POST /api/devices/:id/action` always returns HTTP 200 with an `ActionResult { success, data?, error? }` body. Domain-level failures (device not found, unsupported action, MQTT disconnected) are communicated via `success: false` + `error` string rather than HTTP 4xx/5xx. This makes the API predictable for frontend consumers — they always parse the same shape — and distinguishes infrastructure errors (actual HTTP failures) from domain logic outcomes.
+- **Capability-to-action mapping as a fallback catalog:** The `CAPABILITY_ACTION_MAP` provides a default mapping from device capability strings to action descriptors when a connector doesn't implement `getActionCatalog()`. This means any device with standard capabilities (on/off, brightness, color, etc.) automatically gets a well-typed action catalog without connector-specific code. Connectors can override with richer descriptors when needed.
 - **Data Store disabled by default with setup wizard:** Prevents accidental SD card fill on Raspberry Pi. Users must explicitly enable with configured storage limits, ensuring they understand the implications of persistent data accumulation on constrained hardware.
 - **FIFO eviction over hard rejection when collection hits record limit:** Preserves newest data automatically rather than failing writes. For time-series sensor data, recent readings are almost always more valuable than old ones.
 - **Duration parser as pure module for property-based testing:** The `src/data-store/duration.ts` module has zero dependencies and no side effects, making it ideal for exhaustive property-based testing with fast-check. Separating it from the DataStore class keeps the test surface clean.
@@ -1789,7 +1922,7 @@ The React dashboard provides a comprehensive developer-focused interface with a 
 ### System Tab (pinned — route: `/dashboard`)
 - **Welcome Screen** — Shown when no devices exist. Three animated onboarding cards: Publish MQTT Data (guidance on connecting microcontrollers or running the seed script), Connect Devices (navigates to Connectors tab), Write Automations (navigates to create a custom tab). Uses framer-motion animations and Aeolus branding. Also shown in DeviceGrid when the device list is empty
 - **System Health** — MQTT connection status, device count, automation count, uptime (polls every 30s)
-- **System Page** — Host diagnostics (CPU, memory, disk, Docker usage, temperature, network), application log viewer, version check (daily automatic + manual), self-update controls, Docker prune
+- **System Page** — Read-only host diagnostics (CPU, memory, disk, temperature, network), application log viewer, version display (commit hash + build date in header), update availability badge when the running commit is behind main. No action buttons — system control is handled externally via Docker or SSH
 
 ### Connectors Tab (pinned)
 - **Available Connectors** — Cards for each discovered connector type showing display name, icon, description, supported device types, and setup requirement badge
@@ -1927,8 +2060,8 @@ A React component wrapping `@monaco-editor/react` for editing custom automation 
 - **Memory** — Used/total with percentage bar and colour coding
 - **Disk** — Used/total with percentage bar
 - **Network** — Interface names and IP addresses
+- **Version Display** — Commit hash and build date shown in the page header, with an "Update available" badge when the running image is behind main (checked against GitHub API)
 - **Application Logs** — Collapsible log viewer section with level filter dropdown (all/error/warn/info/debug), auto-refresh toggle (10-second interval), colour-coded entries by level, and manual refresh button. Fetches from `GET /api/system/logs`
-- **Self-Update Button** — "Update & Restart" button that triggers `POST /api/system/update` with a confirmation dialog. Shows status message and instructs user to refresh after ~60 seconds
 
 ### Custom Tabs (unpinned)
 Custom tabs use the modular pane grid powered by `react-grid-layout`. Users create tabs from the sidebar, then add any combination of panes via the PanePicker.
@@ -2008,13 +2141,11 @@ Custom tabs use the modular pane grid powered by `react-grid-layout`. Users crea
 | PUT | `/api/layout` | Save dashboard layout (atomic replace) |
 | GET | `/api/system` | Host system diagnostics (CPU, memory, disk, temp) |
 | GET | `/api/system/logs` | Recent application log entries (count, level filter) |
-| POST | `/api/system/update` | Trigger self-update (git pull + docker compose rebuild) |
+| GET | `/api/system/version` | Build version info + update availability check |
+| GET | `/api/devices/:id/actions` | Action catalog for a device (CapabilityDescriptor[]) |
 | GET | `/api/devices/:id/history` | Device state history (limit, from, to params) |
 | DELETE | `/api/devices/:id/history` | Clear history for a specific device |
 | DELETE | `/api/devices/history/all` | Clear all device history |
-| POST | `/api/system/shutdown` | Gracefully shut down the host Pi |
-| POST | `/api/system/reboot` | Gracefully reboot the host Pi |
-| POST | `/api/system/docker-prune` | Remove unused Aeolus Docker images and build cache |
 | GET | `/api/data-store/collections` | List all collections with metadata |
 | POST | `/api/data-store/collections` | Create a new collection |
 | PATCH | `/api/data-store/collections/:name` | Update collection description/retention |
@@ -2045,8 +2176,8 @@ Records device state snapshots to SQLite for historical trend analysis. Each sta
 
 ---
 
-**Last Updated:** May 15, 2026
-**Version:** 0.14.0
+**Last Updated:** June 2026
+**Version:** 0.15.0
 **Status:** MVP Development
 
 ## Future Enhancements
