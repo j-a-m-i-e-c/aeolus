@@ -7,7 +7,7 @@ COPY package.json package-lock.json* ./
 RUN npm install
 COPY tsconfig.json ./
 COPY src/ ./src/
-RUN npx tsup src/index.ts --format esm --target node22 --external isolated-vm --external better-sqlite3 --external bcrypt
+RUN npx tsup src/index.ts --format esm --target node22 --external isolated-vm --external better-sqlite3 --external bcrypt --external esbuild
 
 # Production stage
 FROM node:22-slim AS production
