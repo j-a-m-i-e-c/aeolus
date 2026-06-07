@@ -133,19 +133,19 @@ Both sides are user-authored code running in sandboxes — the Logic tab in isol
 ┌─────────────────────────┐         ┌─────────────────────────┐
 │   Logic tab (backend)   │         │   UI tab (React)        │
 │                         │         │                         │
-│  state.set("mode", "…") ├────────►│  props.state.get("mode")│
+│  state.set("mode", "…") ├────────►│  aeolus.read("mode")    │
 │                         │   WS    │                         │
-│  // reads on next run   │◄────────┤  props.stateSet("…", 25)│
+│  // reads on next run   │◄────────┤  aeolus.save("…", 25)   │
 │  state.get("target")    │  SQLite │                         │
 │                         │         │                         │
-│  // fires immediately   │◄────────┤  props.emit("changed",  │
+│  // fires immediately   │◄────────┤  aeolus.fire("changed", │
 │  context.state.value    │  HTTP   │    { value: 25 })       │
 └─────────────────────────┘         └─────────────────────────┘
 ```
 
 - **Logic → UI** (real-time): `state.set()` persists to SQLite and pushes via WebSocket. The UI re-renders immediately.
-- **UI → Logic** (passive): `props.stateSet()` writes to SQLite. The Logic tab reads it on its next trigger.
-- **UI → Logic** (immediate): `props.emit(eventName, payload)` fires the Logic tab now with `context.topic = "ui/{ruleId}/{eventName}"` and `context.state = payload`.
+- **UI → Logic** (passive): `aeolus.save()` writes to SQLite. The Logic tab reads it on its next trigger.
+- **UI → Logic** (immediate): `aeolus.fire(eventName, payload)` fires the Logic tab now with `context.topic = "ui/{ruleId}/{eventName}"` and `context.state = payload`.
 
 ### Logic Tab — `automation()` helper
 
@@ -215,15 +215,15 @@ Free-form scripts have full access to the same globals (`devices`, `mqtt`, `http
 
 ```tsx
 // Renders in the automation pane instantly after saving
-export default function EveningMode(props: CustomComponentProps) {
-  const mode = props.state.get("mode") as string;
+export default function EveningMode(aeolus: CustomComponentProps) {
+  const mode = aeolus.read("mode") as string;
   return (
     <div className="p-4 space-y-2">
       <div className="text-lg font-bold text-[#E6EDF3]">
         {mode === "evening" ? "🌙 Evening Mode" : "☀️ Day Mode"}
       </div>
       <button
-        onClick={() => props.deviceAction("hue-light-1", "toggle")}
+        onClick={() => aeolus.control("hue-light-1", "toggle")}
         className="px-3 py-1.5 rounded-lg bg-[#3BA4FF]/20 text-[#3BA4FF]"
       >
         Toggle Light
@@ -232,8 +232,8 @@ export default function EveningMode(props: CustomComponentProps) {
         type="range" min={16} max={28} defaultValue={22}
         onChange={e => {
           const target = Number(e.target.value);
-          props.stateSet("target", target);
-          props.emit("target-changed", { value: target });
+          aeolus.save("target", target);
+          aeolus.fire("target-changed", { value: target });
         }}
       />
     </div>
@@ -241,7 +241,7 @@ export default function EveningMode(props: CustomComponentProps) {
 }
 ```
 
-`props.state.get("mode")` reads the value the Logic tab wrote. `props.deviceAction` lets the UI control devices directly. `props.emit("target-changed", { value })` fires the Logic tab immediately with the new value in `context.state` — use it when the UI needs to delegate a decision to the backend rather than issuing a direct command. Write TSX, save, and your component renders live in the pane — no rebuild or refresh needed.
+`aeolus.read("mode")` reads the value the Logic tab wrote. `aeolus.control` lets the UI control devices directly. `aeolus.fire("target-changed", { value })` fires the Logic tab immediately with the new value in `context.state` — use it when the UI needs to delegate a decision to the backend rather than issuing a direct command. Write TSX, save, and your component renders live in the pane — no rebuild or refresh needed.
 
 **How it works under the hood:** When you save, the backend transpiles your TSX into an ES module using the TypeScript compiler API with the React JSX transform. The compiled JavaScript is stored in the database and served via a dedicated API endpoint. The frontend fetches it, rewrites the React imports to reference the host app's shared React instance, loads it as a module via a blob URL and dynamic `import()`, and renders it inside an error boundary. The whole round-trip happens in milliseconds — no Docker rebuild, no Vite recompilation, no page refresh.
 

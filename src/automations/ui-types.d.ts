@@ -52,36 +52,27 @@ interface CustomComponentProps {
   /** Whether the automation rule is currently enabled. */
   enabled: boolean;
   /**
-   * Trigger a device action from the component.
-   * @param deviceId - The target device ID.
-   * @param actionType - The action to perform (e.g. "toggle", "setBrightness").
-   * @param params - Optional parameters for the action.
+   * Read a value from the shared state store.
+   * Values are written by the Logic tab via `state.set()` and pushed in real-time via WebSocket.
+   * @param key - The state key to read.
+   * @returns The stored value, or undefined if the key does not exist.
    */
-  deviceAction: (deviceId: string, actionType: string, params?: Record<string, unknown>) => Promise<void>;
+  read: (key: string) => unknown;
   /**
-   * Publish an MQTT message from the component.
-   * @param topic - The MQTT topic to publish to.
-   * @param payload - The message payload as a string.
-   */
-  mqttPublish: (topic: string, payload: string) => void;
-  /** The most recent execution log entries for this rule. */
-  executionHistory: ExecutionEntry[];
-  /** Live key-value state from the Automation State Store, updated via WebSocket. */
-  state: Map<string, unknown>;
-  /**
-   * Write a key-value pair back to the Automation State Store.
-   * The value is persisted to SQLite and broadcast to all connected clients.
+   * Persist a key-value pair to the Automation State Store.
+   * The value is saved to SQLite and broadcast to all connected clients.
+   * The Logic tab can read it on its next trigger via `state.get(key)`.
    * @param key - The state key.
    * @param value - A JSON-serializable value.
    */
-  stateSet: (key: string, value: unknown) => void;
+  save: (key: string, value: unknown) => void;
   /**
    * Persist value to state store AND immediately fire the Logic tab with
    * topic "ui/{ruleId}/state-set" and state { key, value }.
    * @param key - The state key to persist.
    * @param value - A JSON-serializable value.
    */
-  stateSetAndFire: (key: string, value: unknown) => void;
+  saveAndFire: (key: string, value: unknown) => void;
   /**
    * Fire the Logic tab script with a named UI event.
    *
@@ -93,7 +84,22 @@ interface CustomComponentProps {
    * @param eventName - A short name for the event (e.g. "target-changed", "mode-selected").
    * @param payload - Optional data to pass to the Logic tab in `context.state`.
    */
-  emit: (eventName: string, payload?: Record<string, unknown>) => void;
+  fire: (eventName: string, payload?: Record<string, unknown>) => void;
+  /**
+   * Control a device from the component.
+   * @param deviceId - The target device ID.
+   * @param actionType - The action to perform (e.g. "toggle", "setBrightness").
+   * @param params - Optional parameters for the action.
+   */
+  control: (deviceId: string, actionType: string, params?: Record<string, unknown>) => Promise<void>;
+  /**
+   * Send an MQTT message from the component.
+   * @param topic - The MQTT topic to publish to.
+   * @param payload - The message payload as a string.
+   */
+  publish: (topic: string, payload: string) => void;
+  /** The most recent execution log entries for this rule. */
+  history: ExecutionEntry[];
 }
 
 // ── Minimal React type declarations for IntelliSense ──
@@ -124,8 +130,9 @@ declare namespace JSX {
  * Your component should be the default export:
  *
  * ```tsx
- * export default function MyComponent(props: CustomComponentProps) {
- *   return <div>{props.ruleName}</div>;
+ * export default function MyComponent(aeolus: CustomComponentProps) {
+ *   const value = aeolus.read("myKey");
+ *   return <div>{aeolus.ruleName} — {String(value)}</div>;
  * }
  * ```
  */

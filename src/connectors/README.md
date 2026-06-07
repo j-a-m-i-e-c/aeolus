@@ -168,7 +168,7 @@ Include snippets for:
 
 **UI tab:**
 - Device status cards (show state, name, type for your connector's devices)
-- Control buttons (toggle, sliders, colour pickers using `props.deviceAction`)
+- Control buttons (toggle, sliders, colour pickers using `aeolus.control`)
 - Data displays (energy stats, sensor readings, battery levels)
 
 ### 5. `actionHandlers: Record<string, ActionHandler>` (optional)

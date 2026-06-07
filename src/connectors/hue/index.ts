@@ -105,13 +105,13 @@ export const snippets: SnippetDescriptor[] = [
     name: "Light Toggle Card",
     description: "Card with on/off toggle for a Hue light",
     mode: "ui",
-    code: `const hueLights = props.devices.filter(d => d.integration === "hue");
+    code: `const hueLights = aeolus.devices.filter(d => d.integration === "hue");
 // In JSX:
 // {hueLights.map(light => (
 //   <div key={light.id} className="flex items-center justify-between p-3 rounded-lg bg-[#0B0F14] border border-[#2A3441]">
 //     <span className="text-sm text-[#E6EDF3]">{light.name}</span>
 //     <button
-//       onClick={() => props.deviceAction(light.id, "toggle")}
+//       onClick={() => aeolus.control(light.id, "toggle")}
 //       className={\`px-3 py-1 rounded text-xs font-medium \${light.state.on ? "bg-[#F59E0B]/20 text-[#F59E0B]" : "bg-[#6B7785]/20 text-[#6B7785]"}\`}
 //     >
 //       {light.state.on ? "On" : "Off"}
@@ -129,7 +129,7 @@ export const snippets: SnippetDescriptor[] = [
   min={0}
   max={254}
   defaultValue={128}
-  onChange={(e) => props.deviceAction("hue-light-1", "brightness", { brightness: Number(e.target.value) })}
+  onChange={(e) => aeolus.control("hue-light-1", "brightness", { brightness: Number(e.target.value) })}
   className="w-full accent-[#F59E0B]"
 />`,
   },
@@ -140,9 +140,9 @@ export const snippets: SnippetDescriptor[] = [
     mode: "ui",
     code: `<button
   onClick={() => {
-    const hueLights = props.devices.filter(d => d.integration === "hue");
+    const hueLights = aeolus.devices.filter(d => d.integration === "hue");
     hueLights.forEach(light => {
-      if (light.state.on) props.deviceAction(light.id, "toggle");
+      if (light.state.on) aeolus.control(light.id, "toggle");
     });
   }}
   className="px-4 py-2 rounded-lg text-xs font-medium bg-[#EF4444]/20 text-[#EF4444] border border-[#EF4444]/30 hover:bg-[#EF4444]/30 transition-colors"
@@ -182,7 +182,7 @@ export const snippets: SnippetDescriptor[] = [
     min={153}
     max={500}
     defaultValue={300}
-    onChange={(e) => props.deviceAction("hue-light-1", "color-temp", { ct: Number(e.target.value) })}
+    onChange={(e) => aeolus.control("hue-light-1", "color-temp", { ct: Number(e.target.value) })}
     className="w-full"
     style={{ background: "linear-gradient(to right, #A6C8FF, #FFD580, #FF9F43)" }}
   />

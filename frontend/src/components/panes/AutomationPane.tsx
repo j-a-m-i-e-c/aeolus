@@ -68,7 +68,7 @@ const DEFAULT_SCRIPT = `// ─── Option 1: Free-form (use the globals howeve
 // }
 //
 // Push data to your custom UI component via the state store:
-// Anything you state.set() here appears as props.state.get() in the UI tab.
+// Anything you state.set() here appears as aeolus.read() in the UI tab.
 // state.set("lastTemp", temp);
 // state.set("lastCheck", Date.now());
 //
@@ -95,28 +95,34 @@ automation({
 const DEFAULT_UI_TEMPLATE = `// Custom Automation UI Component
 // ─────────────────────────────────────────────────────
 // This component renders in the automation pane's status mode.
-// It receives live data from the Aeolus runtime as props.
-// Open the Docs panel to see all available props.
+// It receives live data from the Aeolus runtime.
+// Open the Docs panel to see all available methods.
 
 import type { CustomComponentProps } from "./types";
 
-export default function AutomationUI(props: CustomComponentProps) {
+export default function MyComponent(aeolus: CustomComponentProps) {
+  const value = aeolus.read("myKey");
+
   return (
     <div className="p-4 space-y-3">
       <div className="text-sm font-semibold text-[#E6EDF3]">
-        {props.ruleName}
+        {aeolus.ruleName}
       </div>
       <div className="text-xs text-[#9AA6B2]">
-        {props.enabled ? "✅ Enabled" : "⏸ Disabled"}
-        {props.lastFired && (
+        {aeolus.enabled ? "✅ Enabled" : "⏸ Disabled"}
+        {aeolus.lastFired && (
           <span className="ml-2">
-            Last fired: {new Date(props.lastFired).toLocaleTimeString()}
+            Last fired: {new Date(aeolus.lastFired).toLocaleTimeString()}
           </span>
         )}
       </div>
-      <div className="text-xs text-[#6B7785]">
-        {props.devices.length} devices registered
-      </div>
+      <p className="text-xs text-[#6B7785]">Value: {String(value)}</p>
+      <button
+        onClick={() => aeolus.fire("clicked", {})}
+        className="px-3 py-1.5 rounded-lg text-xs font-medium bg-primary/20 text-primary border border-primary/30 hover:bg-primary/30 transition-colors"
+      >
+        Click me
+      </button>
     </div>
   );
 }
@@ -427,8 +433,8 @@ export function AutomationPane({ config, paneId }: Props) {
     [mode, handleSave, handleUpdate],
   );
 
-  // Device action helper for custom components
-  const deviceAction = useCallback(
+  // control helper for custom components (was deviceAction)
+  const control = useCallback(
     async (deviceId: string, actionType: string, params?: Record<string, unknown>) => {
       await authFetch(`${API_URL}/api/devices/${deviceId}/action`, {
         method: "POST",
@@ -439,8 +445,8 @@ export function AutomationPane({ config, paneId }: Props) {
     [],
   );
 
-  // MQTT publish helper for custom components
-  const mqttPublish = useCallback((topic: string, payload: string) => {
+  // publish helper for custom components (was mqttPublish)
+  const publish = useCallback((topic: string, payload: string) => {
     authFetch(`${API_URL}/api/mqtt/publish`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -448,23 +454,30 @@ export function AutomationPane({ config, paneId }: Props) {
     }).catch(() => {});
   }, []);
 
-  // Convert plain object state to Map for custom component props
+  // Convert plain object state to Map for the read() method
   const stateMap = new Map(Object.entries(ruleState));
 
-  // stateSet helper bound to current ruleId
-  const stateSet = useCallback(
+  // read helper — returns value for a given key from the state map
+  const read = useCallback(
+    (key: string) => stateMap.get(key),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [ruleState],
+  );
+
+  // save helper bound to current ruleId (was stateSet)
+  const save = useCallback(
     (key: string, value: unknown) => sendStateUpdate(ruleId, key, value),
     [ruleId],
   );
 
-  // stateSetAndFire helper — persist state AND fire the Logic tab
-  const stateSetAndFire = useCallback(
+  // saveAndFire helper — persist state AND fire the Logic tab (was stateSetAndFire)
+  const saveAndFire = useCallback(
     (key: string, value: unknown) => sendStateUpdateAndFire(ruleId, key, value),
     [ruleId],
   );
 
-  // emit helper — fires the Logic tab script with a synthetic event
-  const emit = useCallback(
+  // fire helper — fires the Logic tab script with a synthetic event (was emit)
+  const fire = useCallback(
     (eventName: string, payload?: Record<string, unknown>) => {
       authFetch(`${API_URL}/api/automations/${ruleId}/fire`, {
         method: "POST",
@@ -589,13 +602,13 @@ export function AutomationPane({ config, paneId }: Props) {
             hasUiSource={hasUiSource}
             lastFired={lastFired}
             devices={devices}
-            deviceAction={deviceAction}
-            mqttPublish={mqttPublish}
-            executionHistory={executionHistory}
-            stateMap={stateMap}
-            stateSet={stateSet}
-            stateSetAndFire={stateSetAndFire}
-            emit={emit}
+            control={control}
+            publish={publish}
+            history={executionHistory}
+            read={read}
+            save={save}
+            saveAndFire={saveAndFire}
+            fire={fire}
           />
         </div>
       </div>
@@ -683,12 +696,12 @@ export function AutomationPane({ config, paneId }: Props) {
           {editingTab === "ui" && Object.keys(ruleState).length > 0 && (
             <div className="shrink-0 mt-1 rounded-lg bg-[#0B0F14] border border-[#2A3441] px-3 py-2 max-h-24 overflow-auto">
               <div className="text-[10px] text-[#6B7785] uppercase tracking-wider mb-1">
-                props.state <span className="normal-case tracking-normal">— live from logic tab</span>
+                aeolus.read <span className="normal-case tracking-normal">— live from logic tab</span>
               </div>
               <div className="flex flex-wrap gap-x-4 gap-y-0.5">
                 {Object.entries(ruleState).map(([key, value]) => (
                   <div key={key} className="text-[11px] font-mono">
-                    <span className="text-[#9AA6B2]">.get(</span>
+                    <span className="text-[#9AA6B2]">.read(</span>
                     <span className="text-[#5CE1E6]">"{key}"</span>
                     <span className="text-[#9AA6B2]">)</span>
                     <span className="text-[#6B7785] ml-1">→</span>
@@ -818,78 +831,78 @@ export function AutomationPane({ config, paneId }: Props) {
             ) : (
               <div className="space-y-3 text-[11px] font-mono">
                 <div className="text-[10px] text-[#6B7785] mb-2">
-                  Your component receives these as <span className="text-[#E6EDF3]">props</span>
+                  Your component receives these as <span className="text-[#E6EDF3]">aeolus</span>
                 </div>
 
-                {/* props.devices */}
+                {/* aeolus.devices */}
                 <div>
-                  <div className="text-primary font-semibold mb-1">props.devices</div>
+                  <div className="text-primary font-semibold mb-1">aeolus.devices</div>
                   <div className="text-[#9AA6B2] pl-2">All devices from the registry (live via WebSocket)</div>
                 </div>
 
-                {/* props.ruleId */}
+                {/* aeolus.ruleId */}
                 <div>
-                  <div className="text-primary font-semibold mb-1">props.ruleId</div>
+                  <div className="text-primary font-semibold mb-1">aeolus.ruleId</div>
                   <div className="text-[#9AA6B2] pl-2">This automation's unique ID</div>
                 </div>
 
-                {/* props.ruleName */}
+                {/* aeolus.ruleName */}
                 <div>
-                  <div className="text-primary font-semibold mb-1">props.ruleName</div>
+                  <div className="text-primary font-semibold mb-1">aeolus.ruleName</div>
                   <div className="text-[#9AA6B2] pl-2">This automation's display name</div>
                 </div>
 
-                {/* props.enabled */}
+                {/* aeolus.enabled */}
                 <div>
-                  <div className="text-primary font-semibold mb-1">props.enabled</div>
+                  <div className="text-primary font-semibold mb-1">aeolus.enabled</div>
                   <div className="text-[#9AA6B2] pl-2">Whether this automation is enabled</div>
                 </div>
 
-                {/* props.lastFired */}
+                {/* aeolus.lastFired */}
                 <div>
-                  <div className="text-primary font-semibold mb-1">props.lastFired</div>
+                  <div className="text-primary font-semibold mb-1">aeolus.lastFired</div>
                   <div className="text-[#9AA6B2] pl-2">Unix timestamp of last execution (or null)</div>
                 </div>
 
-                {/* props.state */}
+                {/* aeolus.read */}
                 <div>
-                  <div className="text-primary font-semibold mb-1">props.state</div>
-                  <div className="text-[#9AA6B2] pl-2">Live key-value state from the automation script</div>
+                  <div className="text-primary font-semibold mb-1">aeolus.read(key)</div>
+                  <div className="text-[#9AA6B2] pl-2">Read a value from the shared state store</div>
                 </div>
 
-                {/* props.stateSet */}
+                {/* aeolus.save */}
                 <div>
-                  <div className="text-primary font-semibold mb-1">props.stateSet(key, value)</div>
-                  <div className="text-[#9AA6B2] pl-2">Write state back to the automation</div>
+                  <div className="text-primary font-semibold mb-1">aeolus.save(key, value)</div>
+                  <div className="text-[#9AA6B2] pl-2">Persist value for the Logic tab to read on next trigger</div>
                 </div>
 
-                {/* props.stateSetAndFire */}
+                {/* aeolus.saveAndFire */}
                 <div>
-                  <div className="text-primary font-semibold mb-1">props.stateSetAndFire(key, value)</div>
+                  <div className="text-primary font-semibold mb-1">aeolus.saveAndFire(key, value)</div>
                   <div className="text-[#9AA6B2] pl-2">Persist state + fire the Logic tab</div>
                 </div>
 
-                {/* props.deviceAction */}
+                {/* aeolus.fire */}
                 <div>
-                  <div className="text-primary font-semibold mb-1">props.deviceAction(id, type, params?)</div>
-                  <div className="text-[#9AA6B2] pl-2">Trigger a device action</div>
-                </div>
-
-                {/* props.mqttPublish */}
-                <div>
-                  <div className="text-primary font-semibold mb-1">props.mqttPublish(topic, payload)</div>
-                  <div className="text-[#9AA6B2] pl-2">Publish an MQTT message</div>
-                </div>
-
-                {/* props.emit */}
-                <div>
-                  <div className="text-primary font-semibold mb-1">props.emit(eventName, payload?)</div>
+                  <div className="text-primary font-semibold mb-1">aeolus.fire(eventName, payload?)</div>
                   <div className="text-[#9AA6B2] pl-2">Fire the Logic tab with a UI event</div>
                 </div>
 
-                {/* props.executionHistory */}
+                {/* aeolus.control */}
                 <div>
-                  <div className="text-primary font-semibold mb-1">props.executionHistory</div>
+                  <div className="text-primary font-semibold mb-1">aeolus.control(id, type, params?)</div>
+                  <div className="text-[#9AA6B2] pl-2">Control a device</div>
+                </div>
+
+                {/* aeolus.publish */}
+                <div>
+                  <div className="text-primary font-semibold mb-1">aeolus.publish(topic, payload)</div>
+                  <div className="text-[#9AA6B2] pl-2">Send an MQTT message</div>
+                </div>
+
+                {/* aeolus.history */}
+                <div>
+                  <div className="text-primary font-semibold mb-1">aeolus.history</div>
                   <div className="text-[#9AA6B2] pl-2">Last 10 execution log entries</div>
                 </div>
               </div>
@@ -981,13 +994,13 @@ interface DynamicCustomSectionProps {
   hasUiSource: boolean;
   lastFired: number | null;
   devices: Record<string, Device>;
-  deviceAction: (deviceId: string, actionType: string, params?: Record<string, unknown>) => Promise<void>;
-  mqttPublish: (topic: string, payload: string) => void;
-  executionHistory: ExecutionEntry[];
-  stateMap: Map<string, unknown>;
-  stateSet: (key: string, value: unknown) => void;
-  stateSetAndFire: (key: string, value: unknown) => void;
-  emit: (eventName: string, payload?: Record<string, unknown>) => void;
+  control: (deviceId: string, actionType: string, params?: Record<string, unknown>) => Promise<void>;
+  publish: (topic: string, payload: string) => void;
+  history: ExecutionEntry[];
+  read: (key: string) => unknown;
+  save: (key: string, value: unknown) => void;
+  saveAndFire: (key: string, value: unknown) => void;
+  fire: (eventName: string, payload?: Record<string, unknown>) => void;
 }
 
 function DynamicCustomSection({
@@ -996,13 +1009,13 @@ function DynamicCustomSection({
   hasUiSource,
   lastFired,
   devices,
-  deviceAction,
-  mqttPublish,
-  executionHistory,
-  stateMap,
-  stateSet,
-  stateSetAndFire,
-  emit,
+  control,
+  publish,
+  history,
+  read,
+  save,
+  saveAndFire,
+  fire,
 }: DynamicCustomSectionProps) {
   const { Component, loading: dynamicLoading, error: dynamicError } = useDynamicComponent(ruleId, hasUiSource);
   const [customFallback, setCustomFallback] = useState(false);
@@ -1033,13 +1046,13 @@ function DynamicCustomSection({
           ruleName={rule.name}
           lastFired={lastFired}
           enabled={rule.enabled}
-          deviceAction={deviceAction}
-          mqttPublish={mqttPublish}
-          executionHistory={executionHistory}
-          state={stateMap}
-          stateSet={stateSet}
-          stateSetAndFire={stateSetAndFire}
-          emit={emit}
+          control={control}
+          publish={publish}
+          history={history}
+          read={read}
+          save={save}
+          saveAndFire={saveAndFire}
+          fire={fire}
         />
       </CustomComponentBoundary>
     );

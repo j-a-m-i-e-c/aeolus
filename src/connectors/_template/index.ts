@@ -78,7 +78,7 @@ export function createConnector(config: Record<string, unknown>): Connector {
  * Include both logic snippets (for the Logic tab) and UI snippets (for the UI tab).
  *
  * - Logic snippets: use sandbox globals (devices, mqtt, log, state, etc.)
- * - UI snippets: use props.* (deviceAction, mqttPublish, devices, state, etc.)
+ * - UI snippets: use aeolus.* (control, publish, devices, read, etc.)
  *
  * Set `mode: "ui"` for UI snippets. Logic snippets default to "logic" when omitted.
  */

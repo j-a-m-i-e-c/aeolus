@@ -199,14 +199,14 @@ const smartIrrigation = await api("POST", "/api/automations", {
 });`,
   uiSource: `import type { CustomComponentProps } from "./types";
 
-export default function SmartIrrigation(props: CustomComponentProps) {
-  const tank1 = props.state.get("tank1Level") as number || 0;
-  const tank2 = props.state.get("tank2Level") as number || 0;
+export default function SmartIrrigation(aeolus: CustomComponentProps) {
+  const tank1 = aeolus.read("tank1Level") as number || 0;
+  const tank2 = aeolus.read("tank2Level") as number || 0;
   const zones = ["zone1", "zone2", "zone3"];
-  const totalCycles = props.state.get("totalCycles") as number || 0;
+  const totalCycles = aeolus.read("totalCycles") as number || 0;
 
-  const getMoisture = (z: string) => props.state.get("moisture_" + z) as number | undefined;
-  const isWatering = (z: string) => props.state.get(z + "_watering") as boolean;
+  const getMoisture = (z: string) => aeolus.read("moisture_" + z) as number | undefined;
+  const isWatering = (z: string) => aeolus.read(z + "_watering") as boolean;
 
   const moistureColor = (v: number | undefined) => {
     if (v === undefined) return "#6B7785";
@@ -290,7 +290,7 @@ export default function SmartIrrigation(props: CustomComponentProps) {
       </div>
 
       <button
-        onClick={() => props.mqttPublish("switch/irrigation/zone-1/command", JSON.stringify({ action: "open", duration: 300 }))}
+        onClick={() => aeolus.publish("switch/irrigation/zone-1/command", JSON.stringify({ action: "open", duration: 300 }))}
         className="w-full py-2.5 rounded-lg text-xs font-medium bg-gradient-to-r from-[#3BA4FF]/20 to-[#5CE1E6]/20 text-[#5CE1E6] border border-[#5CE1E6]/30 hover:from-[#3BA4FF]/30 hover:to-[#5CE1E6]/30 transition-all"
       >
         Manual Water All Zones (5 min)
@@ -358,11 +358,11 @@ const greenhouse = await api("POST", "/api/automations", {
 });`,
   uiSource: `import type { CustomComponentProps } from "./types";
 
-export default function GreenhousePanel(props: CustomComponentProps) {
-  const temp = props.state.get("temp") as number || 0;
-  const humidity = props.state.get("humidity") as number || 0;
-  const co2 = props.state.get("co2") as number || 0;
-  const ventActive = props.state.get("ventActive") as boolean;
+export default function GreenhousePanel(aeolus: CustomComponentProps) {
+  const temp = aeolus.read("temp") as number || 0;
+  const humidity = aeolus.read("humidity") as number || 0;
+  const co2 = aeolus.read("co2") as number || 0;
+  const ventActive = aeolus.read("ventActive") as boolean;
 
   const zones = [
     { key: "tomato", icon: "🍅", label: "Tomatoes" },
@@ -371,9 +371,9 @@ export default function GreenhousePanel(props: CustomComponentProps) {
     { key: "herbs", icon: "🌿", label: "Herbs" },
   ];
 
-  const getMoisture = (z: string) => props.state.get("zone_" + z + "_moisture") as number || 0;
-  const getLight = (z: string) => props.state.get("zone_" + z + "_light") as number || 0;
-  const getStage = (z: string) => props.state.get("zone_" + z + "_stage") as string || "vegetative";
+  const getMoisture = (z: string) => aeolus.read("zone_" + z + "_moisture") as number || 0;
+  const getLight = (z: string) => aeolus.read("zone_" + z + "_light") as number || 0;
+  const getStage = (z: string) => aeolus.read("zone_" + z + "_stage") as string || "vegetative";
 
   const stageColor = (s: string) => s === "fruiting" ? "#EF4444" : s === "flowering" ? "#F59E0B" : s === "vegetative" ? "#22C55E" : "#3BA4FF";
 
@@ -515,11 +515,11 @@ const tankTransfer = await api("POST", "/api/automations", {
 });`,
   uiSource: `import type { CustomComponentProps } from "./types";
 
-export default function TankTransfer(props: CustomComponentProps) {
-  const mainLevel = props.state.get("mainTankLevel") as number || 0;
-  const feederLevel = props.state.get("feederTankLevel") as number || 0;
-  const pumpActive = props.state.get("pumpActive") as boolean || false;
-  const totalTransfers = props.state.get("totalTransfers") as number || 0;
+export default function TankTransfer(aeolus: CustomComponentProps) {
+  const mainLevel = aeolus.read("mainTankLevel") as number || 0;
+  const feederLevel = aeolus.read("feederTankLevel") as number || 0;
+  const pumpActive = aeolus.read("pumpActive") as boolean || false;
+  const totalTransfers = aeolus.read("totalTransfers") as number || 0;
 
   const Tank = ({ level, label, id, subtitle }: { level: number; label: string; id: string; subtitle: string }) => {
     const fillY = 75 - (level / 100) * 55;
@@ -588,7 +588,7 @@ export default function TankTransfer(props: CustomComponentProps) {
       </div>
 
       <button
-        onClick={() => props.mqttPublish("switch/tank/transfer-pump/command", JSON.stringify({ on: true, duration: 300 }))}
+        onClick={() => aeolus.publish("switch/tank/transfer-pump/command", JSON.stringify({ on: true, duration: 300 }))}
         className="w-full py-2.5 rounded-lg text-xs font-medium bg-gradient-to-r from-[#3BA4FF]/20 to-[#5CE1E6]/20 text-[#5CE1E6] border border-[#5CE1E6]/30 hover:from-[#3BA4FF]/30 hover:to-[#5CE1E6]/30 transition-all"
       >
         Manual Transfer (5 min)
@@ -627,12 +627,12 @@ const energyMonitor = await api("POST", "/api/automations", {
 });`,
   uiSource: `import type { CustomComponentProps } from "./types";
 
-export default function EnergyMonitor(props: CustomComponentProps) {
-  const solar = props.state.get("solar-production") as number || 0;
-  const grid = props.state.get("grid-consumption") as number || 0;
-  const battery = props.state.get("battery-level") as number || 0;
-  const net = props.state.get("net") as number || 0;
-  const selfSuff = props.state.get("selfSufficiency") as number || 0;
+export default function EnergyMonitor(aeolus: CustomComponentProps) {
+  const solar = aeolus.read("solar-production") as number || 0;
+  const grid = aeolus.read("grid-consumption") as number || 0;
+  const battery = aeolus.read("battery-level") as number || 0;
+  const net = aeolus.read("net") as number || 0;
+  const selfSuff = aeolus.read("selfSufficiency") as number || 0;
 
   const batteryColor = battery > 60 ? "#22C55E" : battery > 25 ? "#F59E0B" : "#EF4444";
   const batteryFill = (battery / 100) * 20;
@@ -761,12 +761,12 @@ const securityMonitor = await api("POST", "/api/automations", {
 });`,
   uiSource: `import type { CustomComponentProps } from "./types";
 
-export default function SecurityMonitor(props: CustomComponentProps) {
+export default function SecurityMonitor(aeolus: CustomComponentProps) {
   const zones = ["front-door", "backyard", "garage", "driveway"];
-  const events = props.state.get("events") as Array<{ zone: string; time: number }> || [];
-  const totalAlerts = props.state.get("totalAlerts") as number || 0;
+  const events = aeolus.read("events") as Array<{ zone: string; time: number }> || [];
+  const totalAlerts = aeolus.read("totalAlerts") as number || 0;
 
-  const isActive = (z: string) => props.state.get("zone_" + z) as boolean;
+  const isActive = (z: string) => aeolus.read("zone_" + z) as boolean;
 
   return (
     <div className="p-4 space-y-4">
@@ -839,14 +839,14 @@ const reefTank = await api("POST", "/api/automations", {
 });`,
   uiSource: `import type { CustomComponentProps } from "./types";
 
-export default function ReefTank(props: CustomComponentProps) {
-  const waterLevel = props.state.get("water-level") as number || 0;
-  const ph = props.state.get("ph") as number || 0;
-  const temp = props.state.get("temp") as number || 0;
-  const tds = props.state.get("tds") as number || 0;
+export default function ReefTank(aeolus: CustomComponentProps) {
+  const waterLevel = aeolus.read("water-level") as number || 0;
+  const ph = aeolus.read("ph") as number || 0;
+  const temp = aeolus.read("temp") as number || 0;
+  const tds = aeolus.read("tds") as number || 0;
   const pumpOn = true;
-  const feedCountdown = props.state.get("feedCountdown") as number || 0;
-  const lastFedTime = props.state.get("lastFedTime") as number | undefined;
+  const feedCountdown = aeolus.read("feedCountdown") as number || 0;
+  const lastFedTime = aeolus.read("lastFedTime") as number | undefined;
 
   const phColor = ph >= 8.0 && ph <= 8.4 ? "#22C55E" : ph >= 7.8 && ph <= 8.6 ? "#F59E0B" : "#EF4444";
   const fillHeight = (waterLevel / 100) * 70;
@@ -939,12 +939,12 @@ const waterQuality = await api("POST", "/api/automations", {
 });`,
   uiSource: `import type { CustomComponentProps } from "./types";
 
-export default function WaterQuality(props: CustomComponentProps) {
-  const ph = props.state.get("ph") as number || 8.2;
-  const ammonia = props.state.get("ammonia") as number || 0;
-  const nitrite = props.state.get("nitrite") as number || 0;
-  const nitrate = props.state.get("nitrate") as number || 0;
-  const phTrend = props.state.get("phTrend") as string || "stable";
+export default function WaterQuality(aeolus: CustomComponentProps) {
+  const ph = aeolus.read("ph") as number || 8.2;
+  const ammonia = aeolus.read("ammonia") as number || 0;
+  const nitrite = aeolus.read("nitrite") as number || 0;
+  const nitrate = aeolus.read("nitrate") as number || 0;
+  const phTrend = aeolus.read("phTrend") as string || "stable";
 
   const trendArrow = phTrend === "up" ? "↑" : phTrend === "down" ? "↓" : "→";
   const trendColor = phTrend === "stable" ? "#22C55E" : "#F59E0B";
@@ -1023,16 +1023,16 @@ const fermentation = await api("POST", "/api/automations", {
 });`,
   uiSource: `import type { CustomComponentProps } from "./types";
 
-export default function Fermentation(props: CustomComponentProps) {
+export default function Fermentation(aeolus: CustomComponentProps) {
   const vessels = [
     { id: 1, stage: "primary", label: "IPA #47" },
     { id: 2, stage: "secondary", label: "Stout #12" },
     { id: 3, stage: "conditioning", label: "Lager #8" },
   ];
 
-  const getTemp = (id: number) => props.state.get("vessel" + id + "-temp") as number || 0;
-  const getGravity = (id: number) => props.state.get("vessel" + id + "-gravity") as number || 1.0;
-  const getCo2 = (id: number) => props.state.get("vessel" + id + "-co2") as number || 0;
+  const getTemp = (id: number) => aeolus.read("vessel" + id + "-temp") as number || 0;
+  const getGravity = (id: number) => aeolus.read("vessel" + id + "-gravity") as number || 1.0;
+  const getCo2 = (id: number) => aeolus.read("vessel" + id + "-co2") as number || 0;
 
   const stageColor = (stage: string) => stage === "primary" ? "#F59E0B" : stage === "secondary" ? "#3BA4FF" : "#22C55E";
   const fillLevel = (id: number) => {
@@ -1141,12 +1141,12 @@ const brewDay = await api("POST", "/api/automations", {
 });`,
   uiSource: `import type { CustomComponentProps } from "./types";
 
-export default function BrewDay(props: CustomComponentProps) {
-  const mashTemp = props.state.get("mash-temp") as number || 0;
-  const boilTimer = props.state.get("boil-timer") as number || 0;
-  const batchName = props.state.get("batchName") as string || "West Coast IPA #48";
-  const batchStyle = props.state.get("batchStyle") as string || "American IPA";
-  const targetOG = props.state.get("targetOG") as number || 1.065;
+export default function BrewDay(aeolus: CustomComponentProps) {
+  const mashTemp = aeolus.read("mash-temp") as number || 0;
+  const boilTimer = aeolus.read("boil-timer") as number || 0;
+  const batchName = aeolus.read("batchName") as string || "West Coast IPA #48";
+  const batchStyle = aeolus.read("batchStyle") as string || "American IPA";
+  const targetOG = aeolus.read("targetOG") as number || 1.065;
 
   const hopSchedule = [
     { time: 60, name: "Centennial", amount: "28g", done: true },
@@ -1221,13 +1221,13 @@ const nutrientSystem = await api("POST", "/api/automations", {
 });`,
   uiSource: `import type { CustomComponentProps } from "./types";
 
-export default function NutrientSystem(props: CustomComponentProps) {
-  const res1 = props.state.get("reservoir1-level") as number || 0;
-  const res2 = props.state.get("reservoir2-level") as number || 0;
-  const ph = props.state.get("ph") as number || 0;
-  const ec = props.state.get("ec") as number || 0;
-  const waterTemp = props.state.get("water-temp") as number || 0;
-  const pumpOn = props.state.get("pumpOn") as boolean ?? true;
+export default function NutrientSystem(aeolus: CustomComponentProps) {
+  const res1 = aeolus.read("reservoir1-level") as number || 0;
+  const res2 = aeolus.read("reservoir2-level") as number || 0;
+  const ph = aeolus.read("ph") as number || 0;
+  const ec = aeolus.read("ec") as number || 0;
+  const waterTemp = aeolus.read("water-temp") as number || 0;
+  const pumpOn = aeolus.read("pumpOn") as boolean ?? true;
 
   const phColor = ph >= 5.5 && ph <= 6.5 ? "#22C55E" : "#F59E0B";
   const ecColor = ec >= 1.0 && ec <= 2.0 ? "#22C55E" : "#F59E0B";
@@ -1328,11 +1328,11 @@ const growLights = await api("POST", "/api/automations", {
 });`,
   uiSource: `import type { CustomComponentProps } from "./types";
 
-export default function GrowLights(props: CustomComponentProps) {
-  const ppfd = props.state.get("ppfd") as number || 0;
-  const dli = props.state.get("dli") as number || 0;
-  const lightsOn = props.state.get("lightsOn") as boolean ?? true;
-  const mode = props.state.get("spectrumMode") as string || "full-spectrum";
+export default function GrowLights(aeolus: CustomComponentProps) {
+  const ppfd = aeolus.read("ppfd") as number || 0;
+  const dli = aeolus.read("dli") as number || 0;
+  const lightsOn = aeolus.read("lightsOn") as boolean ?? true;
+  const mode = aeolus.read("spectrumMode") as string || "full-spectrum";
   const onHour = 6;
   const offHour = 22;
 
@@ -1435,13 +1435,13 @@ const poolMonitor = await api("POST", "/api/automations", {
 });`,
   uiSource: `import type { CustomComponentProps } from "./types";
 
-export default function PoolMonitor(props: CustomComponentProps) {
-  const temp = props.state.get("temp") as number || 0;
-  const chlorine = props.state.get("chlorine") as number || 0;
-  const ph = props.state.get("ph") as number || 0;
-  const orp = props.state.get("orp") as number || 0;
-  const pumpOn = props.state.get("pumpOn") as boolean ?? true;
-  const filterPressure = props.state.get("filter-pressure") as number || 0;
+export default function PoolMonitor(aeolus: CustomComponentProps) {
+  const temp = aeolus.read("temp") as number || 0;
+  const chlorine = aeolus.read("chlorine") as number || 0;
+  const ph = aeolus.read("ph") as number || 0;
+  const orp = aeolus.read("orp") as number || 0;
+  const pumpOn = aeolus.read("pumpOn") as boolean ?? true;
+  const filterPressure = aeolus.read("filter-pressure") as number || 0;
 
   const tempAngle = Math.min(Math.max((temp - 15) / 25 * 180, 0), 180);
   const chlorineOk = chlorine >= 1.0 && chlorine <= 3.0;
@@ -1533,17 +1533,17 @@ const spaControls = await api("POST", "/api/automations", {
 });`,
   uiSource: `import type { CustomComponentProps } from "./types";
 
-export default function SpaControls(props: CustomComponentProps) {
-  const temp = props.state.get("temp") as number || 38.5;
-  const setpoint = props.state.get("setpoint") as number || 39;
-  const jetsOn = props.state.get("jetsOn") as boolean || false;
-  const heaterOn = props.state.get("heaterOn") as boolean ?? true;
-  const coverOpen = props.state.get("coverOpen") as boolean || false;
+export default function SpaControls(aeolus: CustomComponentProps) {
+  const temp = aeolus.read("temp") as number || 38.5;
+  const setpoint = aeolus.read("setpoint") as number || 39;
+  const jetsOn = aeolus.read("jetsOn") as boolean || false;
+  const heaterOn = aeolus.read("heaterOn") as boolean ?? true;
+  const coverOpen = aeolus.read("coverOpen") as boolean || false;
 
   const adjustTemp = (delta: number) => {
     const newTemp = setpoint + delta;
-    props.stateSet("setpoint", newTemp);
-    props.mqttPublish("switch/spa/setpoint/command", JSON.stringify({ value: newTemp }));
+    aeolus.save("setpoint", newTemp);
+    aeolus.publish("switch/spa/setpoint/command", JSON.stringify({ value: newTemp }));
   };
 
   return (
@@ -1575,7 +1575,7 @@ export default function SpaControls(props: CustomComponentProps) {
       {/* Controls */}
       <div className="grid grid-cols-2 gap-2">
         <button
-          onClick={() => props.mqttPublish("switch/spa/jets/command", JSON.stringify({ on: !jetsOn }))}
+          onClick={() => aeolus.publish("switch/spa/jets/command", JSON.stringify({ on: !jetsOn }))}
           className={"rounded-lg p-3 border text-center transition-colors " + (jetsOn ? "bg-[#3BA4FF]/20 border-[#3BA4FF]/30" : "bg-[#0B0F14] border-[#2A3441]")}
         >
           <div className="text-[10px] text-[#6B7785]">Jets</div>
@@ -1627,7 +1627,7 @@ const rackMonitor = await api("POST", "/api/automations", {
 });`,
   uiSource: `import type { CustomComponentProps } from "./types";
 
-export default function RackMonitor(props: CustomComponentProps) {
+export default function RackMonitor(aeolus: CustomComponentProps) {
   const servers = [
     { id: 1, name: "Web Server" },
     { id: 2, name: "Database" },
@@ -1635,10 +1635,10 @@ export default function RackMonitor(props: CustomComponentProps) {
     { id: 4, name: "Storage" },
   ];
 
-  const getTemp = (id: number) => props.state.get("server" + id + "-temp") as number || 0;
-  const getCpu = (id: number) => props.state.get("server" + id + "-cpu") as number || 0;
-  const getFan = (id: number) => props.state.get("server" + id + "-fan") as number || 0;
-  const avgTemp = props.state.get("avgTemp") as number || 0;
+  const getTemp = (id: number) => aeolus.read("server" + id + "-temp") as number || 0;
+  const getCpu = (id: number) => aeolus.read("server" + id + "-cpu") as number || 0;
+  const getFan = (id: number) => aeolus.read("server" + id + "-fan") as number || 0;
+  const avgTemp = aeolus.read("avgTemp") as number || 0;
 
   const tempColor = (t: number) => t > 50 ? "#EF4444" : t > 40 ? "#F59E0B" : "#22C55E";
 
@@ -1730,14 +1730,14 @@ const powerNetwork = await api("POST", "/api/automations", {
 });`,
   uiSource: `import type { CustomComponentProps } from "./types";
 
-export default function PowerNetwork(props: CustomComponentProps) {
-  const battery = props.state.get("battery") as number || 0;
-  const load = props.state.get("load") as number || 0;
-  const inputV = props.state.get("input-voltage") as number || 0;
-  const outputV = props.state.get("output-voltage") as number || 0;
-  const throughputUp = props.state.get("throughput-up") as number || 0;
-  const throughputDown = props.state.get("throughput-down") as number || 0;
-  const uptime = props.state.get("uptime") as number || 0;
+export default function PowerNetwork(aeolus: CustomComponentProps) {
+  const battery = aeolus.read("battery") as number || 0;
+  const load = aeolus.read("load") as number || 0;
+  const inputV = aeolus.read("input-voltage") as number || 0;
+  const outputV = aeolus.read("output-voltage") as number || 0;
+  const throughputUp = aeolus.read("throughput-up") as number || 0;
+  const throughputDown = aeolus.read("throughput-down") as number || 0;
+  const uptime = aeolus.read("uptime") as number || 0;
 
   const batteryColor = battery > 70 ? "#22C55E" : battery > 30 ? "#F59E0B" : "#EF4444";
   const loadColor = load < 60 ? "#22C55E" : load < 80 ? "#F59E0B" : "#EF4444";
@@ -1839,13 +1839,13 @@ const weatherStation = await api("POST", "/api/automations", {
 });`,
   uiSource: `import type { CustomComponentProps } from "./types";
 
-export default function WeatherStation(props: CustomComponentProps) {
-  const temp = props.state.get("outdoor-temp") as number || 0;
-  const windSpeed = props.state.get("wind-speed") as number || 0;
-  const windDir = props.state.get("wind-direction") as number || 0;
-  const rain = props.state.get("rain") as number || 0;
-  const pressure = props.state.get("pressure") as number || 0;
-  const uv = props.state.get("uv-index") as number || 0;
+export default function WeatherStation(aeolus: CustomComponentProps) {
+  const temp = aeolus.read("outdoor-temp") as number || 0;
+  const windSpeed = aeolus.read("wind-speed") as number || 0;
+  const windDir = aeolus.read("wind-direction") as number || 0;
+  const rain = aeolus.read("rain") as number || 0;
+  const pressure = aeolus.read("pressure") as number || 0;
+  const uv = aeolus.read("uv-index") as number || 0;
 
   const uvColor = uv <= 2 ? "#22C55E" : uv <= 5 ? "#F59E0B" : uv <= 7 ? "#EF4444" : "#9333EA";
   const uvLabel = uv <= 2 ? "Low" : uv <= 5 ? "Moderate" : uv <= 7 ? "High" : "Extreme";
@@ -2013,7 +2013,7 @@ const climateOverview = await api("POST", "/api/automations", {
 });`,
   uiSource: `import type { CustomComponentProps } from "./types";
 
-export default function ClimateOverview(props: CustomComponentProps) {
+export default function ClimateOverview(aeolus: CustomComponentProps) {
   const rooms = [
     { id: "kitchen", label: "Kitchen" },
     { id: "living-room", label: "Living Room" },
@@ -2022,10 +2022,10 @@ export default function ClimateOverview(props: CustomComponentProps) {
     { id: "bathroom", label: "Bathroom" },
   ];
 
-  const getTemp = (id: string) => props.state.get("temp_" + id) as number | undefined;
-  const getMin = (id: string) => props.state.get("min_" + id) as number | undefined;
-  const getMax = (id: string) => props.state.get("max_" + id) as number | undefined;
-  const getComfort = (id: string) => props.state.get("comfort_" + id) as string || "—";
+  const getTemp = (id: string) => aeolus.read("temp_" + id) as number | undefined;
+  const getMin = (id: string) => aeolus.read("min_" + id) as number | undefined;
+  const getMax = (id: string) => aeolus.read("max_" + id) as number | undefined;
+  const getComfort = (id: string) => aeolus.read("comfort_" + id) as string || "—";
 
   const comfortColor = (c: string) => c === "comfortable" ? "#22C55E" : c === "cool" ? "#3BA4FF" : c === "warm" ? "#F59E0B" : "#6B7785";
   const comfortIcon = (c: string) => c === "comfortable" ? "✓" : c === "cool" ? "❄" : c === "warm" ? "☀" : "—";
@@ -2100,9 +2100,9 @@ const weeklyForecast = await api("POST", "/api/automations", {
 });`,
   uiSource: `import type { CustomComponentProps } from "./types";
 
-export default function WeeklyForecast(props: CustomComponentProps) {
-  const today = props.state.get("today") as { temp: number; high: number; low: number; condition: string; description: string } || { temp: 24, high: 27, low: 18, condition: "partly-cloudy", description: "Partly cloudy with afternoon sun" };
-  const forecast = props.state.get("forecast") as Array<{ day: string; high: number; low: number; condition: string; rainChance: number }> || [];
+export default function WeeklyForecast(aeolus: CustomComponentProps) {
+  const today = aeolus.read("today") as { temp: number; high: number; low: number; condition: string; description: string } || { temp: 24, high: 27, low: 18, condition: "partly-cloudy", description: "Partly cloudy with afternoon sun" };
+  const forecast = aeolus.read("forecast") as Array<{ day: string; high: number; low: number; condition: string; rainChance: number }> || [];
 
   const conditionIcon = (c: string) => c === "sunny" ? "☀️" : c === "partly-cloudy" ? "⛅" : c === "rainy" ? "🌧️" : c === "stormy" ? "⛈️" : "☀️";
   const conditionColor = (c: string) => c === "sunny" ? "#F59E0B" : c === "partly-cloudy" ? "#9AA6B2" : c === "rainy" ? "#3BA4FF" : c === "stormy" ? "#EF4444" : "#F59E0B";

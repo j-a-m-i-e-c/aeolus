@@ -74,7 +74,7 @@ const UI_SNIPPETS: SnippetGroup[] = [
         code: `<div className="bg-[#0B0F14] rounded-lg p-3 border border-[#2A3441]">
   <div className="text-[10px] text-[#6B7785] uppercase mb-1">Status</div>
   <div className="text-lg font-bold text-[#E6EDF3]">
-    {props.enabled ? "Active" : "Inactive"}
+    {aeolus.enabled ? "Active" : "Inactive"}
   </div>
 </div>`,
       },
@@ -83,7 +83,7 @@ const UI_SNIPPETS: SnippetGroup[] = [
         name: "Device Toggle Button",
         description: "Button that toggles a device on/off",
         code: `<button
-  onClick={() => props.deviceAction("device-id", "toggle")}
+  onClick={() => aeolus.control("device-id", "toggle")}
   className="px-3 py-1.5 rounded-lg text-xs font-medium bg-[#3BA4FF]/20 text-[#3BA4FF] border border-[#3BA4FF]/30 hover:bg-[#3BA4FF]/30 transition-colors"
 >
   Toggle Device
@@ -93,7 +93,7 @@ const UI_SNIPPETS: SnippetGroup[] = [
         id: "ui-state-value",
         name: "Read State Value",
         description: "Display a value pushed from the logic tab via state.set()",
-        code: `const lastEvent = props.state.get("lastEvent") as { topic: string; value: number; time: number } | undefined;
+        code: `const lastEvent = aeolus.read("lastEvent") as { topic: string; value: number; time: number } | undefined;
 // In JSX:
 // {lastEvent && (
 //   <div className="bg-[#0B0F14] rounded-lg p-3 border border-[#2A3441]">
@@ -108,7 +108,7 @@ const UI_SNIPPETS: SnippetGroup[] = [
         name: "Write State Button",
         description: "Button that writes to the state store",
         code: `<button
-  onClick={() => props.stateSet("myKey", "newValue")}
+  onClick={() => aeolus.save("myKey", "newValue")}
   className="px-3 py-1.5 rounded-lg text-xs font-medium bg-[#22C55E]/20 text-[#22C55E] border border-[#22C55E]/30"
 >
   Update State
@@ -119,7 +119,7 @@ const UI_SNIPPETS: SnippetGroup[] = [
         name: "MQTT Publish Button",
         description: "Button that publishes an MQTT message",
         code: `<button
-  onClick={() => props.mqttPublish("my/topic", JSON.stringify({ action: "start" }))}
+  onClick={() => aeolus.publish("my/topic", JSON.stringify({ action: "start" }))}
   className="px-3 py-1.5 rounded-lg text-xs font-medium bg-[#F59E0B]/20 text-[#F59E0B] border border-[#F59E0B]/30"
 >
   Publish Message
@@ -127,10 +127,10 @@ const UI_SNIPPETS: SnippetGroup[] = [
       },
       {
         id: "ui-emit-event",
-        name: "Emit UI Event",
+        name: "Fire UI Event",
         description: "Button that fires the Logic tab with a named event",
         code: `<button
-  onClick={() => props.emit("my-event", { value: 42 })}
+  onClick={() => aeolus.fire("my-event", { value: 42 })}
   className="px-3 py-1.5 rounded-lg text-xs font-medium bg-[#A855F7]/20 text-[#A855F7] border border-[#A855F7]/30"
 >
   Fire Logic
@@ -140,7 +140,7 @@ const UI_SNIPPETS: SnippetGroup[] = [
         id: "ui-device-list",
         name: "Device List",
         description: "Render a list of devices filtered by type",
-        code: `const lights = props.devices.filter(d => d.type === "light");
+        code: `const lights = aeolus.devices.filter(d => d.type === "light");
 // In JSX:
 // {lights.map(d => <div key={d.id}>{d.name}: {d.state.on ? "On" : "Off"}</div>)}`,
       },
@@ -148,7 +148,7 @@ const UI_SNIPPETS: SnippetGroup[] = [
         id: "ui-execution-history",
         name: "Execution History",
         description: "Render recent execution log entries with timestamps",
-        code: `{props.executionHistory.map((entry) => (
+        code: `{aeolus.history.map((entry) => (
   <div key={entry.id} className="flex items-center gap-2 px-2 py-1 rounded bg-[#0B0F14] border border-[#2A3441]">
     <span className="text-[10px] text-[#6B7785]">
       {new Date(entry.timestamp).toLocaleTimeString()}
@@ -171,9 +171,9 @@ const UI_SNIPPETS: SnippetGroup[] = [
         description: "Show the last fired time and schedule name",
         code: `<div className="bg-[#0B0F14] rounded-lg p-3 border border-[#2A3441]">
   <div className="text-[10px] text-[#6B7785] uppercase mb-1">Schedule</div>
-  <div className="text-sm text-[#E6EDF3]">{props.ruleName}</div>
+  <div className="text-sm text-[#E6EDF3]">{aeolus.ruleName}</div>
   <div className="text-[10px] text-[#9AA6B2] mt-1">
-    Last fired: {props.lastFired ? new Date(props.lastFired).toLocaleString() : "Never"}
+    Last fired: {aeolus.lastFired ? new Date(aeolus.lastFired).toLocaleString() : "Never"}
   </div>
 </div>`,
       },
@@ -182,7 +182,7 @@ const UI_SNIPPETS: SnippetGroup[] = [
         name: "Manual Trigger Button",
         description: "Button that publishes to a service trigger topic",
         code: `<button
-  onClick={() => props.mqttPublish("service/trigger/my-trigger", JSON.stringify({ payload: {} }))}
+  onClick={() => aeolus.publish("service/trigger/my-trigger", JSON.stringify({ payload: {} }))}
   className="px-4 py-2 rounded-lg text-sm font-medium bg-primary/20 text-primary border border-primary/30 hover:bg-primary/30 transition-colors"
 >
   Run Now

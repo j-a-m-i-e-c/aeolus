@@ -850,7 +850,7 @@ Create a new automation rule (form or script). For script rules, include `ruleTy
   "triggerTopic": "sensor/+/temperature",
   "ruleType": "script",
   "scriptSource": "if (context.state.value < 18) {\n  devices.action('climate-living-room', 'setTemperature', { target: 22 });\n}",
-  "uiSource": "export default function MyUI(props: CustomComponentProps) { ... }"
+  "uiSource": "export default function MyUI(aeolus: CustomComponentProps) { ... }"
 }
 ```
 Returns `{ "success": true, "id": "..." }`. 400 if transpilation fails (with `details` array of `{ line, column, message }`).
@@ -1334,11 +1334,13 @@ interface CustomComponentProps {
   ruleName: string;
   lastFired: number | null;
   enabled: boolean;
-  deviceAction: (deviceId: string, actionType: string, params?: Record<string, unknown>) => Promise<void>;
-  mqttPublish: (topic: string, payload: string) => void;
-  executionHistory: ExecutionEntry[];
-  state: Map<string, unknown>;       // Live key-value state from AutomationStateStore, updated via WebSocket
-  stateSet: (key: string, value: unknown) => void;  // Write back to the state store (persisted + broadcast)
+  read: (key: string) => unknown;                    // Read a value from the shared state store (written by Logic tab via state.set())
+  save: (key: string, value: unknown) => void;       // Persist value for the Logic tab to read on next trigger
+  saveAndFire: (key: string, value: unknown) => void; // Persist + fire Logic tab immediately
+  fire: (eventName: string, payload?: Record<string, unknown>) => void; // Fire Logic tab with a UI event
+  control: (deviceId: string, actionType: string, params?: Record<string, unknown>) => Promise<void>;
+  publish: (topic: string, payload: string) => void;
+  history: ExecutionEntry[];
 }
 ```
 
@@ -1783,7 +1785,7 @@ Self-contained one-pane-one-automation component with a 3-mode state machine. Ea
 - "Fire Now" button (Zap icon) — directly executes the rule via `POST /api/automations/:id/fire`, bypassing topic matching
 - Last fired timestamp (polls every 10 seconds)
 - Visual: FlowDiagram for structured automations (using `automation()` helper), ActivityFeed for free-form scripts
-- Custom UI component rendering: if the rule has `uiSource`, the `useDynamicComponent` hook fetches the compiled module from `/api/automations/:id/ui-module`, rewrites React imports, loads via blob URL + dynamic `import()`, and renders the component inside a `CustomComponentBoundary` error boundary with full `CustomComponentProps` (devices, state, stateSet, deviceAction, mqttPublish, executionHistory). Components activate instantly on save — no rebuild or refresh needed
+- Custom UI component rendering: if the rule has `uiSource`, the `useDynamicComponent` hook fetches the compiled module from `/api/automations/:id/ui-module`, rewrites React imports, loads via blob URL + dynamic `import()`, and renders the component inside a `CustomComponentBoundary` error boundary with full `CustomComponentProps` (devices, read, save, saveAndFire, fire, control, publish, history). Components activate instantly on save — no rebuild or refresh needed
 
 **Editing Mode** (entered via Edit button):
 - Pre-filled name, topic, and script source
@@ -1973,8 +1975,8 @@ Records device state snapshots to SQLite for historical trend analysis. Each sta
 
 ---
 
-**Last Updated:** June 2026
-**Version:** 0.15.0
+**Last Updated:** June 2025
+**Version:** 0.16.0
 **Status:** MVP Development
 
 ## Future Enhancements

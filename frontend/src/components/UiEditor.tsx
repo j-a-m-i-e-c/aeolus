@@ -88,12 +88,13 @@ export default React;`,
   ruleName: string;
   lastFired: number | null;
   enabled: boolean;
-  deviceAction: (deviceId: string, actionType: string, params?: Record<string, unknown>) => Promise<void>;
-  mqttPublish: (topic: string, payload: string) => void;
-  executionHistory: any[];
-  state: Map<string, unknown>;
-  stateSet: (key: string, value: unknown) => void;
-  emit: (eventName: string, payload?: Record<string, unknown>) => void;
+  read: (key: string) => unknown;
+  save: (key: string, value: unknown) => void;
+  saveAndFire: (key: string, value: unknown) => void;
+  fire: (eventName: string, payload?: Record<string, unknown>) => void;
+  control: (deviceId: string, actionType: string, params?: Record<string, unknown>) => Promise<void>;
+  publish: (topic: string, payload: string) => void;
+  history: any[];
 }`,
     "file:///types.ts"
   );

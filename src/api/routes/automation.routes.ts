@@ -561,7 +561,7 @@ export function createAutomationRoutes(
       }
 
       // Build context — supports three modes:
-      // 1. body.context = { topic, state } — full context override (used by stateSetAndFire)
+      // 1. body.context = { topic, state } — full context override (used by saveAndFire)
       // 2. body.eventName — UI emit helper (topic = ui/{ruleId}/{eventName})
       // 3. Default — synthetic manual-fire context
       const body = req.body ?? {};
