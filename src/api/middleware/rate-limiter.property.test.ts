@@ -5,7 +5,7 @@ import request from "supertest";
 import rateLimit from "express-rate-limit";
 
 // Mock the logger
-vi.mock("../../../logger.js", () => ({
+vi.mock("../../logger.js", () => ({
   default: {
     info: vi.fn(),
     error: vi.fn(),

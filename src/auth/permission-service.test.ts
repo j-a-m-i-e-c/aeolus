@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import Database from "better-sqlite3";
-import { initSchema } from "../../db/database.js";
+import { initSchema } from "../db/database.js";
 
 let testDb: InstanceType<typeof Database>;
 
-vi.mock("../../db/database.js", async (importOriginal) => {
-  const original = await importOriginal<typeof import("../../db/database.js")>();
+vi.mock("../db/database.js", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../db/database.js")>();
   return {
     ...original,
     getDatabase: () => testDb,
@@ -17,7 +17,7 @@ const {
   hasPermission,
   getUserTabPermission,
   getUserAccessibleTabs,
-} = await import("../permission-service.js");
+} = await import("./permission-service.js");
 
 function createGroup(id: string, name: string): void {
   testDb

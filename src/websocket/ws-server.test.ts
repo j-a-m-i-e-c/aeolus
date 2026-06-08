@@ -3,12 +3,12 @@ import { createServer, type Server } from "node:http";
 import { EventEmitter } from "node:events";
 import WebSocket from "ws";
 import Database from "better-sqlite3";
-import { initSchema } from "../../db/database.js";
+import { initSchema } from "../db/database.js";
 
 let testDb: InstanceType<typeof Database>;
 
-vi.mock("../../db/database.js", async (importOriginal) => {
-  const original = await importOriginal<typeof import("../../db/database.js")>();
+vi.mock("../db/database.js", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../db/database.js")>();
   return {
     ...original,
     getDatabase: () => testDb,
@@ -16,8 +16,8 @@ vi.mock("../../db/database.js", async (importOriginal) => {
 });
 
 // Import after mock setup
-const { WsServer } = await import("../ws-server.js");
-const { generateAccessToken, _resetSecretCache } = await import("../../auth/token-service.js");
+const { WsServer } = await import("./ws-server.js");
+const { generateAccessToken, _resetSecretCache } = await import("../auth/token-service.js");
 
 // Minimal DeviceRegistry mock
 function createMockRegistry() {

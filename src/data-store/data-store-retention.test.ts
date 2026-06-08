@@ -4,9 +4,9 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { EventEmitter } from "node:events";
 import Database from "better-sqlite3";
 import type { Database as DatabaseType } from "better-sqlite3";
-import { DataStore } from "../data-store.js";
+import { DataStore } from "./data-store.js";
 
-vi.mock("../../logger.js", () => ({
+vi.mock("../logger.js", () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 

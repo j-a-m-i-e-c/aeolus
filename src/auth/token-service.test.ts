@@ -2,12 +2,12 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import crypto from "node:crypto";
 import jwt from "jsonwebtoken";
 import Database from "better-sqlite3";
-import { initSchema } from "../../db/database.js";
+import { initSchema } from "../db/database.js";
 
 let testDb: InstanceType<typeof Database>;
 
-vi.mock("../../db/database.js", async (importOriginal) => {
-  const original = await importOriginal<typeof import("../../db/database.js")>();
+vi.mock("../db/database.js", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../db/database.js")>();
   return {
     ...original,
     getDatabase: () => testDb,
@@ -24,7 +24,7 @@ const {
   revokeRefreshToken,
   revokeAllUserTokens,
   _resetSecretCache,
-} = await import("../token-service.js");
+} = await import("./token-service.js");
 
 describe("Token Service", () => {
   beforeEach(() => {

@@ -1,12 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import express, { type Request, type Response, type NextFunction } from "express";
 import request from "supertest";
-import { validate } from "../validate.js";
-import { errorHandler, AppError } from "../error-handler.js";
+import { validate } from "./validate.js";
+import { errorHandler, AppError } from "./error-handler.js";
 import { z } from "zod";
 
 // Mock the logger to avoid pino output during tests
-vi.mock("../../../logger.js", () => ({
+vi.mock("../../logger.js", () => ({
   default: {
     info: vi.fn(),
     error: vi.fn(),
@@ -16,7 +16,7 @@ vi.mock("../../../logger.js", () => ({
 }));
 
 // Mock the config for rate limiter tests
-vi.mock("../../../config.js", () => ({
+vi.mock("../../config.js", () => ({
   config: {
     rateLimitRpm: 5, // Low limit for testing
     corsOrigins: [],
@@ -29,7 +29,7 @@ describe("Middleware Integration Tests", () => {
   describe("Rate Limiter", () => {
     it("returns 429 after exceeding the configured limit", async () => {
       // Import rate limiter after mocking config
-      const { apiRateLimiter } = await import("../rate-limiter.js");
+      const { apiRateLimiter } = await import("./rate-limiter.js");
 
       const app = express();
       app.use(apiRateLimiter);

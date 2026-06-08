@@ -25,8 +25,8 @@ jobs:
       - name: Run tests with coverage
         run: npx vitest run --coverage
 
-      - name: Lint (non-blocking)
-        run: npx eslint . || true
+      - name: Lint
+        run: npx eslint .
 
   build-images:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'

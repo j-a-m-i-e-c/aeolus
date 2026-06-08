@@ -2,10 +2,10 @@ import { describe, expect, vi } from "vitest";
 import { test, fc } from "@fast-check/vitest";
 import express, { type Request, type Response, type NextFunction } from "express";
 import request from "supertest";
-import { errorHandler, AppError } from "../error-handler.js";
+import { errorHandler, AppError } from "./error-handler.js";
 
 // Mock the logger
-vi.mock("../../../logger.js", () => ({
+vi.mock("../../logger.js", () => ({
   default: {
     info: vi.fn(),
     error: vi.fn(),
@@ -15,7 +15,7 @@ vi.mock("../../../logger.js", () => ({
 }));
 
 // Mock config to production mode
-vi.mock("../../../config.js", () => ({
+vi.mock("../../config.js", () => ({
   config: {
     nodeEnv: "production",
     logLevel: "silent",

@@ -2,16 +2,16 @@ import { describe, expect, vi } from "vitest";
 import { test, fc } from "@fast-check/vitest";
 import express, { type Request, type Response } from "express";
 import request from "supertest";
-import { validate } from "../validate.js";
+import { validate } from "./validate.js";
 import {
   createAutomationBodySchema,
-} from "../../schemas/automation.schemas.js";
+} from "../schemas/automation.schemas.js";
 import {
   createCollectionBodySchema,
-} from "../../schemas/data-store.schemas.js";
+} from "../schemas/data-store.schemas.js";
 
 // Mock the logger
-vi.mock("../../../logger.js", () => ({
+vi.mock("../../logger.js", () => ({
   default: {
     info: vi.fn(),
     error: vi.fn(),
