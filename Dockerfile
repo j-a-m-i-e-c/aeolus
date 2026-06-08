@@ -1,4 +1,4 @@
-FROM node:22-slim AS builder
+FROM node:26-slim AS builder
 WORKDIR /app
 RUN apt-get update && apt-get install -y python3 make g++ git && rm -rf /var/lib/apt/lists/*
 COPY .git ./.git
@@ -10,7 +10,7 @@ COPY src/ ./src/
 RUN npx tsup src/index.ts --format esm --target node22 --external isolated-vm --external better-sqlite3 --external bcrypt --external esbuild
 
 # Production stage
-FROM node:22-slim AS production
+FROM node:26-slim AS production
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ wget curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
