@@ -31,8 +31,8 @@ clean: ## Remove all unused Docker images and build cache
 dev: ## Start backend in dev mode (hot reload)
 	npm run dev
 
-seed: ## Populate with demo data
-	node scripts/seed-demo.mjs
+seed: ## Populate with demo data (usage: make seed USER=admin PASS=mypass)
+	node scripts/seed-demo.mjs http://localhost:3001 $(USER) $(PASS)
 
 test: ## Run test suite
 	npm test
