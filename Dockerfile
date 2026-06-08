@@ -14,10 +14,9 @@ FROM node:22-slim AS production
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ wget curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
-RUN which npm && npm --version
 
 COPY package.json package-lock.json* ./
-RUN npm install --omit=dev && npm cache clean --force
+RUN npm pkg delete scripts.prepare && npm install --omit=dev && npm cache clean --force
 COPY --from=builder /app/dist ./dist/
 COPY --from=builder /tmp/build-info.json ./dist/build-info.json
 COPY src/automations/sandbox-types.d.ts ./dist/automations/sandbox-types.d.ts
