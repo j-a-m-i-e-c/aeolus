@@ -13,9 +13,12 @@
  *   node scripts/seed-demo.mjs [url] [username] [password]
  *
  * Examples:
- *   node scripts/seed-demo.mjs                                    # Fresh DB (creates admin)
- *   node scripts/seed-demo.mjs http://localhost:3001 admin mypass  # Existing account
- *   node scripts/seed-demo.mjs http://192.168.0.40:3001           # Remote Pi (fresh DB)
+ *   node scripts/seed-demo.mjs http://localhost:3001 admin mypass
+ *   node scripts/seed-demo.mjs http://192.168.0.40:3001 admin mypass
+ *
+ * Prerequisites:
+ *   1. Aeolus must be running (docker compose up)
+ *   2. An admin account must be created via the dashboard first
  */
 
 const API = process.argv[2] || "http://localhost:3001";
@@ -40,49 +43,37 @@ async function api(method, path, body) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// 0. AUTHENTICATE (setup admin if needed, then login)
+// 0. AUTHENTICATE
 // ═══════════════════════════════════════════════════════════════════════
 console.log("0. Authenticating...");
-
-const SEED_USER = "admin";
-const SEED_PASS = "aeolus-demo-2026";
 
 // Check if setup is needed
 const statusRes = await fetch(`${API}/api/auth/status`);
 const status = await statusRes.json().catch(() => ({}));
 
 if (status.needsSetup) {
-  // Create admin account
-  const setupRes = await fetch(`${API}/api/auth/setup`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username: SEED_USER, password: SEED_PASS }),
-  });
-  const setupData = await setupRes.json().catch(() => ({}));
-  if (setupRes.ok) {
-    authToken = setupData.accessToken;
-    console.log(`  ✓ Created admin account (${SEED_USER})`);
-  } else {
-    console.error("  ✗ Failed to create admin:", setupData);
-    process.exit(1);
-  }
+  console.error("  ✗ Admin account not set up yet.");
+  console.error("    Visit the dashboard first to create your admin account,");
+  console.error("    then run this script with your credentials:");
+  console.error(`    node scripts/seed-demo.mjs ${API} <username> <password>`);
+  process.exit(1);
+}
+
+// Login
+const loginRes = await fetch(`${API}/api/auth/login`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ username: SEED_USER, password: SEED_PASS }),
+});
+const loginData = await loginRes.json().catch(() => ({}));
+if (loginRes.ok) {
+  authToken = loginData.accessToken;
+  console.log(`  ✓ Logged in as ${SEED_USER}`);
 } else {
-  // Login with existing account
-  const loginRes = await fetch(`${API}/api/auth/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username: SEED_USER, password: SEED_PASS }),
-  });
-  const loginData = await loginRes.json().catch(() => ({}));
-  if (loginRes.ok) {
-    authToken = loginData.accessToken;
-    console.log(`  ✓ Logged in as ${SEED_USER}`);
-  } else {
-    console.error(`  ✗ Login failed for "${SEED_USER}".`);
-    console.error(`    Usage: node scripts/seed-demo.mjs [url] [username] [password]`);
-    console.error(`    Example: node scripts/seed-demo.mjs http://localhost:3001 admin mypassword`);
-    process.exit(1);
-  }
+  console.error(`  ✗ Login failed for "${SEED_USER}".`);
+  console.error(`    Usage: node scripts/seed-demo.mjs [url] [username] [password]`);
+  console.error(`    Example: node scripts/seed-demo.mjs http://localhost:3001 admin mypassword`);
+  process.exit(1);
 }
 
 // ═══════════════════════════════════════════════════════════════════════
