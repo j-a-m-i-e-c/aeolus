@@ -14,6 +14,7 @@ FROM node:22-slim AS production
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ wget curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
+RUN which npm && npm --version
 
 COPY package.json package-lock.json* ./
 RUN npm install --omit=dev && npm cache clean --force
