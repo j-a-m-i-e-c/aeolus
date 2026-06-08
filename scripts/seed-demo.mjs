@@ -1721,11 +1721,11 @@ console.log("\n4. Creating dashboard layout...");
 const now = new Date().toISOString();
 
 const tabs = [
-  { id: "tab-garden", label: "Garden", icon: "sprout", order: 0, createdAt: now },
-  { id: "tab-aquarium", label: "Aquarium", icon: "fish", order: 1, createdAt: now },
-  { id: "tab-brewery", label: "Brewery", icon: "beer", order: 2, createdAt: now },
-  { id: "tab-energy", label: "Energy", icon: "zap", order: 3, createdAt: now },
-  { id: "tab-weather", label: "Weather", icon: "cloud-sun", order: 4, createdAt: now },
+  { id: "tab-garden", name: "Garden", icon: "sprout", order: 0, createdAt: now },
+  { id: "tab-aquarium", name: "Aquarium", icon: "fish", order: 1, createdAt: now },
+  { id: "tab-brewery", name: "Brewery", icon: "beer", order: 2, createdAt: now },
+  { id: "tab-energy", name: "Energy", icon: "zap", order: 3, createdAt: now },
+  { id: "tab-weather", name: "Weather", icon: "cloud-sun", order: 4, createdAt: now },
 ];
 
 const panes = [
