@@ -77,6 +77,24 @@ if (loginRes.ok) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
+// 0b. CLEAN EXISTING DATA
+// ═══════════════════════════════════════════════════════════════════════
+console.log("\n   Cleaning existing data...");
+
+// Delete all existing automations
+const existingRules = await api("GET", "/api/automations");
+if (Array.isArray(existingRules)) {
+  for (const rule of existingRules) {
+    await api("DELETE", `/api/automations/${rule.id}`);
+  }
+  if (existingRules.length > 0) console.log(`  ✓ Deleted ${existingRules.length} existing automations`);
+}
+
+// Clear layout
+await api("PUT", "/api/layout", { tabs: [], panes: [] });
+console.log("  ✓ Cleared dashboard layout");
+
+// ═══════════════════════════════════════════════════════════════════════
 // 1. PUBLISH MOCK DEVICES
 // ═══════════════════════════════════════════════════════════════════════
 console.log("\n1. Publishing mock devices...");
