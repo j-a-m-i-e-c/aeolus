@@ -34,6 +34,12 @@ dev: ## Start backend in dev mode (hot reload)
 seed: ## Populate with demo data (usage: make seed USER=admin PASS=mypass)
 	node scripts/seed-demo.mjs http://localhost:3001 $(USER) $(PASS)
 
+reset: ## Wipe database and restart fresh (destroys all data)
+	docker compose down
+	rm -f data/aeolus.db
+	docker compose up -d
+	@echo "Database wiped. Create admin at http://localhost:3000, then run: make seed USER=admin PASS=yourpass"
+
 reset: ## Wipe database and restart fresh (deletes all data!)
 	docker compose down
 	rm -f data/aeolus.db
