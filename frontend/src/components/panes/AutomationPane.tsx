@@ -194,7 +194,7 @@ export function AutomationPane({ config, paneId }: Props) {
       } else {
         setNotFound(true);
       }
-    } catch (err) {
+    } catch (_err) {
       setFetchError("Failed to load automation");
     } finally {
       setLoading(false);
@@ -460,7 +460,6 @@ export function AutomationPane({ config, paneId }: Props) {
   // read helper — returns value for a given key from the state map
   const read = useCallback(
     (key: string) => stateMap.get(key),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [ruleState],
   );
 

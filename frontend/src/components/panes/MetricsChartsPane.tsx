@@ -22,7 +22,7 @@ const CHART_DEFS = [
   { key: "httpRequestRate", label: "HTTP Request Rate", unit: "req/s" },
 ] as const;
 
-export function MetricsChartsPane({ config, paneId }: Props) {
+export function MetricsChartsPane({ config: _config, paneId: _paneId }: Props) {
   const { timeRange, chartData, loading, error, setTimeRange, startPolling, stopPolling } =
     useMetricsHistoryStore();
 

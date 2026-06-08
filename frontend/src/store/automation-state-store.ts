@@ -33,7 +33,7 @@ export const useAutomationStateStore = create<AutomationStateState>((set) => ({
     })),
   clearRuleState: (ruleId) =>
     set((prev) => {
-      const { [ruleId]: _, ...rest } = prev.stateByRule;
+      const { [ruleId]: _removed, ...rest } = prev.stateByRule;
       return { stateByRule: rest };
     }),
 }));

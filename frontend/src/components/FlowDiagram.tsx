@@ -41,14 +41,14 @@ export function FlowDiagram({ trigger, conditions, actions }: FlowDiagramProps) 
 
   // Compute condition positions
   const conditionPositions: number[] = [];
-  for (const _c of conditions) {
+  for (const _condition of conditions) {
     conditionPositions.push(y);
     y += DIAMOND_SIZE * 2 + GAP;
   }
 
   // Compute action positions
   const actionPositions: number[] = [];
-  for (const _a of actions) {
+  for (const _action of actions) {
     actionPositions.push(y);
     y += NODE_H + GAP;
   }

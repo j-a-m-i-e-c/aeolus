@@ -3,7 +3,6 @@
 import { motion } from "framer-motion";
 import { X, Lightbulb, Thermometer, ToggleLeft, Wind, Clock } from "lucide-react";
 import { sendAction } from "../lib/api-client";
-import type { Device } from "../store/device-store";
 import { useDeviceStore } from "../store/device-store";
 
 const TYPE_ICONS = {

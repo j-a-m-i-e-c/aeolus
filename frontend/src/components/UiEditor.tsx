@@ -1,6 +1,6 @@
 // frontend/src/components/UiEditor.tsx — Monaco editor for custom automation UI components (TSX)
 
-import { useRef, useEffect, useCallback } from "react";
+import { useRef, useCallback } from "react";
 import Editor, { OnMount, OnChange } from "@monaco-editor/react";
 import type { editor } from "monaco-editor";
 import { authFetch } from "../lib/auth-fetch";

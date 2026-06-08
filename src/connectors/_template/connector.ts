@@ -18,8 +18,6 @@
 import type {
   Connector,
   ConnectorHealthStatus,
-  SetupStepDescriptor,
-  SetupStepResult,
 } from "../connector.interface.js";
 import type { Device, Action } from "../../core/types.js";
 
@@ -142,7 +140,7 @@ export class TemplateConnector implements Connector {
    * @param action - Contains deviceId, action type, and params.
    * @throws If the device is unknown or the action fails.
    */
-  async execute(action: Action): Promise<void> {
+  async execute(_action: Action): Promise<void> {
     // TODO: Route the action to the correct device
     // Example:
     //   const device = this.devices.get(action.deviceId);

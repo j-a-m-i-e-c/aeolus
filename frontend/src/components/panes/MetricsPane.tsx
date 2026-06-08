@@ -43,7 +43,7 @@ function SkeletonCard() {
   );
 }
 
-export function MetricsPane({ config, paneId }: Props) {
+export function MetricsPane({ config: _config, paneId: _paneId }: Props) {
   const { summary, loading, error, startPolling, stopPolling } = useMetricsStore();
 
   useEffect(() => {

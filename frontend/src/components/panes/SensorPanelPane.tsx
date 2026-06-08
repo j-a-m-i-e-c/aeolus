@@ -7,6 +7,6 @@ interface Props {
   config: PaneConfig;
 }
 
-export function SensorPanelPane({ config }: Props) {
+export function SensorPanelPane({ config: _config }: Props) {
   return <SensorPanel />;
 }

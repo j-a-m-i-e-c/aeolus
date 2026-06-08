@@ -320,7 +320,6 @@ export class DataStore {
 
     // Resolve time range
     let fromTs: number | undefined;
-    let toTs: number | undefined;
 
     if (options?.from !== undefined) {
       if (typeof options.from === "string") {
@@ -331,7 +330,7 @@ export class DataStore {
       }
     }
 
-    toTs = options?.to ?? Date.now();
+    const toTs = options?.to ?? Date.now();
 
     // Handle aggregation queries
     if (options?.aggregate) {
@@ -639,7 +638,7 @@ export class DataStore {
       return;
     }
 
-    let totalPruned = 0;
+    let _totalPruned = 0;
 
     for (const row of rows) {
       const collectionName = row.name;
@@ -657,7 +656,7 @@ export class DataStore {
         this.db.prepare(
           "DELETE FROM ds_records WHERE collection = ? AND timestamp < ?"
         ).run(collectionName, cutoffMs);
-        totalPruned += prunedCount;
+        _totalPruned += prunedCount;
         logger.info(
           { collection: collectionName, pruned: prunedCount, retentionDays },
           "Retention enforcement: pruned expired records",

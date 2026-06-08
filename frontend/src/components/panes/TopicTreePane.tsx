@@ -7,6 +7,6 @@ interface Props {
   config: PaneConfig;
 }
 
-export function TopicTreePane({ config }: Props) {
+export function TopicTreePane({ config: _config }: Props) {
   return <TopicTree />;
 }

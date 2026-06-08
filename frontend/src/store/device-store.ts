@@ -74,7 +74,7 @@ export const useDeviceStore = create<DeviceState>((set) => ({
     }),
   removeDevice: (deviceId) =>
     set((prev) => {
-      const { [deviceId]: _, ...rest } = prev.devices;
+      const { [deviceId]: _removed, ...rest } = prev.devices;
       return { devices: rest };
     }),
   setHealth: (health) => set({ health }),

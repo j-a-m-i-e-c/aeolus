@@ -673,7 +673,7 @@ function registerUiRule(
   if (stored.rule_type === "script" && stored.compiled_js) {
     // Script rule — action runs compiled JS through the Sandbox
     const compiledJs = stored.compiled_js;
-    const action = async (context: EventContext) => {
+    const action = async (_context: EventContext) => {
       // Sandbox execution is handled by AutomationEngine in task 8.1
       logger.info({ ruleId: stored.id, name: stored.name }, "Script rule triggered (sandbox dispatch pending engine wiring)");
     };
@@ -693,7 +693,7 @@ function registerUiRule(
   } else {
     // Form rule — dispatch through ActionExecutor
     const params = JSON.parse(stored.action_params);
-    const action = async (context: EventContext) => {
+    const action = async (_context: EventContext) => {
       const descriptor: ActionDescriptor = {
         type: stored.action_type,
         target: stored.action_target,

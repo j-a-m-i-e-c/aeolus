@@ -2480,7 +2480,7 @@ await api("POST", "/api/data-store/collections", {
   description: "Solar production, grid consumption, and battery level over time",
   retentionDays: 90,
 });
-const energyRecords = generateTimeSeries(168, 30, (i, total) => {
+const energyRecords = generateTimeSeries(168, 30, (i, _total) => {
   const hour = new Date(Date.now() - i * 30 * 60_000).getHours();
   const daylight = hour >= 6 && hour <= 20;
   const solarBase = daylight ? 2.5 + Math.sin((hour - 6) / 14 * Math.PI) * 3.5 : 0;

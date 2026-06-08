@@ -16,7 +16,6 @@ import {
   revokeRefreshToken,
 } from "./token-service.js";
 import { getUserByUsername, getUser, verifyPassword } from "./user-service.js";
-import type { User } from "./user-service.js";
 import logger from "../logger.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────

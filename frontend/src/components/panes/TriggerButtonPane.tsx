@@ -1,7 +1,7 @@
 // frontend/src/components/panes/TriggerButtonPane.tsx — Configurable trigger button pane
 
 import { useState } from "react";
-import { Zap, Loader2, Check } from "lucide-react";
+import { Zap, Check } from "lucide-react";
 import type { PaneConfig } from "../../types/dashboard";
 import { authFetch } from "../../lib/auth-fetch";
 

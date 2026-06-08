@@ -20,7 +20,7 @@ function deviceTypeBadge(type: string): string {
   }
 }
 
-export function KasaControlPane({ config }: Props) {
+export function KasaControlPane({ config: _config }: Props) {
   const devices = useDeviceStore((s) => s.devices);
   const updateDevice = useDeviceStore((s) => s.updateDevice);
 

@@ -246,7 +246,6 @@ function SetupWizard({
     tick();
 
     return () => stopPolling();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentStepIdx]);
 
   const executeStep = async () => {
@@ -553,7 +552,7 @@ export function ConnectorsPage() {
       setConfiguringType(null);
       setConfigValues({});
       await refresh();
-    } catch (err) {
+    } catch (_err) {
       // Error is shown via the API client
     }
     setActionLoading(null);

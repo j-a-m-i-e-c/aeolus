@@ -112,7 +112,7 @@ export function CollectionList() {
   }
 
   /** Strip the _metrics: prefix for cleaner display in the observability section */
-  function formatSystemName(name: string): string {
+  function _formatSystemName(name: string): string {
     return name.replace(SYSTEM_COLLECTION_PREFIX, "");
   }
 

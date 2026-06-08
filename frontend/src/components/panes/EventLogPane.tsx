@@ -7,6 +7,6 @@ interface Props {
   config: PaneConfig;
 }
 
-export function EventLogPane({ config }: Props) {
+export function EventLogPane({ config: _config }: Props) {
   return <EventLog />;
 }

@@ -47,7 +47,7 @@ interface Props {
   config: PaneConfig;
 }
 
-export function HueControlPane({ config }: Props) {
+export function HueControlPane({ config: _config }: Props) {
   const devices = useDeviceStore((s) => s.devices);
   const updateDevice = useDeviceStore((s) => s.updateDevice);
   const [localBri, setLocalBri] = useState<Record<string, number>>({});

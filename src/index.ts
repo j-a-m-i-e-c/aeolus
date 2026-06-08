@@ -34,7 +34,6 @@ import { createConnectorRoutes } from "./api/routes/connector.routes.js";
 import { requestLogger } from "./api/middleware/request-logger.js";
 import { errorHandler } from "./api/middleware/error-handler.js";
 import { corsMiddleware } from "./api/middleware/cors-config.js";
-import { apiRateLimiter } from "./api/middleware/rate-limiter.js";
 import { authenticate } from "./auth/auth-middleware.js";
 import { createAuthRoutes } from "./api/routes/auth.routes.js";
 import { ensureBackendCredential } from "./auth/mqtt-credential-service.js";

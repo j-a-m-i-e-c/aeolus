@@ -156,7 +156,7 @@ export const handleDelay: ActionHandler = async (action, ruleId, deps) => {
 };
 
 /** Send an HTTP webhook request. */
-export const handleWebhook: ActionHandler = async (action, ruleId, deps) => {
+export const handleWebhook: ActionHandler = async (action, _ruleId, _deps) => {
   const method = typeof action.params.method === "string" ? action.params.method : "POST";
   const headers = (action.params.headers as Record<string, string>) ?? {};
   const body = action.params.body !== undefined ? String(action.params.body) : undefined;

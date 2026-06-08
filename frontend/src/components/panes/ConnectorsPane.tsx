@@ -7,6 +7,6 @@ interface Props {
   config: PaneConfig;
 }
 
-export function ConnectorsPane({ config }: Props) {
+export function ConnectorsPane({ config: _config }: Props) {
   return <ConnectorsPage />;
 }

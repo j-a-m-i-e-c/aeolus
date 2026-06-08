@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useDeviceStore } from "../store/device-store";
-import { sendAction, publishMqtt } from "../lib/api-client";
+import { publishMqtt } from "../lib/api-client";
 import { motion, AnimatePresence } from "framer-motion";
 import { Search, Lightbulb, Thermometer, ToggleLeft, Wind, Send } from "lucide-react";
 

@@ -22,7 +22,7 @@ interface Props {
   config: PaneConfig;
 }
 
-export function ScheduleViewerPane({ config }: Props) {
+export function ScheduleViewerPane({ config: _config }: Props) {
   const [automations, setAutomations] = useState<Automation[]>([]);
   const [lastFiredMap, setLastFiredMap] = useState<Record<string, string | null>>({});
   const [loading, setLoading] = useState(true);

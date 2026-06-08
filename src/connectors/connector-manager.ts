@@ -9,7 +9,6 @@ import type {
   Connector,
   ConnectorInstanceInfo,
   ConnectorRecord,
-  ConnectorHealthStatus,
   SetupStepDescriptor,
   SetupStepResult,
   CapabilityDescriptor,

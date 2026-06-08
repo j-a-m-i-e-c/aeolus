@@ -7,6 +7,6 @@ interface Props {
   config: PaneConfig;
 }
 
-export function DeviceGridPane({ config }: Props) {
+export function DeviceGridPane({ config: _config }: Props) {
   return <DeviceGrid />;
 }

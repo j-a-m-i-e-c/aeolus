@@ -161,7 +161,7 @@ export function TimeSeriesChart({ records }: TimeSeriesChartProps) {
 
   // Extract series data
   const series = useMemo(() => {
-    return visibleFields.map((field, idx) => {
+    return visibleFields.map((field, _idx) => {
       const points = sorted
         .map((record) => {
           const val = record.payload[field];

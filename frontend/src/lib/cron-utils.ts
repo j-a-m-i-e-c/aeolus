@@ -33,7 +33,7 @@ export function isValidCron(expression: string): boolean {
   if (parts.length !== 5) return false;
 
   // Each field can be: *, */N, N, N-N, N,N, or combinations with /N step
-  const fieldPattern = /^(\*|\d{1,2}(-\d{1,2})?(,(\d{1,2}(-\d{1,2})?))*)(\/(\ d{1,2}))?$/;
+  const _fieldPattern = /^(\*|\d{1,2}(-\d{1,2})?(,(\d{1,2}(-\d{1,2})?))*)(\/(\ d{1,2}))?$/;
 
   // More permissive pattern that handles all valid cron field formats
   const validField = (field: string): boolean => {

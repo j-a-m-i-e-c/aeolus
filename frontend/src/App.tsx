@@ -8,7 +8,6 @@ import { ToastContainer } from "./components/ToastContainer";
 import { CommandPalette } from "./components/CommandPalette";
 import { ConnectorsPage } from "./components/ConnectorsPage";
 import { DataStorePage } from "./pages/DataStorePage";
-import { UsersPage } from "./pages/UsersPage";
 import SecurityPage from "./pages/SecurityPage";
 import { SystemPage } from "./components/SystemPage";
 import { TabLayout } from "./components/TabLayout";

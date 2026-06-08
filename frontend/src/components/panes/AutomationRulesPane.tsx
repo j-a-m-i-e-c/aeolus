@@ -7,6 +7,6 @@ interface Props {
   config: PaneConfig;
 }
 
-export function AutomationRulesPane({ config }: Props) {
+export function AutomationRulesPane({ config: _config }: Props) {
   return <AutomationsPage />;
 }

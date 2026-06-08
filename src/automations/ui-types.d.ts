@@ -111,7 +111,7 @@ declare namespace React {
     props: Record<string, unknown>;
     key: string | number | null;
   }
-  type FC<P = {}> = (props: P) => ReactElement | null;
+  type FC<P = Record<string, unknown>> = (props: P) => ReactElement | null;
   function useState<T>(initialState: T | (() => T)): [T, (value: T | ((prev: T) => T)) => void];
   function useEffect(effect: () => void | (() => void), deps?: unknown[]): void;
   function useCallback<T extends (...args: any[]) => any>(callback: T, deps: unknown[]): T;
@@ -120,6 +120,7 @@ declare namespace React {
 }
 
 declare namespace JSX {
+  // eslint-disable-next-line @typescript-eslint/no-empty-object-type
   interface Element extends React.ReactElement {}
   interface IntrinsicElements {
     [elemName: string]: any;

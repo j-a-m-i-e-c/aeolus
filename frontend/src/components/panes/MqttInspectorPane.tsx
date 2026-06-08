@@ -7,6 +7,6 @@ interface Props {
   config: PaneConfig;
 }
 
-export function MqttInspectorPane({ config }: Props) {
+export function MqttInspectorPane({ config: _config }: Props) {
   return <MqttInspector />;
 }

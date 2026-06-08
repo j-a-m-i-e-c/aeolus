@@ -13,7 +13,7 @@ export default function MqttSecurityPage() {
 
   useEffect(() => {
     fetchStatus().then(() => setInitialized(true));
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   if (!initialized && loading) {
     return (

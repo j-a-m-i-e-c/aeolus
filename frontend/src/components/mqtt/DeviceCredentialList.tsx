@@ -15,7 +15,7 @@ export default function DeviceCredentialList() {
 
   useEffect(() => {
     fetchCredentials();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();

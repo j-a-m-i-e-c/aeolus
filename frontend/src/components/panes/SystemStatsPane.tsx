@@ -7,6 +7,6 @@ interface Props {
   config: PaneConfig;
 }
 
-export function SystemStatsPane({ config }: Props) {
+export function SystemStatsPane({ config: _config }: Props) {
   return <SystemPage />;
 }
