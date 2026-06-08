@@ -106,11 +106,11 @@ export function createSystemRoutes(): Router {
 
   /** GET /api/system/version — build-time version info + update check */
   router.get("/version", async (_req, res) => {
-    // Read build info from file baked at Docker build time
+    // Read build info from file baked at container build time
     let commit = "unknown";
     let buildDate = "unknown";
     try {
-      // In Docker: /app/dist/build-info.json. Locally: try relative to cwd.
+      // In production: /app/dist/build-info.json. Locally: try relative to cwd.
       const candidates = [
         path.join(process.cwd(), "dist", "build-info.json"),
         path.join(process.cwd(), "build-info.json"),
@@ -125,7 +125,7 @@ export function createSystemRoutes(): Router {
         } catch { continue; }
       }
     } catch {
-      // Fall back to env vars (for local dev without Docker)
+      // Fall back to env vars (for local dev without container)
       commit = process.env.BUILD_COMMIT || "unknown";
       buildDate = process.env.BUILD_DATE || "unknown";
     }
