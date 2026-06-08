@@ -9,11 +9,18 @@
  *   4. Energy — Solar dashboard + Battery manager
  *   5. Weather — Weather station + Indoor climate
  *
- * Run:
- *   node scripts/seed-demo.mjs http://localhost:3001
+ * Usage:
+ *   node scripts/seed-demo.mjs [url] [username] [password]
+ *
+ * Examples:
+ *   node scripts/seed-demo.mjs                                    # Fresh DB (creates admin)
+ *   node scripts/seed-demo.mjs http://localhost:3001 admin mypass  # Existing account
+ *   node scripts/seed-demo.mjs http://192.168.0.40:3001           # Remote Pi (fresh DB)
  */
 
 const API = process.argv[2] || "http://localhost:3001";
+const SEED_USER = process.argv[3] || "admin";
+const SEED_PASS = process.argv[4] || "aeolus-demo-2026";
 console.log(`\n🌬️  Seeding Aeolus demo → ${API}\n`);
 
 let authToken = null;
@@ -71,8 +78,9 @@ if (status.needsSetup) {
     authToken = loginData.accessToken;
     console.log(`  ✓ Logged in as ${SEED_USER}`);
   } else {
-    console.error(`  ✗ Login failed. Create an account first or use default credentials (${SEED_USER}/${SEED_PASS})`);
-    console.error("    Tip: Delete data/aeolus.db and restart for a fresh setup");
+    console.error(`  ✗ Login failed for "${SEED_USER}".`);
+    console.error(`    Usage: node scripts/seed-demo.mjs [url] [username] [password]`);
+    console.error(`    Example: node scripts/seed-demo.mjs http://localhost:3001 admin mypassword`);
     process.exit(1);
   }
 }
