@@ -16,8 +16,12 @@
 const API = process.argv[2] || "http://localhost:3001";
 console.log(`\n🌬️  Seeding Aeolus demo → ${API}\n`);
 
+let authToken = null;
+
 async function api(method, path, body) {
-  const opts = { method, headers: { "Content-Type": "application/json" } };
+  const headers = { "Content-Type": "application/json" };
+  if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
+  const opts = { method, headers };
   if (body) opts.body = JSON.stringify(body);
   const res = await fetch(`${API}${path}`, opts);
   const data = await res.json().catch(() => ({}));
@@ -29,9 +33,54 @@ async function api(method, path, body) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
+// 0. AUTHENTICATE (setup admin if needed, then login)
+// ═══════════════════════════════════════════════════════════════════════
+console.log("0. Authenticating...");
+
+const SEED_USER = "admin";
+const SEED_PASS = "aeolus-demo-2026";
+
+// Check if setup is needed
+const statusRes = await fetch(`${API}/api/auth/status`);
+const status = await statusRes.json().catch(() => ({}));
+
+if (status.needsSetup) {
+  // Create admin account
+  const setupRes = await fetch(`${API}/api/auth/setup`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username: SEED_USER, password: SEED_PASS }),
+  });
+  const setupData = await setupRes.json().catch(() => ({}));
+  if (setupRes.ok) {
+    authToken = setupData.accessToken;
+    console.log(`  ✓ Created admin account (${SEED_USER})`);
+  } else {
+    console.error("  ✗ Failed to create admin:", setupData);
+    process.exit(1);
+  }
+} else {
+  // Login with existing account
+  const loginRes = await fetch(`${API}/api/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username: SEED_USER, password: SEED_PASS }),
+  });
+  const loginData = await loginRes.json().catch(() => ({}));
+  if (loginRes.ok) {
+    authToken = loginData.accessToken;
+    console.log(`  ✓ Logged in as ${SEED_USER}`);
+  } else {
+    console.error(`  ✗ Login failed. Create an account first or use default credentials (${SEED_USER}/${SEED_PASS})`);
+    console.error("    Tip: Delete data/aeolus.db and restart for a fresh setup");
+    process.exit(1);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
 // 1. PUBLISH MOCK DEVICES
 // ═══════════════════════════════════════════════════════════════════════
-console.log("1. Publishing mock devices...");
+console.log("\n1. Publishing mock devices...");
 
 const mqttDevices = [
   // ── Garden ──
