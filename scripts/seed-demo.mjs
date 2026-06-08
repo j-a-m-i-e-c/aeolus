@@ -95,9 +95,27 @@ await api("PUT", "/api/layout", { tabs: [], panes: [] });
 console.log("  ✓ Cleared dashboard layout");
 
 // ═══════════════════════════════════════════════════════════════════════
-// 1. PUBLISH MOCK DEVICES
+// 1. CLEAN EXISTING DATA
 // ═══════════════════════════════════════════════════════════════════════
-console.log("\n1. Publishing mock devices...");
+console.log("\n1. Cleaning existing automations and layout...");
+
+// Delete all existing automations
+const existing = await api("GET", "/api/automations");
+if (existing && Array.isArray(existing)) {
+  for (const rule of existing) {
+    await api("DELETE", `/api/automations/${rule.id}`);
+  }
+  console.log(`  ✓ Deleted ${existing.length} existing automations`);
+}
+
+// Clear layout
+await api("PUT", "/api/layout", { tabs: [], panes: [] });
+console.log("  ✓ Cleared dashboard layout");
+
+// ═══════════════════════════════════════════════════════════════════════
+// 2. PUBLISH MOCK DEVICES
+// ═══════════════════════════════════════════════════════════════════════
+console.log("\n2. Publishing mock devices...");
 
 const mqttDevices = [
   // ── Garden ──
@@ -184,9 +202,9 @@ console.log(`  ✓ Published ${mqttDevices.length} device messages`);
 
 
 // ═══════════════════════════════════════════════════════════════════════
-// 2. CREATE AUTOMATIONS
+// 3. CREATE AUTOMATIONS
 // ═══════════════════════════════════════════════════════════════════════
-console.log("\n2. Creating automations...");
+console.log("\n3. Creating automations...");
 
 // ─────────────────────────────────────────────────────────────────────
 // TAB 1: GARDEN — Irrigation Controller (Hero)
@@ -1696,9 +1714,9 @@ if (indoorClimate) console.log("  ✓ Indoor Climate:", indoorClimate.id);
 
 
 // ═══════════════════════════════════════════════════════════════════════
-// 3. CREATE DASHBOARD LAYOUT
+// 4. CREATE DASHBOARD LAYOUT
 // ═══════════════════════════════════════════════════════════════════════
-console.log("\n3. Creating dashboard layout...");
+console.log("\n4. Creating dashboard layout...");
 
 const now = new Date().toISOString();
 
@@ -1736,9 +1754,9 @@ await api("PUT", "/api/layout", { tabs, panes });
 console.log(`  ✓ Layout: ${tabs.length} tabs, ${panes.length} panes`);
 
 // ═══════════════════════════════════════════════════════════════════════
-// 4. FIRE AUTOMATIONS FOR EXECUTION HISTORY
+// 5. FIRE AUTOMATIONS FOR EXECUTION HISTORY
 // ═══════════════════════════════════════════════════════════════════════
-console.log("\n4. Generating execution history...");
+console.log("\n5. Generating execution history...");
 
 const allRules = [
   irrigationController, greenhouse,
