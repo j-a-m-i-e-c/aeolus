@@ -1730,24 +1730,24 @@ const tabs = [
 
 const panes = [
   // Garden (hero tab — irrigation controller gets full width top)
-  { id: "pane-irrigation", tabId: "tab-garden", paneType: "automation", config: { ruleId: irrigationController?.id || "" }, x: 0, y: 0, w: 12, h: 12, createdAt: now },
-  { id: "pane-greenhouse", tabId: "tab-garden", paneType: "automation", config: { ruleId: greenhouse?.id || "" }, x: 0, y: 12, w: 12, h: 9, createdAt: now },
+  { id: "pane-irrigation", tabId: "tab-garden", paneType: "automation", config: { ruleId: irrigationController?.id || "", ruleName: "Irrigation Controller" }, x: 0, y: 0, w: 12, h: 12, createdAt: now },
+  { id: "pane-greenhouse", tabId: "tab-garden", paneType: "automation", config: { ruleId: greenhouse?.id || "", ruleName: "Greenhouse" }, x: 0, y: 12, w: 12, h: 9, createdAt: now },
 
   // Aquarium
-  { id: "pane-reef", tabId: "tab-aquarium", paneType: "automation", config: { ruleId: reefMonitor?.id || "" }, x: 0, y: 0, w: 6, h: 10, createdAt: now },
-  { id: "pane-lighting", tabId: "tab-aquarium", paneType: "automation", config: { ruleId: lightingController?.id || "" }, x: 6, y: 0, w: 6, h: 10, createdAt: now },
+  { id: "pane-reef", tabId: "tab-aquarium", paneType: "automation", config: { ruleId: reefMonitor?.id || "", ruleName: "Reef Monitor" }, x: 0, y: 0, w: 6, h: 10, createdAt: now },
+  { id: "pane-lighting", tabId: "tab-aquarium", paneType: "automation", config: { ruleId: lightingController?.id || "", ruleName: "Lighting Controller" }, x: 6, y: 0, w: 6, h: 10, createdAt: now },
 
   // Brewery
-  { id: "pane-fermentation", tabId: "tab-brewery", paneType: "automation", config: { ruleId: fermentationTracker?.id || "" }, x: 0, y: 0, w: 6, h: 10, createdAt: now },
-  { id: "pane-brew-day", tabId: "tab-brewery", paneType: "automation", config: { ruleId: brewDayTimer?.id || "" }, x: 6, y: 0, w: 6, h: 10, createdAt: now },
+  { id: "pane-fermentation", tabId: "tab-brewery", paneType: "automation", config: { ruleId: fermentationTracker?.id || "", ruleName: "Fermentation Tracker" }, x: 0, y: 0, w: 6, h: 10, createdAt: now },
+  { id: "pane-brew-day", tabId: "tab-brewery", paneType: "automation", config: { ruleId: brewDayTimer?.id || "", ruleName: "Brew Day Timer" }, x: 6, y: 0, w: 6, h: 10, createdAt: now },
 
   // Energy
-  { id: "pane-solar", tabId: "tab-energy", paneType: "automation", config: { ruleId: solarDashboard?.id || "" }, x: 0, y: 0, w: 7, h: 10, createdAt: now },
-  { id: "pane-battery", tabId: "tab-energy", paneType: "automation", config: { ruleId: batteryManager?.id || "" }, x: 7, y: 0, w: 5, h: 10, createdAt: now },
+  { id: "pane-solar", tabId: "tab-energy", paneType: "automation", config: { ruleId: solarDashboard?.id || "", ruleName: "Solar Dashboard" }, x: 0, y: 0, w: 7, h: 10, createdAt: now },
+  { id: "pane-battery", tabId: "tab-energy", paneType: "automation", config: { ruleId: batteryManager?.id || "", ruleName: "Battery Manager" }, x: 7, y: 0, w: 5, h: 10, createdAt: now },
 
   // Weather
-  { id: "pane-weather-station", tabId: "tab-weather", paneType: "automation", config: { ruleId: weatherStation?.id || "" }, x: 0, y: 0, w: 6, h: 10, createdAt: now },
-  { id: "pane-indoor-climate", tabId: "tab-weather", paneType: "automation", config: { ruleId: indoorClimate?.id || "" }, x: 6, y: 0, w: 6, h: 10, createdAt: now },
+  { id: "pane-weather-station", tabId: "tab-weather", paneType: "automation", config: { ruleId: weatherStation?.id || "", ruleName: "Weather Station" }, x: 0, y: 0, w: 6, h: 10, createdAt: now },
+  { id: "pane-indoor-climate", tabId: "tab-weather", paneType: "automation", config: { ruleId: indoorClimate?.id || "", ruleName: "Indoor Climate" }, x: 6, y: 0, w: 6, h: 10, createdAt: now },
 ];
 
 await api("PUT", "/api/layout", { tabs, panes });
