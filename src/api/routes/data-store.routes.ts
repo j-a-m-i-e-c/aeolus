@@ -102,13 +102,13 @@ export function createDataStoreRoutes(dataStore: DataStore): Router {
   router.post("/collections/:name/records", validate({ body: writeRecordBodySchema, params: collectionNameParamsSchema }), (req, res, next) => {
     try {
       const name = req.params.name as string;
-      const { payload, tags } = req.body;
+      const { payload, tags, timestamp } = req.body;
 
       if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
         throw new BadRequestError("Payload is required and must be a JSON object");
       }
 
-      dataStore.write(name, payload, { tags });
+      dataStore.write(name, payload, { tags, timestamp });
       res.status(201).json({ success: true });
     } catch (err) {
       if (err instanceof Error && err.message.includes("Data Store is not enabled")) {

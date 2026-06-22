@@ -204,6 +204,16 @@ describe("data-store.routes", () => {
       expect(mockDataStore.write).toHaveBeenCalledWith("sensors", { temperature: 22.5, humidity: 60 }, { tags: { location: "office" } });
     });
 
+    it("should pass an explicit timestamp through to write when provided", async () => {
+      const ts = 1_700_000_000_000;
+      const res = await request(app, "POST", "/api/data-store/collections/sensors/records", {
+        payload: { temperature: 19.1 },
+        timestamp: ts,
+      });
+      expect(res.status).toBe(201);
+      expect(mockDataStore.write).toHaveBeenCalledWith("sensors", { temperature: 19.1 }, { tags: undefined, timestamp: ts });
+    });
+
     it("should return 503 when data store is not enabled", async () => {
       mockDataStore.write.mockImplementation(() => {
         throw new Error("Data Store is not enabled");

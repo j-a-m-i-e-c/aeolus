@@ -20,6 +20,9 @@ export const writeRecordBodySchema = z.object({
     message: "Payload must be a JSON object, not an array",
   }),
   tags: z.record(z.string(), z.string().max(500)).optional(),
+  // Optional explicit record timestamp (epoch ms). Enables backdating historical
+  // records (e.g. seeding time-series demo data). Defaults to now when omitted.
+  timestamp: z.number().int().positive().optional(),
 });
 
 export const bucketKeyParamsSchema = z.object({
