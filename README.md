@@ -4,7 +4,7 @@
 
 <h1 align="center">Aeolus</h1>
 
-<h3 align="center">Self-hosted IoT platform for developers</h3>
+<h3 align="center">Local-first edge automation platform</h3>
 
 <p align="center">
   <img src="https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white" />
@@ -34,15 +34,15 @@
 
 ## What is Aeolus?
 
-Aeolus is a local-first IoT platform that bridges custom microcontrollers, commercial smart devices, and external APIs into one unified system — all running on a Raspberry Pi with one command.
+Aeolus is a local-first edge automation platform. It collects events from arbitrary hardware, executes sandboxed business logic, persists state, and exposes custom interfaces — all self-hosted on hardware you control. Home automation is the first domain it targets, but the architecture is domain-agnostic.
 
-Any MQTT device appears in the dashboard automatically when it publishes a message. Commercial ecosystems like Philips Hue and TP-Link Kasa plug in through a connector framework that handles discovery, pairing, and control without touching core code. Everything feeds the same internal event bus, so an ESP32 sensor, a Hue bulb, and a weather API all look the same to your automation logic.
+Everything runs on your LAN by default — fast responses, full privacy, no vendor accounts. Any MQTT device appears automatically when it publishes a message. Commercial ecosystems plug in through a connector framework designed so that any developer with unusual hardware can write support for it in an afternoon. Everything feeds the same internal event bus, so an ESP32 sensor, a Hue bulb, and a weather API all look identical to your automation logic.
 
-Automations are paired backend scripts and frontend components that talk through a reactive state bus. The backend runs in a secure V8 sandbox with access to devices, MQTT, HTTP, and a built-in time-series data store. The frontend is a live React component that renders the moment you save — no rebuild, no deploy. The Monaco editor gives you full IntelliSense across both.
+Each automation is a paired backend script and frontend component that communicate through a reactive state store. The backend runs in a secure V8 sandbox (isolated-vm — 32MB memory cap, 5-second timeout, no filesystem access). The frontend is a live React component that renders the moment you save. The Monaco editor gives you full IntelliSense across both.
 
-The dashboard is fully modular — create custom tabs, drag in panes, assign permissions per user group. Persistent storage runs on SQLite with configurable retention. Prometheus metrics are built in. The whole stack is three Docker containers and zero cloud dependencies.
+Because nothing depends on external services, the system keeps running if your internet drops, a vendor shuts down, or a cloud API changes pricing. That same property makes it deployable anywhere — a home, a workshop, a farm, a boat, a research station. Optional remote access via Cloudflare Tunnel when you want it.
 
-No cloud. No subscriptions. Just your LAN.
+Three Docker containers. One SQLite file. Zero subscriptions.
 
 <!-- TODO: Add hero screenshot of the dashboard here -->
 <!-- ![Dashboard Screenshot](docs/screenshots/dashboard.png) -->
@@ -59,7 +59,15 @@ docker compose up
 
 Open **http://localhost:3000** — that's it.
 
-Use the seed script (`node scripts/seed-demo.mjs`) to populate the platform with realistic demo data so you can explore without any hardware.
+### Explore Without Hardware
+
+The seed script populates the platform with realistic demo scenarios so you can explore the full feature set immediately:
+
+```bash
+make seed USER=admin PASS=yourpass
+```
+
+Each tab demonstrates a different domain — smart home, ocean research vessel, agricultural monitoring, underground mining, spacecraft systems, escape room, and a zombie apocalypse survival bunker — showing how the same platform adapts to wildly different environments. No physical devices required.
 
 <!-- TODO: Add screenshot of the welcome/onboarding screen here -->
 <!-- ![Welcome Screen](docs/screenshots/welcome.png) -->

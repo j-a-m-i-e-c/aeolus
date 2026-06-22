@@ -4,3 +4,9 @@ dist/
 *.db
 coverage/
 src/coverage/
+
+# Seed dev scratch files (validation harness + extracted legacy seed)
+scripts/seed/_*.mjs
+
+# Local working notes
+docs/temp-chatgpt-convo
