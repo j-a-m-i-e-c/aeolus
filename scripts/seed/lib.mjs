@@ -99,18 +99,27 @@ export async function publishDevices(api, devices) {
 /**
  * Create script automations. Returns a map of { key → ruleId } so layout
  * panes can reference automations by their stable module key.
- * @param {{key: string, name: string, triggerTopic?: string, scriptSource: string, uiSource?: string}[]} automations
+ *
+ * Each automation: { key, name, scriptSource, uiSource?, and EITHER
+ *   triggerTopic (MQTT) OR cron (cron expression) }.
+ * @param {{key: string, name: string, triggerTopic?: string, cron?: string, scriptSource: string, uiSource?: string}[]} automations
  */
 export async function createAutomations(api, automations) {
   const ids = {};
   for (const a of automations) {
-    const created = await api("POST", "/api/automations", {
+    const body = {
       name: a.name,
-      triggerTopic: a.triggerTopic || "none",
       ruleType: "script",
       scriptSource: a.scriptSource,
       uiSource: a.uiSource || undefined,
-    });
+    };
+    if (a.cron) {
+      body.triggerType = "cron";
+      body.cronExpression = a.cron;
+    } else {
+      body.triggerTopic = a.triggerTopic || "none";
+    }
+    const created = await api("POST", "/api/automations", body);
     if (created) {
       ids[a.key] = created.id;
       console.log(`  ✓ ${a.name}`);

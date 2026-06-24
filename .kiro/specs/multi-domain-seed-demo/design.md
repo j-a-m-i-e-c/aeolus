@@ -6,6 +6,12 @@ The seed demo replaces the current `scripts/seed-demo.mjs` with a richer multi-d
 
 The seed runs as a single script that authenticates against the API and creates everything via REST calls — same mechanism as the current seed.
 
+> **Intentionally not seeded: a "Local Conditions" tab.** Live, location-specific data (local
+> weather, fire danger, flood) is deliberately kept *out* of the seed so the demo runs anywhere
+> with zero config and no API keys. That tab is instead a hand-built worked example — see
+> [`docs/guides/local-conditions-tab.md`](../../../docs/guides/local-conditions-tab.md) — which
+> doubles as real-user dogfooding of the `http` global, cron triggers, and Data Store caching.
+
 ---
 
 ## Tab Designs
@@ -24,15 +30,13 @@ The seed runs as a single script that authenticates against the API and creates 
 | Smart Plug (Kettle) | plug | `{ on: false, power: 0, unit: "W" }` |
 | Thermostat | climate | `{ target: 21, current: 20.8, mode: "heat" }` |
 
-**Automations:**
-1. **Evening Mode** — when motion detected after 6pm, dim lights to 60% and set thermostat to comfort. UI shows current mode (day/evening/night) with a manual override toggle and live sensor readings.
-2. **Energy Monitor** — solar production vs consumption, battery level, grid import/export. UI shows power flow diagram with live values. *(Carry over from existing seed)*
-3. **Weather Station** — outdoor conditions + indoor room temperatures. UI shows weather overview with wind compass, UV index, and room-by-room temps. *(Carry over from existing seed)*
-4. **Reef Monitor** — aquarium pH, temperature, salinity with circular gauges. Dosing pump logic. *(Carry over from existing seed — may move to its own tab later)*
-5. **Lighting Controller** — aquarium light phase automation (dawn/day/dusk/moonlight/night cycle). *(Carry over from existing seed)*
-6. **Fermentation Tracker** — homebrew vessel monitoring with progress rings, gravity, temp deviation. *(Carry over from existing seed — may move to its own tab later)*
+**Automations:** (option b — home-only; aquarium/brewery carry-overs intentionally dropped)
+1. **Evening Mode** — motion + time-of-day drives lighting scenes and thermostat. UI shows day/evening/night selector, lights status, kitchen temp, and motion. *(New.)*
+2. **Energy Monitor** — solar production vs consumption, battery, grid import/export. UI shows an animated power-flow diagram + self-sufficiency. *(Carried over from the original seed's Solar Dashboard.)*
+3. **Weather Station** — outdoor conditions with wind compass, UV, pressure, rain. *(Carried over.)*
+4. **Indoor Climate** — per-room temperatures on an SVG floor plan, colour-coded comfort zones. *(Carried over.)*
 
-**Data Store:** `energy-readings` collection with 48h of 5-min interval power data.
+**Data Store:** `energy-readings` collection with 48h of 30-min interval solar/consumption/battery data.
 
 ---
 
@@ -207,6 +211,24 @@ The seed runs as a single script that authenticates against the API and creates 
 4. **Supply Inventory** — tracks food/water/meds/ammo and projects depletion dates from burn rate. UI shows resource bars with burn-rate and countdown-to-empty. *Connects via: load-cell shelves / manual logging → MQTT.*
 
 **Data Store:** `perimeter-events` (72h motion log) and `supply-history` (consumption over time).
+
+---
+
+## Tab 8: Space (live public APIs)
+
+**Premise:** Unlike the other tabs (simulated MQTT devices), the Space tab pulls **live data from
+free, key-free public APIs** — a showcase of the `http` global + cron triggers + graceful empty
+states. It has no MQTT devices and no Data Store collections; the APIs are the source of truth.
+(Distinct from the simulated *Spacecraft* ops tab above.)
+
+**Automations (all cron-triggered):**
+1. **Upcoming Launches** ⭐ — The Space Devs Launch Library 2 (`lldev` host — cached, no rate limit, no key). Next-launch hero with live countdown + following launches. Cron `0 */2 * * *`.
+2. **ISS Tracker** — `wheretheiss.at` live position on an equirectangular world map + altitude/velocity/sunlit. Cron `*/5 * * * *`.
+3. **Space Weather** — NOAA SWPC planetary K-index → Kp gauge, storm level, aurora likelihood, 20-reading history. Cron `*/30 * * * *`.
+4. **Moon & Meteors** — moon phase + illumination computed locally from the synodic month (no API), plus next major meteor shower from a fixed annual calendar. Fully offline-capable. Cron `0 */6 * * *`.
+
+**No keys, by design.** APOD/Open-Meteo etc. were considered but the seed must run with zero
+config for anyone — so only no-key endpoints are used, and `Moon & Meteors` needs no network at all.
 
 ---
 
