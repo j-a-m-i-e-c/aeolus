@@ -166,7 +166,7 @@ export default function LightingBoard(aeolus: CustomComponentProps) {
   );
 }`;
 
-// ─── Cue Stack — sequenced show control (GO / BACK) ──────────────────────────
+// ─── Cue Stack — operator console (manual; UI owns the cue list) ─────────────
 const cueLogic = `automation({
   conditions: [
     function ready(context) {
@@ -175,61 +175,149 @@ const cueLogic = `automation({
   ],
   actions: [
     function cue(context) {
-      var cues = ["Preset", "Act 1 — Open", "Ballad Wash", "Act 2 — Storm", "Strobe Hit", "Lightning", "Blackout", "Act 3 — Dawn", "Crowd Wash", "Encore", "Finale", "Bows"];
-      var s = context.state || {}, t = context.topic || "";
-      if (s.current !== undefined) state.set("idx", s.current);
-
-      var idx = state.get("idx");
-      if (idx === undefined) idx = 3;
-      if (t.indexOf("go") >= 0) idx = Math.min(cues.length - 1, idx + 1);
-      else if (t.indexOf("back") >= 0) idx = Math.max(0, idx - 1);
-
-      state.set("idx", idx);
-      state.set("cueName", cues[idx]);
-      state.set("total", cues.length);
-      state.set("nextName", cues[idx + 1] || "— end —");
+      // Operator-driven — the cue list, order, and live position are managed in
+      // the UI and persisted via aeolus.save(). Nothing to compute on trigger.
       state.set("lastUpdate", Date.now());
-      if (t.indexOf("go") >= 0) log.info("GO → cue " + (idx + 1) + ": " + cues[idx]);
     },
   ],
 });`;
 
-const cueUi = `import type { CustomComponentProps } from "./types";
+const cueUi = `import { useState, useEffect } from "react";
+import type { CustomComponentProps } from "./types";
+
+const TYPES: Record<string, { icon: string; color: string }> = {
+  light: { icon: "💡", color: "#F59E0B" },
+  sound: { icon: "🔊", color: "#3BA4FF" },
+  video: { icon: "🎞️", color: "#A855F7" },
+  fx: { icon: "🎆", color: "#EF4444" },
+  blackout: { icon: "⬛", color: "#6B7785" },
+};
+
+const DEFAULT_CUES = [
+  { id: "c1", label: "Preset", type: "light", fade: 0 },
+  { id: "c2", label: "Act 1 — Open", type: "light", fade: 3 },
+  { id: "c3", label: "Ballad Wash", type: "light", fade: 5 },
+  { id: "c4", label: "Act 2 — Storm", type: "fx", fade: 2 },
+  { id: "c5", label: "Strobe Hit", type: "fx", fade: 0 },
+  { id: "c6", label: "Lightning", type: "fx", fade: 0 },
+  { id: "c7", label: "Blackout", type: "blackout", fade: 1 },
+  { id: "c8", label: "Act 3 — Dawn", type: "light", fade: 8 },
+  { id: "c9", label: "Crowd Wash", type: "light", fade: 3 },
+  { id: "c10", label: "Encore", type: "sound", fade: 2 },
+  { id: "c11", label: "Finale", type: "fx", fade: 1 },
+  { id: "c12", label: "Bows", type: "light", fade: 4 },
+];
 
 export default function CueStack(aeolus: CustomComponentProps) {
-  const cues = ["Preset", "Act 1 — Open", "Ballad Wash", "Act 2 — Storm", "Strobe Hit", "Lightning", "Blackout", "Act 3 — Dawn", "Crowd Wash", "Encore", "Finale", "Bows"];
-  const idx = aeolus.read("idx") as number ?? 3;
-  const total = aeolus.read("total") as number ?? cues.length;
+  const saved = aeolus.read("cues") as any[];
+  const [cues, setCues] = useState<any[]>(Array.isArray(saved) && saved.length ? saved : DEFAULT_CUES);
+  const [liveId, setLiveId] = useState<string>((aeolus.read("liveId") as string) || DEFAULT_CUES[3].id);
+  const [fade, setFade] = useState<{ id: string; t0: number; dur: number } | null>(null);
+  const [progress, setProgress] = useState(0);
+  const [blackout, setBlackout] = useState(false);
+  const [dragI, setDragI] = useState<number | null>(null);
+  const [overI, setOverI] = useState<number | null>(null);
+
+  const liveIdx = Math.max(0, cues.findIndex((c) => c.id === liveId));
+  const nextIdx = liveIdx + 1;
+
+  const commit = (id: string) => { setLiveId(id); aeolus.save("liveId", id); setFade(null); setProgress(0); setBlackout(false); };
+
+  // Live crossfade animation
+  useEffect(() => {
+    if (!fade) return;
+    let timer: any;
+    const tick = () => {
+      const p = Math.min(1, (Date.now() - fade.t0) / fade.dur);
+      setProgress(p);
+      if (p >= 1) commit(fade.id);
+      else timer = setTimeout(tick, 50);
+    };
+    tick();
+    return () => clearTimeout(timer);
+  }, [fade]);
+
+  const go = () => {
+    if (fade || nextIdx >= cues.length) return;
+    const target = cues[nextIdx];
+    if (target.fade > 0) { setBlackout(false); setProgress(0); setFade({ id: target.id, t0: Date.now(), dur: target.fade * 1000 }); }
+    else commit(target.id);
+  };
+  const back = () => { if (fade || liveIdx <= 0) return; commit(cues[liveIdx - 1].id); };
+  const jump = (id: string) => { if (!fade) commit(id); };
+  const allStop = () => { setFade(null); setProgress(0); setBlackout(true); };
+
+  // Native drag-to-reorder
+  const onDrop = (i: number) => {
+    if (dragI === null || dragI === i) { setDragI(null); setOverI(null); return; }
+    const arr = cues.slice();
+    const moved = arr.splice(dragI, 1)[0];
+    arr.splice(i, 0, moved);
+    setCues(arr); aeolus.save("cues", arr);
+    setDragI(null); setOverI(null);
+  };
+
+  const fadeTarget = fade ? cues.find((c) => c.id === fade.id) : null;
 
   return (
     <div className="p-4 space-y-3">
       <div className="flex items-center justify-between">
         <div className="text-sm font-semibold text-[#E6EDF3]">🎬 Cue Stack</div>
-        <span className="text-[9px] px-2 py-0.5 rounded-full font-semibold bg-[#22C55E]/15 text-[#22C55E] animate-pulse">● LIVE</span>
+        {blackout
+          ? <span className="text-[9px] px-2 py-0.5 rounded-full font-semibold bg-[#EF4444]/15 text-[#EF4444]">■ ALL STOP</span>
+          : <span className="text-[9px] px-2 py-0.5 rounded-full font-semibold bg-[#22C55E]/15 text-[#22C55E] animate-pulse">● LIVE</span>}
       </div>
 
-      {/* Cue list */}
-      <div className="bg-[#0B0F14] rounded-xl border border-[#2A3441] p-1.5 max-h-40 overflow-auto">
+      {/* Cue list — drag to reorder, click to arm */}
+      <div className="bg-[#0B0F14] rounded-xl border border-[#2A3441] p-1.5 max-h-44 overflow-auto">
         {cues.map((c, i) => {
-          const isCurrent = i === idx;
-          const isNext = i === idx + 1;
+          const t = TYPES[c.type] || TYPES.light;
+          const isLive = i === liveIdx && !blackout;
+          const isNext = i === nextIdx;
+          const isOver = i === overI;
           return (
-            <div key={i} className="flex items-center gap-2 px-2 py-1.5 rounded-md" style={{ background: isCurrent ? "#22C55E20" : isNext ? "#3BA4FF10" : "transparent" }}>
-              <span className="text-[9px] font-mono w-5" style={{ color: isCurrent ? "#22C55E" : "#6B7785" }}>{i + 1}</span>
-              <span className="text-[10px] flex-1" style={{ color: isCurrent ? "#E6EDF3" : isNext ? "#9AA6B2" : "#6B7785" }}>{c}</span>
-              {isCurrent && <span className="text-[7px] text-[#22C55E] font-semibold">LIVE</span>}
+            <div
+              key={c.id}
+              draggable
+              onDragStart={() => setDragI(i)}
+              onDragOver={(e) => { e.preventDefault(); if (i !== overI) setOverI(i); }}
+              onDrop={(e) => { e.preventDefault(); onDrop(i); }}
+              onClick={() => jump(c.id)}
+              className="flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer transition-colors"
+              style={{ background: isLive ? "#22C55E20" : isNext ? "#3BA4FF10" : "transparent", borderTop: isOver ? "2px solid #5CE1E6" : "2px solid transparent" }}
+            >
+              <span className="text-[#3A4452] text-[10px] cursor-grab select-none">⠿</span>
+              <span className="text-[9px] font-mono w-4" style={{ color: isLive ? "#22C55E" : "#6B7785" }}>{i + 1}</span>
+              <span className="text-[11px]" title={c.type}>{t.icon}</span>
+              <span className="text-[10px] flex-1 truncate" style={{ color: isLive ? "#E6EDF3" : isNext ? "#9AA6B2" : "#6B7785" }}>{c.label}</span>
+              <span className="text-[8px] font-mono text-[#6B7785]">{c.fade > 0 ? c.fade.toFixed(1) + "s" : "snap"}</span>
+              {isLive && <span className="text-[7px] text-[#22C55E] font-semibold">LIVE</span>}
               {isNext && <span className="text-[7px] text-[#3BA4FF]">NEXT</span>}
             </div>
           );
         })}
       </div>
 
+      {/* Live crossfade bar */}
+      {fade && fadeTarget && (
+        <div className="bg-[#0B0F14] rounded-lg border border-[#5CE1E6]/30 px-3 py-2">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-[9px] text-[#5CE1E6]">Fading → {fadeTarget.label}</span>
+            <span className="text-[9px] font-mono text-[#9AA6B2]">{((fade.dur * (1 - progress)) / 1000).toFixed(1)}s</span>
+          </div>
+          <div className="h-1.5 bg-[#1A2330] rounded-full overflow-hidden">
+            <div className="h-full rounded-full" style={{ width: (progress * 100) + "%", background: "linear-gradient(90deg,#3BA4FF,#5CE1E6)" }} />
+          </div>
+        </div>
+      )}
+
       {/* Transport */}
-      <div className="grid grid-cols-3 gap-2">
-        <button onClick={() => aeolus.fire("back", {})} className="py-2.5 rounded-lg text-[11px] font-medium bg-[#0B0F14] text-[#9AA6B2] border border-[#2A3441] hover:text-[#E6EDF3] transition-all">◀ Back</button>
-        <button onClick={() => aeolus.fire("go", {})} className="col-span-2 py-2.5 rounded-lg text-sm font-bold bg-[#22C55E]/20 text-[#22C55E] border border-[#22C55E]/40 hover:bg-[#22C55E]/30 transition-all">GO ▶</button>
+      <div className="grid grid-cols-4 gap-2">
+        <button onClick={back} className="py-2.5 rounded-lg text-[11px] font-medium bg-[#0B0F14] text-[#9AA6B2] border border-[#2A3441] hover:text-[#E6EDF3] transition-all">◀ Back</button>
+        <button onClick={go} className="col-span-2 py-2.5 rounded-lg text-sm font-bold bg-[#22C55E]/20 text-[#22C55E] border border-[#22C55E]/40 hover:bg-[#22C55E]/30 transition-all">GO ▶</button>
+        <button onClick={allStop} className="py-2.5 rounded-lg text-[11px] font-medium bg-[#EF4444]/15 text-[#EF4444] border border-[#EF4444]/30 hover:bg-[#EF4444]/25 transition-all">■ Stop</button>
       </div>
-      <div className="text-center text-[9px] text-[#6B7785]">Cue {idx + 1} of {total}</div>
+      <div className="text-center text-[9px] text-[#6B7785]">Cue {liveIdx + 1} of {cues.length} · drag to reorder, tap to arm</div>
     </div>
   );
 }`;

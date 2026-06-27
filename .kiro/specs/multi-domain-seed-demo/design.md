@@ -251,7 +251,7 @@ this is genuinely connectable. A digital lighting board is the hero visual.
 
 **Automations:**
 1. **Lighting Board** ⭐ — an operator console (manual trigger; faders write straight through `aeolus.save`). A large live stage preview reacts instantly to: per-fixture wash/moving-head faders, a master, a **centre follow-spot** with **tracking on/off** (sweeps the stage when enabled), and **left/right strobes**. *Connects via: OLA / Art-Net / sACN → DMX.*
-2. **Cue Stack** — a sequenced show: GO/BACK steps a cue list, each cue recalls lights + atmospherics. UI shows the cue list with live/next highlighting + GO/BACK + cue timer. *(Showcases `fire`.)*
+2. **Cue Stack** — an operator console (manual). The cue list lives in UI state (persisted via `aeolus.save`): **drag to reorder**, **tap to arm**, GO/BACK transport, and an **All-Stop** panic blackout. Each cue has a type (light/sound/video/fx/blackout, with icons) and a **fade time** — GO animates a **live crossfade progress bar** over that duration. *(Showcases native HTML5 drag-and-drop + React state in a custom component.)*
 3. **Atmospherics** — haze density, fog blasts, CO₂ jets with fluid/pressure levels. UI: density slider, blast buttons, tank gauges. *Connects via: DMX-controlled hazers/foggers.*
 4. **Effects & Pyro** — theatrical pyro/confetti/CO₂ behind an **ARM/DISARM safety interlock** (effects locked until armed) with per-cue fire. UI: arm key-switch, armed indicator, effect buttons disabled unless armed, fired log. *(Models real show-control safety.)*
 
