@@ -9,65 +9,70 @@ import { genSeries } from "../lib.mjs";
 const tab = { id: "tab-stage", name: "Stage & Show Control", icon: "drama" };
 
 const devices = [
-  { topic: "light/stage/front-wash", payload: { level: 80, color: "#FF6B00" } },
-  { topic: "light/stage/back-wash", payload: { level: 60, color: "#3BA4FF" } },
-  { topic: "light/stage/moving-head-1", payload: { level: 100, pan: 120, tilt: 45, color: "#A855F7" } },
-  { topic: "light/stage/moving-head-2", payload: { level: 90, pan: 200, tilt: 60, color: "#22C55E" } },
-  { topic: "light/stage/master", payload: { level: 75 } },
   { topic: "fx/stage/hazer", payload: { on: true, density: 40, fluid: 65 } },
   { topic: "fx/stage/fogger", payload: { on: false, fluid: 80 } },
   { topic: "fx/stage/co2", payload: { on: false, pressure: 90 } },
 ];
 
-// ─── Lighting Board ⭐ — DMX fixtures scaled by master fader ──────────────────
+// ─── Lighting Board ⭐ — operator console (manual; UI writes via aeolus.save) ──
 const boardLogic = `automation({
   conditions: [
-    function has(context) {
-      return context.state !== undefined;
+    function ready(context) {
+      return true;
     },
   ],
   actions: [
     function board(context) {
-      var s = context.state, t = context.topic || "";
-      var fx = t.split("light/stage/")[1] || "";
-      if (fx === "master") {
-        state.set("master", s.level);
-      } else if (fx) {
-        state.set(fx + "_level", s.level);
-        if (s.color) state.set(fx + "_color", s.color);
-        if (s.pan !== undefined) state.set(fx + "_pan", s.pan);
-        if (s.tilt !== undefined) state.set(fx + "_tilt", s.tilt);
-      }
+      // Operator-driven console — fader/toggle state is written directly from
+      // the UI via aeolus.save(). Nothing to compute on trigger.
       state.set("lastUpdate", Date.now());
     },
   ],
 });`;
 
-const boardUi = `import { useState } from "react";
+const boardUi = `import { useState, useEffect } from "react";
 import type { CustomComponentProps } from "./types";
 
 export default function LightingBoard(aeolus: CustomComponentProps) {
   const fixtures = [
-    { key: "front-wash", label: "Front Wash", color: "#FF6B00", cx: 70, ry: 30 },
-    { key: "moving-head-1", label: "Moving Head 1", color: "#A855F7", cx: 130, ry: 20 },
-    { key: "moving-head-2", label: "Moving Head 2", color: "#22C55E", cx: 190, ry: 20 },
-    { key: "back-wash", label: "Back Wash", color: "#3BA4FF", cx: 250, ry: 30 },
+    { key: "front-wash", label: "Front Wash", color: "#FF6B00", cx: 78, ry: 42, def: 80 },
+    { key: "moving-head-1", label: "Moving Head 1", color: "#A855F7", cx: 150, ry: 28, def: 100 },
+    { key: "moving-head-2", label: "Moving Head 2", color: "#22C55E", cx: 250, ry: 28, def: 90 },
+    { key: "back-wash", label: "Back Wash", color: "#3BA4FF", cx: 322, ry: 42, def: 60 },
   ];
 
-  // Seed local fader state from the automation state store, then drive the
-  // preview directly off local state for instant response. aeolus.save()
-  // persists each change back through the platform.
+  // Operator console — fader/toggle state lives in React state for instant
+  // response and is persisted via aeolus.save(). Seeded from the state store.
   const seed: Record<string, number> = {};
-  fixtures.forEach((f) => { seed[f.key] = (aeolus.read(f.key + "_level") as number) ?? 80; });
+  fixtures.forEach((f) => { seed[f.key] = (aeolus.read(f.key + "_level") as number) ?? f.def; });
   const [levels, setLevels] = useState<Record<string, number>>(seed);
   const [master, setMaster] = useState<number>((aeolus.read("master") as number) ?? 75);
+  const [spot, setSpot] = useState<number>((aeolus.read("spot") as number) ?? 90);
+  const [tracking, setTracking] = useState<boolean>((aeolus.read("tracking") as boolean) ?? true);
+  const [strobeL, setStrobeL] = useState<boolean>((aeolus.read("strobeL") as boolean) ?? false);
+  const [strobeR, setStrobeR] = useState<boolean>((aeolus.read("strobeR") as boolean) ?? false);
+  const [pos, setPos] = useState<number>(0.5);
 
-  const setLevel = (key: string, v: number) => {
-    setLevels((prev) => ({ ...prev, [key]: v }));
-    aeolus.save(key + "_level", v);
-  };
-  const setMasterLevel = (v: number) => { setMaster(v); aeolus.save("master", v); };
+  // Follow-spot tracking — sweep the spot across the stage while enabled.
+  useEffect(() => {
+    if (!tracking) return;
+    const start = Date.now();
+    let timer: any;
+    const tick = () => {
+      setPos(0.5 + 0.42 * Math.sin(((Date.now() - start) / 1000) * 0.9));
+      timer = setTimeout(tick, 60);
+    };
+    tick();
+    return () => clearTimeout(timer);
+  }, [tracking]);
+
   const m = master / 100;
+  const setLevel = (key: string, v: number) => { setLevels((prev) => ({ ...prev, [key]: v })); aeolus.save(key + "_level", v); };
+  const setMasterLevel = (v: number) => { setMaster(v); aeolus.save("master", v); };
+  const setSpotLevel = (v: number) => { setSpot(v); aeolus.save("spot", v); };
+  const toggle = (key: string, v: boolean, setter: (b: boolean) => void) => { setter(v); aeolus.save(key, v); };
+  const spotX = 40 + (tracking ? pos : 0.5) * 320;
+  const spotOp = (spot / 100) * m;
 
   return (
     <div className="p-4 space-y-3">
@@ -78,20 +83,34 @@ export default function LightingBoard(aeolus: CustomComponentProps) {
 
       {/* Stage preview — driven live by the faders */}
       <div className="bg-[#070A0E] rounded-xl border border-[#2A3441] p-2">
-        <svg width="100%" height="120" viewBox="0 0 320 120" preserveAspectRatio="xMidYMid meet">
-          <rect x="0" y="0" width="320" height="120" rx="6" fill="#05070A" />
+        <svg width="100%" height="210" viewBox="0 0 400 210" preserveAspectRatio="xMidYMid meet">
+          <rect x="0" y="0" width="400" height="210" rx="6" fill="#05070A" />
+          <rect x="10" y="8" width="380" height="6" rx="2" fill="#1A2330" stroke="#2A3441" strokeWidth="0.5" />
+
           {fixtures.map((f) => {
             const level = levels[f.key] ?? 0;
             const op = (level / 100) * m;
             return (
               <g key={f.key}>
-                <ellipse cx={f.cx} cy="92" rx={f.ry + 10} ry="16" fill={f.color} opacity={op * 0.55} />
-                <polygon points={f.cx + ",10 " + (f.cx - f.ry) + ",92 " + (f.cx + f.ry) + ",92"} fill={f.color} opacity={op * 0.4} />
-                <circle cx={f.cx} cy="8" r="3.5" fill={f.color} opacity={0.2 + (level / 100) * 0.8} />
+                <polygon points={f.cx + ",16 " + (f.cx - f.ry) + ",176 " + (f.cx + f.ry) + ",176"} fill={f.color} opacity={op * 0.32} />
+                <ellipse cx={f.cx} cy="178" rx={f.ry} ry="11" fill={f.color} opacity={op * 0.5} />
+                <circle cx={f.cx} cy="11" r="4" fill={f.color} opacity={0.25 + (level / 100) * 0.75} />
               </g>
             );
           })}
-          <rect x="10" y="100" width="300" height="14" rx="2" fill="#121821" stroke="#2A3441" strokeWidth="0.5" />
+
+          {/* centre follow-spot */}
+          <polygon points={"200,16 " + (spotX - 24) + ",176 " + (spotX + 24) + ",176"} fill="#FFFCEA" opacity={spotOp * 0.4} />
+          <ellipse cx={spotX} cy="178" rx="26" ry="10" fill="#FFFCEA" opacity={spotOp * 0.6} />
+          <circle cx="200" cy="11" r="4.5" fill="#FFFCEA" opacity={0.3 + (spot / 100) * 0.7} />
+          <circle cx={spotX} cy="174" r="5" fill="#0B0F14" stroke="#E6EDF3" strokeWidth="1" />
+          {tracking && <text x={spotX} y="196" textAnchor="middle" fill="#5CE1E6" fontSize="7">● tracking</text>}
+
+          {/* strobes */}
+          {strobeL && <rect x="6" y="44" width="14" height="120" rx="3" fill="#FFFFFF" opacity="0.85" className="animate-pulse" />}
+          {strobeR && <rect x="380" y="44" width="14" height="120" rx="3" fill="#FFFFFF" opacity="0.85" className="animate-pulse" />}
+
+          <rect x="10" y="184" width="380" height="16" rx="2" fill="#121821" stroke="#2A3441" strokeWidth="0.5" />
         </svg>
       </div>
 
@@ -109,6 +128,16 @@ export default function LightingBoard(aeolus: CustomComponentProps) {
             <span className="text-[9px] font-mono w-8 text-right" style={{ color: f.color }}>{levels[f.key] ?? 0}</span>
           </div>
         ))}
+        <div className="flex items-center gap-2">
+          <span className="w-3 h-3 rounded-sm shrink-0" style={{ background: "#FFFCEA" }} />
+          <span className="text-[9px] text-[#9AA6B2] w-24 shrink-0">Centre Spot</span>
+          <input
+            type="range" min={0} max={100} value={spot}
+            onChange={(e) => setSpotLevel(Number(e.target.value))}
+            className="flex-1 h-1.5 cursor-pointer" style={{ accentColor: "#FFFCEA" }}
+          />
+          <span className="text-[9px] font-mono w-8 text-right text-[#E6EDF3]">{spot}</span>
+        </div>
         <div className="flex items-center gap-2 pt-2 border-t border-[#2A3441]">
           <span className="w-3 h-3 rounded-sm shrink-0" style={{ background: "#5CE1E6" }} />
           <span className="text-[9px] font-semibold text-[#5CE1E6] w-24 shrink-0">MASTER</span>
@@ -119,6 +148,19 @@ export default function LightingBoard(aeolus: CustomComponentProps) {
           />
           <span className="text-[9px] font-mono w-8 text-right text-[#5CE1E6]">{master}</span>
         </div>
+      </div>
+
+      {/* Follow-spot tracking + strobes */}
+      <div className="grid grid-cols-3 gap-2">
+        <button onClick={() => toggle("tracking", !tracking, setTracking)} className="py-2 rounded-lg text-[10px] font-medium border transition-all" style={{ background: tracking ? "#5CE1E620" : "#0B0F14", color: tracking ? "#5CE1E6" : "#6B7785", borderColor: tracking ? "#5CE1E64D" : "#2A3441" }}>
+          🎯 Track {tracking ? "On" : "Off"}
+        </button>
+        <button onClick={() => toggle("strobeL", !strobeL, setStrobeL)} className="py-2 rounded-lg text-[10px] font-medium border transition-all" style={{ background: strobeL ? "#E6EDF320" : "#0B0F14", color: strobeL ? "#E6EDF3" : "#6B7785", borderColor: strobeL ? "#E6EDF34D" : "#2A3441" }}>
+          ⚡ Strobe L
+        </button>
+        <button onClick={() => toggle("strobeR", !strobeR, setStrobeR)} className="py-2 rounded-lg text-[10px] font-medium border transition-all" style={{ background: strobeR ? "#E6EDF320" : "#0B0F14", color: strobeR ? "#E6EDF3" : "#6B7785", borderColor: strobeR ? "#E6EDF34D" : "#2A3441" }}>
+          ⚡ Strobe R
+        </button>
       </div>
     </div>
   );
@@ -360,16 +402,16 @@ export default function EffectsPyro(aeolus: CustomComponentProps) {
 
 // ─── Assembly ────────────────────────────────────────────────────────────────
 const automations = [
-  { key: "board", name: "Lighting Board", triggerTopic: "light/stage/+", scriptSource: boardLogic, uiSource: boardUi },
+  { key: "board", name: "Lighting Board", triggerTopic: "none", scriptSource: boardLogic, uiSource: boardUi },
   { key: "cue", name: "Cue Stack", triggerTopic: "none", scriptSource: cueLogic, uiSource: cueUi },
   { key: "atmos", name: "Atmospherics", triggerTopic: "fx/stage/+", scriptSource: atmosLogic, uiSource: atmosUi },
   { key: "pyro", name: "Effects & Pyro", triggerTopic: "none", scriptSource: pyroLogic, uiSource: pyroUi },
 ];
 
 const panes = [
-  { kind: "automation", ref: "board", x: 0, y: 0, w: 6, h: 13 },
+  { kind: "automation", ref: "board", x: 0, y: 0, w: 6, h: 16 },
   { kind: "automation", ref: "cue", x: 6, y: 0, w: 6, h: 11 },
-  { kind: "automation", ref: "atmos", x: 0, y: 13, w: 6, h: 10 },
+  { kind: "automation", ref: "atmos", x: 0, y: 16, w: 6, h: 10 },
   { kind: "automation", ref: "pyro", x: 6, y: 11, w: 6, h: 10 },
 ];
 
