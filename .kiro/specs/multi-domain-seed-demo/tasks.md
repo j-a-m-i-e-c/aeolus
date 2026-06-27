@@ -20,6 +20,7 @@
 - [x] 6. Spacecraft tab — Life Support, Power System, Attitude Control, Ground Station Comms ⭐
 - [x] 7. Escape Room tab — Puzzle Sequencer, Game Master Console ⭐, Hint System, Effects & Lighting
 - [x] 8. Off-Grid Bunker tab — Perimeter Defence, Off-Grid Power ⭐, Air Filtration (NBC), Supply Inventory
+- [x] 8b. Stage & Show Control tab (DMX) — Lighting Board ⭐, Cue Stack, Atmospherics, Effects & Pyro (arm-interlock)
 - [x] 9. Space tab (live public APIs, no keys) — Upcoming Launches ⭐, ISS Tracker, Space Weather, Moon & Meteors
 
 - [ ] 10. Integration and testing (on a running stack)

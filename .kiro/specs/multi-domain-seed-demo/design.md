@@ -232,6 +232,33 @@ config for anyone — so only no-key endpoints are used, and `Moon & Meteors` ne
 
 ---
 
+## Tab 9: Stage & Show Control (DMX)
+
+**Premise:** A live theatre/concert production rig. Show control runs on **DMX512** — and a
+Raspberry Pi running Open Lighting Architecture (OLA) can output Art-Net/sACN → DMX directly, so
+this is genuinely connectable. A digital lighting board is the hero visual.
+
+**Devices (a small DMX patch):**
+| Name | Type | State |
+|------|------|-------|
+| Front Wash | light | `{ level: 80, color: "#FF6B00" }` |
+| Back Wash | light | `{ level: 60, color: "#3BA4FF" }` |
+| Moving Head 1/2 | light | `{ level: 100, pan: 120, tilt: 45, color: "#A855F7" }` |
+| Master | light | `{ level: 75 }` |
+| Hazer / Fogger / CO₂ jet | fx | `{ on, density/fluid/pressure }` |
+| Pyro | fx | `{ armed: false, cuesLoaded: 4 }` |
+| Cue | show | `{ current: 3, total: 12, name: "Act 2 — Storm" }` |
+
+**Automations:**
+1. **Lighting Board** ⭐ — per-fixture DMX channels scaled by a master fader. UI is a digital console: a stage preview with coloured beam pools + a vertical fader bank (level, colour chip, fixture name). *Connects via: OLA / Art-Net / sACN → DMX.*
+2. **Cue Stack** — a sequenced show: GO/BACK steps a cue list, each cue recalls lights + atmospherics. UI shows the cue list with live/next highlighting + GO/BACK + cue timer. *(Showcases `fire`.)*
+3. **Atmospherics** — haze density, fog blasts, CO₂ jets with fluid/pressure levels. UI: density slider, blast buttons, tank gauges. *Connects via: DMX-controlled hazers/foggers.*
+4. **Effects & Pyro** — theatrical pyro/confetti/CO₂ behind an **ARM/DISARM safety interlock** (effects locked until armed) with per-cue fire. UI: arm key-switch, armed indicator, effect buttons disabled unless armed, fired log. *(Models real show-control safety.)*
+
+**Data Store:** `show-log` (cue/effect fire events for the session).
+
+---
+
 ## Pane Layout Per Tab
 
 Each tab has a Device Grid pane at the top for an overview, plus multiple automation panes below — each one showcasing a different automation for that domain. The exact number of automations per tab will be determined during implementation (expect 3–6 per domain).
