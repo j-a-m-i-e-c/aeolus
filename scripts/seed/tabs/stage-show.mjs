@@ -45,18 +45,30 @@ const boardLogic = `automation({
   ],
 });`;
 
-const boardUi = `import type { CustomComponentProps } from "./types";
+const boardUi = `import { useState } from "react";
+import type { CustomComponentProps } from "./types";
 
 export default function LightingBoard(aeolus: CustomComponentProps) {
-  const master = aeolus.read("master") as number ?? 75;
   const fixtures = [
-    { key: "front-wash", label: "Front", color: "#FF6B00", beam: { cx: 70, ry: 26 } },
-    { key: "moving-head-1", label: "MH1", color: "#A855F7", beam: { cx: 130, ry: 18 } },
-    { key: "moving-head-2", label: "MH2", color: "#22C55E", beam: { cx: 190, ry: 18 } },
-    { key: "back-wash", label: "Back", color: "#3BA4FF", beam: { cx: 250, ry: 26 } },
+    { key: "front-wash", label: "Front Wash", color: "#FF6B00", cx: 70, ry: 30 },
+    { key: "moving-head-1", label: "Moving Head 1", color: "#A855F7", cx: 130, ry: 20 },
+    { key: "moving-head-2", label: "Moving Head 2", color: "#22C55E", cx: 190, ry: 20 },
+    { key: "back-wash", label: "Back Wash", color: "#3BA4FF", cx: 250, ry: 30 },
   ];
-  const lvl = (k: string, d: number) => (aeolus.read(k + "_level") as number ?? d);
-  const col = (k: string, d: string) => (aeolus.read(k + "_color") as string || d);
+
+  // Seed local fader state from the automation state store, then drive the
+  // preview directly off local state for instant response. aeolus.save()
+  // persists each change back through the platform.
+  const seed: Record<string, number> = {};
+  fixtures.forEach((f) => { seed[f.key] = (aeolus.read(f.key + "_level") as number) ?? 80; });
+  const [levels, setLevels] = useState<Record<string, number>>(seed);
+  const [master, setMaster] = useState<number>((aeolus.read("master") as number) ?? 75);
+
+  const setLevel = (key: string, v: number) => {
+    setLevels((prev) => ({ ...prev, [key]: v }));
+    aeolus.save(key + "_level", v);
+  };
+  const setMasterLevel = (v: number) => { setMaster(v); aeolus.save("master", v); };
   const m = master / 100;
 
   return (
@@ -66,51 +78,48 @@ export default function LightingBoard(aeolus: CustomComponentProps) {
         <span className="text-[9px] text-[#6B7785]">DMX · {fixtures.length} fixtures</span>
       </div>
 
-      {/* Stage preview */}
+      {/* Stage preview — driven live by the faders */}
       <div className="bg-[#070A0E] rounded-xl border border-[#2A3441] p-2">
         <svg width="100%" height="120" viewBox="0 0 320 120" preserveAspectRatio="xMidYMid meet">
           <rect x="0" y="0" width="320" height="120" rx="6" fill="#05070A" />
-          {/* beam pools */}
           {fixtures.map((f) => {
-            const level = lvl(f.key, 80);
-            const c = col(f.key, f.color);
-            const op = (level / 100) * m * 0.55;
+            const level = levels[f.key] ?? 0;
+            const op = (level / 100) * m;
             return (
               <g key={f.key}>
-                <ellipse cx={f.beam.cx} cy="92" rx={f.beam.ry + 10} ry="16" fill={c} opacity={op} />
-                <polygon points={f.beam.cx + ",10 " + (f.beam.cx - f.beam.ry) + ",92 " + (f.beam.cx + f.beam.ry) + ",92"} fill={c} opacity={op * 0.6} />
-                <circle cx={f.beam.cx} cy="8" r="3" fill={c} opacity={0.4 + (level / 100) * 0.6} />
+                <ellipse cx={f.cx} cy="92" rx={f.ry + 10} ry="16" fill={f.color} opacity={op * 0.55} />
+                <polygon points={f.cx + ",10 " + (f.cx - f.ry) + ",92 " + (f.cx + f.ry) + ",92"} fill={f.color} opacity={op * 0.4} />
+                <circle cx={f.cx} cy="8" r="3.5" fill={f.color} opacity={0.2 + (level / 100) * 0.8} />
               </g>
             );
           })}
-          {/* stage deck */}
           <rect x="10" y="100" width="300" height="14" rx="2" fill="#121821" stroke="#2A3441" strokeWidth="0.5" />
         </svg>
       </div>
 
-      {/* Fader bank */}
-      <div className="bg-[#0B0F14] rounded-xl border border-[#2A3441] p-3 flex justify-around items-end">
-        {fixtures.map((f) => {
-          const level = lvl(f.key, 80);
-          const c = col(f.key, f.color);
-          return (
-            <div key={f.key} className="flex flex-col items-center gap-1">
-              <span className="text-[8px] font-mono text-[#E6EDF3]">{level}</span>
-              <div className="w-3 h-20 bg-[#1A2330] rounded-full overflow-hidden flex flex-col-reverse">
-                <div className="w-full rounded-full transition-all duration-500" style={{ height: level + "%", background: c }} />
-              </div>
-              <span className="w-3 h-3 rounded-sm" style={{ background: c }} />
-              <span className="text-[7px] text-[#6B7785]">{f.label}</span>
-            </div>
-          );
-        })}
-        {/* Master */}
-        <div className="flex flex-col items-center gap-1 pl-2 border-l border-[#2A3441]">
-          <span className="text-[8px] font-mono font-bold text-[#5CE1E6]">{master}</span>
-          <div className="w-3.5 h-20 bg-[#1A2330] rounded-full overflow-hidden flex flex-col-reverse">
-            <div className="w-full rounded-full transition-all duration-500" style={{ height: master + "%", background: "linear-gradient(180deg,#5CE1E6,#3BA4FF)" }} />
+      {/* Fader bank — interactive */}
+      <div className="bg-[#0B0F14] rounded-xl border border-[#2A3441] p-3 space-y-2">
+        {fixtures.map((f) => (
+          <div key={f.key} className="flex items-center gap-2">
+            <span className="w-3 h-3 rounded-sm shrink-0" style={{ background: f.color }} />
+            <span className="text-[9px] text-[#9AA6B2] w-24 shrink-0">{f.label}</span>
+            <input
+              type="range" min={0} max={100} value={levels[f.key] ?? 0}
+              onChange={(e) => setLevel(f.key, Number(e.target.value))}
+              className="flex-1 h-1.5 cursor-pointer" style={{ accentColor: f.color }}
+            />
+            <span className="text-[9px] font-mono w-8 text-right" style={{ color: f.color }}>{levels[f.key] ?? 0}</span>
           </div>
-          <span className="text-[7px] text-[#5CE1E6] font-semibold">MASTER</span>
+        ))}
+        <div className="flex items-center gap-2 pt-2 border-t border-[#2A3441]">
+          <span className="w-3 h-3 rounded-sm shrink-0" style={{ background: "#5CE1E6" }} />
+          <span className="text-[9px] font-semibold text-[#5CE1E6] w-24 shrink-0">MASTER</span>
+          <input
+            type="range" min={0} max={100} value={master}
+            onChange={(e) => setMasterLevel(Number(e.target.value))}
+            className="flex-1 h-1.5 cursor-pointer" style={{ accentColor: "#5CE1E6" }}
+          />
+          <span className="text-[9px] font-mono w-8 text-right text-[#5CE1E6]">{master}</span>
         </div>
       </div>
     </div>
@@ -360,11 +369,10 @@ const automations = [
 ];
 
 const panes = [
-  { kind: "device-grid", x: 0, y: 0, w: 12, h: 5 },
-  { kind: "automation", ref: "board", x: 0, y: 5, w: 6, h: 13 },
-  { kind: "automation", ref: "cue", x: 6, y: 5, w: 6, h: 11 },
-  { kind: "automation", ref: "atmos", x: 0, y: 18, w: 6, h: 10 },
-  { kind: "automation", ref: "pyro", x: 6, y: 16, w: 6, h: 10 },
+  { kind: "automation", ref: "board", x: 0, y: 0, w: 6, h: 13 },
+  { kind: "automation", ref: "cue", x: 6, y: 0, w: 6, h: 11 },
+  { kind: "automation", ref: "atmos", x: 0, y: 13, w: 6, h: 10 },
+  { kind: "automation", ref: "pyro", x: 6, y: 11, w: 6, h: 10 },
 ];
 
 const dataStore = [

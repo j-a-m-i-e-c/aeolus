@@ -366,11 +366,10 @@ const automations = [
 ];
 
 const panes = [
-  { kind: "device-grid", x: 0, y: 0, w: 12, h: 5 },
-  { kind: "automation", ref: "power", x: 0, y: 5, w: 6, h: 10 },
-  { kind: "automation", ref: "perimeter", x: 6, y: 5, w: 6, h: 10 },
-  { kind: "automation", ref: "nbc", x: 0, y: 15, w: 6, h: 10 },
-  { kind: "automation", ref: "supply", x: 6, y: 15, w: 6, h: 10 },
+  { kind: "automation", ref: "power", x: 0, y: 0, w: 6, h: 10 },
+  { kind: "automation", ref: "perimeter", x: 6, y: 0, w: 6, h: 10 },
+  { kind: "automation", ref: "nbc", x: 0, y: 10, w: 6, h: 10 },
+  { kind: "automation", ref: "supply", x: 6, y: 10, w: 6, h: 10 },
 ];
 
 const dataStore = [

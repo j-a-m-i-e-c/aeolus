@@ -457,11 +457,10 @@ const automations = [
 ];
 
 const panes = [
-  { kind: "device-grid", x: 0, y: 0, w: 12, h: 5 },
-  { kind: "automation", ref: "evening", x: 0, y: 5, w: 6, h: 8 },
-  { kind: "automation", ref: "energy", x: 6, y: 5, w: 6, h: 10 },
-  { kind: "automation", ref: "weather", x: 0, y: 13, w: 6, h: 10 },
-  { kind: "automation", ref: "indoor", x: 6, y: 15, w: 6, h: 11 },
+  { kind: "automation", ref: "evening", x: 0, y: 0, w: 6, h: 8 },
+  { kind: "automation", ref: "energy", x: 6, y: 0, w: 6, h: 10 },
+  { kind: "automation", ref: "weather", x: 0, y: 8, w: 6, h: 10 },
+  { kind: "automation", ref: "indoor", x: 6, y: 10, w: 6, h: 11 },
 ];
 
 const dataStore = [

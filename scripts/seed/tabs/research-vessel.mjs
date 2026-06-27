@@ -433,11 +433,10 @@ const automations = [
 ];
 
 const panes = [
-  { kind: "device-grid", x: 0, y: 0, w: 12, h: 5 },
-  { kind: "automation", ref: "ctd", x: 0, y: 5, w: 6, h: 12 },
-  { kind: "automation", ref: "dp", x: 6, y: 5, w: 6, h: 12 },
-  { kind: "automation", ref: "underway", x: 0, y: 17, w: 6, h: 11 },
-  { kind: "automation", ref: "rov", x: 6, y: 17, w: 6, h: 10 },
+  { kind: "automation", ref: "ctd", x: 0, y: 0, w: 6, h: 12 },
+  { kind: "automation", ref: "dp", x: 6, y: 0, w: 6, h: 12 },
+  { kind: "automation", ref: "underway", x: 0, y: 12, w: 6, h: 11 },
+  { kind: "automation", ref: "rov", x: 6, y: 12, w: 6, h: 10 },
 ];
 
 const dataStore = [

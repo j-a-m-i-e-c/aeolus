@@ -411,11 +411,10 @@ const automations = [
 ];
 
 const panes = [
-  { kind: "device-grid", x: 0, y: 0, w: 12, h: 5 },
-  { kind: "automation", ref: "comms", x: 0, y: 5, w: 6, h: 11 },
-  { kind: "automation", ref: "eps", x: 6, y: 5, w: 6, h: 10 },
-  { kind: "automation", ref: "ecls", x: 0, y: 16, w: 6, h: 10 },
-  { kind: "automation", ref: "adcs", x: 6, y: 15, w: 6, h: 10 },
+  { kind: "automation", ref: "comms", x: 0, y: 0, w: 6, h: 11 },
+  { kind: "automation", ref: "eps", x: 6, y: 0, w: 6, h: 10 },
+  { kind: "automation", ref: "ecls", x: 0, y: 11, w: 6, h: 10 },
+  { kind: "automation", ref: "adcs", x: 6, y: 10, w: 6, h: 10 },
 ];
 
 const dataStore = [

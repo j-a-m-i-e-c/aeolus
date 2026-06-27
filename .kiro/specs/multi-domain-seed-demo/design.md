@@ -261,21 +261,19 @@ this is genuinely connectable. A digital lighting board is the hero visual.
 
 ## Pane Layout Per Tab
 
-Each tab has a Device Grid pane at the top for an overview, plus multiple automation panes below — each one showcasing a different automation for that domain. The exact number of automations per tab will be determined during implementation (expect 3–6 per domain).
+Each tab is a grid of automation panes (typically 4), each showcasing a different automation for
+that domain — no device-grid pane (the seed leads with the custom automation UIs, not a raw device
+list). Panes use a 12-column responsive layout, generally two columns of automations.
 
 ```
-┌────────────────────────────────────────────────┐
-│  Device Grid (full width, top)                 │
-├──────────────────────┬─────────────────────────┤
+┌──────────────────────┬─────────────────────────┐
 │  Automation Pane 1   │  Automation Pane 2      │
 ├──────────────────────┼─────────────────────────┤
 │  Automation Pane 3   │  Automation Pane 4      │
-├──────────────────────┴─────────────────────────┤
-│  ... more as needed                            │
-└────────────────────────────────────────────────┘
+└──────────────────────┴─────────────────────────┘
 ```
 
-The automations listed in each tab section below are starting points — more will be designed during implementation to fully showcase the platform's capabilities in each domain.
+A hero automation (e.g. Irrigation, Lighting Board) may span full width at the top.
 
 ---
 
