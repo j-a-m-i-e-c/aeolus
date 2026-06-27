@@ -13,9 +13,7 @@ const devices = [
   { topic: "sensor/escape/puzzle3", payload: { solved: false, weight: 2.4, target: 3.1 } },
   { topic: "switch/escape/maglock-1", payload: { locked: false } },
   { topic: "switch/escape/maglock-exit", payload: { locked: true } },
-  { topic: "light/escape/dmx", payload: { scene: "puzzle", brightness: 40, colour: "#4B0082" } },
   { topic: "switch/escape/hint-screen", payload: { on: true, hintsSent: 1 } },
-  { topic: "sensor/escape/timer", payload: { remaining: 2340, started: true } },
   { topic: "switch/escape/smoke", payload: { on: false } },
 ];
 
@@ -347,9 +345,9 @@ export default function EffectsLighting(aeolus: CustomComponentProps) {
 // ─── Assembly ────────────────────────────────────────────────────────────────
 const automations = [
   { key: "puzzle", name: "Puzzle Sequencer", triggerTopic: "sensor/escape/puzzle+", scriptSource: puzzleLogic, uiSource: puzzleUi },
-  { key: "gm", name: "Game Master Console", triggerTopic: "sensor/escape/timer", scriptSource: gmLogic, uiSource: gmUi },
+  { key: "gm", name: "Game Master Console", triggerTopic: "none", scriptSource: gmLogic, uiSource: gmUi },
   { key: "hint", name: "Hint System", triggerTopic: "none", scriptSource: hintLogic, uiSource: hintUi },
-  { key: "fx", name: "Effects & Lighting", triggerTopic: "light/escape/dmx", scriptSource: fxLogic, uiSource: fxUi },
+  { key: "fx", name: "Effects & Lighting", triggerTopic: "none", scriptSource: fxLogic, uiSource: fxUi },
 ];
 
 const panes = [

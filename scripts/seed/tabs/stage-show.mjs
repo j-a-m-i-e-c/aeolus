@@ -17,8 +17,6 @@ const devices = [
   { topic: "fx/stage/hazer", payload: { on: true, density: 40, fluid: 65 } },
   { topic: "fx/stage/fogger", payload: { on: false, fluid: 80 } },
   { topic: "fx/stage/co2", payload: { on: false, pressure: 90 } },
-  { topic: "pyro/stage/main", payload: { armed: false, cuesLoaded: 4 } },
-  { topic: "show/stage/cue", payload: { current: 3, total: 12, name: "Act 2 — Storm" } },
 ];
 
 // ─── Lighting Board ⭐ — DMX fixtures scaled by master fader ──────────────────
@@ -363,9 +361,9 @@ export default function EffectsPyro(aeolus: CustomComponentProps) {
 // ─── Assembly ────────────────────────────────────────────────────────────────
 const automations = [
   { key: "board", name: "Lighting Board", triggerTopic: "light/stage/+", scriptSource: boardLogic, uiSource: boardUi },
-  { key: "cue", name: "Cue Stack", triggerTopic: "show/stage/cue", scriptSource: cueLogic, uiSource: cueUi },
+  { key: "cue", name: "Cue Stack", triggerTopic: "none", scriptSource: cueLogic, uiSource: cueUi },
   { key: "atmos", name: "Atmospherics", triggerTopic: "fx/stage/+", scriptSource: atmosLogic, uiSource: atmosUi },
-  { key: "pyro", name: "Effects & Pyro", triggerTopic: "pyro/stage/+", scriptSource: pyroLogic, uiSource: pyroUi },
+  { key: "pyro", name: "Effects & Pyro", triggerTopic: "none", scriptSource: pyroLogic, uiSource: pyroUi },
 ];
 
 const panes = [
