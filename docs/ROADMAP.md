@@ -22,6 +22,16 @@ Use MQTT 5.0's request/response pattern to get confirmation that a device actual
 ### More Connectors (Zigbee, Z-Wave, Tasmota, Shelly)
 Expand the connector library with support for popular IoT protocols and device ecosystems. Zigbee (via zigbee2mqtt) and Z-Wave would cover a wide range of sensors and actuators. Tasmota and Shelly connectors would add support for popular DIY and off-the-shelf Wi-Fi devices.
 
+### DMX / Stage Lighting Connector
+Drive professional stage and architectural lighting over DMX512 — the standard used in theatre, concert, and live-event production. Aeolus is application-layer and can't bit-bang RS-485 timing itself, so the connector hands off DMX universes to a layer that does the physical signal. Several integration paths, in rough order of how "native" they are:
+
+- **Art-Net / sACN (E1.31) over Ethernet** — the backend emits DMX universes as UDP packets (Node's built-in `dgram`) to a network DMX node (Enttec ODE, DMXKing eDMX, etc.) that converts IP → physical DMX. No USB on the Pi; scales to many universes. This is the cleanest, most scalable option.
+- **OLA (Open Lighting Architecture)** — run `olad` on the Pi and POST channel values to its HTTP/JSON API. OLA abstracts every output (USB-DMX widgets, Art-Net, sACN, KiNET, GPIO), so the connector stays tiny and supports the widest hardware. Lowest-effort path to a working proof.
+- **MQTT → ESP32 → DMX** — fits the existing ESP32/MQTT pattern: Aeolus publishes channel values to a command topic, a ~$5 ESP32 with an RS-485 transceiver outputs DMX (or acts as its own Art-Net node). No new connector required — just `mqtt.publish`.
+- **Local hardware** — USB-DMX widget, a DMX HAT, or GPIO + a MAX485 transceiver for direct output; wireless DMX (CRMX/W-DMX) sits downstream.
+
+The seed's **Stage & Show Control** tab (Lighting Board, Cue Stack, Atmospherics, Effects & Pyro) already demonstrates the UI/automation side — fader values, cue recalls, and effect fires map directly to DMX channel writes. The connector would turn those into real fixture output. Lowest-effort proof: `olad` on the Pi + a cheap USB-DMX widget (or an ESP32 Art-Net node).
+
 ### Smart Camera Integration
 Connect IP cameras and smart camera systems (Reolink, Hikvision, UniFi Protect, RTSP-compatible cameras) to the Aeolus device registry. Stream snapshots or MJPEG feeds into a dedicated camera pane on the dashboard. Integrate motion detection events into the automation engine so cameras can trigger rules (e.g. "when front door camera detects motion after 11pm, turn on porch light and send a notification"). ONVIF protocol support would cover a wide range of cameras. For AI-capable cameras, ingest object detection events (person, vehicle, animal) as device state — enabling automations like "when a person is detected in the driveway, unlock the front gate." Camera feeds stay local, no cloud required.
 
