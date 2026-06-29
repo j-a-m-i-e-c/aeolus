@@ -67,7 +67,7 @@ The seed script populates the platform with realistic demo scenarios so you can 
 make seed USER=admin PASS=yourpass
 ```
 
-Each tab demonstrates a different domain — a smart home, connected farm, ocean research vessel, underground mine, spacecraft operations, escape room, live stage/show control, and an off-grid survival bunker — plus a **Space** tab driven entirely by live public APIs (rocket launches, the ISS, space weather, moon phase). It shows how the same platform adapts to wildly different environments. No physical devices or API keys required.
+Each tab demonstrates a different domain — a connected farm, ocean research vessel, underground mine, spacecraft operations, escape room, live stage/show control, and an off-grid survival bunker — plus a **Space** tab driven entirely by live public APIs (rocket launches, the ISS, space weather, moon phase). It shows how the same platform adapts to wildly different environments. No physical devices or API keys required.
 
 <!-- TODO: Add screenshot of the welcome/onboarding screen here -->
 <!-- ![Welcome Screen](docs/screenshots/welcome.png) -->

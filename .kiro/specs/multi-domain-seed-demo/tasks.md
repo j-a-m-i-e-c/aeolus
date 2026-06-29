@@ -12,10 +12,10 @@
   - [x] 1.4 `scripts/seed/lib.mjs` helpers (api, devices, automations [mqtt + cron], data store, layout, genSeries)
   - [x] 1.5 Error handling + progress logging + `_validate.mjs` transpile harness
 
-- [x] 2. Smart Home tab (option b — home-only) — Evening Mode (new), Energy Monitor, Weather Station, Indoor Climate. Aquarium/brewery carry-overs dropped.
+- [ ] 2. Smart Home tab — REMOVED from seed (overlaps a real user's own setup; left as a local/manual build)
 
 - [x] 3. Research Vessel tab — CTD Profiler ⭐, Dynamic Positioning, Underway Seawater, ROV Telemetry
-- [x] 4. Agriculture tab (flagship agritech) — Irrigation & Water ⭐, Smart Fencing, Crop Health, Frost Guard
+- [x] 4. Agriculture tab (flagship agritech) — Dam & Header Tank ⭐ (pump console), Drinking Water (pump console), Smart Fencing. Crop Health + Frost Guard dropped.
 - [x] 5. Underground Mining tab — Atmospheric Monitoring, Ventilation on Demand ⭐, Personnel Muster, Dewatering Cascade
 - [x] 6. Spacecraft tab — Life Support, Power System, Attitude Control, Ground Station Comms ⭐
 - [x] 7. Escape Room tab — Puzzle Sequencer, Game Master Console ⭐, Hint System, Effects & Lighting

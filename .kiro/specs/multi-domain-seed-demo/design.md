@@ -16,31 +16,11 @@ The seed runs as a single script that authenticates against the API and creates 
 
 ## Tab Designs
 
-### Tab 1: Smart Home
+> The **Smart Home** tab was removed from the seed — it overlaps with what a real
+> user would build locally, so it's left as a local/manual exercise rather than
+> shipped demo data.
 
-**Premise:** A typical developer's house with smart lighting, climate sensors, and energy monitoring.
-
-**Devices:**
-| Name | Type | State Example |
-|------|------|---------------|
-| Living Room Light | light | `{ on: true, brightness: 80 }` |
-| Bedroom Light | light | `{ on: false, brightness: 0 }` |
-| Kitchen Temp | sensor | `{ value: 22.3, unit: "°C" }` |
-| Hallway Motion | sensor | `{ motion: true, lastTriggered: <timestamp> }` |
-| Smart Plug (Kettle) | plug | `{ on: false, power: 0, unit: "W" }` |
-| Thermostat | climate | `{ target: 21, current: 20.8, mode: "heat" }` |
-
-**Automations:** (option b — home-only; aquarium/brewery carry-overs intentionally dropped)
-1. **Evening Mode** — motion + time-of-day drives lighting scenes and thermostat. UI shows day/evening/night selector, lights status, kitchen temp, and motion. *(New.)*
-2. **Energy Monitor** — solar production vs consumption, battery, grid import/export. UI shows an animated power-flow diagram + self-sufficiency. *(Carried over from the original seed's Solar Dashboard.)*
-3. **Weather Station** — outdoor conditions with wind compass, UV, pressure, rain. *(Carried over.)*
-4. **Indoor Climate** — per-room temperatures on an SVG floor plan, colour-coded comfort zones. *(Carried over.)*
-
-**Data Store:** `energy-readings` collection with 48h of 30-min interval solar/consumption/battery data.
-
----
-
-### Tab 2: Research Vessel
+### Tab 1: Research Vessel
 
 **Premise:** An oceanographic research ship — built around the instruments real vessels like RV Investigator or Schmidt Ocean's Falkor actually run.
 
@@ -83,30 +63,29 @@ The seed runs as a single script that authenticates against the API and creates 
 
 ### Tab 3: Agriculture ⭐ (priority — agritech showcase)
 
-**Premise:** A connected broadacre/mixed farm — water management, virtual livestock fencing, crop health, and frost protection. This is the flagship domain tab (target industry: agtech), so it gets the richest treatment.
+**Premise:** A connected farm — irrigation/dam water management, drinking-water transfer, and virtual livestock fencing. Flagship tab (target industry: agtech).
 
 **Devices:**
-| Name | Type | State Example |
-|------|------|---------------|
-| Dam Level | sensor | `{ value: 82, unit: "%" }` |
-| Header Tank Level | sensor | `{ value: 65, unit: "%" }` |
-| Dam Pump | switch | `{ on: true }` |
-| Soil Moisture (×4 beds/paddocks) | sensor | `{ value: 38, unit: "%" }` |
-| Irrigation Valves (×4) | switch | `{ on: true }` |
-| Fence Energiser | sensor | `{ voltage: 7.2, unit: "kV", current: 0.4, fault: false }` |
-| Fence Zones (×4) | sensor | `{ intact: true, voltage: 7.1, breach: false }` |
+| Name | Type | State |
+|------|------|-------|
+| Dam Level | sensor | `{ value: 82 }` |
+| Header Tank Level | sensor | `{ value: 65 }` |
+| Dam Pump | switch | `{ on: false }` |
+| Shed Tanks | sensor | `{ value: 78 }` |
+| House Tank | sensor | `{ value: 55 }` |
+| House Pump | switch | `{ on: false }` |
+| Fence Energiser | sensor | `{ voltage: 7.2, current: 0.4, fault: false }` |
+| Fence Zones (×4) | sensor | `{ intact: true, voltage: 7.1 }` |
 | Livestock Collars | sensor | `{ herd: 120, inZone: 118, strays: 2, avgBattery: 74 }` |
-| Crop Field (×3) | sensor | `{ ndvi: 0.72, growthStage: "flowering", canopyTemp: 24.1 }` |
-| Weather Station | sensor | `{ temp: 31.2, humidity: 45, windSpeed: 12, rain: false, dewPoint: 8.2 }` |
-| Frost Sensors (×3) | sensor | `{ temp: 2.4, leafWetness: 60 }` |
 
 **Automations:**
-1. **Irrigation & Water Management** ⭐ — soil-moisture-driven valves per crop; dam pump fills header tank when low; skips on rain. UI shows the SVG flow diagram (Dam → Header Tank → Beds) with animated water flow, per-zone moisture bars, tank gauges, and a "water all" override. *(Carry over + extend the existing hero.) Connects via: soil probes + valve relays + tank level sensors → MQTT.*
-2. **Smart Fencing** — monitors electric-fence energiser voltage/current and per-zone line integrity; detects breaches and earth faults; tracks virtual-fence collar containment (in-zone vs strays). UI shows a paddock map with fence-line status (intact/breach), energiser voltage gauge, and a livestock containment count. *Connects via: fence energiser Modbus + GPS collars (Halter/Gallagher-style) → MQTT/LoRa.*
-3. **Crop Health** — per-field NDVI, growth stage, and canopy temperature; flags water/heat stress. UI shows field cards with an NDVI colour scale, growth-stage timeline, and stress badges. *Connects via: in-field sensors / drone-NDVI ingest → MQTT.*
-4. **Frost Guard** — watches dew point, air temp, and leaf wetness; predicts frost risk overnight and can trigger frost fans/sprinklers. UI shows a frost-risk dial, temp-vs-dewpoint trend, and protection status. *Connects via: frost sensors + weather station → MQTT.*
+1. **Dam & Header Tank** ⭐ — operator pump console: Dam → pump → Header Tank visuals with live levels (% + litres) and pump controls (On/Off, Fill Header, Transfer 500/1000 L). Transfers animate live (water moves between tanks). *Connects via: tank level sensors + pump relay → MQTT.*
+2. **Drinking Water** — same console for rainwater: Shed Tanks → pump → House Tank, with On/Off, Fill House, Transfer controls. *Connects via: tank level sensors + pump relay → MQTT.*
+3. **Smart Fencing** — energiser voltage/current + per-zone line integrity (breach/fault) + virtual-fence collar containment (in-zone vs strays). UI: paddock map with fence-line status, energiser voltage, containment count. *Connects via: fence energiser Modbus + GPS collars (Halter/Gallagher-style) → MQTT/LoRa.*
 
-**Data Store:** `soil-moisture` (72h per zone), `fence-events` (breach/fault log), `frost-log` (overnight minimums).
+> Crop Health and Frost Guard were dropped to focus the tab on water + fencing; they can return later.
+
+**Data Store:** `tank-levels` (dam/header/shed/house levels over 72h).
 
 ---
 
