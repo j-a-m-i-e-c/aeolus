@@ -34,8 +34,6 @@ declare global {
 export const PUBLIC_ROUTES: { method: string; path: string }[] = [
   { method: "GET", path: "/api/health" },
   { method: "HEAD", path: "/api/health" },
-  { method: "GET", path: "/api/system" },
-  { method: "GET", path: "/api/system/logs" },
   { method: "GET", path: "/api/system/version" },
   { method: "GET", path: "/api/auth/status" },
   { method: "POST", path: "/api/auth/login" },

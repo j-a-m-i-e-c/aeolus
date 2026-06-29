@@ -115,7 +115,7 @@ export function createAutomationRoutes(
   });
 
   /** POST /api/automations/trigger/:name — fire a named trigger event (replaces services trigger) */
-  router.post("/trigger/:name", (req, res) => {
+  router.post("/trigger/:name", requireTabPermission("interact"), (req, res) => {
     const { name } = req.params;
     const body = req.body ?? {};
     const firedAt = Date.now();
@@ -607,7 +607,7 @@ export function createAutomationRoutes(
   });
 
   /** PUT /api/automations/:id/state — upsert a key-value pair, persist + broadcast */
-  router.put("/:id/state", validate({ body: automationStateBodySchema, params: automationIdParamsSchema }), (req, res, next) => {
+  router.put("/:id/state", requireTabPermission("interact"), validate({ body: automationStateBodySchema, params: automationIdParamsSchema }), (req, res, next) => {
     try {
       const id = req.params.id as string;
       const { key, value } = req.body;
@@ -626,7 +626,7 @@ export function createAutomationRoutes(
   });
 
   /** DELETE /api/automations/:id/state/:key — remove a single key-value pair */
-  router.delete("/:id/state/:key", (req, res, next) => {
+  router.delete("/:id/state/:key", requireTabPermission("interact"), (req, res, next) => {
     try {
       const id = req.params.id as string;
       const key = req.params.key as string;

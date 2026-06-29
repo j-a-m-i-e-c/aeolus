@@ -34,6 +34,7 @@ import { createConnectorRoutes } from "./api/routes/connector.routes.js";
 import { requestLogger } from "./api/middleware/request-logger.js";
 import { errorHandler } from "./api/middleware/error-handler.js";
 import { corsMiddleware } from "./api/middleware/cors-config.js";
+import { apiRateLimiter } from "./api/middleware/rate-limiter.js";
 import { authenticate } from "./auth/auth-middleware.js";
 import { createAuthRoutes } from "./api/routes/auth.routes.js";
 import { ensureBackendCredential } from "./auth/mqtt-credential-service.js";
@@ -180,6 +181,9 @@ async function main(): Promise<void> {
   app.use(express.json({ limit: "1mb" }));
   app.use(cookieParser());
   app.use(requestLogger);
+
+  // Global API rate limiter (per-IP). The login route adds its own stricter limiter.
+  app.use(apiRateLimiter);
 
   // HTTP metrics middleware — records request duration for all subsequent routes
   app.use(metricsMiddleware());

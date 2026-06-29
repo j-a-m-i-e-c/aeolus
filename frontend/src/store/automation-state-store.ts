@@ -40,7 +40,7 @@ export const useAutomationStateStore = create<AutomationStateState>((set) => ({
 
 /** Send a state update to the backend (used as aeolus.save in custom components) */
 export function sendStateUpdate(ruleId: string, key: string, value: unknown): void {
-  fetch(`${API_URL}/api/automations/${ruleId}/state`, {
+  authFetch(`${API_URL}/api/automations/${ruleId}/state`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ key, value }),
