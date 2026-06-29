@@ -124,7 +124,7 @@ Embed a full VS Code instance ([code-server](https://github.com/coder/code-serve
 - **System administration** — reading logs, inspecting the SQLite database, running diagnostic scripts, managing Docker containers, all from the browser
 - **Remote development** — when combined with the Cloudflare Tunnel roadmap item, developers could work on the Aeolus platform from anywhere without SSH tunnels or VPN setup
 
-**Implementation approach:** Add a `code-server` service to `docker-compose.yml` mounting the Aeolus project directory, proxy it through Express using `http-proxy-middleware` (with WebSocket support), and add a new dashboard pane type or sidebar link that renders the editor in an iframe. The backend container already has `docker-cli` and the Docker socket mounted, so orchestration is straightforward. Estimated effort: 1-2 days for a working MVP.
+**Implementation approach:** Add a `code-server` service to `docker-compose.yml` mounting the Aeolus project directory, proxy it through Express using `http-proxy-middleware` (with WebSocket support), and add a new dashboard pane type or sidebar link that renders the editor in an iframe. Note that Aeolus deliberately does **not** mount the Docker socket or ship the Docker CLI in the backend image (see the security hardening notes), so any container orchestration from the editor would need a scoped, opt-in mechanism rather than relying on host Docker access. Estimated effort: 1-2 days for a working MVP.
 
 ---
 

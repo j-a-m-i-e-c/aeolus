@@ -69,11 +69,11 @@ This enables the full IoT loop — sense, decide, act — across any combination
 ### Backend
 - **Runtime:** Node.js 22 + TypeScript (strict mode, ESM)
 - **Framework:** Express.js
-- **Database:** SQLite via sql.js (pure JavaScript, no native deps)
+- **Database:** SQLite via better-sqlite3 (native, synchronous, WAL mode)
 - **MQTT:** mqtt.js
 - **WebSocket:** ws library
 - **Sandbox:** isolated-vm (secure V8 isolate for user-authored automation scripts)
-- **Transpilation:** TypeScript compiler API (runtime dependency — used to transpile user scripts on save)
+- **Transpilation:** esbuild (runtime dependency — used to transpile user scripts and UI components on save)
 - **Logging:** pino with pino-pretty in development
 - **Testing:** Vitest + fast-check (property-based testing)
 
@@ -175,9 +175,7 @@ aeolus/
 │   ├── websocket/
 │   │   └── ws-server.ts              # WebSocket server
 │   ├── db/
-│   │   └── database.ts              # sql.js setup + schema (devices, automation_rules, automation_state, tabs, panes, connectors)
-│   ├── types/
-│   │   └── sql.js.d.ts              # Type declarations for sql.js
+│   │   └── database.ts              # better-sqlite3 setup + schema (devices, automation_rules, automation_state, tabs, panes, connectors, auth, history)
 │   ├── config.ts                     # Environment variable loading
 │   ├── log-buffer.ts                 # In-memory circular buffer for recent log entries
 │   ├── logger.ts                     # pino logger with log buffer interception
@@ -264,7 +262,8 @@ aeolus/
 │   └── mosquitto.conf                # Broker configuration
 ├── scripts/
 │   ├── setup-pi.sh                   # One-line Raspberry Pi install script
-│   └── deploy-pi.sh                  # Pull + rebuild deploy script
+│   ├── seed-demo.mjs                 # Multi-domain demo seeder (invoked by `make seed`)
+│   └── seed/                         # Per-domain seed modules + shared helpers
 ├── docker-compose.yml
 ├── Dockerfile                        # Backend multi-stage build (auto-detects git commit at build time)
 └── frontend/Dockerfile               # Frontend build + nginx
@@ -425,9 +424,9 @@ Central dispatch service for all automation actions. Every action — whether fr
 - Emits `AUTOMATION_FIRED` on the event bus after each successful action
 - `executeSequence()` runs actions in order, continuing on individual failures
 
-### TypeScript Transpiler (`src/automations/transpiler.ts`)
+### Transpiler (`src/automations/transpiler.ts`)
 
-Handles TypeScript → JavaScript compilation using the TypeScript compiler API (`ts.transpileModule()`). Provides two transpilation functions for different contexts.
+Handles TypeScript/TSX → JavaScript compilation using **esbuild** (`transformSync` — fast, native, the same tool Vite uses). Provides two transpilation functions for different contexts.
 
 **`transpile(source)` — Automation logic scripts:**
 - Strips type annotations and produces ES2022-compatible JavaScript output
@@ -437,7 +436,7 @@ Handles TypeScript → JavaScript compilation using the TypeScript compiler API 
 - Does not perform full type checking — only syntactic transpilation (type checking happens in the Monaco editor via the `.d.ts` bundle)
 
 **`transpileUi(source)` — Custom UI components (TSX):**
-- Transpiles TSX source to ES module JavaScript with `jsx: react-jsx` and `jsxImportSource: "react"`
+- Transpiles TSX source to ES module JavaScript with esbuild's `jsx: "automatic"` and `jsxImportSource: "react"`
 - Allows `import` statements (unlike `transpile()` which rejects them) — UI components need to import React and JSX runtime
 - Produces ES2022 ESNext module output suitable for dynamic `import()` in the browser
 - Rejects empty source strings with a descriptive error
@@ -705,11 +704,11 @@ One-time migration of legacy `hue-credentials.json` into the ConnectorStore.
 
 ### Data Store (`src/data-store/data-store.ts`)
 
-Persistent time-series and key-value storage system built on the existing sql.js (pure JS SQLite) infrastructure. Enables automations to accumulate structured data over time, share computed values across rules, and query historical records with aggregation.
+Persistent time-series and key-value storage system built on the existing better-sqlite3 (native SQLite) infrastructure. Enables automations to accumulate structured data over time, share computed values across rules, and query historical records with aggregation.
 
 **Purpose:** Provide a durable storage layer for automation scripts that need to persist data beyond a single execution — sensor data logging, rolling averages, cross-rule state sharing, and historical trend analysis.
 
-**Architecture:** A single `DataStore` class receives the sql.js `Database` instance and an `EventEmitter` (the internal event bus). All logic — write, query, buckets, retention, config, safeguards — lives in this one class, mirroring the existing `StateHistory` and `ConnectorStore` patterns.
+**Architecture:** A single `DataStore` class receives the better-sqlite3 `Database` instance and an `EventEmitter` (the internal event bus). All logic — write, query, buckets, retention, config, safeguards — lives in this one class, mirroring the existing `StateHistory` and `ConnectorStore` patterns.
 
 **Disabled by default:** The `ds_config` table stores an `enabled` flag. When disabled, the sandbox `db` global is `undefined` and REST write endpoints return 503. A setup wizard on first visit guides users through storage limits to prevent accidental SD card fill on Raspberry Pi.
 
@@ -1684,8 +1683,8 @@ Three configurable levels managed from the dashboard: Open, Shared Password, or 
 - **Data Store disabled by default with setup wizard:** Prevents accidental SD card fill on Raspberry Pi. Users must explicitly enable with configured storage limits, ensuring they understand the implications of persistent data accumulation on constrained hardware.
 - **FIFO eviction over hard rejection when collection hits record limit:** Preserves newest data automatically rather than failing writes. For time-series sensor data, recent readings are almost always more valuable than old ones.
 - **Duration parser as pure module for property-based testing:** The `src/data-store/duration.ts` module has zero dependencies and no side effects, making it ideal for exhaustive property-based testing with fast-check. Separating it from the DataStore class keeps the test surface clean.
-- **Single DataStore class mirrors existing StateHistory/ConnectorStore patterns:** All logic (write, query, buckets, retention, config, safeguards) lives in one class that receives the sql.js Database instance. This consistency makes the codebase predictable — developers familiar with one storage component can immediately understand the others.
-- **sql.js over better-sqlite3:** Pure JavaScript avoids native C++ build tools requirement, enabling cross-platform development (Windows → Raspberry Pi) without compilation issues.
+- **Single DataStore class mirrors existing StateHistory/ConnectorStore patterns:** All logic (write, query, buckets, retention, config, safeguards) lives in one class that receives the better-sqlite3 Database instance. This consistency makes the codebase predictable — developers familiar with one storage component can immediately understand the others.
+- **better-sqlite3 for storage:** A native, synchronous SQLite binding with WAL mode. Synchronous calls keep the storage code simple (no Promise plumbing through the event path), and WAL mode gives good concurrent read performance. The tradeoff is a native addon that compiles per-platform — the Dockerfile builds it for ARM64.
 - **EventEmitter over message queue:** Simple pub/sub is sufficient at MVP scale. No need for Redis/RabbitMQ for a local-first system.
 - **Zustand over Redux:** Lightweight, minimal boilerplate, matches the "clarity over decoration" design principle.
 - **Express over Fastify:** Broader ecosystem familiarity, easier WebSocket integration via ws library.
@@ -1694,7 +1693,7 @@ Three configurable levels managed from the dashboard: Open, Shared Password, or 
 - **Pinned tabs render dedicated components:** Pinned system tabs (System, Connectors, Data) render their own full-page components directly via React Router `<Route>` elements in `App.tsx`, bypassing the modular pane grid. The System tab (`/dashboard`) renders `SystemHealth`, `DeviceGrid`, and `SystemPage` inline. The Connectors tab (`/connectors`) renders the `ConnectorsPage` component. The Data tab (`/data-store`) renders the `DataStorePage` component (setup wizard when disabled, data explorer when enabled). This gives each system page full control over its layout and styling. Custom (unpinned) tabs use the `TabLayout` component with the pane grid system. This separation keeps system pages polished while maintaining flexibility for user-created tabs.
 - **`isolated-vm` over Node.js `vm` for sandbox execution:** The Node.js `vm` module is explicitly documented as "not a security mechanism" — it runs code in the same V8 isolate as the host process, allowing escape via prototype pollution and `Function` constructor access. The `vm2` library was deprecated after repeated critical sandbox escape CVEs. `isolated-vm` creates a separate V8 isolate with its own heap, no access to the host's global scope, and built-in support for memory limits (32 MB) and execution timeouts (5 seconds). This is the same isolation primitive used by Cloudflare Workers. For a Raspberry Pi deployment where the automation engine shares a process with the MQTT broker connection and device registry, true V8-level isolation is essential. The tradeoff is that `isolated-vm` is a native addon requiring C++ compilation — the Dockerfile includes `build-essential` and `python3` for ARM64 builds.
 - **Monaco over CodeMirror for the script editor:** Monaco is the editor engine behind VS Code. It provides native TypeScript language service integration — IntelliSense, type checking, and error squiggles work out of the box when you register `.d.ts` type definitions via `addExtraLib()`. CodeMirror 6 is lighter but requires significant custom work to achieve comparable TypeScript support. Since the code editor is the centrepiece of the automation overhaul and developer experience is paramount, Monaco is the right choice. The `@monaco-editor/react` wrapper provides clean React integration.
-- **TypeScript as a runtime dependency:** The TypeScript compiler API (`ts.transpileModule()`) is used at runtime to transpile user-authored automation scripts on save. This means `typescript` is a production dependency, not just a dev dependency. The tradeoff is a larger production bundle, but it enables on-the-fly transpilation without a separate build step or external service.
+- **esbuild as a runtime dependency:** esbuild (`transformSync`) is used at runtime to transpile user-authored automation scripts and TSX UI components on save. This means `esbuild` is a production dependency, not just a dev dependency. It strips type annotations (no type checking) and compiles in microseconds, enabling on-the-fly transpilation without a separate build step or external service.
 - **Generic backend-driven setup wizard:** The ConnectorsPage setup wizard is fully generic — it fetches step descriptors from `GET /api/connectors/:id/setup-steps` and renders them dynamically. No connector-specific UI code exists in the frontend. Each step can include input fields, and the wizard accumulates data across steps, passing it to subsequent step executions and patching the connector config on completion. This means adding a new connector with a multi-step setup flow requires zero frontend changes.
 - **3 pinned tabs instead of 5:** Simplified from 5 pinned tabs (Dashboard, Automations, Connectors, Services, System) to 3 (System, Connectors, Data). The System tab renders the device grid, system health, and host diagnostics inline. The Data tab renders the Data Store explorer (setup wizard when disabled, data explorer when enabled). Automations moved to self-contained panes in custom tabs — each automation is one pane, reflecting the code-first philosophy. Pinned tabs are hardcoded in the frontend, not stored in the database.
 - **One-pane-one-automation pattern:** Each AutomationPane manages a single automation rule through a setup → status → editing state machine. This replaces the previous list-based approach where all automations lived in one page. The pane pattern means automations live alongside the controls they manage in custom tabs, and users can see the flow diagram or activity feed at a glance.

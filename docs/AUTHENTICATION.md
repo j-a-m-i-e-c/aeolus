@@ -185,7 +185,7 @@ Regardless of tab assignments, only the admin can:
 - Create/delete users and groups
 - Create/delete tabs
 - Manage MQTT credentials
-- Manage connectors and services
+- Manage connectors
 
 ---
 

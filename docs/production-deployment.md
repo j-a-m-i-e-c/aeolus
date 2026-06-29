@@ -1,26 +1,65 @@
 # Production Deployment Guide
 
-A practical guide for running Aeolus on a Raspberry Pi in production. Covers security hardening, backups, monitoring, and maintenance.
+A practical guide for running Aeolus on a Raspberry Pi in production. Covers authentication, MQTT security, TLS, firewalling, backups, monitoring, and updates.
+
+Aeolus runs as three containers defined in `docker-compose.yml`:
+
+| Service | Network | Port | Description |
+|---------|---------|------|-------------|
+| `aeolus-mosquitto` | bridge | `1883` | Eclipse Mosquitto MQTT broker |
+| `aeolus-backend` | **host** | `3001` | Express API + automation engine + WebSocket |
+| `aeolus-frontend` | bridge | `3000` → `80` | React dashboard (nginx) |
+
+> The backend uses `network_mode: host` so it can do UDP-broadcast discovery (Kasa) and reach LAN devices (Hue bridge) directly. That means the backend binds port `3001` straight onto the host rather than through Docker port mapping.
 
 ---
 
-## 1. MQTT Broker Authentication
+## 1. Authentication & First-Run Setup
 
-By default, Mosquitto allows anonymous connections. For production, enable username/password authentication.
+Authentication is always on — there is no anonymous/disabled mode for the dashboard. On first launch (no admin exists yet), Aeolus serves a **Setup Page** on every route. Create the admin account there:
 
-### Create a password file
+- Username (non-empty)
+- Password (minimum 8 characters)
+
+After setup you get a JWT-based session: a short-lived access token (15 min) held in memory plus an httpOnly refresh cookie (7 days). Non-admin users belong to groups with per-tab `read` / `interact` / `write` permissions.
+
+For the full auth model — token flow, group permissions, user management API, and emergency admin recovery — see **[`AUTHENTICATION.md`](AUTHENTICATION.md)**.
+
+### JWT secret
+
+By default Aeolus generates a random 256-bit signing key on first run and stores it in the database. To pin it across rebuilds (recommended if you ever restore to a different machine), set `JWT_SECRET`. Changing the secret invalidates all existing sessions.
+
+---
+
+## 2. MQTT Broker Security
+
+The committed `mosquitto/mosquitto.conf` ships with `allow_anonymous true` — fine for a trusted LAN during setup, but you should lock it down for production.
+
+### Recommended: manage it from the dashboard
+
+Aeolus manages MQTT authentication for you from the **Security** tab. Choose one of three levels:
+
+| Level | Description |
+|-------|-------------|
+| **Open** | No authentication (development / trusted networks) |
+| **Shared Password** | One credential shared by all devices |
+| **Per-Device** | A unique username/password per device |
+
+Switching levels regenerates the Mosquitto password file and reloads the broker automatically. Per-device credentials are created under **Security → MQTT Credentials**; the password is shown once on creation. The backend maintains its own credential (`aeolus-backend`) automatically. See [`AUTHENTICATION.md`](AUTHENTICATION.md#mqtt-credential-workflow) for the credential workflow and device firmware notes.
+
+### Manual fallback
+
+If you'd rather configure the broker by hand instead of through the dashboard:
 
 ```bash
-# Generate the password file (runs inside the Mosquitto container)
+# Create the password file (runs inside the Mosquitto container)
 docker exec -it aeolus-mosquitto mosquitto_passwd -c /mosquitto/config/passwd aeolus
 
-# Add additional users without -c (which overwrites the file)
+# Add more users without -c (which would overwrite the file)
 docker exec -it aeolus-mosquitto mosquitto_passwd /mosquitto/config/passwd another_user
 ```
 
-### Update mosquitto.conf
-
-Edit `mosquitto/mosquitto.conf`:
+Then edit `mosquitto/mosquitto.conf`:
 
 ```conf
 listener 1883
@@ -31,9 +70,7 @@ persistence_location /mosquitto/data/
 log_dest stdout
 ```
 
-### Update the backend connection
-
-Set credentials in your `.env` file:
+Point the backend at the broker with credentials (only needed for the manual approach — `docker-compose.yml` otherwise sets `MQTT_BROKER_URL` to `mqtt://localhost:1883`):
 
 ```env
 MQTT_BROKER_URL=mqtt://aeolus:your_password@localhost:1883
@@ -47,13 +84,11 @@ docker compose down && docker compose up -d
 
 ---
 
-## 2. HTTPS via Reverse Proxy
+## 3. HTTPS via Reverse Proxy
 
 The frontend serves on port 3000 (HTTP) and the backend API on port 3001. Use a reverse proxy for TLS termination.
 
 ### Option A: Caddy (simplest)
-
-Install Caddy on the Pi host:
 
 ```bash
 sudo apt install caddy
@@ -62,7 +97,7 @@ sudo apt install caddy
 Edit `/etc/caddy/Caddyfile`:
 
 ```caddyfile
-# For LAN access with automatic self-signed cert
+# For LAN access with an automatic self-signed cert
 https://aeolus.local {
   tls internal
 
@@ -85,8 +120,6 @@ sudo systemctl restart caddy
 ```
 
 ### Option B: nginx with self-signed certs
-
-Generate a self-signed certificate:
 
 ```bash
 sudo openssl req -x509 -nodes -days 365 \
@@ -139,7 +172,7 @@ If you need external access without opening ports:
 curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64.deb -o cloudflared.deb
 sudo dpkg -i cloudflared.deb
 
-# Authenticate and create tunnel
+# Authenticate and create the tunnel
 cloudflared tunnel login
 cloudflared tunnel create aeolus
 cloudflared tunnel route dns aeolus aeolus.yourdomain.com
@@ -152,60 +185,70 @@ Cloudflare handles TLS automatically — no certs to manage.
 
 ---
 
-## 3. Firewall Rules
+## 4. Firewall Rules
 
-Use UFW to restrict access to LAN only. Replace `192.168.1.0/24` with your actual LAN subnet.
+Use UFW to restrict access to the LAN only. Replace `192.168.1.0/24` with your actual subnet.
 
 ```bash
-# Enable UFW
 sudo ufw default deny incoming
 sudo ufw default allow outgoing
 
 # Allow SSH (so you don't lock yourself out)
 sudo ufw allow ssh
 
-# Allow Aeolus ports from LAN only
+# Allow Aeolus ports from the LAN only
 sudo ufw allow from 192.168.1.0/24 to any port 3000 proto tcp  # Frontend
 sudo ufw allow from 192.168.1.0/24 to any port 3001 proto tcp  # Backend API
 sudo ufw allow from 192.168.1.0/24 to any port 1883 proto tcp  # MQTT
 
-# Deny these ports from anywhere else (implicit with default deny, but explicit is clearer)
+# Deny those ports from anywhere else (implicit with default deny, but explicit is clearer)
 sudo ufw deny 3000
 sudo ufw deny 3001
 sudo ufw deny 1883
 
-# Enable the firewall
 sudo ufw enable
 sudo ufw status verbose
 ```
 
-> **Note:** UFW processes rules in order. The `allow from LAN` rules above will match before the `deny` rules for LAN traffic, while WAN traffic hits the deny rules.
+> UFW processes rules in order. The `allow from LAN` rules match before the `deny` rules for LAN traffic, while WAN traffic hits the deny rules.
 
 ---
 
-## 4. Backup Strategy
+## 5. Backup & Restore
 
-Aeolus stores all persistent data in a SQLite database inside a Docker volume.
+All persistent state lives in a single SQLite database (`better-sqlite3`, WAL mode) inside a Docker volume.
 
 ### Locate the database
 
 ```bash
-# Find the volume mount path
 docker volume inspect aeolus_backend_data | grep Mountpoint
 # Typically: /var/lib/docker/volumes/aeolus_backend_data/_data/aeolus.db
 ```
 
-### Manual backup
+### Safe backup
+
+Because the database runs in WAL mode, a plain `cp` of the `.db` file while the backend is running can miss data still in the write-ahead log. Two safe options:
+
+**Option A — stop, copy, restart (simplest, guaranteed consistent):**
 
 ```bash
-# Copy the database file (safe — SQLite with WAL mode handles this)
+docker compose stop backend
 sudo cp /var/lib/docker/volumes/aeolus_backend_data/_data/aeolus.db \
   ~/backups/aeolus-$(date +%Y%m%d-%H%M%S).db
+docker compose start backend
 ```
 
-### Automated backup with cron
+**Option B — online consistent copy (no downtime):**
 
-Create a backup script at `~/scripts/backup-aeolus.sh`:
+```bash
+# Copies a consistent snapshot even while the DB is in use
+sqlite3 /var/lib/docker/volumes/aeolus_backend_data/_data/aeolus.db \
+  ".backup '/home/pi/backups/aeolus-$(date +%Y%m%d-%H%M%S).db'"
+```
+
+### Automated nightly backup
+
+Create `~/scripts/backup-aeolus.sh`:
 
 ```bash
 #!/bin/bash
@@ -214,9 +257,9 @@ DB_PATH="/var/lib/docker/volumes/aeolus_backend_data/_data/aeolus.db"
 RETENTION_DAYS=14
 
 mkdir -p "$BACKUP_DIR"
-sudo cp "$DB_PATH" "$BACKUP_DIR/aeolus-$(date +%Y%m%d-%H%M%S).db"
+sqlite3 "$DB_PATH" ".backup '$BACKUP_DIR/aeolus-$(date +%Y%m%d-%H%M%S).db'"
 
-# Remove backups older than retention period
+# Remove backups older than the retention period
 find "$BACKUP_DIR" -name "aeolus-*.db" -mtime +$RETENTION_DAYS -delete
 
 echo "Backup complete. $(ls "$BACKUP_DIR" | wc -l) backups retained."
@@ -224,161 +267,114 @@ echo "Backup complete. $(ls "$BACKUP_DIR" | wc -l) backups retained."
 
 ```bash
 chmod +x ~/scripts/backup-aeolus.sh
+crontab -e
 ```
-
-Add to crontab (`crontab -e`):
 
 ```cron
 # Daily backup at 3 AM
 0 3 * * * /home/pi/scripts/backup-aeolus.sh >> /home/pi/backups/backup.log 2>&1
 ```
 
-### Restore procedure
+### Restore
 
 ```bash
-# Stop the stack
 docker compose down
-
-# Replace the database
 sudo cp ~/backups/aeolus-20240115-030000.db \
   /var/lib/docker/volumes/aeolus_backend_data/_data/aeolus.db
-
-# Restart
 docker compose up -d
 ```
 
 ---
 
-## 5. Monitoring
+## 6. Monitoring
 
 ### Health endpoint
-
-The backend exposes `/api/health` which reports system status:
 
 ```bash
 curl http://localhost:3001/api/health
 ```
 
-Returns MQTT connection state, device count, uptime, and memory usage. Use this for external monitoring.
+Returns MQTT connection state, device count, uptime, and memory usage. Use it for external monitoring.
+
+### Prometheus metrics
+
+The backend exposes `/metrics` in Prometheus text-exposition format (MQTT throughput, device counts, automation execution, HTTP stats, WebSocket connections, system resources).
+
+```bash
+curl http://localhost:3001/metrics
+```
+
+If you set `METRICS_TOKEN`, the endpoint requires `Authorization: Bearer <token>` and bypasses JWT auth so Prometheus can scrape it without a user account. When unset, the endpoint is open (fine for local-only deployments). Aeolus also has a built-in two-tier metrics history with charts in the **Data** tab, so Grafana is optional.
 
 ### Docker health checks
 
-Docker automatically monitors container health. Check status:
+The backend container declares a healthcheck (`wget --spider http://localhost:3001/api/health`, 30s interval, 3 retries). With `restart: unless-stopped`, Docker restarts unhealthy containers automatically.
 
 ```bash
 docker ps --format "table {{.Names}}\t{{.Status}}"
 ```
 
-The backend container is configured with:
-- Health check interval: 30s
-- Timeout: 5s
-- Start period: 10s
-- Retries before unhealthy: 3
-
-Docker will restart unhealthy containers automatically (via `restart: unless-stopped`).
-
 ### Container logs
 
 ```bash
-# View recent logs
 docker logs aeolus-backend --tail 100
-
-# Follow logs in real time
 docker logs aeolus-backend -f
-
-# Check for errors
 docker logs aeolus-backend 2>&1 | grep -i error
 ```
 
-### Simple alerting with a cron check
+Application logs are also viewable in the dashboard's **System** tab.
 
-Add to crontab for basic uptime monitoring:
+### Simple uptime alert
 
-```bash
-# Check health every 5 minutes, send notification on failure
+```cron
+# Check health every 5 minutes, notify on failure
 */5 * * * * curl -sf http://localhost:3001/api/health > /dev/null || echo "Aeolus backend is DOWN" | mail -s "Aeolus Alert" you@example.com
 ```
 
-Or use a lightweight tool like [Uptime Kuma](https://github.com/louislam/uptime-kuma) running on the same Pi for a dashboard with notifications.
-
----
-
-## 6. Docker Socket Trade-off
-
-### Why it's mounted
-
-The backend container has `/var/run/docker.sock` mounted as a volume:
-
-```yaml
-volumes:
-  - /var/run/docker.sock:/var/run/docker.sock
-```
-
-This enables the **self-update feature** — Aeolus can pull new images and recreate its own containers from the web UI without SSH access.
-
-### What the risk is
-
-Mounting the Docker socket gives the container **full Docker API access** on the host. In theory, a compromised container could:
-- Start/stop any container on the host
-- Mount host filesystems
-- Execute commands on the host via privileged containers
-
-### Why it's acceptable here
-
-- **Single-user system** — Aeolus runs on your personal Pi, not a shared server
-- **LAN-only access** — The API is not exposed to the internet (see firewall rules above)
-- **No untrusted input** — The self-update endpoint only pulls from the configured git remote
-- **Convenience trade-off** — One-click updates from the UI vs. SSH + manual `docker compose` commands
-
-### Mitigation
-
-If you want to reduce exposure:
-
-1. **Restrict with firewall rules** (already covered in Section 3)
-2. **Use a Docker socket proxy** like [Tecnativa/docker-socket-proxy](https://github.com/Tecnativa/docker-socket-proxy) to limit which API calls the container can make
-3. **Remove the mount** if you don't need self-update — just comment out the volume line and update manually via SSH
+Or run [Uptime Kuma](https://github.com/louislam/uptime-kuma) on the same Pi for a dashboard with notifications.
 
 ---
 
 ## 7. Environment Variables
 
-Reference table of all environment variables with production-recommended values:
+`docker-compose.yml` sets the core backend variables directly (`PORT`, `MQTT_BROKER_URL`, `DB_PATH`, `MQTT_TOPICS`, `NODE_ENV`, `LOG_LEVEL`). The remaining variables below are tuning knobs and secrets you can add to a `.env` file in the project root.
 
-| Variable | Default | Production Value | Description |
-|----------|---------|-----------------|-------------|
+| Variable | Default | Production value | Description |
+|----------|---------|------------------|-------------|
 | `NODE_ENV` | `development` | `production` | Suppresses stack traces in error responses, enables optimizations |
-| `PORT` | `3001` | `3001` | Backend API port |
-| `MQTT_BROKER_URL` | `mqtt://localhost:1883` | `mqtt://user:pass@localhost:1883` | MQTT broker connection URL (include credentials) |
-| `MQTT_TOPICS` | `#` | `#` | MQTT topic subscription filter |
-| `DB_PATH` | `./data/aeolus.db` | `/app/data/aeolus.db` | Database path (use the Docker volume path) |
+| `PORT` | `3001` | `3001` | Backend API port (set via `API_PORT` in compose) |
+| `MQTT_BROKER_URL` | `mqtt://localhost:1883` | `mqtt://localhost:1883` | MQTT broker URL (include credentials only for the manual MQTT-auth approach) |
+| `MQTT_TOPICS` | `#` | `#` | MQTT subscription filter |
+| `DB_PATH` | `./data/aeolus.db` | `/app/data/aeolus.db` | Database path (the Docker volume path) |
 | `LOG_LEVEL` | `debug` | `info` | Log verbosity (`debug`, `info`, `warn`, `error`) |
-| `RATE_LIMIT_RPM` | `200` | `200` | Max API requests per minute per IP |
-| `CORS_ORIGINS` | _(empty)_ | `https://aeolus.local` | Additional allowed CORS origins (comma-separated) |
-| `FRONTEND_PORT` | `3000` | `3000` | Frontend container port mapping |
-| `MQTT_PORT` | `1883` | `1883` | MQTT broker port mapping |
-| `HUE_BRIDGE_IP` | _(empty)_ | _(your bridge IP)_ | Philips Hue bridge IP address |
-| `HUE_API_KEY` | _(empty)_ | _(your API key)_ | Philips Hue API key |
-| `AEOLUS_PROJECT_DIR` | _(unset)_ | `/aeolus-host` | Host project directory for self-update feature |
+| `RATE_LIMIT_RPM` | `1000` | `1000` | Max API requests per minute per IP |
+| `CORS_ORIGINS` | _(empty)_ | `https://aeolus.local` | Extra allowed CORS origins (comma-separated); LAN origins are allowed by default |
+| `STATE_HISTORY_MAX` | `100` | `100` | Max state-history records kept per device |
+| `HISTORY_RECORD_INTERVAL` | `5000` | `5000` | Minimum ms between recorded state-history points (throttle) |
+| `JWT_SECRET` | _(auto-generated)_ | _(your 256-bit key)_ | JWT signing key; auto-generated and stored in the DB if unset |
+| `MQTT_PASSWORD_FILE` | `mosquitto/password_file` | `mosquitto/password_file` | Path Aeolus writes when managing MQTT credentials |
+| `METRICS_TOKEN` | _(empty)_ | _(your token)_ | Bearer token to protect `/metrics`; open when unset |
+| `FRONTEND_PORT` | `3000` | `3000` | Frontend container host port |
+| `MQTT_PORT` | `1883` | `1883` | MQTT broker host port |
 
-Create your production `.env`:
+Example production `.env`:
 
 ```env
 NODE_ENV=production
-PORT=3001
-MQTT_BROKER_URL=mqtt://aeolus:your_secure_password@localhost:1883
-MQTT_TOPICS=#
-DB_PATH=/app/data/aeolus.db
 LOG_LEVEL=info
-RATE_LIMIT_RPM=200
+RATE_LIMIT_RPM=1000
 CORS_ORIGINS=https://aeolus.local
-AEOLUS_PROJECT_DIR=/aeolus-host
+JWT_SECRET=replace-with-a-long-random-string
+METRICS_TOKEN=replace-with-a-random-token
 ```
 
 ---
 
-## 8. Update Procedure
+## 8. Updates
 
-### Option A: Manual update (via SSH)
+Aeolus does **not** self-update from the web UI (that feature, and the Docker socket mount it required, were removed for security — see Section 9). Updates are applied externally.
+
+### Manual update (via SSH)
 
 ```bash
 cd ~/aeolus
@@ -386,29 +382,29 @@ git pull origin main
 docker compose up --build -d
 ```
 
-This pulls the latest code, rebuilds images, and restarts containers with zero-downtime (containers restart one at a time).
-
-### Option B: Self-update button (via web UI)
-
-Aeolus includes a built-in update button in the settings page. It:
-
-1. Runs `git pull` inside the mounted project directory
-2. Rebuilds and restarts containers via the Docker socket
-3. Reports progress in the UI
-
-This requires the Docker socket mount and `AEOLUS_PROJECT_DIR` to be configured (both are set by default in `docker-compose.yml`).
+This pulls the latest code, rebuilds images, and restarts containers. The dashboard's **System** tab shows the current build commit and an "update available" badge by comparing against the latest commit on `main` — it surfaces that an update exists, but applying it is a manual step.
 
 ### Rollback
 
-If an update breaks something:
-
 ```bash
-# Check recent commits
 git log --oneline -5
-
-# Roll back to previous version
 git checkout <previous-commit-sha>
 docker compose up --build -d
 ```
 
-Or restore from a database backup if data was affected (see Section 4).
+Or restore from a database backup if data was affected (Section 5).
+
+---
+
+## 9. Security Hardening
+
+Aeolus ships hardened for an internet-adjacent home/edge deployment:
+
+- **No Docker socket mount** — the backend container has no access to `/var/run/docker.sock`, so a compromised container cannot control the host's Docker daemon.
+- **Read-only system router** — `/api/system` is GET-only (diagnostics, logs, version check). There are no shutdown, reboot, update, or prune endpoints; host control is done via SSH/Docker, not the web app.
+- **No git or Docker CLI in the production image** — the build commit is baked into `dist/build-info.json` at build time, so no runtime git is needed.
+- **Authentication always on** — bcrypt (cost 12) password hashing, short-lived JWTs, httpOnly refresh cookies, and login rate-limiting (5 attempts/min per IP).
+- **Sandboxed automations** — user scripts run in `isolated-vm` V8 isolates (32 MB cap, 5 s timeout, no filesystem, no module imports).
+- **LAN-only by default** — combine with the firewall rules (Section 4) and a TLS reverse proxy (Section 3) for a hardened deployment.
+
+> The production image still includes `python3`, `make`, and `g++` — they're required to compile the native addons (`isolated-vm`, `better-sqlite3`, `bcrypt`) during install. They are build dependencies for those modules, not host-control tooling.
