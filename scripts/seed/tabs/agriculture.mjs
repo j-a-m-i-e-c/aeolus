@@ -16,7 +16,7 @@ const devices = [
   { topic: "switch/farm/dam-pump", payload: { on: false } },
   { topic: "switch/farm/house-pump", payload: { on: false } },
   { topic: "sensor/fence/energiser", payload: { voltage: 7.2, current: 0.4, fault: false } },
-  { topic: "sensor/fence/collars", payload: { herd: 120, tracked: 26, strays: 2, avgBattery: 74 } },
+  { topic: "sensor/fence/collars", payload: { herd: 30, tracked: 30, strays: 2, avgBattery: 74 } },
 ];
 
 // All three panes are operator/monitoring consoles simulated in the UI and
@@ -215,12 +215,12 @@ import type { CustomComponentProps } from "./types";
 
 const PAD = { x: 16, y: 30, w: 448, h: 196 };
 const VF = { x: 40, y: 48, w: 400, h: 160 };
-const HERD = 120, VOLT = 7.2;
+const HERD = 30, VOLT = 7.2;
 
 export default function SmartFencing(aeolus: CustomComponentProps) {
   const [cows, setCows] = useState(() => {
     const list: any[] = [];
-    for (let i = 0; i < 26; i++) {
+    for (let i = 0; i < HERD; i++) {
       const stray = i < 2;
       list.push({
         id: "#" + String(1001 + i).slice(1),
@@ -296,7 +296,7 @@ export default function SmartFencing(aeolus: CustomComponentProps) {
           <button onClick={() => setSel(null)} className="text-[10px] text-[#6B7785] hover:text-[#E6EDF3] px-2 py-1">✕</button>
         </div>
       ) : (
-        <div className="text-center text-[8px] text-[#6B7785]">tap a tag to inspect · {cows.length} tracked of {HERD} herd</div>
+        <div className="text-center text-[8px] text-[#6B7785]">tap a tag to inspect · whole herd ({HERD}) tracked</div>
       )}
 
       <div className="grid grid-cols-4 gap-1.5">
