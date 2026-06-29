@@ -79,11 +79,9 @@ The seed runs as a single script that authenticates against the API and creates 
 | Livestock Collars | sensor | `{ herd: 120, inZone: 118, strays: 2, avgBattery: 74 }` |
 
 **Automations:**
-1. **Dam & Header Tank** ⭐ — operator pump console: Dam → pump → Header Tank visuals with live levels (% + litres) and pump controls (On/Off, Fill Header, Transfer 500/1000 L). Transfers animate live (water moves between tanks). *Connects via: tank level sensors + pump relay → MQTT.*
-2. **Drinking Water** — same console for rainwater: Shed Tanks → pump → House Tank, with On/Off, Fill House, Transfer controls. *Connects via: tank level sensors + pump relay → MQTT.*
-3. **Smart Fencing** — energiser voltage/current + per-zone line integrity (breach/fault) + virtual-fence collar containment (in-zone vs strays). UI: paddock map with fence-line status, energiser voltage, containment count. *Connects via: fence energiser Modbus + GPS collars (Halter/Gallagher-style) → MQTT/LoRa.*
-
-> Crop Health and Frost Guard were dropped to focus the tab on water + fencing; they can return later.
+1. **Smart Fencing** ⭐ — GPS herd tracking. A large paddock map shows the **virtual fence** and **individually-tracked cattle** as moving dots, each with a tag ID (#001…). Tap a tag to inspect (status, collar battery); strays outside the virtual fence pulse red. Stats: in-zone, strays, energiser voltage, avg collar battery. *Connects via: GPS collars (Halter/Gallagher-style) + fence energiser → MQTT/LoRa.*
+2. **Water Management** — two pump consoles in one pane: **Dam → Header Tank** and **Shed → House** (drinking). Each shows live tank levels (% + litres) with a pump between, and controls: On/Off, Fill, Transfer +500/+1000 L (transfers animate live). *Connects via: tank level sensors + pump relays → MQTT.*
+3. **Cattle Troughs** — a 20-trough watering grid; each drains and auto-refills via float valve (live), colour-coded, with refilling/low/average summary. *Connects via: trough float sensors → MQTT.*
 
 **Data Store:** `tank-levels` (dam/header/shed/house levels over 72h).
 
