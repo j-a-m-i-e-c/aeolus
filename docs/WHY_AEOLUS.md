@@ -1,28 +1,28 @@
 # Why Aeolus?
 
-Aeolus is a local-first edge automation platform. It provides sandboxed code execution, hot-loaded React dashboards, a pluggable connector framework, MQTT-native device discovery, and optional remote access. Everything runs on your LAN by default — fast, private, no vendor dependency. Because nothing relies on external services, it also happens to be fully functional offline, which makes it deployable anywhere from a home to a research station.
+Aeolus is a local-first platform for building applications that run physical environments. It ingests events from arbitrary hardware, runs your business logic in a secure sandbox, persists state, and renders custom interfaces you write yourself — all self-hosted on hardware you control.
 
-Home automation is the first domain it targets — but the architecture is domain-agnostic. The same platform works for a workshop, a greenhouse, a boat, or an industrial monitoring site.
+The shorter version: it's the development experience you already have as a software engineer — TypeScript, React, a real editor, version control, Docker — applied to the physical world.
 
----
-
-## How It Differs from Home Assistant
-
-Aeolus is not a Home Assistant clone. It was built from scratch to solve a fundamentally different problem: give developers a real programming environment for event-driven automation, not a GUI wizard with YAML escape hatches.
-
-**Home Assistant** is a configuration-driven platform. You describe what you want in YAML, configure integrations through a UI, and use templates (Jinja2) when the visual editor runs out of expressiveness. It's designed for non-programmers who want to automate their home without writing code.
-
-**Aeolus** is a code-first platform. You write automation scripts in a Monaco editor with full IntelliSense, compose custom React dashboard components in JSX, and deploy to a Pi with `docker compose up`. It's designed for developers who want the same experience they have in their day job — types, tests, version control, and composability — applied to their physical environment.
-
-Home Assistant optimises for accessibility. Aeolus optimises for developer experience.
-
-Aeolus is also early. What exists today is the foundation — a well-architected core with a connector framework explicitly designed for other developers to extend. The vision is a community-driven platform where developers contribute connectors for their own hardware, share automation recipes, and build on a codebase that respects their time and skills. The simplicity of the connector interface (one TypeScript file, 5 methods) is intentional — it's meant to lower the barrier so anyone with a device and an afternoon can plug it into the ecosystem.
+Home automation is the most familiar way to demonstrate it — almost everyone can picture controlling lights, sensors, and switches — but it's only one example. The architecture is domain-agnostic: the same runtime works for a greenhouse, a workshop, a boat, a solar installation, or an industrial monitoring site. Everything runs on your LAN by default — fast, private, no vendor accounts. Because nothing depends on external services, it also happens to keep working offline, which makes it deployable anywhere.
 
 ---
 
-## Each Automation Is a Full-Stack Unit
+## Why I Built This
 
-This is the single biggest architectural difference. Every automation in Aeolus has two tabs: **Logic** (backend script) and **UI** (React/JSX component). They are a paired unit that communicate through a reactive state store:
+I live on a farm. Over time I accumulated pumps, water tanks, weather stations, solar, cameras, and a pile of ESP32 sensors — all useful, all disconnected. The platforms I tried either hid programming behind configuration screens or made anything beyond a simple rule awkward to express.
+
+I write software for a living. I wanted the experience I already have at work — real code, types, a proper editor, Git, Docker — but pointed at the physical things on my property. When I couldn't find that, I built it.
+
+That origin matters because it shaped every design decision. Aeolus isn't a feature list assembled top-down. It started from a concrete problem — *managing real hardware in a real place* — and the architecture grew from first principles to solve it. The fact that the same runtime now works for a research vessel or a stage-lighting rig is a consequence of solving the farm problem properly, not a marketing afterthought.
+
+---
+
+## The Core Idea: Each Automation Is a Full-Stack Unit
+
+This is the single most distinctive thing about Aeolus, so it leads.
+
+Every automation has two halves: a **Logic** tab (a backend script) and a **UI** tab (a React/JSX component). They are a paired unit — the automation *is* the deployment unit — and they communicate through a private reactive state store:
 
 ```
 ┌─────────────────────────┐         ┌─────────────────────────┐
@@ -42,56 +42,17 @@ This is the single biggest architectural difference. Every automation in Aeolus 
 - **UI → Logic** (passive): `aeolus.save()` writes to SQLite. The Logic tab reads it on its next trigger.
 - **UI → Logic** (immediate): `aeolus.fire(eventName, payload)` triggers the Logic tab now with `context.topic = "ui/{ruleId}/{eventName}"`.
 
-No other home automation platform offers this paired backend/frontend model where both halves are user-authored and connected by the platform. In Home Assistant, dashboard cards and automations are completely separate concerns — cards read entity state, automations write it, but there's no direct channel between a specific automation and a specific UI component.
+Most automation tools keep these concerns separate: dashboards read state, automations write it, and there's no direct channel between a specific automation and a specific piece of UI. Aeolus treats each automation as a miniature application with its own backend, its own frontend, and a dedicated reactive channel between them — both halves user-authored, the platform supplying only the runtime and the wiring.
+
+That single abstraction is what makes the rest of the platform feel less like a home-automation tool and more like an application framework for the edge.
 
 ---
 
-## Architectural Philosophy
+## A Real Programming Environment
 
-| Principle | Aeolus | Home Assistant |
-|-----------|--------|----------------|
-| **Automation language** | JavaScript/TypeScript in a secure V8 sandbox | YAML + Jinja2 templates |
-| **UI customisation** | Write JSX/TSX components, rendered live on save | Lovelace cards (YAML config) or custom card JS |
-| **Device communication** | MQTT-native + pluggable connector framework | 2,500+ Python integrations |
-| **Data persistence** | SQLite — single file, zero config | MariaDB/PostgreSQL/SQLite (recorder) |
-| **Deployment model** | 3 Docker containers, one command | HassOS image or supervised install |
-| **Extension mechanism** | Connectors implementing a TypeScript interface | Python integrations + HACS |
-| **Target user** | Developers, engineers, tinkerers who code | Everyone — from beginners to advanced |
+The promise is simple: if you're already a software engineer, you shouldn't have to give up your tools to automate the physical world. No YAML state machines, no visual node editors, no proprietary DSL — just code.
 
----
-
-## Automation: Code vs Configuration
-
-### The Home Assistant Way
-
-```yaml
-automation:
-  - alias: "Turn on lights at sunset"
-    trigger:
-      - platform: sun
-        event: sunset
-    condition:
-      - condition: state
-        entity_id: binary_sensor.someone_home
-        state: "on"
-    action:
-      - service: light.turn_on
-        target:
-          entity_id: light.living_room
-        data:
-          brightness_pct: 60
-```
-
-This works for simple rules. But what happens when you need to:
-- Call an external API and branch based on the response?
-- Maintain state across multiple trigger events?
-- Apply different logic based on day of week, season, or a rolling average?
-- Compose multiple automations into a pipeline?
-- Test your automation logic in isolation?
-
-You end up fighting Jinja2 templates, creating helper entities as state machines, and writing Python custom components that bypass the automation engine entirely.
-
-### The Aeolus Way
+### Automation: Code, Not Configuration
 
 ```javascript
 // Runs in a secure V8 isolate — 32MB memory, 5-second timeout
@@ -120,7 +81,9 @@ if (temp > 28 && forecast.willRain === false) {
 }
 ```
 
-This is just code. Loops, conditionals, async/await, external API calls, persistent state — no templates, no workarounds, no escape hatches. TypeScript annotations are optional (stripped at transpile time), so you can write plain JavaScript if that's your style.
+This is just code. Loops, conditionals, async/await, external API calls, persistent state — no templates, no helper-entity workarounds, no escape hatches. TypeScript annotations are optional (stripped at transpile time), so you can write plain JavaScript if that's your style. The point isn't TypeScript specifically — it's that you express logic in a real programming language with the full expressiveness that implies.
+
+The moment your needs go past a simple "if sensor then action" rule — branching on an API response, maintaining state across events, applying a rolling average, composing several automations into a pipeline, unit-testing the logic in isolation — you're still just writing code instead of fighting a configuration format.
 
 ### How It Actually Works Under the Hood
 
@@ -160,7 +123,7 @@ This is a genuine security boundary. A buggy or malicious script cannot:
 - Import any module
 - Crash the host process
 
-In Home Assistant, custom integrations and template automations run in the same Python process as the core. A bad integration can crash everything.
+The sandbox is deliberate platform groundwork: if you want user-authored code to run safely — including, eventually, third-party code from other people — you need a real isolation boundary, not `eval` with good intentions.
 
 ### The Structured Helper (Optional)
 
@@ -189,7 +152,7 @@ automation({
 
 Named functions become labeled nodes in the flow diagram. You get visual representation *and* real code — not one or the other. The helper is entirely optional — free-form scripts have access to the exact same globals.
 
-### Transpilation: esbuild, Not TypeScript Compiler
+### Transpilation: esbuild, Not the TypeScript Compiler
 
 Scripts are transpiled using **esbuild** (the same tool Vite uses) — not the full TypeScript compiler. This means:
 - Transpilation is near-instant (microseconds, not seconds)
@@ -199,17 +162,9 @@ Scripts are transpiled using **esbuild** (the same tool Vite uses) — not the f
 
 ---
 
-## Custom UI: Live React Components vs Lovelace Cards
+## Custom UI: Live React Components Paired to Their Automation
 
-### Home Assistant's Dashboard
-
-Home Assistant uses Lovelace — a YAML-configured card system. Built-in cards cover common patterns (gauges, buttons, entity lists). For anything custom, you write a JavaScript web component that follows HA's custom card API, publish it as a HACS resource, and configure it in YAML.
-
-The feedback loop is slow: edit JS → refresh browser → check YAML config → repeat. Custom cards are disconnected from the automation logic — they can read entity state but have no direct channel to their "backend."
-
-### Aeolus: Live React Components Paired to Their Automation
-
-As described above, every automation has a UI tab. The feedback loop is instant — save and it renders. Custom cards in Home Assistant are disconnected from automation logic; in Aeolus, the UI component and its backend script are a single unit with a dedicated communication channel.
+Every automation has a UI tab, and the feedback loop is instant — save and it renders. The UI component and its backend script are a single unit with a dedicated communication channel, not a dashboard card that happens to read some shared state.
 
 ### What a Custom Component Looks Like
 
@@ -266,8 +221,6 @@ Every component receives an `aeolus` props object with:
 
 ## The Event Bus: Everything Speaks the Same Language
 
-Home Assistant's internal architecture is complex — entity registries, state machines, event buses, service calls, and device triggers all interact through different mechanisms. Adding a new integration means understanding multiple subsystems.
-
 Aeolus has **one event bus** — a Node.js EventEmitter with 23 typed event constants:
 
 ```
@@ -285,7 +238,7 @@ Two event source layers feed the bus identically:
 - **MQTT devices** (ESP32, Arduino, Tasmota, ESPHome) — messages arrive at Mosquitto, the MqttService parses them into `NormalizedEvent` objects, and emits `DEVICE_STATE_CHANGE`.
 - **Connectors** (Hue, Kasa, etc.) — the ConnectorManager polls devices, normalises them into the same `Device` format, and emits `DEVICE_STATE_CHANGE` through synthetic topics like `connector/hue/{deviceId}`.
 
-An automation script receives the same `context` object regardless of whether the event came from an ESP32 publishing raw JSON, a Hue light polled via HTTP, or a Kasa plug discovered via UDP broadcast. The script doesn't know or care about the underlying protocol.
+An automation script receives the same `context` object regardless of whether the event came from an ESP32 publishing raw JSON, a Hue light polled via HTTP, or a Kasa plug discovered via UDP broadcast. The script doesn't know or care about the underlying protocol. Reducing every input — sensor, commercial device, weather API — to one event model is the abstraction that lets the platform scale to new hardware without growing new subsystems.
 
 ### Topic Matching — MQTT Wildcards
 
@@ -299,20 +252,7 @@ Plus cron-triggered rules (`*/5 * * * *` — every 5 minutes) and manual fire (n
 
 ## The Connector Framework: Designed for Community Contributions
 
-### Home Assistant Integration Authoring
-
-Writing a HA integration means:
-- A directory with `__init__.py`, `manifest.json`, `config_flow.py`, `const.py`, `sensor.py` (or `light.py`, `switch.py`...)
-- Understanding HA's entity model, device registry, config entries, and update coordinators
-- Setting up a development environment with the full HA core
-- Following a 20+ page developer documentation guide
-- Submitting to HACS or the core repo for distribution
-
-The barrier to entry is high. Most HA integrations are written by a small number of dedicated contributors, not the average user.
-
-### Aeolus Connector Authoring: One Afternoon, One File
-
-The connector framework was designed with one goal: make it so easy to add hardware support that any developer with a device and an afternoon can do it.
+This is the part with the highest leverage. Platforms win on ecosystems, not features — so the connector framework was designed with one goal: make it so easy to add hardware support that any developer with a device and an afternoon can do it.
 
 A connector is a single TypeScript file exporting three things:
 
@@ -347,7 +287,7 @@ The `Connector` interface has 5 required methods: `connect()`, `disconnect()`, `
 
 Connectors can optionally export `snippets` (code templates for the editor), `actionHandlers` (custom action types for the ActionExecutor), and `conditions` (reusable condition factories for the automation engine). The Hue connector, for example, exports 10+ code snippets covering both Logic and UI tabs.
 
-This is the contribution path: you buy some hardware (Shelly plugs, Zigbee sensors, a Sonos speaker), write a connector for it, and submit a PR. Everyone benefits, and the effort required is a fraction of what HA demands. The platform grows one developer at a time, each bringing their own hardware.
+This is the contribution path: you buy some hardware (Shelly plugs, Zigbee sensors, a Sonos speaker, an industrial PLC), write a connector for it, and submit a PR. The platform grows one developer at a time, each bringing their own hardware. The person building a custom ocean-sensor buoy doesn't care how many integrations exist elsewhere — they care that they can support *their* device in an afternoon.
 
 ### The Action System: Structured Results, Not Fire-and-Forget
 
@@ -369,17 +309,11 @@ HueConnector.execute(action)  →  HTTP PUT to Hue bridge
 ActionResult { success: true }  (or { success: false, error: "Bridge unreachable" })
 ```
 
-Built-in action handlers: `publish` (MQTT), `toggle`, `device_action`, `log`, `delay`, `webhook`. Connectors register additional handlers when enabled (`hue_scene`, `hue_color_loop`, etc.) and unregister them when disabled. The system never throws — every action returns an `ActionResult` with success/failure.
+Built-in action handlers: `publish` (MQTT), `toggle`, `device_action`, `log`, `delay`, `webhook`. Connectors register additional handlers when enabled (`hue_scene`, `hue_color_loop`, etc.) and unregister them when disabled. The system never throws — every action returns an `ActionResult` with success/failure, so your logic can actually branch on whether a command worked.
 
 ---
 
 ## The Dashboard: Modular, Composable, Permission-Aware
-
-### Home Assistant's Dashboard (Lovelace)
-
-Lovelace is card-based. You add cards to views via the UI editor or YAML. Cards are independent — they read entity state but don't communicate with each other. The layout is grid-based but not drag-and-drop in the traditional sense (you reorder cards, not freely position them). Custom cards require authoring web components with HA's card lifecycle API.
-
-### Aeolus's Dashboard
 
 The dashboard uses **react-grid-layout** with responsive breakpoints (12/12/6/4/2 columns across breakpoints). Panes are freely draggable and resizable. The layout persists to the backend via debounced API calls (2-second debounce).
 
@@ -401,7 +335,7 @@ The WebSocket server enforces this: messages are filtered per-connection based o
 
 ### The Pane as the Unit of Composition
 
-In Aeolus, the **Automation Pane** isn't just a card showing status — it's the entire development environment:
+The **Automation Pane** isn't just a card showing status — it's the entire development environment:
 - **Setup mode** — name your automation, pick a trigger (MQTT topic, cron, or none), write code
 - **Editing mode** — Monaco editor with Logic/UI tabs, snippet picker, live docs panel
 - **Status mode** — shows the custom UI component (if authored), flow diagram (if using `automation()` helper), or activity feed
@@ -448,9 +382,7 @@ No switching to browser tabs to look up the API.
 
 ## The Data Store: A Time-Series Database in the Sandbox
 
-Home Assistant has a "Recorder" that stores entity state history and a "Statistics" system for long-term aggregates. Both are opaque to automations — you can read current state but can't accumulate custom data over time from within an automation.
-
-Aeolus has a purpose-built **Data Store** accessible directly from automation scripts via the `db` global:
+Automations don't just react to events — they can accumulate data over time and query it back. The **Data Store** is accessible directly from automation scripts via the `db` global:
 
 ```javascript
 // Write a timestamped record to a collection
@@ -474,15 +406,13 @@ const target = db.get("computed", "monthlyAvg");
 
 Under the hood: SQLite-backed with per-collection FIFO eviction, configurable `maxRecordsPerCollection`, retention policies (days), tag-based filtering, and 5 aggregation functions (sum, avg, min, max, count). Duration strings like `"7d"`, `"24h"`, `"30m"` are parsed into epoch-relative timestamps.
 
-The Data Store is disabled by default (to avoid accidental SD card fill on Pi) — a setup wizard guides you through configuring storage limits before it activates.
+The Data Store is disabled by default (to avoid accidental SD card fill on a Pi) — a setup wizard guides you through configuring storage limits before it activates.
 
 ---
 
-## MQTT: First-Class, Not One Integration Among Thousands
+## MQTT: First-Class, Not One Integration Among Many
 
-In Home Assistant, MQTT is an integration you install and configure. Devices need to follow the MQTT Discovery protocol (specific JSON payloads on `homeassistant/` topics) or you manually configure them in YAML.
-
-In Aeolus, **MQTT is the foundation**. Any device that publishes any message to any topic appears in the device registry automatically:
+MQTT is the foundation, not a plugin. Any device that publishes any message to any topic appears in the device registry automatically:
 
 1. ESP32 publishes `sensor/garden/moisture` with `{"value": 45}`
 2. Mosquitto delivers it to the backend's wildcard subscription
@@ -500,15 +430,6 @@ For commands back to devices, automations call `mqtt.publish("valve/irrigation/c
 ---
 
 ## Observability: Built-In, Not Bolt-On
-
-### Home Assistant
-- Logbook (human-readable event log)
-- History (entity state over time, stored via Recorder)
-- Statistics (long-term aggregates for energy)
-- Prometheus integration available via community add-on
-- No built-in metrics dashboard — you need Grafana
-
-### Aeolus (Built Into the Platform)
 
 **Prometheus `/metrics` endpoint** — 19+ metrics in Prometheus text exposition format:
 - MQTT: messages received/published, connection state, processing duration
@@ -542,19 +463,14 @@ All visible from the dashboard with dedicated panes — no external tooling need
 
 ---
 
-## Deployment and Infrastructure
-
-| Aspect | Aeolus | Home Assistant |
-|--------|--------|----------------|
-| **Install** | `docker compose up` | Flash HassOS to SD card, or supervised install on Debian |
-| **Containers** | 3 (Mosquitto, backend, frontend/nginx) | 1 monolith + add-on containers |
-| **Database** | SQLite (single `.db` file, portable) | Recorder (SQLite/MariaDB/PostgreSQL) |
-| **Updates** | `git pull && docker compose up -d --build` | One-click from UI (HassOS) or manual |
-| **Backup** | Copy one `.db` file | Snapshot system (full or partial) |
-| **RAM usage** | ~150MB | ~500MB–1GB+ depending on integrations |
-| **Production hardening** | Read-only system routes, no Docker socket mount, no git/build tools in image | Depends on install type |
+## Deployment, Infrastructure, and Security
 
 The entire platform state is one SQLite file. Copy it to a USB stick, put it on another Pi, `docker compose up` — you're running.
+
+- **Install** — `docker compose up`. Three containers: Mosquitto (MQTT broker), the Express backend (API + automation engine + WebSocket), and the React/nginx frontend.
+- **Updates** — `git pull && docker compose up -d --build`.
+- **Backup** — copy one `.db` file.
+- **Footprint** — ~150MB RAM, comfortable on a Raspberry Pi 4/5.
 
 ### Security Hardening (From the Actual Image)
 
@@ -567,42 +483,39 @@ The entire platform state is one SQLite file. Copy it to a USB stick, put it on 
 
 ---
 
-## What Home Assistant Does Better
+## How It Compares to Home Assistant
 
-Being honest about where HA wins:
+Home Assistant is the obvious reference point in this space, so it's worth being precise about the difference — and honest about the tradeoffs.
 
-1. **Integration count** — 2,500+ vs a handful. If you need Sonos, Roomba, Ring, Nest, and 20 other ecosystems, HA supports them today.
-2. **Community size** — Massive forums, Discord, Reddit, YouTube tutorials, HACS marketplace. Aeolus is a single-developer project.
-3. **Voice assistants** — Native Alexa/Google Home integration and the Assist pipeline for local voice control.
-4. **Mobile app** — Polished companion apps for iOS and Android with location tracking, notifications, and device sensors.
-5. **Non-developer accessibility** — The UI-first approach means anyone can set up basic automations without writing code.
-6. **Maturity** — 10+ years of development, battle-tested by hundreds of thousands of users.
-7. **Add-on ecosystem** — Grafana, Node-RED, VS Code, ESPHome, zigbee2mqtt — all installable as supervised containers from the UI.
+Home Assistant is configuration-driven: you describe automations in YAML, configure integrations through a UI, and reach for Jinja2 templates when the visual editor runs out of expressiveness. It's built so that non-programmers can automate their homes without writing code, and it does that extremely well, backed by 2,500+ integrations and a huge community.
 
----
+Aeolus makes the opposite bet. It assumes you *are* a programmer and gives you a real programming environment — real code, a real editor, real composition — rather than a configuration layer. That's a deliberate narrowing: it's not trying to serve everyone.
 
-## What Aeolus Does Better
+| Principle | Aeolus | Home Assistant |
+|-----------|--------|----------------|
+| **Automation language** | JavaScript/TypeScript in a secure V8 sandbox | YAML + Jinja2 templates |
+| **UI customisation** | Write JSX/TSX components, rendered live on save | Lovelace cards (YAML config) or custom card JS |
+| **Device communication** | MQTT-native + pluggable connector framework | 2,500+ Python integrations |
+| **Data persistence** | SQLite — single file, zero config | MariaDB/PostgreSQL/SQLite (recorder) |
+| **Deployment model** | 3 Docker containers, one command | HassOS image or supervised install |
+| **Extension mechanism** | Connectors implementing a TypeScript interface | Python integrations + HACS |
+| **Sandboxing** | User code in isolated V8 (32MB, 5s, no fs) | Custom integrations share the core Python process |
+| **Target user** | Developers, engineers, tinkerers who code | Everyone — from beginners to advanced |
 
-1. **Automation expressiveness** — Real JavaScript/TypeScript with full language features vs YAML + Jinja2 templates. No ceiling on complexity. async/await, loops, API calls, state machines — just code.
-2. **Custom UI** — Write JSX components that render instantly on save vs configuring Lovelace cards in YAML or authoring web components with HA's custom card lifecycle.
-3. **The paired model** — Each automation is a backend script + frontend component connected by a reactive state store over WebSocket. No other platform does this.
-4. **Sandbox security** — User code runs in isolated V8 contexts (32MB, 5s timeout). A buggy script can't access the filesystem, consume unlimited memory, or crash the host. HA custom integrations share the Python process with core.
-5. **Developer experience** — Monaco editor with IntelliSense, inline docs, snippet library, flow diagrams, activity feeds. The experience you'd expect from an IDE, not a home automation tool.
-6. **Simplicity** — Three Docker containers, one SQLite file, 23 event types on one bus. The entire architecture fits in your head. HA's codebase is hundreds of thousands of lines across thousands of integrations.
-7. **Resource efficiency** — ~150MB RAM on a Raspberry Pi. HA with a dozen integrations easily consumes 1GB+.
-8. **MQTT as foundation** — Zero-config device discovery for any MQTT device. Publish a message, device appears. HA requires either MQTT Discovery protocol payloads or manual YAML configuration.
-9. **Connector authoring** — Implement a TypeScript interface (5 methods), export metadata and a factory function. No manifest files, config flows, entity platforms, or Python packaging.
-10. **Data Store** — Automations can accumulate time-series data, query with aggregation, and share computed state across rules. HA automations can't write to a persistent data layer.
-11. **Hot-loading** — UI components transpile and render in milliseconds on save. No container restart, no build step, no page refresh.
-12. **Action results** — Every device action returns `{ success, error? }`. HA service calls are fire-and-forget — you don't know if they worked unless you poll entity state afterward.
+### Where Home Assistant Wins
 
----
+Being honest about this matters more than a feature checklist:
 
-## Who Should Use What
+- **Breadth** — 2,500+ integrations. If you want to connect 50 commercial devices with minimal effort, HA is the pragmatic choice.
+- **Voice assistants** — Alexa, Google, Siri integration is mature.
+- **No code required** — a non-programmer can build a working smart home. Aeolus expects you to write code.
+- **Community and marketplace** — vastly larger today, with HACS, forums, and blueprints.
+
+### Who Should Use What
 
 | If you... | Use |
 |-----------|-----|
-| Want to connect 50 different commercial devices with minimal effort | Home Assistant |
+| Want to connect many commercial devices with minimal effort | Home Assistant |
 | Need voice assistant integration (Alexa, Google, Siri) | Home Assistant |
 | Don't want to write code | Home Assistant |
 | Want a massive community and marketplace | Home Assistant |
@@ -623,15 +536,16 @@ Home Assistant answers: *"How do I automate my home without being a programmer?"
 
 Aeolus answers: *"How do I automate my environment **as** a programmer?"*
 
-The core abstractions — event bus, sandboxed execution, pluggable connectors, local state, custom UI, offline operation — are edge-computing concepts. IoT and home automation happen to be the first use case, but if you removed the Hue and Kasa connectors tomorrow, the platform would still make sense deployed on a research station, a greenhouse, a boat, or a remote solar installation.
+The core abstractions — event bus, sandboxed execution, pluggable connectors, local state, paired Logic/UI applications, offline operation — are edge-computing concepts. Home automation is just the most familiar way to demonstrate them, but if you removed the Hue and Kasa connectors tomorrow, the platform would still make sense on a research station, a greenhouse, a boat, or a remote solar installation.
+
+None of the individual pieces — React, Monaco, isolated-vm, MQTT, Docker, WebSockets — are new. What's unusual is the combination, and the consistent philosophy behind it: bring the modern software-development experience to the physical world, and treat every automation as a full-stack application rather than a configuration entry.
 
 ### Where It's Going
 
-What exists today is the core — a solid runtime, a handful of connectors, and a developer experience that proves the model works. But Aeolus is designed to grow through contributions:
+What exists today is the core — a solid runtime, a handful of connectors, and a developer experience that proves the model works. Aeolus is designed to grow through contributions:
 
-- **The connector framework exists specifically to be extended.** One TypeScript file, 5 methods, and your hardware is part of the ecosystem. The guy building a custom ocean sensor buoy doesn't care that another platform supports 2,500 integrations — he cares that he can write support for his device in an afternoon.
+- **The connector framework exists specifically to be extended.** One TypeScript file, 5 methods, and your hardware is part of the ecosystem.
 - **Automation recipes and custom UI components are portable code** — shareable, version-controllable, domain-agnostic.
 - **The architecture is intentionally simple** — 3 containers, 1 event bus, clear separation of concerns. A new contributor can understand the full system in an afternoon.
 
 The bet is that developers who deploy Aeolus for their own environments will naturally contribute back the connectors and automations they build. The framework makes that contribution path as frictionless as possible.
-

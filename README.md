@@ -34,7 +34,7 @@
 
 ## What is Aeolus?
 
-Aeolus is a local-first edge automation platform. It collects events from arbitrary hardware, executes sandboxed business logic, persists state, and exposes custom interfaces — all self-hosted on hardware you control. Home automation is the first domain it targets, but the architecture is domain-agnostic.
+Aeolus is a local-first edge automation platform. It collects events from arbitrary hardware, executes sandboxed business logic, persists state, and exposes custom interfaces — all self-hosted on hardware you control. Home automation is the most familiar way to demonstrate it — most people can immediately picture controlling lights, sensors, and switches — but it's only one example; the architecture is domain-agnostic. It's an attempt to bring the developer experience of modern application development to edge automation.
 
 Everything runs on your LAN by default — fast responses, full privacy, no vendor accounts. Any MQTT device appears automatically when it publishes a message. Commercial ecosystems plug in through a connector framework designed so that any developer with unusual hardware can write support for it in an afternoon. Everything feeds the same internal event bus, so an ESP32 sensor, a Hue bulb, and a weather API all look identical to your automation logic.
 
@@ -251,7 +251,7 @@ export default function EveningMode(aeolus: CustomComponentProps) {
 
 `aeolus.read("mode")` reads the value the Logic tab wrote. `aeolus.control` lets the UI control devices directly. `aeolus.fire("target-changed", { value })` fires the Logic tab immediately with the new value in `context.state` — use it when the UI needs to delegate a decision to the backend rather than issuing a direct command. Write TSX, save, and your component renders live in the pane — no rebuild or refresh needed.
 
-**How it works under the hood:** When you save, the backend transpiles your TSX into an ES module using the TypeScript compiler API with the React JSX transform. The compiled JavaScript is stored in the database and served via a dedicated API endpoint. The frontend fetches it, rewrites the React imports to reference the host app's shared React instance, loads it as a module via a blob URL and dynamic `import()`, and renders it inside an error boundary. The whole round-trip happens in milliseconds — no Docker rebuild, no Vite recompilation, no page refresh.
+**How it works under the hood:** When you save, the backend transpiles your TSX into an ES module using esbuild with the React JSX transform (`jsx: "automatic"`). The compiled JavaScript is stored in the database and served via a dedicated API endpoint. The frontend fetches it, rewrites the React imports to reference the host app's shared React instance, loads it as a module via a blob URL and dynamic `import()`, and renders it inside an error boundary. The whole round-trip happens in milliseconds — no Docker rebuild, no Vite recompilation, no page refresh.
 
 <!-- TODO: Add screenshot of the automation editor (Monaco + flow diagram) here -->
 <!-- ![Automation Editor](docs/screenshots/automation-editor.png) -->
