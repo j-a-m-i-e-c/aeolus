@@ -3,6 +3,7 @@
 import { Router } from "express";
 import type { Database as DatabaseType } from "better-sqlite3";
 import { BadRequestError } from "../middleware/error-handler.js";
+import { asyncHandler } from "../middleware/async-handler.js";
 import { requireAdmin } from "../../auth/auth-middleware.js";
 import logger from "../../logger.js";
 
@@ -65,47 +66,38 @@ export function createLayoutRoutes(db: DatabaseType): Router {
   });
 
   /** PUT /api/layout ← { tabs, panes } → { success: true } */
-  router.put("/", requireAdmin, (req, res, next) => {
-    try {
-      const { tabs, panes } = req.body;
+  router.put("/", requireAdmin, asyncHandler((req, res) => {
+    const { tabs, panes } = req.body;
 
-      if (!Array.isArray(tabs) || !Array.isArray(panes)) {
-        throw new BadRequestError("Invalid layout payload: tabs and panes must be arrays");
-      }
-
-      // Atomic replace using better-sqlite3 transaction
-      const replaceLayout = db.transaction((tabsData: typeof tabs, panesData: typeof panes) => {
-        db.prepare("DELETE FROM panes").run();
-        db.prepare("DELETE FROM tabs").run();
-
-        const insertTab = db.prepare(
-          `INSERT INTO tabs (id, name, icon, "order", pinned, created_at) VALUES (?, ?, ?, ?, ?, ?)`
-        );
-        for (const tab of tabsData) {
-          insertTab.run(tab.id, tab.name, tab.icon, tab.order, tab.pinned ? 1 : 0, tab.createdAt);
-        }
-
-        const insertPane = db.prepare(
-          `INSERT INTO panes (id, tab_id, pane_type, config, x, y, w, h, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-        );
-        for (const pane of panesData) {
-          insertPane.run(pane.id, pane.tabId, pane.paneType, JSON.stringify(pane.config ?? {}), pane.x, pane.y, pane.w, pane.h, pane.createdAt);
-        }
-      });
-
-      replaceLayout(tabs, panes);
-
-      logger.info({ tabs: tabs.length, panes: panes.length }, "Layout persisted");
-      res.json({ success: true });
-    } catch (err) {
-      if (err instanceof BadRequestError) {
-        next(err);
-        return;
-      }
-      logger.error(err, "Failed to persist layout");
-      next(err);
+    if (!Array.isArray(tabs) || !Array.isArray(panes)) {
+      throw new BadRequestError("Invalid layout payload: tabs and panes must be arrays");
     }
-  });
+
+    // Atomic replace using better-sqlite3 transaction
+    const replaceLayout = db.transaction((tabsData: typeof tabs, panesData: typeof panes) => {
+      db.prepare("DELETE FROM panes").run();
+      db.prepare("DELETE FROM tabs").run();
+
+      const insertTab = db.prepare(
+        `INSERT INTO tabs (id, name, icon, "order", pinned, created_at) VALUES (?, ?, ?, ?, ?, ?)`
+      );
+      for (const tab of tabsData) {
+        insertTab.run(tab.id, tab.name, tab.icon, tab.order, tab.pinned ? 1 : 0, tab.createdAt);
+      }
+
+      const insertPane = db.prepare(
+        `INSERT INTO panes (id, tab_id, pane_type, config, x, y, w, h, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      );
+      for (const pane of panesData) {
+        insertPane.run(pane.id, pane.tabId, pane.paneType, JSON.stringify(pane.config ?? {}), pane.x, pane.y, pane.w, pane.h, pane.createdAt);
+      }
+    });
+
+    replaceLayout(tabs, panes);
+
+    logger.info({ tabs: tabs.length, panes: panes.length }, "Layout persisted");
+    res.json({ success: true });
+  }));
 
   return router;
 }

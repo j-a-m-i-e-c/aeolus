@@ -3,6 +3,7 @@
 
 import { Router } from "express";
 import { validate } from "../middleware/validate.js";
+import { asyncHandler } from "../middleware/async-handler.js";
 import {
   setSecurityLevelSchema,
   createDeviceCredentialSchema,
@@ -20,14 +21,10 @@ export function createProvisioningRoutes(
   // ─── Status Endpoint (any authenticated user) ────────────────────────────
 
   /** GET /api/mqtt/provisioning/status — Return current security status */
-  router.get("/status", authenticate, async (req, res, next) => {
-    try {
-      const status = provisioningService.getStatus();
-      res.json(status);
-    } catch (err) {
-      next(err);
-    }
-  });
+  router.get("/status", authenticate, asyncHandler((req, res) => {
+    const status = provisioningService.getStatus();
+    res.json(status);
+  }));
 
   // ─── Security Level Management (admin-only) ──────────────────────────────
 
@@ -37,15 +34,11 @@ export function createProvisioningRoutes(
     authenticate,
     requireAdmin,
     validate({ body: setSecurityLevelSchema }),
-    async (req, res, next) => {
-      try {
-        const { level } = req.body;
-        const status = await provisioningService.setSecurityLevel(level);
-        res.json(status);
-      } catch (err) {
-        next(err);
-      }
-    },
+    asyncHandler(async (req, res) => {
+      const { level } = req.body;
+      const status = await provisioningService.setSecurityLevel(level);
+      res.json(status);
+    }),
   );
 
   // ─── Shared Password Management (admin-only) ─────────────────────────────
@@ -55,14 +48,10 @@ export function createProvisioningRoutes(
     "/shared/regenerate",
     authenticate,
     requireAdmin,
-    async (req, res, next) => {
-      try {
-        const credential = await provisioningService.regenerateSharedPassword();
-        res.json(credential);
-      } catch (err) {
-        next(err);
-      }
-    },
+    asyncHandler(async (req, res) => {
+      const credential = await provisioningService.regenerateSharedPassword();
+      res.json(credential);
+    }),
   );
 
   // ─── Device Credential Management (admin-only) ───────────────────────────
@@ -72,14 +61,10 @@ export function createProvisioningRoutes(
     "/credentials",
     authenticate,
     requireAdmin,
-    (req, res, next) => {
-      try {
-        const credentials = provisioningService.listDeviceCredentials();
-        res.json(credentials);
-      } catch (err) {
-        next(err);
-      }
-    },
+    asyncHandler((req, res) => {
+      const credentials = provisioningService.listDeviceCredentials();
+      res.json(credentials);
+    }),
   );
 
   /** POST /api/mqtt/provisioning/credentials — Create device credential */
@@ -88,16 +73,12 @@ export function createProvisioningRoutes(
     authenticate,
     requireAdmin,
     validate({ body: createDeviceCredentialSchema }),
-    async (req, res, next) => {
-      try {
-        const { deviceName } = req.body;
-        const credential =
-          await provisioningService.createDeviceCredential(deviceName);
-        res.status(201).json(credential);
-      } catch (err) {
-        next(err);
-      }
-    },
+    asyncHandler(async (req, res) => {
+      const { deviceName } = req.body;
+      const credential =
+        await provisioningService.createDeviceCredential(deviceName);
+      res.status(201).json(credential);
+    }),
   );
 
   /** DELETE /api/mqtt/provisioning/credentials/:id — Revoke device credential */
@@ -105,15 +86,11 @@ export function createProvisioningRoutes(
     "/credentials/:id",
     authenticate,
     requireAdmin,
-    async (req, res, next) => {
-      try {
-        const id = req.params.id as string;
-        await provisioningService.revokeDeviceCredential(id);
-        res.json({ success: true });
-      } catch (err) {
-        next(err);
-      }
-    },
+    asyncHandler(async (req, res) => {
+      const id = req.params.id as string;
+      await provisioningService.revokeDeviceCredential(id);
+      res.json({ success: true });
+    }),
   );
 
   return router;

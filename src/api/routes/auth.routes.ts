@@ -1,9 +1,9 @@
 // src/api/routes/auth.routes.ts — Authentication, user, group, and MQTT credential endpoints
 
 import { Router } from "express";
-import type { RequestHandler } from "express";
 import rateLimit from "express-rate-limit";
 import { validate } from "../middleware/validate.js";
+import { asyncHandler } from "../middleware/async-handler.js";
 import {
   setupSchema,
   loginSchema,
@@ -87,21 +87,17 @@ export function createAuthRoutes(): Router {
   /** POST /api/auth/setup — First-run admin creation */
   router.post(
     "/setup",
-    setupGuard as RequestHandler,
+    setupGuard as import("express").RequestHandler,
     validate({ body: setupSchema }),
-    async (req, res, next) => {
-      try {
-        const { username, password } = req.body;
-        const result = await authService.setupAdmin(username, password);
-        setRefreshCookie(res, result.refreshToken);
-        res.status(201).json({
-          accessToken: result.accessToken,
-          user: result.user,
-        });
-      } catch (err) {
-        next(err);
-      }
-    },
+    asyncHandler(async (req, res) => {
+      const { username, password } = req.body;
+      const result = await authService.setupAdmin(username, password);
+      setRefreshCookie(res, result.refreshToken);
+      res.status(201).json({
+        accessToken: result.accessToken,
+        user: result.user,
+      });
+    }),
   );
 
   /** POST /api/auth/login — Login with credentials */
@@ -109,98 +105,74 @@ export function createAuthRoutes(): Router {
     "/login",
     loginRateLimiter,
     validate({ body: loginSchema }),
-    async (req, res, next) => {
-      try {
-        const { username, password } = req.body;
-        const result = await authService.login(username, password);
-        setRefreshCookie(res, result.refreshToken);
-        res.json({
-          accessToken: result.accessToken,
-          user: result.user,
-        });
-      } catch (err) {
-        next(err);
-      }
-    },
+    asyncHandler(async (req, res) => {
+      const { username, password } = req.body;
+      const result = await authService.login(username, password);
+      setRefreshCookie(res, result.refreshToken);
+      res.json({
+        accessToken: result.accessToken,
+        user: result.user,
+      });
+    }),
   );
 
   /** POST /api/auth/refresh — Exchange refresh cookie for new access token */
-  router.post("/refresh", (req, res, next) => {
-    try {
-      const refreshToken = req.cookies?.[REFRESH_COOKIE_NAME];
-      if (!refreshToken) {
-        res.status(401).json({ error: "No refresh token provided" });
-        return;
-      }
-      const accessToken = authService.refresh(refreshToken);
-      res.json({ accessToken });
-    } catch (err) {
-      next(err);
+  router.post("/refresh", asyncHandler((req, res) => {
+    const refreshToken = req.cookies?.[REFRESH_COOKIE_NAME];
+    if (!refreshToken) {
+      res.status(401).json({ error: "No refresh token provided" });
+      return;
     }
-  });
+    const accessToken = authService.refresh(refreshToken);
+    res.json({ accessToken });
+  }));
 
   /** POST /api/auth/logout — Revoke refresh token and clear cookie */
-  router.post("/logout", (req, res, next) => {
-    try {
-      const refreshToken = req.cookies?.[REFRESH_COOKIE_NAME];
-      if (refreshToken) {
-        authService.logout(refreshToken);
-      }
-      clearRefreshCookie(res);
-      res.json({ success: true });
-    } catch (err) {
-      next(err);
+  router.post("/logout", asyncHandler((req, res) => {
+    const refreshToken = req.cookies?.[REFRESH_COOKIE_NAME];
+    if (refreshToken) {
+      authService.logout(refreshToken);
     }
-  });
+    clearRefreshCookie(res);
+    res.json({ success: true });
+  }));
 
   /** PUT /api/auth/password — Change own password (authenticated) */
   router.put(
     "/password",
     authenticate,
     validate({ body: passwordChangeSchema }),
-    async (req, res, next) => {
-      try {
-        const { currentPassword, newPassword } = req.body;
-        await userService.changePassword(
-          req.user!.userId,
-          currentPassword,
-          newPassword,
-        );
-        res.json({ success: true });
-      } catch (err) {
-        next(err);
-      }
-    },
+    asyncHandler(async (req, res) => {
+      const { currentPassword, newPassword } = req.body;
+      await userService.changePassword(
+        req.user!.userId,
+        currentPassword,
+        newPassword,
+      );
+      res.json({ success: true });
+    }),
   );
 
   /** GET /api/auth/me — Get current user info + accessible tabs */
-  router.get("/me", authenticate, (req, res, next) => {
-    try {
-      const user = req.user!;
-      const accessibleTabs = getUserAccessibleTabs(user.userId);
-      res.json({
-        id: user.userId,
-        username: user.username,
-        role: user.role,
-        groupId: user.groupId,
-        accessibleTabs,
-      });
-    } catch (err) {
-      next(err);
-    }
-  });
+  router.get("/me", authenticate, asyncHandler((req, res) => {
+    const user = req.user!;
+    const accessibleTabs = getUserAccessibleTabs(user.userId);
+    res.json({
+      id: user.userId,
+      username: user.username,
+      role: user.role,
+      groupId: user.groupId,
+      accessibleTabs,
+    });
+  }));
 
   // ─── User Management Endpoints (Task 8.2) ────────────────────────────────
 
   /** GET /api/auth/users — List all users (admin only) */
-  router.get("/users", authenticate, requireAdmin, (_req, res, next) => {
-    try {
-      const users = userService.listUsers();
-      res.json(users);
-    } catch (err) {
-      next(err);
-    }
-  });
+  router.get("/users", authenticate, requireAdmin, asyncHandler((_req, res) => {
+    const users = userService.listUsers();
+    res.json(users);
+  }));
 
   /** POST /api/auth/users — Create a new user (admin only) */
   router.post(
@@ -208,21 +180,17 @@ export function createAuthRoutes(): Router {
     authenticate,
     requireAdmin,
     validate({ body: createUserSchema }),
-    async (req, res, next) => {
-      try {
-        const { username, password, groupId } = req.body;
-        const user = await userService.createUser(username, password, groupId);
-        res.status(201).json({
-          id: user.id,
-          username: user.username,
-          role: user.role,
-          groupId: user.groupId,
-          createdAt: user.createdAt,
-        });
-      } catch (err) {
-        next(err);
-      }
-    },
+    asyncHandler(async (req, res) => {
+      const { username, password, groupId } = req.body;
+      const user = await userService.createUser(username, password, groupId);
+      res.status(201).json({
+        id: user.id,
+        username: user.username,
+        role: user.role,
+        groupId: user.groupId,
+        createdAt: user.createdAt,
+      });
+    }),
   );
 
   /** PUT /api/auth/users/:id — Update a user (admin only) */
@@ -231,22 +199,18 @@ export function createAuthRoutes(): Router {
     authenticate,
     requireAdmin,
     validate({ body: updateUserSchema }),
-    async (req, res, next) => {
-      try {
-        const id = req.params.id as string;
-        const updates = req.body;
-        const user = await userService.updateUser(id, updates);
-        res.json({
-          id: user.id,
-          username: user.username,
-          role: user.role,
-          groupId: user.groupId,
-          createdAt: user.createdAt,
-        });
-      } catch (err) {
-        next(err);
-      }
-    },
+    asyncHandler(async (req, res) => {
+      const id = req.params.id as string;
+      const updates = req.body;
+      const user = await userService.updateUser(id, updates);
+      res.json({
+        id: user.id,
+        username: user.username,
+        role: user.role,
+        groupId: user.groupId,
+        createdAt: user.createdAt,
+      });
+    }),
   );
 
   /** DELETE /api/auth/users/:id — Delete a user (admin only) */
@@ -254,28 +218,20 @@ export function createAuthRoutes(): Router {
     "/users/:id",
     authenticate,
     requireAdmin,
-    (req, res, next) => {
-      try {
-        const id = req.params.id as string;
-        userService.deleteUser(id);
-        res.json({ success: true });
-      } catch (err) {
-        next(err);
-      }
-    },
+    asyncHandler((req, res) => {
+      const id = req.params.id as string;
+      userService.deleteUser(id);
+      res.json({ success: true });
+    }),
   );
 
   // ─── Group Management Endpoints (Task 8.3) ───────────────────────────────
 
   /** GET /api/auth/groups — List all groups (admin only) */
-  router.get("/groups", authenticate, requireAdmin, (_req, res, next) => {
-    try {
-      const groups = groupService.listGroups();
-      res.json(groups);
-    } catch (err) {
-      next(err);
-    }
-  });
+  router.get("/groups", authenticate, requireAdmin, asyncHandler((_req, res) => {
+    const groups = groupService.listGroups();
+    res.json(groups);
+  }));
 
   /** POST /api/auth/groups — Create a new group (admin only) */
   router.post(
@@ -283,15 +239,11 @@ export function createAuthRoutes(): Router {
     authenticate,
     requireAdmin,
     validate({ body: createGroupSchema }),
-    (req, res, next) => {
-      try {
-        const { name, tabAssignments } = req.body;
-        const group = groupService.createGroup(name, tabAssignments);
-        res.status(201).json(group);
-      } catch (err) {
-        next(err);
-      }
-    },
+    asyncHandler((req, res) => {
+      const { name, tabAssignments } = req.body;
+      const group = groupService.createGroup(name, tabAssignments);
+      res.status(201).json(group);
+    }),
   );
 
   /** PUT /api/auth/groups/:id — Update a group (admin only) */
@@ -300,16 +252,12 @@ export function createAuthRoutes(): Router {
     authenticate,
     requireAdmin,
     validate({ body: updateGroupSchema }),
-    (req, res, next) => {
-      try {
-        const id = req.params.id as string;
-        const { name, tabAssignments } = req.body;
-        const group = groupService.updateGroup(id, name, tabAssignments);
-        res.json(group);
-      } catch (err) {
-        next(err);
-      }
-    },
+    asyncHandler((req, res) => {
+      const id = req.params.id as string;
+      const { name, tabAssignments } = req.body;
+      const group = groupService.updateGroup(id, name, tabAssignments);
+      res.json(group);
+    }),
   );
 
   /** DELETE /api/auth/groups/:id — Delete a group (admin only) */
@@ -317,15 +265,11 @@ export function createAuthRoutes(): Router {
     "/groups/:id",
     authenticate,
     requireAdmin,
-    (req, res, next) => {
-      try {
-        const id = req.params.id as string;
-        groupService.deleteGroup(id);
-        res.json({ success: true });
-      } catch (err) {
-        next(err);
-      }
-    },
+    asyncHandler((req, res) => {
+      const id = req.params.id as string;
+      groupService.deleteGroup(id);
+      res.json({ success: true });
+    }),
   );
 
   // ─── MQTT Credential Endpoints (Task 8.4) ────────────────────────────────
@@ -335,14 +279,10 @@ export function createAuthRoutes(): Router {
     "/mqtt-credentials",
     authenticate,
     requireAdmin,
-    (_req, res, next) => {
-      try {
-        const credentials = mqttCredentialService.listCredentials();
-        res.json(credentials);
-      } catch (err) {
-        next(err);
-      }
-    },
+    asyncHandler((_req, res) => {
+      const credentials = mqttCredentialService.listCredentials();
+      res.json(credentials);
+    }),
   );
 
   /** POST /api/auth/mqtt-credentials — Create MQTT credential (admin only) */
@@ -351,16 +291,12 @@ export function createAuthRoutes(): Router {
     authenticate,
     requireAdmin,
     validate({ body: createMqttCredentialSchema }),
-    async (req, res, next) => {
-      try {
-        const { deviceName } = req.body;
-        const credential =
-          await mqttCredentialService.createCredential(deviceName);
-        res.status(201).json(credential);
-      } catch (err) {
-        next(err);
-      }
-    },
+    asyncHandler(async (req, res) => {
+      const { deviceName } = req.body;
+      const credential =
+        await mqttCredentialService.createCredential(deviceName);
+      res.status(201).json(credential);
+    }),
   );
 
   /** DELETE /api/auth/mqtt-credentials/:id — Delete MQTT credential (admin only) */
@@ -368,15 +304,11 @@ export function createAuthRoutes(): Router {
     "/mqtt-credentials/:id",
     authenticate,
     requireAdmin,
-    (req, res, next) => {
-      try {
-        const id = req.params.id as string;
-        mqttCredentialService.deleteCredential(id);
-        res.json({ success: true });
-      } catch (err) {
-        next(err);
-      }
-    },
+    asyncHandler((req, res) => {
+      const id = req.params.id as string;
+      mqttCredentialService.deleteCredential(id);
+      res.json({ success: true });
+    }),
   );
 
   return router;

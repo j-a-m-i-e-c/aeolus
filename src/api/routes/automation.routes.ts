@@ -17,6 +17,7 @@ import { isValidCron } from "../../automations/cron-utils.js";
 import type { ConnectorRegistry } from "../../connectors/connector-registry.js";
 import { BadRequestError, NotFoundError } from "../middleware/error-handler.js";
 import { validate } from "../middleware/validate.js";
+import { asyncHandler } from "../middleware/async-handler.js";
 import { createAutomationBodySchema, updateAutomationBodySchema, automationIdParamsSchema, toggleAutomationBodySchema, automationStateBodySchema } from "../schemas/automation.schemas.js";
 import { requireTabPermission } from "../../auth/auth-middleware.js";
 import { eventBus, AUTOMATION_STATE_CHANGE, DEVICE_STATE_CHANGE } from "../../core/event-bus.js";
@@ -67,34 +68,26 @@ export function createAutomationRoutes(
   });
 
   /** GET /api/automations/types — serve sandbox type definitions as text/plain */
-  router.get("/types", (_req, res, next) => {
-    try {
-      if (!fs.existsSync(sandboxTypesPath)) {
-        res.status(500).json({ error: "Type definitions not available", statusCode: 500 });
-        return;
-      }
-      const content = fs.readFileSync(sandboxTypesPath, "utf-8");
-      res.type("text/plain").send(content);
-    } catch (err) {
-      next(err);
+  router.get("/types", asyncHandler((_req, res) => {
+    if (!fs.existsSync(sandboxTypesPath)) {
+      res.status(500).json({ error: "Type definitions not available", statusCode: 500 });
+      return;
     }
-  });
+    const content = fs.readFileSync(sandboxTypesPath, "utf-8");
+    res.type("text/plain").send(content);
+  }));
 
   /** GET /api/automations/ui-types — serve custom UI component type definitions as text/plain */
-  router.get("/ui-types", (_req, res, next) => {
-    try {
-      // Resolve ui-types.d.ts relative to sandbox-types.d.ts (same directory)
-      const uiTypesPath = sandboxTypesPath.replace("sandbox-types.d.ts", "ui-types.d.ts");
-      if (!fs.existsSync(uiTypesPath)) {
-        res.status(500).json({ error: "UI type definitions not available", statusCode: 500 });
-        return;
-      }
-      const content = fs.readFileSync(uiTypesPath, "utf-8");
-      res.type("text/plain").send(content);
-    } catch (err) {
-      next(err);
+  router.get("/ui-types", asyncHandler((_req, res) => {
+    // Resolve ui-types.d.ts relative to sandbox-types.d.ts (same directory)
+    const uiTypesPath = sandboxTypesPath.replace("sandbox-types.d.ts", "ui-types.d.ts");
+    if (!fs.existsSync(uiTypesPath)) {
+      res.status(500).json({ error: "UI type definitions not available", statusCode: 500 });
+      return;
     }
-  });
+    const content = fs.readFileSync(uiTypesPath, "utf-8");
+    res.type("text/plain").send(content);
+  }));
 
   /** GET /api/automations/history — return execution log entries */
   router.get("/history", (req, res) => {
@@ -505,99 +498,87 @@ export function createAutomationRoutes(
   });
 
   /** DELETE /api/automations/:id — delete a UI rule */
-  router.delete("/:id", requireTabPermission("write"), (req, res, next) => {
-    try {
-      const id = req.params.id as string;
-      const existing = queryRuleById(db, id);
-      if (!existing) {
-        throw new NotFoundError(`Automation rule ${id} not found`);
-      }
-      if (stateStore) {
-        stateStore.deleteAll(id);
-      }
-      db.prepare("DELETE FROM automation_rules WHERE id = ?").run(id);
-      engine.unregister(id);
-      logger.info({ ruleId: id, ruleType: existing.rule_type }, "Automation rule deleted");
-      res.json({ success: true });
-    } catch (err) {
-      next(err);
+  router.delete("/:id", requireTabPermission("write"), asyncHandler((req, res) => {
+    const id = req.params.id as string;
+    const existing = queryRuleById(db, id);
+    if (!existing) {
+      throw new NotFoundError(`Automation rule ${id} not found`);
     }
-  });
+    if (stateStore) {
+      stateStore.deleteAll(id);
+    }
+    db.prepare("DELETE FROM automation_rules WHERE id = ?").run(id);
+    engine.unregister(id);
+    logger.info({ ruleId: id, ruleType: existing.rule_type }, "Automation rule deleted");
+    res.json({ success: true });
+  }));
 
   /** PATCH /api/automations/:id/toggle — enable/disable a UI rule */
-  router.patch("/:id/toggle", requireTabPermission("write"), validate({ body: toggleAutomationBodySchema, params: automationIdParamsSchema }), (req, res, next) => {
-    try {
-      const id = req.params.id as string;
-      const { enabled } = req.body;
+  router.patch("/:id/toggle", requireTabPermission("write"), validate({ body: toggleAutomationBodySchema, params: automationIdParamsSchema }), asyncHandler((req, res) => {
+    const id = req.params.id as string;
+    const { enabled } = req.body;
 
-      const existing = queryRuleById(db, id);
-      if (!existing) {
-        throw new NotFoundError(`Automation rule ${id} not found`);
-      }
-
-      db.prepare("UPDATE automation_rules SET enabled = ? WHERE id = ?").run(enabled ? 1 : 0, id);
-
-      if (enabled) {
-        // Re-register — reload from DB to get latest state
-        const updated = queryRuleById(db, id)!;
-        registerUiRule(engine, registry, actionExecutor, updated, conditionRegistry);
-      } else {
-        engine.unregister(id);
-      }
-
-      res.json({ success: true, enabled: !!enabled });
-    } catch (err) {
-      next(err);
+    const existing = queryRuleById(db, id);
+    if (!existing) {
+      throw new NotFoundError(`Automation rule ${id} not found`);
     }
-  });
+
+    db.prepare("UPDATE automation_rules SET enabled = ? WHERE id = ?").run(enabled ? 1 : 0, id);
+
+    if (enabled) {
+      // Re-register — reload from DB to get latest state
+      const updated = queryRuleById(db, id)!;
+      registerUiRule(engine, registry, actionExecutor, updated, conditionRegistry);
+    } else {
+      engine.unregister(id);
+    }
+
+    res.json({ success: true, enabled: !!enabled });
+  }));
 
   /** POST /api/automations/:id/fire — manually fire a specific automation rule */
-  router.post("/:id/fire", requireTabPermission("interact"), async (req, res, next) => {
-    try {
-      const id = req.params.id as string;
-      const rule = engine.getRule(id);
-      if (!rule) {
-        throw new NotFoundError(`Automation rule ${id} not found or not enabled`);
-      }
-
-      // Build context — supports three modes:
-      // 1. body.context = { topic, state } — full context override (used by saveAndFire)
-      // 2. body.eventName — UI emit helper (topic = ui/{ruleId}/{eventName})
-      // 3. Default — synthetic manual-fire context
-      const body = req.body ?? {};
-
-      let context: EventContext;
-
-      if (body.context && typeof body.context === "object" && typeof body.context.topic === "string") {
-        // Mode 1: Full context override
-        context = {
-          topic: body.context.topic,
-          deviceId: `ui-${id}`,
-          state: body.context.state ?? {},
-          timestamp: Date.now(),
-        };
-      } else {
-        // Mode 2/3: eventName-based or default
-        const eventName = typeof body.eventName === "string" ? body.eventName : undefined;
-        const { eventName: _discarded, ...statePayload } = body;
-
-        context = {
-          topic: eventName ? `ui/${id}/${eventName}` : rule.topic,
-          deviceId: eventName ? `ui-${id}` : "manual-fire",
-          state: statePayload,
-          timestamp: Date.now(),
-        };
-      }
-
-      // Fire through the engine (routes script rules through sandbox)
-      await engine.fire(id, context);
-
-      logger.info({ ruleId: id, ruleName: rule.name }, "Automation rule manually fired");
-      res.json({ success: true, ruleId: id });
-    } catch (err) {
-      next(err);
+  router.post("/:id/fire", requireTabPermission("interact"), asyncHandler(async (req, res) => {
+    const id = req.params.id as string;
+    const rule = engine.getRule(id);
+    if (!rule) {
+      throw new NotFoundError(`Automation rule ${id} not found or not enabled`);
     }
-  });
+
+    // Build context — supports three modes:
+    // 1. body.context = { topic, state } — full context override (used by saveAndFire)
+    // 2. body.eventName — UI emit helper (topic = ui/{ruleId}/{eventName})
+    // 3. Default — synthetic manual-fire context
+    const body = req.body ?? {};
+
+    let context: EventContext;
+
+    if (body.context && typeof body.context === "object" && typeof body.context.topic === "string") {
+      // Mode 1: Full context override
+      context = {
+        topic: body.context.topic,
+        deviceId: `ui-${id}`,
+        state: body.context.state ?? {},
+        timestamp: Date.now(),
+      };
+    } else {
+      // Mode 2/3: eventName-based or default
+      const eventName = typeof body.eventName === "string" ? body.eventName : undefined;
+      const { eventName: _discarded, ...statePayload } = body;
+
+      context = {
+        topic: eventName ? `ui/${id}/${eventName}` : rule.topic,
+        deviceId: eventName ? `ui-${id}` : "manual-fire",
+        state: statePayload,
+        timestamp: Date.now(),
+      };
+    }
+
+    // Fire through the engine (routes script rules through sandbox)
+    await engine.fire(id, context);
+
+    logger.info({ ruleId: id, ruleName: rule.name }, "Automation rule manually fired");
+    res.json({ success: true, ruleId: id });
+  }));
 
   /** GET /api/automations/:id/state — return all state key-value pairs for a rule */
   router.get("/:id/state", (req, res) => {
@@ -607,37 +588,29 @@ export function createAutomationRoutes(
   });
 
   /** PUT /api/automations/:id/state — upsert a key-value pair, persist + broadcast */
-  router.put("/:id/state", requireTabPermission("interact"), validate({ body: automationStateBodySchema, params: automationIdParamsSchema }), (req, res, next) => {
-    try {
-      const id = req.params.id as string;
-      const { key, value } = req.body;
-      if (!key || typeof key !== "string") {
-        throw new BadRequestError("key is required and must be a string");
-      }
-      if (!stateStore) {
-        throw new BadRequestError("State store not available");
-      }
-      stateStore.set(id, key, value);
-      eventBus.emit(AUTOMATION_STATE_CHANGE, { ruleId: id, key, value });
-      res.json({ success: true });
-    } catch (err) {
-      next(err);
+  router.put("/:id/state", requireTabPermission("interact"), validate({ body: automationStateBodySchema, params: automationIdParamsSchema }), asyncHandler((req, res) => {
+    const id = req.params.id as string;
+    const { key, value } = req.body;
+    if (!key || typeof key !== "string") {
+      throw new BadRequestError("key is required and must be a string");
     }
-  });
+    if (!stateStore) {
+      throw new BadRequestError("State store not available");
+    }
+    stateStore.set(id, key, value);
+    eventBus.emit(AUTOMATION_STATE_CHANGE, { ruleId: id, key, value });
+    res.json({ success: true });
+  }));
 
   /** DELETE /api/automations/:id/state/:key — remove a single key-value pair */
-  router.delete("/:id/state/:key", requireTabPermission("interact"), (req, res, next) => {
-    try {
-      const id = req.params.id as string;
-      const key = req.params.key as string;
-      if (stateStore) {
-        stateStore.delete(id, key);
-      }
-      res.json({ success: true });
-    } catch (err) {
-      next(err);
+  router.delete("/:id/state/:key", requireTabPermission("interact"), asyncHandler((req, res) => {
+    const id = req.params.id as string;
+    const key = req.params.key as string;
+    if (stateStore) {
+      stateStore.delete(id, key);
     }
-  });
+    res.json({ success: true });
+  }));
 
   return router;
 }

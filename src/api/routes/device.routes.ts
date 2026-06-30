@@ -5,6 +5,7 @@ import type { DeviceRegistry } from "../../core/device-registry.js";
 import type { ConnectorManager } from "../../connectors/connector-manager.js";
 import type { StateHistory } from "../../core/state-history.js";
 import { NotFoundError } from "../middleware/error-handler.js";
+import { asyncHandler } from "../middleware/async-handler.js";
 import { validateAction } from "../middleware/validators.js";
 import { requireTabPermission } from "../../auth/auth-middleware.js";
 import logger from "../../logger.js";
@@ -28,7 +29,7 @@ export function createDeviceRoutes(
     if (!device) {
       return next(new NotFoundError(`Device not found: ${id}`));
     }
-    res.json(device);
+    return res.json(device);
   });
 
   /** GET /api/devices/:id/actions — return the action catalog for a device */
@@ -65,7 +66,7 @@ export function createDeviceRoutes(
     }
 
     const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 500);
-    res.json(stateHistory.getHistory(id, limit));
+    return res.json(stateHistory.getHistory(id, limit));
   });
 
   /** DELETE /api/devices/:id/history — clear history for a specific device */
@@ -82,7 +83,7 @@ export function createDeviceRoutes(
 
     const deleted = stateHistory.clearDevice(id);
     logger.info({ deviceId: id, deleted }, "Cleared device state history");
-    res.json({ success: true, deleted });
+    return res.json({ success: true, deleted });
   });
 
   /** DELETE /api/devices/history/all — clear all device history */
@@ -93,32 +94,28 @@ export function createDeviceRoutes(
 
     const deleted = stateHistory.clearAll();
     logger.info({ deleted }, "Cleared all device state history");
-    res.json({ success: true, deleted });
+    return res.json({ success: true, deleted });
   });
 
   /** POST /api/devices/:id/action — execute action on device */
-  router.post("/:id/action", requireTabPermission("interact"), validateAction, async (req, res, next) => {
-    try {
-      const id = req.params.id as string;
+  router.post("/:id/action", requireTabPermission("interact"), validateAction, asyncHandler(async (req, res) => {
+    const id = req.params.id as string;
 
-      const result = await connectorManager.executeAction(id, {
-        type: req.body.type,
-        deviceId: id,
-        params: req.body.params || {},
-      });
+    const result = await connectorManager.executeAction(id, {
+      type: req.body.type,
+      deviceId: id,
+      params: req.body.params || {},
+    });
 
-      if (result.success) {
-        logger.info({ deviceId: id, action: req.body.type }, "Action executed");
-      } else {
-        logger.warn({ deviceId: id, action: req.body.type, error: result.error }, "Action failed");
-      }
-
-      // Always HTTP 200 — callers must inspect ActionResult.success
-      res.json(result);
-    } catch (err) {
-      next(err);
+    if (result.success) {
+      logger.info({ deviceId: id, action: req.body.type }, "Action executed");
+    } else {
+      logger.warn({ deviceId: id, action: req.body.type, error: result.error }, "Action failed");
     }
-  });
+
+    // Always HTTP 200 — callers must inspect ActionResult.success
+    res.json(result);
+  }));
 
   return router;
 }

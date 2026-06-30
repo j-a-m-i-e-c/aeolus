@@ -4,6 +4,7 @@ import { Router } from "express";
 import type { ConnectorManager } from "../../connectors/connector-manager.js";
 import type { ConnectorRegistry } from "../../connectors/connector-registry.js";
 import { BadRequestError, NotFoundError } from "../middleware/error-handler.js";
+import { asyncHandler } from "../middleware/async-handler.js";
 import { requireAdmin } from "../../auth/auth-middleware.js";
 import logger from "../../logger.js";
 
@@ -39,54 +40,42 @@ export function createConnectorRoutes(
   });
 
   /** POST /api/connectors — enable a new connector instance */
-  router.post("/", requireAdmin, async (req, res, next) => {
-    try {
-      const { connector_type, config } = req.body;
+  router.post("/", requireAdmin, asyncHandler(async (req, res) => {
+    const { connector_type, config } = req.body;
 
-      const mod = connectorRegistry.getModule(connector_type);
-      if (!mod) {
-        throw new NotFoundError(`Connector type '${connector_type}' not found`);
-      }
-
-      // Validate required config fields against the configSchema
-      const missingFields = getMissingRequiredFields(config ?? {}, mod.configSchema);
-      if (missingFields.length > 0) {
-        throw new BadRequestError(
-          `Missing required fields: ${missingFields.join(", ")}`,
-        );
-      }
-
-      const instanceId = await connectorManager.enable(connector_type, config ?? {});
-      logger.info({ connector_type, instanceId }, "Connector enabled via API");
-      res.json({ success: true, id: instanceId });
-    } catch (err) {
-      next(err);
+    const mod = connectorRegistry.getModule(connector_type);
+    if (!mod) {
+      throw new NotFoundError(`Connector type '${connector_type}' not found`);
     }
-  });
+
+    // Validate required config fields against the configSchema
+    const missingFields = getMissingRequiredFields(config ?? {}, mod.configSchema);
+    if (missingFields.length > 0) {
+      throw new BadRequestError(
+        `Missing required fields: ${missingFields.join(", ")}`,
+      );
+    }
+
+    const instanceId = await connectorManager.enable(connector_type, config ?? {});
+    logger.info({ connector_type, instanceId }, "Connector enabled via API");
+    res.json({ success: true, id: instanceId });
+  }));
 
   /** PATCH /api/connectors/:id — update connector config */
-  router.patch("/:id", requireAdmin, async (req, res, next) => {
-    try {
-      const id = req.params.id as string;
-      const { config } = req.body;
+  router.patch("/:id", requireAdmin, asyncHandler(async (req, res) => {
+    const id = req.params.id as string;
+    const { config } = req.body;
 
-      await connectorManager.updateConfig(id, config ?? {});
-      res.json({ success: true });
-    } catch (err) {
-      next(err);
-    }
-  });
+    await connectorManager.updateConfig(id, config ?? {});
+    res.json({ success: true });
+  }));
 
   /** DELETE /api/connectors/:id — disable a connector */
-  router.delete("/:id", requireAdmin, async (req, res, next) => {
-    try {
-      const id = req.params.id as string;
-      await connectorManager.disable(id);
-      res.json({ success: true });
-    } catch (err) {
-      next(err);
-    }
-  });
+  router.delete("/:id", requireAdmin, asyncHandler(async (req, res) => {
+    const id = req.params.id as string;
+    await connectorManager.disable(id);
+    res.json({ success: true });
+  }));
 
   /** GET /api/connectors/:id/setup-steps — get setup step descriptors for a connector instance */
   router.get("/:id/setup-steps", requireAdmin, (req, res) => {
@@ -114,75 +103,59 @@ export function createConnectorRoutes(
   });
 
   /** POST /api/connectors/:id/setup/:stepId — execute a setup step */
-  router.post("/:id/setup/:stepId", requireAdmin, async (req, res, next) => {
-    try {
-      const id = req.params.id as string;
-      const stepId = req.params.stepId as string;
-      const params = req.body ?? {};
+  router.post("/:id/setup/:stepId", requireAdmin, asyncHandler(async (req, res) => {
+    const id = req.params.id as string;
+    const stepId = req.params.stepId as string;
+    const params = req.body ?? {};
 
-      const result = await connectorManager.executeSetupStep(id, stepId, params);
-      res.json(result);
-    } catch (err) {
-      next(err);
-    }
-  });
+    const result = await connectorManager.executeSetupStep(id, stepId, params);
+    res.json(result);
+  }));
 
   /** POST /api/connectors/:id/retry — retry connection */
-  router.post("/:id/retry", requireAdmin, async (req, res, next) => {
-    try {
-      const id = req.params.id as string;
-      await connectorManager.retry(id);
-      res.json({ success: true });
-    } catch (err) {
-      next(err);
-    }
-  });
+  router.post("/:id/retry", requireAdmin, asyncHandler(async (req, res) => {
+    const id = req.params.id as string;
+    await connectorManager.retry(id);
+    res.json({ success: true });
+  }));
 
   /** POST /api/connectors/:id/search-lights — start Zigbee light search */
-  router.post("/:id/search-lights", async (req, res, next) => {
-    try {
-      const id = req.params.id as string;
-      const status = connectorManager.getStatus(id);
-      if (!status) {
-        throw new NotFoundError(`Connector instance '${id}' not found`);
-      }
-
-      const connector = connectorManager.getConnectorInstance(id);
-      if (!connector || !("searchForNewLights" in connector)) {
-        throw new BadRequestError(
-          `Connector '${id}' does not support light search`,
-        );
-      }
-
-      const result = await (connector as { searchForNewLights: () => Promise<unknown> }).searchForNewLights();
-      res.json(result);
-    } catch (err) {
-      next(err);
+  router.post("/:id/search-lights", asyncHandler(async (req, res) => {
+    const id = req.params.id as string;
+    const status = connectorManager.getStatus(id);
+    if (!status) {
+      throw new NotFoundError(`Connector instance '${id}' not found`);
     }
-  });
+
+    const connector = connectorManager.getConnectorInstance(id);
+    if (!connector || !("searchForNewLights" in connector)) {
+      throw new BadRequestError(
+        `Connector '${id}' does not support light search`,
+      );
+    }
+
+    const result = await (connector as { searchForNewLights: () => Promise<unknown> }).searchForNewLights();
+    res.json(result);
+  }));
 
   /** GET /api/connectors/:id/search-lights/status — get search progress */
-  router.get("/:id/search-lights/status", (req, res, next) => {
-    try {
-      const id = req.params.id as string;
-      const status = connectorManager.getStatus(id);
-      if (!status) {
-        throw new NotFoundError(`Connector instance '${id}' not found`);
-      }
-
-      const connector = connectorManager.getConnectorInstance(id);
-      if (!connector || !("getSearchStatus" in connector)) {
-        throw new BadRequestError(
-          `Connector '${id}' does not support light search`,
-        );
-      }
-
-      const result = (connector as { getSearchStatus: () => unknown }).getSearchStatus();
-      res.json(result);
-    } catch (err) {
-      next(err);
+  router.get("/:id/search-lights/status", asyncHandler((req, res) => {
+    const id = req.params.id as string;
+    const status = connectorManager.getStatus(id);
+    if (!status) {
+      throw new NotFoundError(`Connector instance '${id}' not found`);
     }
-  });
+
+    const connector = connectorManager.getConnectorInstance(id);
+    if (!connector || !("getSearchStatus" in connector)) {
+      throw new BadRequestError(
+        `Connector '${id}' does not support light search`,
+      );
+    }
+
+    const result = (connector as { getSearchStatus: () => unknown }).getSearchStatus();
+    res.json(result);
+  }));
 
   return router;
 }
