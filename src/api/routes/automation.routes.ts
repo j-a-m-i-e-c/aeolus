@@ -211,291 +211,140 @@ export function createAutomationRoutes(
   });
 
   /** POST /api/automations — create a new UI rule (form or script) */
-  router.post("/", requireTabPermission("write"), validate({ body: createAutomationBodySchema }), (req, res, next) => {
-    try {
-      const { name, triggerTopic, ruleType, conditionType, conditionValue, actionType, actionTarget, actionParams, scriptSource, uiSource, triggerType: rawTriggerType, cronExpression } = req.body;
+  router.post("/", requireTabPermission("write"), validate({ body: createAutomationBodySchema }), asyncHandler((req, res) => {
+    const { name, triggerTopic, ruleType, conditionType, conditionValue, actionType, actionTarget, actionParams, scriptSource, uiSource, triggerType: rawTriggerType, cronExpression } = req.body;
 
-      if (!name) {
-        throw new BadRequestError("name is required");
-      }
-
-      // Determine trigger type (default to "mqtt" for backward compat)
-      const triggerType = rawTriggerType || "mqtt";
-      if (!["mqtt", "cron", "none"].includes(triggerType)) {
-        throw new BadRequestError("triggerType must be 'mqtt', 'cron', or 'none'");
-      }
-
-      // Validate cron expression if trigger type is "cron"
-      if (triggerType === "cron") {
-        if (!cronExpression || typeof cronExpression !== "string" || !cronExpression.trim()) {
-          throw new BadRequestError("cronExpression is required when triggerType is 'cron'");
-        }
-        if (!isValidCron(cronExpression)) {
-          throw new BadRequestError("Invalid cron expression");
-        }
-      }
-
-      // Determine effective trigger topic and cron expression for storage
-      let effectiveTriggerTopic: string;
-      let effectiveCronExpression: string | null;
-
-      if (triggerType === "cron" || triggerType === "none") {
-        effectiveTriggerTopic = "";
-        effectiveCronExpression = triggerType === "cron" ? cronExpression.trim() : null;
-      } else {
-        // mqtt — use provided triggerTopic
-        effectiveTriggerTopic = (triggerTopic && typeof triggerTopic === "string") ? triggerTopic.trim() : "";
-        effectiveCronExpression = null;
-      }
-
-      const id = randomUUID();
-      const now = Date.now();
-
-      // Transpile uiSource if provided
-      const uiSourceValue = (typeof uiSource === "string" && uiSource.trim()) ? uiSource : null;
-      let compiledUiValue: string | null = null;
-      if (uiSourceValue) {
-        const uiResult = transpileUi(uiSourceValue);
-        if (!uiResult.success) {
-          res.status(400).json({
-            error: "TSX compilation failed",
-            statusCode: 400,
-            details: uiResult.errors,
-          });
-          return;
-        }
-        compiledUiValue = uiResult.js;
-      }
-
-      if (ruleType === "script") {
-        // Script rule — transpile and store
-        if (!scriptSource) {
-          throw new BadRequestError("scriptSource is required for script rules");
-        }
-        const result = transpile(scriptSource);
-        if (!result.success) {
-          res.status(400).json({
-            error: "TypeScript compilation failed",
-            statusCode: 400,
-            details: result.errors,
-          });
-          return;
-        }
-
-        const structured = extractStructuredMetadata(result.js, effectiveTriggerTopic);
-        const structuredJson = structured ? JSON.stringify(structured) : null;
-
-        db.prepare(
-          `INSERT INTO automation_rules (id, name, trigger_topic, condition_type, condition_value, action_type, action_target, action_params, rule_type, script_source, compiled_js, structured_metadata, ui_source, compiled_ui, trigger_type, cron_expression, enabled, created_at)
-           VALUES (?, ?, ?, ?, ?, 'script', '', '{}', 'script', ?, ?, ?, ?, ?, ?, ?, 1, ?)`
-        ).run(id, name, effectiveTriggerTopic, conditionType || null, conditionValue || null, scriptSource, result.js, structuredJson, uiSourceValue, compiledUiValue, triggerType, effectiveCronExpression, now);
-
-        registerUiRule(engine, registry, actionExecutor, {
-          id, name, trigger_topic: effectiveTriggerTopic,
-          condition_type: conditionType || null, condition_value: conditionValue || null,
-          action_type: "script", action_target: "", action_params: "{}",
-          rule_type: "script", script_source: scriptSource, compiled_js: result.js,
-          structured_metadata: structuredJson, ui_source: uiSourceValue, compiled_ui: compiledUiValue,
-          trigger_type: triggerType, cron_expression: effectiveCronExpression,
-          enabled: 1, created_at: now,
-        }, conditionRegistry);
-
-        logger.info({ ruleId: id, name, triggerTopic: effectiveTriggerTopic, ruleType: "script" }, "Script automation rule created");
-        res.json({ success: true, id });
-      } else {
-        // Form rule (default)
-        if (!actionType || !actionTarget) {
-          throw new BadRequestError("actionType and actionTarget are required for form rules");
-        }
-
-        db.prepare(
-          `INSERT INTO automation_rules (id, name, trigger_topic, condition_type, condition_value, action_type, action_target, action_params, rule_type, ui_source, compiled_ui, trigger_type, cron_expression, enabled, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'form', ?, ?, ?, ?, 1, ?)`
-        ).run(id, name, effectiveTriggerTopic, conditionType || null, conditionValue || null, actionType, actionTarget, JSON.stringify(actionParams || {}), uiSourceValue, compiledUiValue, triggerType, effectiveCronExpression, now);
-
-        registerUiRule(engine, registry, actionExecutor, {
-          id, name, trigger_topic: effectiveTriggerTopic,
-          condition_type: conditionType || null, condition_value: conditionValue || null,
-          action_type: actionType, action_target: actionTarget,
-          action_params: JSON.stringify(actionParams || {}),
-          rule_type: "form", script_source: null, compiled_js: null,
-          structured_metadata: null, ui_source: uiSourceValue, compiled_ui: compiledUiValue,
-          trigger_type: triggerType, cron_expression: effectiveCronExpression,
-          enabled: 1, created_at: now,
-        }, conditionRegistry);
-
-        logger.info({ ruleId: id, name, triggerTopic: effectiveTriggerTopic }, "Form automation rule created");
-        res.json({ success: true, id });
-      }
-    } catch (err) {
-      next(err);
+    if (!name) {
+      throw new BadRequestError("name is required");
     }
-  });
+
+    const { triggerType, effectiveTriggerTopic, effectiveCronExpression } =
+      resolveTriggerConfig({ rawTriggerType, triggerTopic, cronExpression });
+
+    const { uiSourceValue, compiledUiValue } = resolveUiSource(uiSource);
+
+    const id = randomUUID();
+    const now = Date.now();
+
+    if (ruleType === "script") {
+      // Script rule — transpile and store
+      if (!scriptSource) {
+        throw new BadRequestError("scriptSource is required for script rules");
+      }
+      const { compiledJs, structuredJson } = compileScriptSource(scriptSource, effectiveTriggerTopic);
+
+      db.prepare(
+        `INSERT INTO automation_rules (id, name, trigger_topic, condition_type, condition_value, action_type, action_target, action_params, rule_type, script_source, compiled_js, structured_metadata, ui_source, compiled_ui, trigger_type, cron_expression, enabled, created_at)
+         VALUES (?, ?, ?, ?, ?, 'script', '', '{}', 'script', ?, ?, ?, ?, ?, ?, ?, 1, ?)`
+      ).run(id, name, effectiveTriggerTopic, conditionType || null, conditionValue || null, scriptSource, compiledJs, structuredJson, uiSourceValue, compiledUiValue, triggerType, effectiveCronExpression, now);
+
+      registerUiRule(engine, registry, actionExecutor, {
+        id, name, trigger_topic: effectiveTriggerTopic,
+        condition_type: conditionType || null, condition_value: conditionValue || null,
+        action_type: "script", action_target: "", action_params: "{}",
+        rule_type: "script", script_source: scriptSource, compiled_js: compiledJs,
+        structured_metadata: structuredJson, ui_source: uiSourceValue, compiled_ui: compiledUiValue,
+        trigger_type: triggerType, cron_expression: effectiveCronExpression,
+        enabled: 1, created_at: now,
+      }, conditionRegistry);
+
+      logger.info({ ruleId: id, name, triggerTopic: effectiveTriggerTopic, ruleType: "script" }, "Script automation rule created");
+      res.json({ success: true, id });
+    } else {
+      // Form rule (default)
+      if (!actionType || !actionTarget) {
+        throw new BadRequestError("actionType and actionTarget are required for form rules");
+      }
+
+      db.prepare(
+        `INSERT INTO automation_rules (id, name, trigger_topic, condition_type, condition_value, action_type, action_target, action_params, rule_type, ui_source, compiled_ui, trigger_type, cron_expression, enabled, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'form', ?, ?, ?, ?, 1, ?)`
+      ).run(id, name, effectiveTriggerTopic, conditionType || null, conditionValue || null, actionType, actionTarget, JSON.stringify(actionParams || {}), uiSourceValue, compiledUiValue, triggerType, effectiveCronExpression, now);
+
+      registerUiRule(engine, registry, actionExecutor, {
+        id, name, trigger_topic: effectiveTriggerTopic,
+        condition_type: conditionType || null, condition_value: conditionValue || null,
+        action_type: actionType, action_target: actionTarget,
+        action_params: JSON.stringify(actionParams || {}),
+        rule_type: "form", script_source: null, compiled_js: null,
+        structured_metadata: null, ui_source: uiSourceValue, compiled_ui: compiledUiValue,
+        trigger_type: triggerType, cron_expression: effectiveCronExpression,
+        enabled: 1, created_at: now,
+      }, conditionRegistry);
+
+      logger.info({ ruleId: id, name, triggerTopic: effectiveTriggerTopic }, "Form automation rule created");
+      res.json({ success: true, id });
+    }
+  }));
 
   /** PUT /api/automations/:id — update an existing UI rule */
-  router.put("/:id", requireTabPermission("write"), validate({ body: updateAutomationBodySchema, params: automationIdParamsSchema }), (req, res, next) => {
-    try {
-      const id = req.params.id as string;
+  router.put("/:id", requireTabPermission("write"), validate({ body: updateAutomationBodySchema, params: automationIdParamsSchema }), asyncHandler((req, res) => {
+    const id = req.params.id as string;
 
-      // Check rule exists
-      const existing = queryRuleById(db, id);
-      if (!existing) {
-        throw new NotFoundError(`Automation rule ${id} not found`);
-      }
-
-      const { name, triggerTopic, conditionType, conditionValue, actionType, actionTarget, actionParams, scriptSource, uiSource, triggerType: rawTriggerType, cronExpression } = req.body;
-
-      // Determine trigger type (keep existing if not provided)
-      const triggerType = rawTriggerType || existing.trigger_type || "mqtt";
-      if (!["mqtt", "cron", "none"].includes(triggerType)) {
-        throw new BadRequestError("triggerType must be 'mqtt', 'cron', or 'none'");
-      }
-
-      // Validate cron expression if trigger type is "cron"
-      if (triggerType === "cron") {
-        const effectiveExpr = cronExpression !== undefined ? cronExpression : existing.cron_expression;
-        if (!effectiveExpr || typeof effectiveExpr !== "string" || !effectiveExpr.trim()) {
-          throw new BadRequestError("cronExpression is required when triggerType is 'cron'");
-        }
-        if (!isValidCron(effectiveExpr)) {
-          throw new BadRequestError("Invalid cron expression");
-        }
-      }
-
-      // Determine effective trigger topic and cron expression for storage
-      let effectiveTriggerTopic: string;
-      let effectiveCronExpression: string | null;
-
-      if (triggerType === "cron" || triggerType === "none") {
-        effectiveTriggerTopic = "";
-        effectiveCronExpression = triggerType === "cron" ? (cronExpression !== undefined ? cronExpression.trim() : (existing.cron_expression || "")) : null;
-      } else {
-        // mqtt — use provided triggerTopic or keep existing
-        effectiveTriggerTopic = triggerTopic !== undefined ? triggerTopic : existing.trigger_topic;
-        effectiveCronExpression = null;
-      }
-
-      if (existing.rule_type === "script") {
-        // Script rule update — re-transpile
-        const updatedSource = scriptSource ?? existing.script_source;
-        if (!updatedSource) {
-          throw new BadRequestError("scriptSource is required for script rules");
-        }
-        const result = transpile(updatedSource);
-        if (!result.success) {
-          res.status(400).json({
-            error: "TypeScript compilation failed",
-            statusCode: 400,
-            details: result.errors,
-          });
-          return;
-        }
-
-        const structured = extractStructuredMetadata(result.js, effectiveTriggerTopic);
-        const structuredJson = structured ? JSON.stringify(structured) : null;
-
-        // Determine ui_source value
-        let uiSourceValue: string | null;
-        if (uiSource === "" || uiSource === null) {
-          uiSourceValue = null;
-        } else if (typeof uiSource === "string" && uiSource.trim()) {
-          uiSourceValue = uiSource;
-        } else {
-          uiSourceValue = existing.ui_source;
-        }
-
-        // Transpile uiSource if updated
-        let compiledUiValue: string | null;
-        if (uiSource === "" || uiSource === null) {
-          compiledUiValue = null;
-        } else if (typeof uiSource === "string" && uiSource.trim()) {
-          const uiResult = transpileUi(uiSourceValue!);
-          if (!uiResult.success) {
-            res.status(400).json({
-              error: "TSX compilation failed",
-              statusCode: 400,
-              details: uiResult.errors,
-            });
-            return;
-          }
-          compiledUiValue = uiResult.js;
-        } else {
-          compiledUiValue = existing.compiled_ui;
-        }
-
-        db.prepare(
-          `UPDATE automation_rules SET name = ?, trigger_topic = ?, condition_type = ?, condition_value = ?, script_source = ?, compiled_js = ?, structured_metadata = ?, ui_source = ?, compiled_ui = ?, trigger_type = ?, cron_expression = ? WHERE id = ?`
-        ).run(name || existing.name, effectiveTriggerTopic, conditionType ?? existing.condition_type, conditionValue ?? existing.condition_value, updatedSource, result.js, structuredJson, uiSourceValue, compiledUiValue, triggerType, effectiveCronExpression, id);
-
-        // Re-register in engine
-        engine.unregister(id);
-        const updated = queryRuleById(db, id)!;
-        if (updated.enabled) {
-          registerUiRule(engine, registry, actionExecutor, updated, conditionRegistry);
-        }
-
-        logger.info({ ruleId: id, name: updated.name }, "Script automation rule updated");
-        res.json({ success: true, id });
-      } else {
-        // Form rule update
-        let uiSourceValue: string | null;
-        if (uiSource === "" || uiSource === null) {
-          uiSourceValue = null;
-        } else if (typeof uiSource === "string" && uiSource.trim()) {
-          uiSourceValue = uiSource;
-        } else {
-          uiSourceValue = existing.ui_source;
-        }
-
-        let compiledUiValue: string | null;
-        if (uiSource === "" || uiSource === null) {
-          compiledUiValue = null;
-        } else if (typeof uiSource === "string" && uiSource.trim()) {
-          const uiResult = transpileUi(uiSourceValue!);
-          if (!uiResult.success) {
-            res.status(400).json({
-              error: "TSX compilation failed",
-              statusCode: 400,
-              details: uiResult.errors,
-            });
-            return;
-          }
-          compiledUiValue = uiResult.js;
-        } else {
-          compiledUiValue = existing.compiled_ui;
-        }
-
-        db.prepare(
-          `UPDATE automation_rules SET name = ?, trigger_topic = ?, condition_type = ?, condition_value = ?, action_type = ?, action_target = ?, action_params = ?, ui_source = ?, compiled_ui = ?, trigger_type = ?, cron_expression = ? WHERE id = ?`
-        ).run(
-          name || existing.name,
-          effectiveTriggerTopic,
-          conditionType ?? existing.condition_type,
-          conditionValue ?? existing.condition_value,
-          actionType || existing.action_type,
-          actionTarget || existing.action_target,
-          JSON.stringify(actionParams || JSON.parse(existing.action_params)),
-          uiSourceValue,
-          compiledUiValue,
-          triggerType,
-          effectiveCronExpression,
-          id,
-        );
-
-        // Re-register in engine
-        engine.unregister(id);
-        const updated = queryRuleById(db, id)!;
-        if (updated.enabled) {
-          registerUiRule(engine, registry, actionExecutor, updated, conditionRegistry);
-        }
-
-        logger.info({ ruleId: id, name: updated.name }, "Form automation rule updated");
-        res.json({ success: true, id });
-      }
-    } catch (err) {
-      next(err);
+    // Check rule exists
+    const existing = queryRuleById(db, id);
+    if (!existing) {
+      throw new NotFoundError(`Automation rule ${id} not found`);
     }
-  });
+
+    const { name, triggerTopic, conditionType, conditionValue, actionType, actionTarget, actionParams, scriptSource, uiSource, triggerType: rawTriggerType, cronExpression } = req.body;
+
+    const { triggerType, effectiveTriggerTopic, effectiveCronExpression } =
+      resolveTriggerConfig({ rawTriggerType, triggerTopic, cronExpression }, existing);
+
+    const { uiSourceValue, compiledUiValue } = resolveUiSource(uiSource, existing);
+
+    if (existing.rule_type === "script") {
+      // Script rule update — re-transpile
+      const updatedSource = scriptSource ?? existing.script_source;
+      if (!updatedSource) {
+        throw new BadRequestError("scriptSource is required for script rules");
+      }
+      const { compiledJs, structuredJson } = compileScriptSource(updatedSource, effectiveTriggerTopic);
+
+      db.prepare(
+        `UPDATE automation_rules SET name = ?, trigger_topic = ?, condition_type = ?, condition_value = ?, script_source = ?, compiled_js = ?, structured_metadata = ?, ui_source = ?, compiled_ui = ?, trigger_type = ?, cron_expression = ? WHERE id = ?`
+      ).run(name || existing.name, effectiveTriggerTopic, conditionType ?? existing.condition_type, conditionValue ?? existing.condition_value, updatedSource, compiledJs, structuredJson, uiSourceValue, compiledUiValue, triggerType, effectiveCronExpression, id);
+
+      // Re-register in engine
+      engine.unregister(id);
+      const updated = queryRuleById(db, id)!;
+      if (updated.enabled) {
+        registerUiRule(engine, registry, actionExecutor, updated, conditionRegistry);
+      }
+
+      logger.info({ ruleId: id, name: updated.name }, "Script automation rule updated");
+      res.json({ success: true, id });
+    } else {
+      // Form rule update
+      db.prepare(
+        `UPDATE automation_rules SET name = ?, trigger_topic = ?, condition_type = ?, condition_value = ?, action_type = ?, action_target = ?, action_params = ?, ui_source = ?, compiled_ui = ?, trigger_type = ?, cron_expression = ? WHERE id = ?`
+      ).run(
+        name || existing.name,
+        effectiveTriggerTopic,
+        conditionType ?? existing.condition_type,
+        conditionValue ?? existing.condition_value,
+        actionType || existing.action_type,
+        actionTarget || existing.action_target,
+        JSON.stringify(actionParams || JSON.parse(existing.action_params)),
+        uiSourceValue,
+        compiledUiValue,
+        triggerType,
+        effectiveCronExpression,
+        id,
+      );
+
+      // Re-register in engine
+      engine.unregister(id);
+      const updated = queryRuleById(db, id)!;
+      if (updated.enabled) {
+        registerUiRule(engine, registry, actionExecutor, updated, conditionRegistry);
+      }
+
+      logger.info({ ruleId: id, name: updated.name }, "Form automation rule updated");
+      res.json({ success: true, id });
+    }
+  }));
 
   /** DELETE /api/automations/:id — delete a UI rule */
   router.delete("/:id", requireTabPermission("write"), asyncHandler((req, res) => {
@@ -619,6 +468,121 @@ export function createAutomationRoutes(
 function queryRuleById(db: DatabaseType, id: string): StoredRule | null {
   const row = db.prepare("SELECT * FROM automation_rules WHERE id = ?").get(id) as StoredRule | undefined;
   return row ?? null;
+}
+
+/** Build a BadRequestError that carries transpiler diagnostics in `details`. */
+function compilationError(message: string, details: unknown): BadRequestError {
+  const err = new BadRequestError(message);
+  err.details = details;
+  return err;
+}
+
+interface ResolvedTrigger {
+  triggerType: string;
+  effectiveTriggerTopic: string;
+  effectiveCronExpression: string | null;
+}
+
+/**
+ * Resolve and validate trigger configuration shared by create (POST) and
+ * update (PUT). On update, pass `existing` so omitted fields fall back to the
+ * stored rule's values. Throws BadRequestError on an invalid trigger type or
+ * cron expression.
+ */
+function resolveTriggerConfig(
+  input: { rawTriggerType?: unknown; triggerTopic?: unknown; cronExpression?: unknown },
+  existing?: StoredRule,
+): ResolvedTrigger {
+  const triggerType = (input.rawTriggerType as string) || existing?.trigger_type || "mqtt";
+  if (!["mqtt", "cron", "none"].includes(triggerType)) {
+    throw new BadRequestError("triggerType must be 'mqtt', 'cron', or 'none'");
+  }
+
+  const rawCron = input.cronExpression;
+
+  if (triggerType === "cron") {
+    const effectiveExpr = rawCron !== undefined ? rawCron : existing?.cron_expression;
+    if (!effectiveExpr || typeof effectiveExpr !== "string" || !effectiveExpr.trim()) {
+      throw new BadRequestError("cronExpression is required when triggerType is 'cron'");
+    }
+    if (!isValidCron(effectiveExpr)) {
+      throw new BadRequestError("Invalid cron expression");
+    }
+  }
+
+  if (triggerType === "cron") {
+    return {
+      triggerType,
+      effectiveTriggerTopic: "",
+      effectiveCronExpression: rawCron !== undefined
+        ? (rawCron as string).trim()
+        : (existing?.cron_expression || ""),
+    };
+  }
+
+  if (triggerType === "none") {
+    return { triggerType, effectiveTriggerTopic: "", effectiveCronExpression: null };
+  }
+
+  // mqtt — use provided triggerTopic, else keep existing (update) or default to "" (create)
+  const rawTopic = input.triggerTopic;
+  const effectiveTriggerTopic = existing
+    ? (rawTopic !== undefined ? (rawTopic as string) : existing.trigger_topic)
+    : ((rawTopic && typeof rawTopic === "string") ? rawTopic.trim() : "");
+
+  return { triggerType, effectiveTriggerTopic, effectiveCronExpression: null };
+}
+
+interface ResolvedUi {
+  uiSourceValue: string | null;
+  compiledUiValue: string | null;
+}
+
+/**
+ * Resolve `ui_source` / `compiled_ui` shared by create and update. On update,
+ * pass `existing` so an omitted (or whitespace-only) uiSource keeps the stored
+ * values, while an explicit "" or null clears them. Throws BadRequestError on
+ * TSX compile failure.
+ */
+function resolveUiSource(uiSource: unknown, existing?: StoredRule): ResolvedUi {
+  if (uiSource === "" || uiSource === null) {
+    return { uiSourceValue: null, compiledUiValue: null };
+  }
+
+  if (typeof uiSource === "string" && uiSource.trim()) {
+    const uiResult = transpileUi(uiSource);
+    if (!uiResult.success) {
+      throw compilationError("TSX compilation failed", uiResult.errors);
+    }
+    return { uiSourceValue: uiSource, compiledUiValue: uiResult.js };
+  }
+
+  // uiSource omitted or whitespace-only — keep existing (create resolves to null)
+  return {
+    uiSourceValue: existing?.ui_source ?? null,
+    compiledUiValue: existing?.compiled_ui ?? null,
+  };
+}
+
+interface ResolvedScript {
+  compiledJs: string;
+  structuredJson: string | null;
+}
+
+/**
+ * Transpile a script rule's source and extract its structured metadata.
+ * Throws BadRequestError on TypeScript compile failure.
+ */
+function compileScriptSource(source: string, triggerTopic: string): ResolvedScript {
+  const result = transpile(source);
+  if (!result.success) {
+    throw compilationError("TypeScript compilation failed", result.errors);
+  }
+  const structured = extractStructuredMetadata(result.js, triggerTopic);
+  return {
+    compiledJs: result.js,
+    structuredJson: structured ? JSON.stringify(structured) : null,
+  };
 }
 
 /** Convert a stored UI rule into a live automation rule and register it */
