@@ -173,6 +173,7 @@ async function main(): Promise<void> {
 
   // 9. Express app
   const app = express();
+  app.disable("x-powered-by"); // Don't advertise the framework
 
   // Prometheus metrics endpoint — BEFORE authenticate (uses its own bearer token auth)
   app.use(createPrometheusMetricsRoute(metricsService));
