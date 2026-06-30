@@ -2,7 +2,7 @@
 
 import type { Database as DatabaseType } from "better-sqlite3";
 import type { ConnectorRecord } from "./connector.interface.js";
-import logger from "../logger.js";
+import { safeJsonParse } from "../core/safe-json.js";
 
 interface ConnectorRow {
   id: string;
@@ -68,16 +68,12 @@ export class ConnectorStore {
     const records: ConnectorRecord[] = [];
 
     for (const row of rows) {
-      let config: Record<string, unknown>;
-      try {
-        config = JSON.parse(row.config);
-      } catch {
-        logger.warn(
-          { id: row.id, raw: row.config },
-          "Malformed JSON in connector config column, skipping record",
-        );
-        continue;
-      }
+      const config = safeJsonParse<Record<string, unknown>>(
+        row.config,
+        { id: row.id },
+        "Malformed JSON in connector config column, skipping record",
+      );
+      if (config === undefined) continue;
 
       records.push({
         id: row.id,

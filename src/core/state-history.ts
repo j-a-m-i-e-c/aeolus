@@ -2,6 +2,7 @@
 
 import type { Database as DatabaseType } from "better-sqlite3";
 import logger from "../logger.js";
+import { safeJsonParse } from "./safe-json.js";
 
 export interface HistoryEntry {
   deviceId: string;
@@ -55,11 +56,14 @@ export class StateHistory {
       "SELECT device_id, state, timestamp FROM device_history WHERE device_id = ? ORDER BY timestamp DESC LIMIT ?"
     ).all(deviceId, effectiveLimit) as Array<{ device_id: string; state: string; timestamp: number }>;
 
-    return rows.map((row) => ({
-      deviceId: row.device_id,
-      state: JSON.parse(row.state) as Record<string, unknown>,
-      timestamp: row.timestamp,
-    }));
+    return rows.flatMap((row) => {
+      const state = safeJsonParse<Record<string, unknown>>(
+        row.state,
+        { deviceId: row.device_id, timestamp: row.timestamp },
+        "Malformed JSON in device_history, skipping entry",
+      );
+      return state === undefined ? [] : [{ deviceId: row.device_id, state, timestamp: row.timestamp }];
+    });
   }
 
   /** Get history for a device within a time range, newest first */
@@ -68,11 +72,14 @@ export class StateHistory {
       "SELECT device_id, state, timestamp FROM device_history WHERE device_id = ? AND timestamp >= ? AND timestamp <= ? ORDER BY timestamp DESC"
     ).all(deviceId, from, to) as Array<{ device_id: string; state: string; timestamp: number }>;
 
-    return rows.map((row) => ({
-      deviceId: row.device_id,
-      state: JSON.parse(row.state) as Record<string, unknown>,
-      timestamp: row.timestamp,
-    }));
+    return rows.flatMap((row) => {
+      const state = safeJsonParse<Record<string, unknown>>(
+        row.state,
+        { deviceId: row.device_id, timestamp: row.timestamp },
+        "Malformed JSON in device_history, skipping entry",
+      );
+      return state === undefined ? [] : [{ deviceId: row.device_id, state, timestamp: row.timestamp }];
+    });
   }
 
   /** Delete oldest entries for a device when count exceeds maxEntriesPerDevice */

@@ -5,6 +5,7 @@ import type { Database as DatabaseType } from "better-sqlite3";
 import { BadRequestError } from "../middleware/error-handler.js";
 import { asyncHandler } from "../middleware/async-handler.js";
 import { requireAdmin } from "../../auth/auth-middleware.js";
+import { safeJsonParse } from "../../core/safe-json.js";
 import logger from "../../logger.js";
 
 interface TabRow {
@@ -50,7 +51,7 @@ export function createLayoutRoutes(db: DatabaseType): Router {
         id: row.id,
         tabId: row.tab_id,
         paneType: row.pane_type,
-        config: safeJsonParse(row.config),
+        config: safeJsonParse(row.config, { paneId: row.id }, "Malformed JSON in pane config, substituting empty config") ?? {},
         x: row.x,
         y: row.y,
         w: row.w,
@@ -100,14 +101,4 @@ export function createLayoutRoutes(db: DatabaseType): Router {
   }));
 
   return router;
-}
-
-/** Safely parse a JSON string, returning {} on failure */
-function safeJsonParse(str: string): Record<string, unknown> {
-  try {
-    return JSON.parse(str);
-  } catch {
-    logger.warn({ raw: str }, "Malformed JSON in pane config, substituting empty config");
-    return {};
-  }
 }

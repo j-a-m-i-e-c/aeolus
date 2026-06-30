@@ -2,6 +2,7 @@
 
 import type { Database as DatabaseType } from "better-sqlite3";
 import logger from "../logger.js";
+import { safeJsonParse } from "../core/safe-json.js";
 
 /**
  * Per-rule key-value store enabling bidirectional communication between
@@ -23,15 +24,13 @@ export class AutomationStateStore {
     for (const row of rows) {
       const ruleId = row.rule_id;
       const key = row.key;
-      const raw = row.value;
 
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(raw);
-      } catch {
-        logger.warn({ ruleId, key, raw }, "Malformed JSON in automation_state, skipping entry");
-        continue;
-      }
+      const parsed = safeJsonParse(
+        row.value,
+        { ruleId, key },
+        "Malformed JSON in automation_state, skipping entry",
+      );
+      if (parsed === undefined) continue;
 
       if (!this.cache.has(ruleId)) {
         this.cache.set(ruleId, new Map());
