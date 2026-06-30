@@ -248,41 +248,6 @@ export function AutomationsPage() {
     setShowForm(true);
   };
 
-  /** Build DSL preview string from current form state */
-  const buildDslPreview = () => {
-    const topic = form.triggerTopic || "...";
-    const condPart =
-      form.conditionType
-        ? `\n  .if(value ${form.conditionType === "value_above" ? ">" : form.conditionType === "value_below" ? "<" : "==="} ${form.conditionValue || "..."})`
-        : "";
-
-    let actionPart = "";
-    switch (form.actionType) {
-      case "log":
-        actionPart = `log("${form.actionMessage || "..."}")`;
-        break;
-      case "toggle":
-        actionPart = `toggle("${form.actionTarget || "..."}")`;
-        break;
-      case "publish":
-        actionPart = `publish("${form.publishTopic || "..."}", "${form.publishPayload || "..."}")`;
-        break;
-      case "device_action":
-        actionPart = `device_action("${form.actionTarget || "..."}", "${form.deviceActionType || "..."}")`;
-        break;
-      case "delay":
-        actionPart = `delay(${form.delayDuration || "0"}ms)`;
-        break;
-      case "webhook":
-        actionPart = `webhook("${form.webhookMethod}", "${form.webhookUrl || "..."}")`;
-        break;
-      default:
-        actionPart = form.actionType;
-    }
-
-    return { topic, condPart, actionPart };
-  };
-
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -666,20 +631,6 @@ export function AutomationsPage() {
                     </div>
                   </div>
                 )}
-
-                {/* DSL Preview */}
-                {(() => {
-                  const { topic, condPart, actionPart } = buildDslPreview();
-                  return (
-                    <div className="bg-background rounded-lg p-3 font-mono text-xs text-[#9AA6B2]">
-                      <span className="text-primary">when</span>(
-                      <span className="text-accent">"{topic}"</span>){condPart}
-                      <br />
-                      {"  "}.<span className="text-primary">then</span>(
-                      <span className="text-accent">{actionPart}</span>)
-                    </div>
-                  );
-                })()}
 
                 <div className="flex gap-2">
                   <button
