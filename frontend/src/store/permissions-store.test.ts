@@ -22,7 +22,7 @@ describe("permissions-store", () => {
   beforeEach(() => {
     mockGetState.mockReset();
     usePermissionsStore.setState({ accessibleTabs: [], loaded: false });
-    global.fetch = vi.fn();
+    vi.stubGlobal("fetch", vi.fn());
   });
 
   describe("admin shortcut", () => {

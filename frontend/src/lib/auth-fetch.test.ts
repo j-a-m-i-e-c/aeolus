@@ -19,7 +19,7 @@ function ok(body: unknown = {}) {
 describe("authFetch", () => {
   beforeEach(() => {
     mockGetState.mockReset();
-    global.fetch = vi.fn();
+    vi.stubGlobal("fetch", vi.fn());
   });
 
   it("injects the Bearer token and a default Content-Type", async () => {
