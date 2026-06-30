@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import express, { type Request, type Response, type NextFunction } from "express";
+import express, { type Request, type Response } from "express";
 import request from "supertest";
 import { validate } from "./validate.js";
 import { errorHandler, AppError } from "./error-handler.js";
@@ -70,6 +70,7 @@ describe("Middleware Integration Tests", () => {
       app.post("/test", validate({ body: schema }), (_req: Request, res: Response) => {
         res.json({ ok: true });
       });
+      app.use(errorHandler);
 
       const res = await request(app)
         .post("/test")

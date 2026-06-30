@@ -3,6 +3,7 @@ import { test, fc } from "@fast-check/vitest";
 import express, { type Request, type Response } from "express";
 import request from "supertest";
 import { validate } from "./validate.js";
+import { errorHandler } from "./error-handler.js";
 import {
   createAutomationBodySchema,
 } from "../schemas/automation.schemas.js";
@@ -36,6 +37,7 @@ describe("Property: Validation Constraint Enforcement", () => {
     app.post("/test", validate({ body: schema }), (_req: Request, res: Response) => {
       res.status(200).json({ ok: true });
     });
+    app.use(errorHandler);
     return app;
   }
 
