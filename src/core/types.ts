@@ -12,6 +12,10 @@ export interface Device {
   state: Record<string, unknown>;
   integration: string;
   lastSeen: number;
+  /** MQTT state topic, present for MQTT-sourced devices. */
+  topic?: string;
+  /** MQTT command topic used to send commands to the device. */
+  commandTopic?: string;
 }
 
 /** Internal event emitted after MQTT message normalization */
@@ -38,6 +42,8 @@ export interface Rule {
   name?: string;
   triggerType?: "mqtt" | "cron" | "none";
   cronExpression?: string;
+  /** Compiled JavaScript for script rules; when present the engine dispatches through the sandbox. */
+  compiled_js?: string;
 }
 
 /** Context passed to rule condition and action functions */

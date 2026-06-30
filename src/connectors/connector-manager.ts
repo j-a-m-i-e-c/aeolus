@@ -527,9 +527,9 @@ export class ConnectorManager {
     // Derive command topic: replace last segment with "set", or use explicit commandTopic
     const topic = typeof device.state.topic === "string"
       ? device.state.topic
-      : (device as unknown as Record<string, unknown>).topic as string | undefined;
+      : device.topic;
 
-    const explicitCommandTopic = (device as unknown as Record<string, unknown>).commandTopic as string | undefined
+    const explicitCommandTopic = device.commandTopic
       ?? (typeof device.state.commandTopic === "string" ? device.state.commandTopic : undefined);
 
     const commandTopic = explicitCommandTopic

@@ -9,6 +9,14 @@ import { computeAggregate, detectSpikes, alignToWindow } from "./aggregation.js"
 
 // ─── Interfaces ──────────────────────────────────────────────────────────────
 
+/**
+ * Shape of a prom-client metric's runtime `get()` method, which the published
+ * types don't expose. Centralized here so the cast lives in one place.
+ */
+interface MetricWithGet {
+  get(): Promise<{ values: Array<{ value: number; labels?: Record<string, string> }> }>;
+}
+
 /** Configuration options for MetricsHistoryService (user-facing, all optional) */
 export interface MetricsHistoryConfig {
   /** Sampling interval in milliseconds (default: 30,000, min: 5,000) */
@@ -292,7 +300,7 @@ export class MetricsHistoryService {
       return 0;
     }
 
-    const data = await (metric as unknown as { get(): Promise<{ values: Array<{ value: number }> }> }).get();
+    const data = await (metric as unknown as MetricWithGet).get();
     if (!data || !data.values || data.values.length === 0) {
       return 0;
     }
@@ -317,7 +325,7 @@ export class MetricsHistoryService {
       return 0;
     }
 
-    const data = await (metric as unknown as { get(): Promise<{ values: Array<{ value: number; labels: Record<string, string> }> }> }).get();
+    const data = await (metric as unknown as MetricWithGet).get();
     if (!data || !data.values || data.values.length === 0) {
       return 0;
     }
@@ -325,7 +333,7 @@ export class MetricsHistoryService {
     let total = 0;
     for (const entry of data.values) {
       const matches = Object.entries(labels).every(
-        ([key, val]) => entry.labels[key] === val,
+        ([key, val]) => entry.labels?.[key] === val,
       );
       if (matches) {
         total += entry.value;
@@ -343,7 +351,7 @@ export class MetricsHistoryService {
       return defaultValue;
     }
 
-    const data = await (metric as unknown as { get(): Promise<{ values: Array<{ value: number }> }> }).get();
+    const data = await (metric as unknown as MetricWithGet).get();
     if (!data || !data.values || data.values.length === 0) {
       return defaultValue;
     }

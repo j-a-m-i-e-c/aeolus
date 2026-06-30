@@ -8,7 +8,7 @@ import type { AutomationEngine } from "../../automations/automation-engine.js";
 import type { DeviceRegistry } from "../../core/device-registry.js";
 import type { ActionExecutor, ActionDescriptor } from "../../automations/action-executor.js";
 import type { ExecutionLog } from "../../automations/execution-log.js";
-import type { EventContext, NormalizedEvent } from "../../core/types.js";
+import type { EventContext, NormalizedEvent, Rule } from "../../core/types.js";
 import type { ConditionRegistry } from "../../automations/condition-registry.js";
 import { transpile, transpileUi } from "../../automations/transpiler.js";
 import { extractStructuredMetadata } from "../../automations/structured-metadata-extractor.js";
@@ -679,7 +679,7 @@ function registerUiRule(
     };
 
     // Register with compiled_js attached so AutomationEngine can detect script rules
-    const rule: Record<string, unknown> = {
+    const rule: Rule = {
       id: stored.id,
       topic: effectiveTopic,
       name: stored.name,
@@ -689,7 +689,7 @@ function registerUiRule(
       triggerType,
       cronExpression,
     };
-    engine.register(rule as unknown as import("../../core/types.js").Rule);
+    engine.register(rule);
   } else {
     // Form rule — dispatch through ActionExecutor
     const params = JSON.parse(stored.action_params);

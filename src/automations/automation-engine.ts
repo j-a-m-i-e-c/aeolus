@@ -57,7 +57,7 @@ export class AutomationEngine {
           state: { ruleId: rule.id, cronExpression: rule.cronExpression, firedAt: Date.now() },
           timestamp: Date.now(),
         };
-        const compiledJs = (rule as unknown as Record<string, unknown>).compiled_js as string | undefined;
+        const compiledJs = rule.compiled_js;
         if (compiledJs && this.sandbox) {
           this.executeScriptRule(rule, compiledJs, context);
         } else {
@@ -94,7 +94,7 @@ export class AutomationEngine {
     const rule = this.registry.getRule(ruleId);
     if (!rule) throw new Error(`Rule ${ruleId} not found`);
 
-    const compiledJs = (rule as unknown as Record<string, unknown>).compiled_js as string | undefined;
+    const compiledJs = rule.compiled_js;
     if (compiledJs && this.sandbox) {
       this.executeScriptRule(rule, compiledJs, context);
     } else {
@@ -167,7 +167,7 @@ export class AutomationEngine {
         if (rule.condition && !rule.condition(context)) continue;
 
         // Check if this is a script rule (has compiled_js attached)
-        const compiledJs = (rule as unknown as Record<string, unknown>).compiled_js as string | undefined;
+        const compiledJs = rule.compiled_js;
 
         if (compiledJs && this.sandbox) {
           // Script rule — dispatch through Sandbox
@@ -271,7 +271,7 @@ export class AutomationEngine {
 
     if (!this.executionLog) return;
 
-    const compiledJs = (rule as unknown as Record<string, unknown>).compiled_js as string | undefined;
+    const compiledJs = rule.compiled_js;
     const ruleType: ExecutionLogEntry["ruleType"] = compiledJs ? "script" : "file";
 
     const entry: ExecutionLogEntry = {
