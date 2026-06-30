@@ -20,7 +20,6 @@ RUN npm pkg delete scripts.prepare && npm install --omit=dev && npm cache clean 
 COPY --from=builder /app/dist ./dist/
 COPY --from=builder /tmp/build-info.json ./dist/build-info.json
 COPY src/automations/sandbox-types.d.ts ./dist/automations/sandbox-types.d.ts
-COPY automations/ ./automations/
 RUN mkdir -p /app/data
 EXPOSE 3001
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
