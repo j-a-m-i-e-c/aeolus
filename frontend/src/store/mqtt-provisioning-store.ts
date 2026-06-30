@@ -1,6 +1,7 @@
 // frontend/src/store/mqtt-provisioning-store.ts — Zustand store for MQTT provisioning state
 
 import { create } from "zustand";
+import { API_URL } from "../lib/env";
 
 // ---- Types ----
 
@@ -27,10 +28,6 @@ export interface SecurityStatus {
 }
 
 // ---- API helpers ----
-
-const API_URL =
-  import.meta.env.VITE_API_URL ||
-  `http://${window.location.hostname}:3001`;
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const { authFetch } = await import("../lib/auth-fetch");

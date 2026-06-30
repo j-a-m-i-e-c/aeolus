@@ -2,8 +2,7 @@
 
 import { create } from "zustand";
 import { useAuthStore } from "./auth-store";
-
-const API_URL = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:3001`;
+import { API_URL } from "../lib/env";
 
 export type PermissionLevel = "read" | "interact" | "write";
 

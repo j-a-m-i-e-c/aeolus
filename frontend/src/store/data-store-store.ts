@@ -1,6 +1,7 @@
 // frontend/src/store/data-store-store.ts — Zustand store for Data Store state
 
 import { create } from "zustand";
+import { API_URL } from "../lib/env";
 
 // ---- Types ----
 
@@ -61,10 +62,6 @@ export interface QueryOptions {
 }
 
 // ---- API helpers ----
-
-const API_URL =
-  import.meta.env.VITE_API_URL ||
-  `http://${window.location.hostname}:3001`;
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const { authFetch } = await import("../lib/auth-fetch");

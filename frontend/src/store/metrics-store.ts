@@ -2,8 +2,7 @@
 
 import { create } from "zustand";
 import { authFetch } from "../lib/auth-fetch";
-
-const API_URL = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:3001`;
+import { API_URL } from "../lib/env";
 const POLLING_INTERVAL_MS = 15_000;
 
 export interface MetricsSummary {

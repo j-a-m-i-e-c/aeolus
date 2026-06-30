@@ -1,8 +1,7 @@
 // frontend/src/lib/api-client.ts — HTTP client for backend API
 
 import { authFetch } from "./auth-fetch";
-
-const API_URL = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:3001`;
+import { API_URL } from "./env";
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await authFetch(`${API_URL}${path}`, {

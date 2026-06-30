@@ -2,10 +2,7 @@
 
 import { useState, useEffect, useRef, type ComponentType } from "react";
 import { authFetch } from "../lib/auth-fetch";
-
-const API_URL =
-  import.meta.env.VITE_API_URL ||
-  `http://${window.location.hostname}:3001`;
+import { API_URL } from "../lib/env";
 
 /**
  * Supported external specifiers that are rewritten to reference

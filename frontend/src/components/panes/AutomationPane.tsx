@@ -29,9 +29,7 @@ import { useDeviceStore } from "../../store/device-store";
 import { useAutomationStateStore, sendStateUpdate, sendStateUpdateAndFire } from "../../store/automation-state-store";
 import type { PaneConfig } from "../../types/dashboard";
 
-const API_URL =
-  import.meta.env.VITE_API_URL ||
-  `http://${window.location.hostname}:3001`;
+import { API_URL } from "../../lib/env";
 
 type PaneMode = "setup" | "status" | "editing";
 

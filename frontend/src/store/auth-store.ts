@@ -1,8 +1,7 @@
 // frontend/src/store/auth-store.ts — Zustand store for authentication state
 
 import { create } from "zustand";
-
-const API_URL = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:3001`;
+import { API_URL } from "../lib/env";
 
 export interface AuthUser {
   id: string;

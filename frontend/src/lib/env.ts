@@ -1,0 +1,11 @@
+// frontend/src/lib/env.ts — Centralized API and WebSocket base URLs.
+//
+// Single source of truth for the backend origin. Override at build time with
+// VITE_API_URL / VITE_WS_URL; otherwise default to the current host on the
+// backend's default port.
+
+export const API_URL =
+  import.meta.env.VITE_API_URL || `http://${window.location.hostname}:3001`;
+
+export const WS_URL =
+  import.meta.env.VITE_WS_URL || `ws://${window.location.hostname}:3001/ws`;

@@ -4,8 +4,8 @@ import { useDeviceStore } from "../store/device-store";
 import { useAutomationStateStore } from "../store/automation-state-store";
 import { useDataStoreStore } from "../store/data-store-store";
 import { useAuthStore } from "../store/auth-store";
+import { WS_URL } from "./env";
 
-const WS_URL = import.meta.env.VITE_WS_URL || `ws://${window.location.hostname}:3001/ws`;
 const RECONNECT_DELAY = 3000;
 
 let ws: WebSocket | null = null;
