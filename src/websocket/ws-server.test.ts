@@ -168,6 +168,24 @@ describe("WsServer Authentication", () => {
       ws.close();
     });
 
+    it("should close the connection when the token expires (close code 4003)", async () => {
+      // Sign a token that is valid now but expires in ~1 second.
+      const jwt = await import("jsonwebtoken");
+      const shortToken = jwt.default.sign(
+        { userId: "admin-1", username: "admin", role: "admin", groupId: null },
+        "test-ws-secret-key-for-testing",
+        { algorithm: "HS256", expiresIn: "1s" },
+      );
+      const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${shortToken}`);
+      await waitForOpen(ws);
+      expect(wsServer.clientCount).toBe(1);
+
+      // The server should close the socket at the token's expiry.
+      const { code, reason } = await waitForClose(ws);
+      expect(code).toBe(4003);
+      expect(reason).toBe("Token expired");
+    });
+
     it("should store authenticated client context", async () => {
       const token = generateAccessToken({
         userId: "user-1",

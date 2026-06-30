@@ -6,7 +6,7 @@ import type { Server } from "node:http";
 import type { EventEmitter } from "node:events";
 import type { DeviceRegistry } from "../core/device-registry.js";
 import type { Device } from "../core/types.js";
-import { verifyAccessToken } from "../auth/token-service.js";
+import { verifyAccessTokenWithExpiry } from "../auth/token-service.js";
 import { getUserAccessibleTabs } from "../auth/permission-service.js";
 import { WS_CLIENT_CONNECT, WS_CLIENT_DISCONNECT, WS_BROADCAST } from "../core/event-bus.js";
 import logger from "../logger.js";
@@ -48,9 +48,12 @@ export class WsServer {
       }
 
       // Verify the token
-      let payload: ReturnType<typeof verifyAccessToken>;
+      let payload: ReturnType<typeof verifyAccessTokenWithExpiry>["payload"];
+      let expiresAt: number;
       try {
-        payload = verifyAccessToken(token);
+        const verified = verifyAccessTokenWithExpiry(token);
+        payload = verified.payload;
+        expiresAt = verified.expiresAt;
       } catch {
         logger.debug("WebSocket connection rejected: invalid or expired token");
         ws.close(4001, "Invalid token");
@@ -93,13 +96,28 @@ export class WsServer {
       }
       this.send(ws, { type: "snapshot", data: snapshot });
 
+      // Close the socket when the access token expires; the client reconnects
+      // with a freshly refreshed token. This bounds how long a connection can
+      // outlive its token (and how stale its tab permissions can get).
+      const ttl = expiresAt - Date.now();
+      const expiryTimer: ReturnType<typeof setTimeout> | null =
+        ttl > 0
+          ? setTimeout(() => {
+              if (ws.readyState === WebSocket.OPEN) {
+                ws.close(4003, "Token expired");
+              }
+            }, ttl)
+          : null;
+
       ws.on("close", () => {
+        if (expiryTimer) clearTimeout(expiryTimer);
         this.clients.delete(ws);
         this.eventBus.emit(WS_CLIENT_DISCONNECT, { clientCount: this.clients.size });
         logger.debug({ clientCount: this.clients.size }, "WebSocket client disconnected");
       });
 
       ws.on("error", (err) => {
+        if (expiryTimer) clearTimeout(expiryTimer);
         logger.error({ error: err.message }, "WebSocket client error");
         this.clients.delete(ws);
       });

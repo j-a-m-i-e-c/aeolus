@@ -115,6 +115,31 @@ export function verifyAccessToken(token: string): AccessTokenPayload {
   };
 }
 
+/**
+ * Verify an access token and also return its expiry as epoch milliseconds.
+ * Used by the WebSocket server to close a connection when its token expires
+ * (the client reconnects with a freshly refreshed token).
+ */
+export function verifyAccessTokenWithExpiry(token: string): {
+  payload: AccessTokenPayload;
+  expiresAt: number;
+} {
+  const secret = getSecret();
+  const decoded = jwt.verify(token, secret, { algorithms: ["HS256"] }) as AccessTokenPayload & {
+    iat: number;
+    exp: number;
+  };
+  return {
+    payload: {
+      userId: decoded.userId,
+      username: decoded.username,
+      role: decoded.role,
+      groupId: decoded.groupId,
+    },
+    expiresAt: decoded.exp * 1000,
+  };
+}
+
 // ─── Refresh Token Operations ────────────────────────────────────────────────
 
 /**
