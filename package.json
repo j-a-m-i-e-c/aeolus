@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "description": "Local-first IoT automation platform",
   "type": "module",
+  "engines": {
+    "node": ">=22 <23"
+  },
   "lint-staged": {
     "src/**/*.ts": ["eslint --max-warnings 0 --no-warn-ignored"]
   },
