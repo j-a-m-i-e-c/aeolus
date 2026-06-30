@@ -112,6 +112,11 @@ Community-contributed connectors and pane types installable from the dashboard. 
 ### OTA Firmware Management
 Manage microcontroller firmware updates from the Aeolus dashboard. Upload compiled binaries (.bin files) and push them to ESP32/ESP8266 devices over Wi-Fi using the ArduinoOTA or ESP-IDF OTA protocols. Track firmware versions per device, roll back to previous versions, and schedule updates during low-activity windows. This would close the loop on the microcontroller workflow — currently users need the Arduino IDE or PlatformIO on a separate machine to flash their boards. With OTA support, the entire lifecycle (write automation → deploy firmware → monitor device) happens from the Aeolus dashboard. The microcontroller templates in [`docs/MICROCONTROLLERS.md`](MICROCONTROLLERS.md) would be extended with OTA-ready variants that include the update client library.
 
+### File-Based Automation Rules
+Re-introduce the ability to author automation rules as version-controlled code files on disk. An `automations/` directory would be scanned on startup, loading any `.ts`/`.js` file that exports a rule (via a `when(topic).if(condition).then(action)` DSL or a plain rule object). This complements the UI builder for users who prefer to keep automation logic in their own git repository, organise rules across multiple files, and review changes through pull requests — pulling the "automations as code" workflow closer to standard application development.
+
+An earlier implementation existed but was removed to keep a single, sandboxed authoring path: the UI builder transpiles and runs scripts inside an isolated-vm sandbox, whereas file-based rules ran as native, unsandboxed Node code with full process access. That suited a single trusted admin but blurred the trust model. A future revival would need to make that trade-off deliberately — either documenting the elevated trust explicitly or routing file-based rules through the same sandbox — and would pair naturally with the Browser-Based Code Editor and remote-development items below.
+
 ### Browser-Based Code Editor (code-server Add-on)
 Embed a full VS Code instance ([code-server](https://github.com/coder/code-server)) into the Aeolus stack as an additional Docker Compose service, accessible from the dashboard via an ingress proxy — similar to Home Assistant's VS Code add-on. The backend (or nginx frontend) would reverse-proxy requests from a path like `/addon/code-server/` into the code-server container, including WebSocket traffic, so the editor works seamlessly within the Aeolus UI.
 
@@ -120,7 +125,7 @@ Embed a full VS Code instance ([code-server](https://github.com/coder/code-serve
 **Where it shines — platform development from the Pi:**
 - **Editing Aeolus source code** — working on backend services, connectors, the frontend, Docker configs, and infrastructure directly from the Pi's browser without needing SSH or a separate development machine
 - **Building new connectors** — the `_template/` scaffold, implementing `connector.interface.ts`, testing against live devices on the LAN. This is real multi-file TypeScript work where a full IDE with project-wide navigation, refactoring, and terminal access makes a meaningful difference
-- **Writing file-based automation rules** — the `automations/` directory DSL rules that live as `.ts` files on disk, where git integration and multi-file awareness help
+- **Writing file-based automation rules** — a potential future feature (see *File-Based Automation Rules* below) where rules would live as `.ts` files on disk; git integration and multi-file awareness would help here
 - **System administration** — reading logs, inspecting the SQLite database, running diagnostic scripts, managing Docker containers, all from the browser
 - **Remote development** — when combined with the Cloudflare Tunnel roadmap item, developers could work on the Aeolus platform from anywhere without SSH tunnels or VPN setup
 

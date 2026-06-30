@@ -9,7 +9,7 @@ export interface ExecutionLogEntry {
   id: string;
   ruleId: string;
   ruleName: string;
-  ruleType: "file" | "form" | "script";
+  ruleType: "form" | "script";
   triggerTopic: string;
   actions: Array<{ type: string; target: string; success: boolean; error?: string }>;
   duration: number; // ms

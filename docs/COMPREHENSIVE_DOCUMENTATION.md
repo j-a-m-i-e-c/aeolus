@@ -144,7 +144,6 @@ aeolus/
 │   │   ├── structured-metadata-extractor.ts  # Best-effort extraction of automation() call metadata for flow diagrams
 │   │   ├── snippet-catalog.ts        # Platform + connector code snippet aggregation
 │   │   ├── condition-registry.ts     # Factory registry for condition predicates
-│   │   ├── dsl.ts                    # when/if/then builder
 │   │   └── rule-registry.ts          # In-memory rule store
 │   ├── connectors/                   # Pluggable connector framework
 │   │   ├── connector.interface.ts    # Core interfaces (Connector, ConnectorMetadata, CapabilityDescriptor, etc.)
@@ -257,7 +256,6 @@ aeolus/
 │       │   └── pane-registry.ts      # Maps pane type identifiers to React components + metadata
 │       └── types/
 │           └── dashboard.ts          # Tab, Pane, PaneConfig, LayoutPayload interfaces + defaults
-├── automations/                      # User-defined rule files (loaded on startup)
 ├── mosquitto/
 │   └── mosquitto.conf                # Broker configuration
 ├── scripts/
@@ -352,13 +350,11 @@ Consistent error response shape across all endpoints.
 
 ### Automation Engine (`src/automations/automation-engine.ts`)
 
-Evaluates code-driven rules against incoming device events. Supports three rule types: file-based DSL rules, form-based UI rules, and script-based TypeScript rules. Supports two trigger modes: MQTT topic matching and cron scheduling.
+Evaluates code-driven rules against incoming device events. Supports two rule types: form-based UI rules and script-based TypeScript rules. Supports two trigger modes: MQTT topic matching and cron scheduling.
 
-- TypeScript DSL: `when(topic).if(condition).then(action)`
 - MQTT wildcard matching (`#` multi-level, `+` single-level)
 - Cron-triggered rules: rules with `triggerType: "cron"` and a `cronExpression` are scheduled via `CronTimerManager` instead of matching MQTT events
 - Fault isolation: one rule throwing doesn't affect others
-- Loads rule files from `automations/` directory on startup
 - Script rules are dispatched through the Sandbox (isolated-vm) with execution timing
 - Form rules are dispatched through the ActionExecutor pipeline
 - Records every execution in the ExecutionLog with duration and success/failure status
@@ -407,7 +403,7 @@ Factory registry for condition predicates, keyed by condition type string. Repla
 
 ### Action Executor (`src/automations/action-executor.ts`)
 
-Central dispatch service for all automation actions. Every action — whether from a form rule, script rule, or file-based rule — flows through this single pipeline. Uses a **handler registry** pattern — a `Map<string, ActionHandler>` — instead of a switch statement, so adding a new action type means calling `registerHandler()` and nothing else. The `execute()` method returns an `ActionResult { success, data?, error? }` — it never throws.
+Central dispatch service for all automation actions. Every action — whether from a form rule or a script rule — flows through this single pipeline. Uses a **handler registry** pattern — a `Map<string, ActionHandler>` — instead of a switch statement, so adding a new action type means calling `registerHandler()` and nothing else. The `execute()` method returns an `ActionResult { success, data?, error? }` — it never throws.
 
 - `ActionDescriptor.type` is an open `string`, not a fixed union — any action type is accepted
 - `registerHandler(type, handler)` — register a handler for an action type (overwrites if already registered)
@@ -839,7 +835,7 @@ Returns all devices keyed by ID.
 ### Automation API
 
 **GET /api/automations**
-List all automation rules (file-based, form, and script) with `ruleType` field.
+List all automation rules (form and script) with `ruleType` field.
 
 **POST /api/automations**
 Create a new automation rule (form or script). For script rules, include `ruleType: "script"` and `scriptSource`. Optionally include `uiSource` for custom UI component TSX source.
@@ -1587,7 +1583,7 @@ GitHub Actions workflow at `.github/workflows/ci.yml` provides automated quality
 Flat config at `eslint.config.js` using `typescript-eslint`.
 
 - Extends `tseslint.configs.recommended`
-- Ignores: `dist/`, `node_modules/`, `automations/`
+- Ignores: `dist/`, `node_modules/`, `frontend/dist/`
 - Key rules:
   - `@typescript-eslint/no-unused-vars`: **error** (with `argsIgnorePattern: "^_"` for intentionally unused params)
   - `@typescript-eslint/no-explicit-any`: **warn**
@@ -1909,7 +1905,7 @@ Custom tabs use the modular pane grid powered by `react-grid-layout`. Users crea
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/automations` | List active automation rules (file, form, script) with ruleType field |
+| GET | `/api/automations` | List active automation rules (form, script) with ruleType field |
 | POST | `/api/automations` | Create a UI automation rule (form or script) |
 | PUT | `/api/automations/:id` | Update an existing automation rule (re-transpiles script source) |
 | DELETE | `/api/automations/:id` | Delete a UI automation rule |

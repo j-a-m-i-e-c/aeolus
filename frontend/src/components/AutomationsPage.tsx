@@ -24,8 +24,8 @@ interface AutomationRule {
   name: string;
   topic: string;
   hasCondition: boolean;
-  source: "file" | "ui";
-  ruleType: "file" | "form" | "script";
+  source: "ui";
+  ruleType: "form" | "script";
   enabled: boolean;
   actionType?: string;
   actionTarget?: string;
@@ -38,7 +38,6 @@ interface AutomationRule {
 export function AutomationsPage() {
   const [rules, setRules] = useState<AutomationRule[]>([]);
   const [showForm, setShowForm] = useState(false);
-  const [showFileRules, setShowFileRules] = useState(true);
   const [creationMode, setCreationMode] = useState<CreationMode>("form");
 
   // Form rule state
@@ -290,15 +289,6 @@ export function AutomationsPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-[#E6EDF3]">Automations</h1>
         <div className="flex items-center gap-3">
-          <label className="flex items-center gap-2 text-xs text-[#6B7785] cursor-pointer">
-            <input
-              type="checkbox"
-              checked={showFileRules}
-              onChange={(e) => setShowFileRules(e.target.checked)}
-              className="accent-primary"
-            />
-            Show code rules
-          </label>
           <button
             onClick={() => {
               if (showForm) {
@@ -717,9 +707,7 @@ export function AutomationsPage() {
 
       {/* Rules list */}
       {(() => {
-        const filtered = showFileRules
-          ? rules
-          : rules.filter((r) => r.source === "ui");
+        const filtered = rules;
         return (
           <div className="space-y-2">
             {filtered.length === 0 ? (

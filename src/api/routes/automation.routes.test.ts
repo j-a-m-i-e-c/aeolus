@@ -1,6 +1,6 @@
 // src/api/routes/automation.routes.test.ts — Unit tests for automation REST API routes
 
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import express from "express";
 import { createAutomationRoutes, loadUiRules } from "./automation.routes.js";
 import { errorHandler } from "../middleware/error-handler.js";
@@ -107,8 +107,8 @@ function createMockDb() {
   const mockStatement = {
     all: vi.fn(() => rows),
     get: vi.fn((id?: string) => rows.find((r) => r.id === id) ?? undefined),
-    run: vi.fn((...args: any[]) => {
-      // For INSERT, add a row to our mock store
+    run: vi.fn(() => {
+      // Mock write — returns a successful result without persisting
       return { changes: 1 };
     }),
   };
@@ -272,21 +272,6 @@ describe("automation.routes", () => {
       const res = await request(app, "GET", "/api/automations");
       expect(res.status).toBe(200);
       expect(res.body).toEqual([]);
-    });
-
-    it("should return file-based rules from engine", async () => {
-      mockEngine.listRules.mockReturnValue([
-        { id: "file-rule-1", topic: "sensors/temp", name: "Temp Rule", condition: null },
-      ]);
-
-      const res = await request(app, "GET", "/api/automations");
-      expect(res.status).toBe(200);
-      const body = res.body as any[];
-      expect(body).toHaveLength(1);
-      expect(body[0].id).toBe("file-rule-1");
-      expect(body[0].source).toBe("file");
-      expect(body[0].ruleType).toBe("file");
-      expect(body[0].enabled).toBe(true);
     });
 
     it("should return DB-based form rules", async () => {

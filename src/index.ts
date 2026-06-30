@@ -138,8 +138,6 @@ async function main(): Promise<void> {
 
   // 7. Automation Engine (with sandbox, action executor, and execution log)
   const engine = new AutomationEngine(eventBus, { sandbox, actionExecutor, executionLog });
-  const automationsDir = path.resolve(process.cwd(), "automations");
-  await engine.loadRulesFromDirectory(automationsDir);
   loadUiRules(engine, db, registry, actionExecutor, conditionRegistry);
 
 

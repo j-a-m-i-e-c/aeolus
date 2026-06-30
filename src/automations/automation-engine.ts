@@ -1,10 +1,7 @@
 // src/automations/automation-engine.ts — Rule evaluation engine
 
 import type { EventEmitter } from "node:events";
-import { pathToFileURL } from "node:url";
 import { randomUUID } from "node:crypto";
-import fs from "node:fs";
-import path from "node:path";
 import { DEVICE_STATE_CHANGE, AUTOMATION_FIRED, AUTOMATION_EXECUTION_COMPLETE, AUTOMATION_RULE_REGISTERED, AUTOMATION_RULE_UNREGISTERED } from "../core/event-bus.js";
 import type { NormalizedEvent, EventContext, Rule } from "../core/types.js";
 import type { Sandbox, SandboxContext } from "./sandbox.js";
@@ -112,43 +109,6 @@ export class AutomationEngine {
     this.cronTimerManager.stopAll();
   }
 
-  /** Load rule files from a directory */
-  async loadRulesFromDirectory(dir: string): Promise<void> {
-    if (!fs.existsSync(dir)) {
-      logger.warn({ dir }, "Automations directory does not exist, skipping");
-      return;
-    }
-
-    const files = fs.readdirSync(dir).filter((f) => f.endsWith(".ts") || f.endsWith(".js"));
-    let loaded = 0;
-
-    for (const file of files) {
-      try {
-        const filePath = path.resolve(dir, file);
-        const fileUrl = pathToFileURL(filePath).href;
-        const mod = await import(fileUrl);
-
-        // Support default export (single rule) or named exports (multiple rules)
-        if (mod.default && typeof mod.default === "object" && mod.default.id) {
-          this.register(mod.default as Rule);
-          loaded++;
-        }
-
-        // Also check for named rule exports
-        for (const [key, value] of Object.entries(mod)) {
-          if (key !== "default" && typeof value === "object" && value !== null && "id" in value && "topic" in value) {
-            this.register(value as Rule);
-            loaded++;
-          }
-        }
-      } catch (err) {
-        logger.error({ file, error: (err as Error).message }, "Failed to load rule file, skipping");
-      }
-    }
-
-    logger.info({ dir, loaded, total: files.length }, "Loaded automation rules");
-  }
-
   /** Evaluate all matching rules for an event */
   private evaluate(event: NormalizedEvent): void {
     const context: EventContext = {
@@ -173,7 +133,7 @@ export class AutomationEngine {
           // Script rule — dispatch through Sandbox
           this.executeScriptRule(rule, compiledJs, context);
         } else {
-          // File-based DSL rule or form rule — execute action directly
+          // Form rule (or any rule without compiled JS) — execute action directly
           this.executeDirectRule(rule, context);
         }
       } catch (err) {
@@ -218,7 +178,7 @@ export class AutomationEngine {
       });
   }
 
-  /** Execute a file-based DSL rule or form rule directly. */
+  /** Execute a non-script rule (e.g. a form rule) directly, without the sandbox. */
   private executeDirectRule(rule: Rule, context: EventContext): void {
     const start = Date.now();
 
@@ -272,7 +232,7 @@ export class AutomationEngine {
     if (!this.executionLog) return;
 
     const compiledJs = rule.compiled_js;
-    const ruleType: ExecutionLogEntry["ruleType"] = compiledJs ? "script" : "file";
+    const ruleType: ExecutionLogEntry["ruleType"] = compiledJs ? "script" : "form";
 
     const entry: ExecutionLogEntry = {
       id: randomUUID(),

@@ -510,7 +510,7 @@ Two event source layers feed the internal bus: MQTT devices (bidirectional via M
 #### Automations
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/automations` | List automation rules (file, form, script) |
+| GET | `/api/automations` | List automation rules (form, script) |
 | POST | `/api/automations` | Create a UI automation rule |
 | PUT | `/api/automations/:id` | Update an existing automation rule |
 | DELETE | `/api/automations/:id` | Delete a UI automation rule |

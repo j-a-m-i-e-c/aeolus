@@ -149,27 +149,8 @@ export function createAutomationRoutes(
     res.send(rule.compiled_ui);
   });
 
-  /** GET /api/automations — list all rules (file + UI) */
+  /** GET /api/automations — list all UI rules (form + script) */
   router.get("/", (_req, res) => {
-    // File-based rules from the engine (exclude UI-registered rules by checking DB)
-    const dbIds = new Set<string>();
-    const dbIdRows = db.prepare("SELECT id FROM automation_rules").all() as Array<{ id: string }>;
-    for (const row of dbIdRows) {
-      dbIds.add(row.id);
-    }
-
-    const fileRules = engine.listRules()
-      .filter((rule) => !dbIds.has(rule.id))
-      .map((rule) => ({
-        id: rule.id,
-        topic: rule.topic,
-        name: rule.name || null,
-        hasCondition: !!rule.condition,
-        source: "file" as const,
-        ruleType: "file" as const,
-        enabled: true,
-      }));
-
     // UI-created rules from DB
     const rows = db.prepare("SELECT * FROM automation_rules ORDER BY created_at DESC").all() as StoredRule[];
     const dbRules: Record<string, unknown>[] = [];
@@ -207,7 +188,7 @@ export function createAutomationRoutes(
       dbRules.push(entry);
     }
 
-    res.json([...fileRules, ...dbRules]);
+    res.json(dbRules);
   });
 
   /** POST /api/automations — create a new UI rule (form or script) */

@@ -72,7 +72,7 @@ describe("AutomationEngine", () => {
     });
   });
 
-  it("executes file-based DSL rules directly without Sandbox", async () => {
+  it("executes non-script rules directly without Sandbox", async () => {
     const actionFn = vi.fn();
     const pushFn = vi.fn();
     const executionLog = { push: pushFn } as unknown as ExecutionLog;
@@ -80,9 +80,9 @@ describe("AutomationEngine", () => {
     const engine = new AutomationEngine(eventBus, { executionLog });
 
     const rule: Rule = {
-      id: "file-rule-1",
+      id: "direct-rule-1",
       topic: "home/sensor/temperature",
-      name: "File Rule",
+      name: "Direct Rule",
       action: actionFn,
     };
     engine.register(rule);
@@ -103,12 +103,12 @@ describe("AutomationEngine", () => {
     );
     // AUTOMATION_FIRED should be emitted
     expect(firedEvents.length).toBe(1);
-    expect(firedEvents[0]).toMatchObject({ ruleId: "file-rule-1" });
+    expect(firedEvents[0]).toMatchObject({ ruleId: "direct-rule-1" });
     // Execution logged
     expect(pushFn).toHaveBeenCalledOnce();
     expect(pushFn.mock.calls[0][0]).toMatchObject({
-      ruleId: "file-rule-1",
-      ruleType: "file",
+      ruleId: "direct-rule-1",
+      ruleType: "form",
     });
   });
 
@@ -202,14 +202,6 @@ describe("AutomationEngine", () => {
     const entry = pushFn.mock.calls[0][0];
     expect(entry.duration).toBeGreaterThanOrEqual(15);
     expect(entry.duration).toBeLessThan(500);
-  });
-
-  describe("loadRulesFromDirectory", () => {
-    it("warns and returns when directory does not exist", async () => {
-      const engine = new AutomationEngine(eventBus);
-      await engine.loadRulesFromDirectory("/nonexistent/path/to/rules");
-      expect(engine.ruleCount).toBe(0);
-    });
   });
 
   describe("cron-triggered rules", () => {
