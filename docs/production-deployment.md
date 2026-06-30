@@ -353,6 +353,7 @@ Or run [Uptime Kuma](https://github.com/louislam/uptime-kuma) on the same Pi for
 | `HISTORY_RECORD_INTERVAL` | `5000` | `5000` | Minimum ms between recorded state-history points (throttle) |
 | `JWT_SECRET` | _(auto-generated)_ | _(your 256-bit key)_ | JWT signing key; auto-generated and stored in the DB if unset |
 | `MQTT_PASSWORD_FILE` | `mosquitto/password_file` | `mosquitto/password_file` | Path Aeolus writes when managing MQTT credentials |
+| `AEOLUS_PROJECT_DIR` | _(process.cwd())_ | _(project root)_ | Directory used to locate `mosquitto/mosquitto.conf` for the provisioning service; defaults to the working directory |
 | `METRICS_TOKEN` | _(empty)_ | _(your token)_ | Bearer token to protect `/metrics`; open when unset |
 | `FRONTEND_PORT` | `3000` | `3000` | Frontend container host port |
 | `MQTT_PORT` | `1883` | `1883` | MQTT broker host port |
