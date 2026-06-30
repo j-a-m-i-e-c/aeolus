@@ -43,7 +43,10 @@ Full Express app with real SQLite database, middleware pipeline, and route handl
 
 ### 4. Frontend Tests (`frontend/src/**/*.test.ts`)
 
-Component and store tests for the React dashboard using Vitest.
+Vitest + jsdom with `@testing-library/react` for the React dashboard. Coverage
+currently focuses on the Zustand stores and `lib/` utilities (the pure,
+logic-heavy layer); component-level tests are being backfilled. This is the
+lightest-covered part of the codebase relative to the backend.
 
 ## Coverage Thresholds
 
