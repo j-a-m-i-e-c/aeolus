@@ -34,6 +34,8 @@
 
 ## What is Aeolus?
 
+> **New here?** For a plain-English introduction with no technical jargon, read [**What Is Aeolus?**](docs/WHAT_IS_AEOLUS.md). For the deep technical rationale, see [**Why Aeolus?**](docs/WHY_AEOLUS.md).
+
 Aeolus is a local-first edge automation platform. It collects events from arbitrary hardware, executes sandboxed business logic, persists state, and exposes custom interfaces — all self-hosted on hardware you control. Home automation is the most familiar way to demonstrate it — most people can immediately picture controlling lights, sensors, and switches — but it's only one example; the architecture is domain-agnostic. It's an attempt to bring the developer experience of modern application development to edge automation.
 
 Everything runs on your LAN by default — fast responses, full privacy, no vendor accounts. Any MQTT device appears automatically when it publishes a message. Commercial ecosystems plug in through a connector framework designed so that any developer with unusual hardware can write support for it in an afternoon. Everything feeds the same internal event bus, so an ESP32 sensor, a Hue bulb, and a weather API all look identical to your automation logic.
@@ -67,7 +69,7 @@ The seed script populates the platform with realistic demo scenarios so you can 
 make seed USER=admin PASS=yourpass
 ```
 
-Each tab demonstrates a different domain — a connected farm, ocean research vessel, underground mine, spacecraft operations, escape room, live stage/show control, and an off-grid survival bunker — plus a **Space** tab driven entirely by live public APIs (rocket launches, the ISS, space weather, moon phase). It shows how the same platform adapts to wildly different environments. No physical devices or API keys required.
+Each tab demonstrates a different domain — a connected farm, ocean research vessel, underground mine, spacecraft operations, escape room, live stage/show control, an off-grid survival bunker, and a wildlife & conservation station (on-device camera AI, nest monitoring, predator deterrent) — plus a **Space** tab driven entirely by live public APIs (rocket launches, the ISS, space weather, moon phase). It shows how the same platform adapts to wildly different environments. No physical devices or API keys required.
 
 <!-- TODO: Add screenshot of the welcome/onboarding screen here -->
 <!-- ![Welcome Screen](docs/screenshots/welcome.png) -->

@@ -10,10 +10,12 @@ import escapeRoom from "./escape-room.mjs";
 import stageShow from "./stage-show.mjs";
 import offGridBunker from "./off-grid-bunker.mjs";
 import agriculture from "./agriculture.mjs";
+import wildlife from "./wildlife.mjs";
 import space from "./space.mjs";
 
 export const tabModules = [
   agriculture,
+  wildlife,
   researchVessel,
   undergroundMining,
   spacecraft,

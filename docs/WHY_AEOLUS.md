@@ -1,5 +1,7 @@
 # Why Aeolus?
 
+> **New here?** For a plain-English, no-jargon introduction, start with [What Is Aeolus?](./WHAT_IS_AEOLUS.md). This document is the deep technical version.
+
 Aeolus is a local-first platform for building applications that run physical environments. It ingests events from arbitrary hardware, runs your business logic in a secure sandbox, persists state, and renders custom interfaces you write yourself — all self-hosted on hardware you control.
 
 The shorter version: it's the development experience you already have as a software engineer — TypeScript, React, a real editor, version control, Docker — applied to the physical world.
@@ -527,6 +529,41 @@ Being honest about this matters more than a feature checklist:
 | Have unusual hardware and want to write a connector in an afternoon | **Aeolus** |
 | Need automations to accumulate data and query it over time | **Aeolus** |
 | Are deploying to a disconnected environment (farm, boat, research station) | **Aeolus** |
+
+---
+
+## On-Device AI: Vision at the Edge
+
+The connector and event-bus design has a natural extension that's worth calling out on its own, because it lines up with where edge hardware is heading: **on-device machine vision**.
+
+Recent Raspberry Pis accept a small AI accelerator over PCIe or USB — the Raspberry Pi AI Kit / AI HAT+ (a Hailo-8/8L NPU), or a Google Coral Edge TPU. A module roughly the size of a stick of gum runs a vision model — object detection, classification, pose — directly on the device at real-time frame rates. No GPU server, no cloud inference API, no footage leaving the box.
+
+The important part, architecturally, is that this needs **no new subsystem in Aeolus**. A detection is just another event. A small process on the Pi runs the model against a camera feed and publishes results to MQTT exactly like any other sensor:
+
+```
+camera/trailcam-01/detection  →  { "species": "fox", "confidence": 0.94, "box": [x,y,w,h], "ts": 1751932800 }
+```
+
+From there it flows through the pipeline already described: MqttService normalises it into a `NormalizedEvent`, the device registry upserts a `camera` device, `DEVICE_STATE_CHANGE` fires, and the automation engine evaluates rules against it. An automation reacts to a detection the same way it reacts to a tank level or a door sensor — there is no special "AI path":
+
+```javascript
+// Trigger topic: camera/+/detection
+const { species, confidence } = context.state;
+if (confidence < 0.7) return;
+
+state.set("lastSpecies", species);
+db.write("wildlife-sightings", { species, confidence }, { tags: { camera: context.deviceId } });
+
+const PREDATORS = ["fox", "feral-cat", "wild-dog"];
+if (PREDATORS.includes(species)) {
+  devices.action("deterrent-01", "on");           // ultrasonic / strobe
+  mqtt.publish("alerts/predator", JSON.stringify({ species, when: Date.now() }));
+}
+```
+
+The inference is the specialised part, and it lives where it belongs — on the accelerator, behind an MQTT topic. Aeolus treats the *output* of the model as data, which is exactly the abstraction it was built around. Wire the camera to a connector instead of raw MQTT (see the *Smart Camera Integration* roadmap item) and the same events arrive through the connector framework instead — the automation code doesn't change.
+
+This matters most where connectivity and privacy are constraints rather than conveniences: **wildlife monitoring and conservation**. Point a camera at a nest, a burrow, or a game trail; the on-site brain distinguishes a native species from an introduced predator; a detection becomes a logged sighting, a nest-temperature alert, or an instant deterrent trigger — all computed locally. Nothing about an endangered species' location is streamed to a third-party cloud, and the whole rig runs on solar with no cell signal for months. "Runs entirely on-site and keeps your data" stops being a feature bullet and becomes the reason the deployment is possible at all. The plain-English [What Is Aeolus?](./WHAT_IS_AEOLUS.md) doc frames this use case for a general audience, and the seed ships a **Wildlife & Conservation** demo tab that simulates the whole loop — trail-cam detections, a nest monitor, a predator deterrent, and a biodiversity log.
 
 ---
 
