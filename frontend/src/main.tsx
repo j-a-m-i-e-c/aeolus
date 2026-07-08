@@ -5,6 +5,9 @@ import * as jsxRuntime from "react/jsx-runtime";
 import { BrowserRouter } from "react-router-dom";
 import App from "./App";
 import "./index.css";
+// Configure Monaco to load from the bundled package (no CDN) — must run before
+// any editor mounts.
+import "./lib/monaco-setup";
 
 // Register external dependencies as globals so dynamically loaded UI modules
 // can resolve React imports without bundling their own copy.
