@@ -61,6 +61,8 @@ docker compose up
 
 Open **http://localhost:3000** — that's it.
 
+> **Supported platform:** Aeolus targets a **Linux host** (Raspberry Pi or any Linux box). It relies on Docker host networking for LAN device discovery (Kasa UDP broadcast, Hue), which only works on Linux. **Windows and macOS are not supported** — Docker Desktop runs containers in a NAT'd VM, so the backend port isn't reachable and LAN discovery doesn't work. You can still evaluate the dashboard and demo on Windows/macOS, but a Linux host is required for real use.
+
 ### Explore Without Hardware
 
 The seed script populates the platform with realistic demo scenarios so you can explore the full feature set immediately:
@@ -68,6 +70,8 @@ The seed script populates the platform with realistic demo scenarios so you can 
 ```bash
 make seed USER=admin PASS=yourpass
 ```
+
+> **Seeding prerequisites:** `make seed` runs the seed script with **Node.js on the host** (it's not run inside Docker), so it needs both **`make`** and **Node.js** installed on the machine. Install them via your package manager (e.g. `sudo dnf install -y make nodejs` or `sudo apt install -y make nodejs`). The `USER`/`PASS` must match the admin account you created on first launch (password is 8+ characters). Without Node you'll see `make: node: No such file or directory` (Error 127). Alternatively, run the seeder in a throwaway container with no host install: `docker run --rm --network host -v "$PWD":/app -w /app node:22 node scripts/seed-demo.mjs http://localhost:3001 admin yourpass`.
 
 Each tab demonstrates a different domain — a connected farm, ocean research vessel, underground mine, spacecraft operations, escape room, live stage/show control, an off-grid survival bunker, and a wildlife & conservation station (on-device camera AI, nest monitoring, predator deterrent) — plus a **Space** tab driven entirely by live public APIs (rocket launches, the ISS, space weather, moon phase). It shows how the same platform adapts to wildly different environments. No physical devices or API keys required.
 
