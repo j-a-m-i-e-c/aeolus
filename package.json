@@ -13,7 +13,7 @@
   },
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsup src/index.ts --external isolated-vm --external better-sqlite3 --external bcrypt --external esbuild",
+    "build": "tsup src/index.ts --format esm --target node22 --external isolated-vm --external better-sqlite3 --external bcrypt --external esbuild",
     "start": "node dist/index.js",
     "test": "vitest run",
     "test:e2e": "playwright test",
