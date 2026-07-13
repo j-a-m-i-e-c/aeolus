@@ -1,4 +1,4 @@
-.PHONY: deploy up down restart logs status clean seed test lint check help
+.PHONY: deploy up down restart logs logs-backend status clean dev seed reset test lint check verify help
 
 # `USER` is normally set by the shell (your login name), which would leak into
 # the seed command. Ignore the environment value and default to "admin" unless
@@ -30,8 +30,8 @@ logs-backend: ## Tail backend logs only
 status: ## Show running containers
 	docker compose ps
 
-clean: ## Remove all unused Docker images and build cache
-	docker builder prune -f && docker image prune -a -f && docker volume prune -f
+clean: ## Remove unused Docker images and build cache (does NOT touch volumes/data)
+	docker builder prune -f && docker image prune -a -f
 
 # ─── Development ──────────────────────────────────────────────────────────────
 
@@ -52,14 +52,18 @@ reset: ## Wipe database and restart fresh (deletes all data!)
 	@sleep 12
 	@echo "✅ Fresh start. Visit http://localhost:3000 to create admin, then run: make seed PASS=yourpass"
 
-test: ## Run test suite
+test: ## Run backend + frontend test suites
 	npm test
+	cd frontend && npm test
 
-lint: ## Run ESLint
+lint: ## Run ESLint over TypeScript sources (per eslint.config.js; frontend TSX not yet covered)
 	npx eslint .
 
-check: ## TypeScript type check (no emit)
+check: ## TypeScript type check, backend + frontend (no emit)
 	npx tsc --noEmit
+	cd frontend && npx tsc --noEmit -p tsconfig.json
+
+verify: check lint test ## Full local gate — type check + lint + tests (backend + frontend)
 
 # ─── Help ─────────────────────────────────────────────────────────────────────
 
