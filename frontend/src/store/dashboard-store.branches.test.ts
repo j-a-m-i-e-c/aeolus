@@ -8,7 +8,7 @@ vi.mock("../lib/api-client", () => ({
   deleteAutomation: vi.fn().mockResolvedValue({ success: true }),
 }));
 
-import { useDashboardStore, tabNameToSlug } from "./dashboard-store";
+import { useDashboardStore } from "./dashboard-store";
 import { fetchLayout, deleteAutomation } from "../lib/api-client";
 import type { Tab, Pane } from "../types/dashboard";
 
