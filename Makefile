@@ -1,5 +1,12 @@
 .PHONY: deploy up down restart logs status clean seed test lint check help
 
+# `USER` is normally set by the shell (your login name), which would leak into
+# the seed command. Ignore the environment value and default to "admin" unless
+# the caller passes USER=... explicitly on the command line.
+ifeq ($(origin USER),environment)
+USER := admin
+endif
+
 # ─── Production (Pi) ──────────────────────────────────────────────────────────
 
 deploy: ## Pull latest, rebuild, and deploy (run on Pi)
@@ -31,8 +38,12 @@ clean: ## Remove all unused Docker images and build cache
 dev: ## Start backend in dev mode (hot reload)
 	npm run dev
 
-seed: ## Populate with demo data (usage: make seed USER=admin PASS=mypass)
-	node scripts/seed-demo.mjs http://localhost:3001 $(USER) $(PASS)
+seed: ## Seed demo data via Docker, no host Node needed (usage: make seed PASS=yourpass [USER=admin])
+	@if [ -z "$(PASS)" ]; then \
+		echo "Error: PASS is required.  Usage: make seed PASS=<admin-password> [USER=admin]"; \
+		exit 1; \
+	fi
+	docker compose --profile seed run --rm -e SEED_USER="$(USER)" -e SEED_PASS="$(PASS)" seed
 
 reset: ## Wipe database and restart fresh (deletes all data!)
 	docker compose down
@@ -40,7 +51,7 @@ reset: ## Wipe database and restart fresh (deletes all data!)
 	docker compose up -d
 	@echo "⏳ Waiting for backend to start..."
 	@sleep 12
-	@echo "✅ Fresh start. Visit http://localhost:3000 to create admin, then run: make seed USER=admin PASS=yourpass"
+	@echo "✅ Fresh start. Visit http://localhost:3000 to create admin, then run: make seed PASS=yourpass"
 
 test: ## Run test suite
 	npm test

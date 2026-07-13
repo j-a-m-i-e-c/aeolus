@@ -68,10 +68,14 @@ Open **http://localhost:3000** — that's it.
 The seed script populates the platform with realistic demo scenarios so you can explore the full feature set immediately:
 
 ```bash
-make seed USER=admin PASS=yourpass
+make seed PASS=yourpass          # USER defaults to admin; override with USER=...
 ```
 
-> **Seeding prerequisites:** `make seed` runs the seed script with **Node.js on the host** (it's not run inside Docker), so it needs both **`make`** and **Node.js** installed on the machine. Install them via your package manager (e.g. `sudo dnf install -y make nodejs` or `sudo apt install -y make nodejs`). The `USER`/`PASS` must match the admin account you created on first launch (password is 8+ characters). Without Node you'll see `make: node: No such file or directory` (Error 127). Alternatively, run the seeder in a throwaway container with no host install: `docker run --rm --network host -v "$PWD":/app -w /app node:22 node scripts/seed-demo.mjs http://localhost:3001 admin yourpass`.
+The seeder runs inside a throwaway Docker container (via the `seed` compose profile), so **no Node install is needed** — only Docker. Create your admin account in the dashboard first; the `PASS` (and optional `USER`) must match it, and the password is 8+ characters. If you'd rather not use `make`, the equivalent is:
+
+```bash
+SEED_PASS=yourpass docker compose --profile seed run --rm seed
+```
 
 Each tab demonstrates a different domain — a connected farm, ocean research vessel, underground mine, spacecraft operations, escape room, live stage/show control, an off-grid survival bunker, and a wildlife & conservation station (on-device camera AI, nest monitoring, predator deterrent) — plus a **Space** tab driven entirely by live public APIs (rocket launches, the ISS, space weather, moon phase). It shows how the same platform adapts to wildly different environments. No physical devices or API keys required.
 
