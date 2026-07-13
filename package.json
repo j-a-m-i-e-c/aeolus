@@ -42,7 +42,7 @@
     "isolated-vm": "^5.0.1",
     "jsonwebtoken": "^9.0.3",
     "mqtt": "^5.10.4",
-    "node-cron": "^4.2.1",
+    "node-cron": "^4.6.0",
     "pino": "^9.6.0",
     "pino-pretty": "^13.0.0",
     "prom-client": "^15.1.3",
