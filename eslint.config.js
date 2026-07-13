@@ -4,7 +4,15 @@ import reactRefresh from "eslint-plugin-react-refresh";
 
 export default tseslint.config(
   {
-    ignores: ["dist/", "node_modules/", "frontend/dist/", "**/coverage/"],
+    ignores: [
+      "dist/",
+      "node_modules/",
+      "frontend/dist/",
+      "**/coverage/",
+      // Playwright run artifacts
+      "playwright-report/",
+      "test-results/",
+    ],
   },
   ...tseslint.configs.recommended,
   {
@@ -19,7 +27,7 @@ export default tseslint.config(
   },
   // Relax rules for test files (includes React component tests, *.test.tsx)
   {
-    files: ["**/*.test.ts", "**/*.test.tsx", "**/*.property.test.ts", "**/*.integration.test.ts"],
+    files: ["**/*.test.ts", "**/*.test.tsx", "**/*.property.test.ts", "**/*.integration.test.ts", "e2e/**/*.ts"],
     rules: {
       "@typescript-eslint/no-unused-expressions": "off",
       "@typescript-eslint/no-explicit-any": "off",

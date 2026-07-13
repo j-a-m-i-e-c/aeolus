@@ -1,4 +1,4 @@
-.PHONY: deploy up down restart logs logs-backend status clean dev seed reset test lint check verify help
+.PHONY: deploy up down restart logs logs-backend status clean dev seed reset test e2e e2e-fresh lint check verify help
 
 # `USER` is normally set by the shell (your login name), which would leak into
 # the seed command. Ignore the environment value and default to "admin" unless
@@ -55,6 +55,14 @@ reset: ## Wipe database and restart fresh (deletes all data!)
 test: ## Run backend + frontend test suites
 	npm test
 	cd frontend && npm test
+
+e2e: ## Run Playwright e2e against the running stack (adapts: sets up or logs in)
+	npm run test:e2e
+
+e2e-fresh: ## Wipe data, rebuild the stack, and run e2e (exercises the first-run setup path)
+	docker compose down -v
+	docker compose up -d --build
+	npm run test:e2e
 
 lint: ## Run ESLint across the repo — backend TS + frontend TSX, zero-warning gate
 	npx eslint . --max-warnings 0
