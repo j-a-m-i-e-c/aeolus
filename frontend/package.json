@@ -18,7 +18,7 @@
     "@fontsource/jetbrains-mono": "^5.2.8",
     "@monaco-editor/react": "^4.7.0",
     "framer-motion": "^11.15.0",
-    "lucide-react": "^0.468.0",
+    "lucide-react": "^1.24.0",
     "monaco-editor": "^0.52.2",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
