@@ -13,7 +13,7 @@ export default function MqttSecurityPage() {
 
   useEffect(() => {
     fetchStatus().then(() => setInitialized(true));
-  }, []);
+  }, [fetchStatus]);
 
   if (!initialized && loading) {
     return (

@@ -258,6 +258,8 @@ export function TriggerSelector({
     if (match) {
       setSelectedPreset(match.expression);
     }
+    // Intentionally syncs only on external cronExpression changes, not on local preset edits.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cronExpression]);
 
   // Validate cron expression and report validity

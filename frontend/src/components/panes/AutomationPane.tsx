@@ -1,6 +1,6 @@
 // frontend/src/components/panes/AutomationPane.tsx — Self-contained automation pane (setup / status / editing)
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   Power,
   PowerOff,
@@ -32,6 +32,10 @@ import type { PaneConfig } from "../../types/dashboard";
 import { API_URL } from "../../lib/env";
 
 type PaneMode = "setup" | "status" | "editing";
+
+// Stable empty-state reference so `ruleState ?? EMPTY_STATE` doesn't allocate a
+// new object each render (keeps the stateMap useMemo dependency stable).
+const EMPTY_STATE: Record<string, unknown> = {};
 
 interface AutomationRule {
   id: string;
@@ -174,7 +178,7 @@ export function AutomationPane({ config, paneId }: Props) {
 
   // Device store for custom component props
   const devices = useDeviceStore((s) => s.devices);
-  const ruleState = useAutomationStateStore((s) => s.stateByRule[ruleId]) ?? {};
+  const ruleState = useAutomationStateStore((s) => s.stateByRule[ruleId]) ?? EMPTY_STATE;
 
   // ── Fetch rule data for status mode ──
   const fetchRule = useCallback(async () => {
@@ -453,12 +457,12 @@ export function AutomationPane({ config, paneId }: Props) {
   }, []);
 
   // Convert plain object state to Map for the read() method
-  const stateMap = new Map(Object.entries(ruleState));
+  const stateMap = useMemo(() => new Map(Object.entries(ruleState)), [ruleState]);
 
   // read helper — returns value for a given key from the state map
   const read = useCallback(
     (key: string) => stateMap.get(key),
-    [ruleState],
+    [stateMap],
   );
 
   // save helper bound to current ruleId (was stateSet)

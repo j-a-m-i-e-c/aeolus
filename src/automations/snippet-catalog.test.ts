@@ -1,6 +1,6 @@
 // src/automations/snippet-catalog.test.ts — Unit tests for snippet catalog builder
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { buildSnippetCatalog } from "./snippet-catalog.js";
 import type { ConnectorRegistry } from "../connectors/connector-registry.js";
 

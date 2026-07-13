@@ -1,7 +1,7 @@
 // src/automations/sandbox.property.test.ts
 // Feature: device-action-system-uplift — Properties 12, 13
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import * as fc from "fast-check";
 import type { ActionResult, BulkActionResult, Device } from "../core/types.js";
 

@@ -11,7 +11,8 @@ const SILENT_PATHS = [
 export function requestLogger(req: Request, res: Response, next: NextFunction): void {
   // Skip logging for high-frequency polling endpoints to avoid noise
   if (SILENT_PATHS.some((p) => req.originalUrl.startsWith(p))) {
-    return next();
+    next();
+    return;
   }
 
   const start = Date.now();

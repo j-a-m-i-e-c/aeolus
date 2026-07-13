@@ -20,7 +20,9 @@ interface ToastState {
   removeToast: (id: string) => void;
 }
 
-export const useToastStore = create<ToastState>((set) => ({
+// Module-local store — only ToastContainer consumes it. Keeping it out of the
+// exports lets React Fast Refresh treat this file as component-only.
+const useToastStore = create<ToastState>((set) => ({
   toasts: [],
   addToast: (toast) =>
     set((prev) => ({

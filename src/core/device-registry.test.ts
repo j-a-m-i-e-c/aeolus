@@ -6,7 +6,7 @@ import type { Database as DatabaseType } from "better-sqlite3";
 import { EventEmitter } from "node:events";
 import { DeviceRegistry, deserializeDevice } from "./device-registry.js";
 import { initSchema } from "../db/database.js";
-import type { Device, NormalizedEvent } from "./types.js";
+import type { Device } from "./types.js";
 
 vi.mock("../logger.js", () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },

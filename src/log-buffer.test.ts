@@ -1,6 +1,6 @@
 // src/log-buffer.test.ts — Unit tests for log buffer
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import { pushLogEntry, getRecentLogs } from "./log-buffer.js";
 
 describe("log-buffer", () => {

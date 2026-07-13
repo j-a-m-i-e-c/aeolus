@@ -1,7 +1,7 @@
 // src/connectors/connector-manager.property.test.ts
 // Feature: device-action-system-uplift — Properties 1, 2, 9, 10, 11
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { EventEmitter } from "node:events";
 import * as fc from "fast-check";
 import { ConnectorManager } from "./connector-manager.js";

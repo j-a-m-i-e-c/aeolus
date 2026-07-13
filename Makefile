@@ -56,8 +56,8 @@ test: ## Run backend + frontend test suites
 	npm test
 	cd frontend && npm test
 
-lint: ## Run ESLint across the repo — backend TS + frontend TSX (React hooks rules)
-	npx eslint .
+lint: ## Run ESLint across the repo — backend TS + frontend TSX, zero-warning gate
+	npx eslint . --max-warnings 0
 
 check: ## TypeScript type check, backend + frontend (no emit)
 	npx tsc --noEmit

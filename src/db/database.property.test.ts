@@ -1,10 +1,9 @@
 // Feature: remove-hardcoded-restrictions, Property 1: Database accepts any non-empty device type string
 // Task 1.2: Property test for database accepting any device type
 // Task 1.3: Unit test for CHECK constraint migration
-import { describe, expect, it, beforeEach } from "vitest";
+import { describe, expect, it } from "vitest";
 import { test, fc } from "@fast-check/vitest";
 import Database from "better-sqlite3";
-import type { Database as DatabaseType } from "better-sqlite3";
 import { initSchema } from "./database.js";
 
 // Mock logger

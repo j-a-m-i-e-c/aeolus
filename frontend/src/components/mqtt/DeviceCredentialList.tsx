@@ -15,7 +15,7 @@ export default function DeviceCredentialList() {
 
   useEffect(() => {
     fetchCredentials();
-  }, []);
+  }, [fetchCredentials]);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();

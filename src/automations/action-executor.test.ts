@@ -3,7 +3,6 @@ import {
   ActionExecutor,
   type ActionDescriptor,
   type ActionExecutorDeps,
-  type ActionHandler,
   handlePublish,
   handleToggle,
   handleDeviceAction,

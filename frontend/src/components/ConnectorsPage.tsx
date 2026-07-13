@@ -246,6 +246,9 @@ function SetupWizard({
     tick();
 
     return () => stopPolling();
+    // Polling is deliberately (re)started only when the wizard step changes;
+    // the other referenced values are captured intentionally per step.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentStepIdx]);
 
   const executeStep = async () => {

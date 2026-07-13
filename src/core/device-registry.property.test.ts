@@ -2,10 +2,10 @@
 // Feature: mvp-core-platform, Property 4: Device Registry Upsert Invariant
 // Feature: mvp-core-platform, Property 20: Device Serialization Round-Trip
 // Feature: mvp-core-platform, Property 21: Malformed JSON Deserialization Safety
-import { describe, expect, beforeEach } from "vitest";
+import { describe, expect } from "vitest";
 import { test, fc } from "@fast-check/vitest";
 import { serializeDevice, deserializeDevice, DeviceRegistry } from "./device-registry.js";
-import type { Device, NormalizedEvent, DeviceType } from "./types.js";
+import type { NormalizedEvent, DeviceType } from "./types.js";
 import { EventEmitter } from "node:events";
 import Database from "better-sqlite3";
 

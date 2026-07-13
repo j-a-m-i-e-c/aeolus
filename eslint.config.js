@@ -38,6 +38,16 @@ export default tseslint.config(
       "react-hooks/rules-of-hooks": "error",
       "react-hooks/exhaustive-deps": "warn",
       "react-refresh/only-export-components": ["warn", { allowConstantExport: true }],
+      // React effects legitimately mix `return;` guards with `return () => cleanup`,
+      // which this rule flags as inconsistent. TS return types cover the real cases.
+      "consistent-return": "off",
+    },
+  },
+  // Declaration files describe external/runtime shapes where `any` is often intentional.
+  {
+    files: ["**/*.d.ts"],
+    rules: {
+      "@typescript-eslint/no-explicit-any": "off",
     },
   },
 );

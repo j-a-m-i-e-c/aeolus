@@ -3,7 +3,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import Database from "better-sqlite3";
 import type { Database as DatabaseType } from "better-sqlite3";
-import { StateHistory, type HistoryEntry } from "./state-history.js";
+import { StateHistory } from "./state-history.js";
 
 // Mock logger
 vi.mock("../logger.js", () => ({
