@@ -56,7 +56,7 @@ test: ## Run backend + frontend test suites
 	npm test
 	cd frontend && npm test
 
-lint: ## Run ESLint over TypeScript sources (per eslint.config.js; frontend TSX not yet covered)
+lint: ## Run ESLint across the repo — backend TS + frontend TSX (React hooks rules)
 	npx eslint .
 
 check: ## TypeScript type check, backend + frontend (no emit)
