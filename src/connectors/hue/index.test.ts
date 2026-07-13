@@ -84,6 +84,20 @@ describe("hue/index module exports", () => {
       );
     });
 
+    it("hue_scene uses 'unknown' when sceneName is not a string", async () => {
+      const mockDeps = {
+        logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+        connectorManager: { executeAction: vi.fn().mockResolvedValue(undefined) },
+      };
+      const action = { target: "hue-light-1", params: { sceneName: 123 } };
+
+      await actionHandlers.hue_scene(action as any, "rule-1", mockDeps as any);
+      expect(mockDeps.connectorManager.executeAction).toHaveBeenCalledWith(
+        "hue-light-1",
+        expect.objectContaining({ type: "scene", params: { sceneName: "unknown" } }),
+      );
+    });
+
     it("hue_color_loop calls connectorManager.executeAction", async () => {
       const mockDeps = {
         logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },

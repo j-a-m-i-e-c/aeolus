@@ -35,8 +35,8 @@ export default defineConfig({
       ],
       thresholds: {
         lines: 90,
-        branches: 70,
-        functions: 75,
+        branches: 90,
+        functions: 90,
         "src/core/": { lines: 85 },
         "src/mqtt/": { lines: 80 },
         "src/data-store/": { lines: 80 },

@@ -10,8 +10,8 @@ vi.mock("../store/device-store", () => ({
 }));
 
 vi.mock("./DeviceCard", () => ({
-  DeviceCard: ({ device }: { device: { id: string; name: string } }) => (
-    <div data-testid={`card-${device.id}`}>{device.name}</div>
+  DeviceCard: ({ device, onClick }: { device: { id: string; name: string }; onClick?: () => void }) => (
+    <div data-testid={`card-${device.id}`} onClick={onClick}>{device.name}</div>
   ),
 }));
 
@@ -35,5 +35,15 @@ describe("DeviceGrid", () => {
     render(<DeviceGrid />);
     expect(screen.getByTestId("card-d1")).toBeInTheDocument();
     expect(screen.getByTestId("card-d2")).toBeInTheDocument();
+  });
+
+  it("calls onSelectDevice when a card is clicked", async () => {
+    Object.assign(mockDevices, {
+      d1: { id: "d1", name: "Light A" },
+    });
+    const onSelect = vi.fn();
+    render(<DeviceGrid onSelectDevice={onSelect} />);
+    screen.getByTestId("card-d1").click();
+    expect(onSelect).toHaveBeenCalledWith("d1");
   });
 });
