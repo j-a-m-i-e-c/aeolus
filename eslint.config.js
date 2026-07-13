@@ -4,7 +4,7 @@ import reactRefresh from "eslint-plugin-react-refresh";
 
 export default tseslint.config(
   {
-    ignores: ["dist/", "node_modules/", "frontend/dist/"],
+    ignores: ["dist/", "node_modules/", "frontend/dist/", "**/coverage/"],
   },
   ...tseslint.configs.recommended,
   {
@@ -17,9 +17,9 @@ export default tseslint.config(
       "consistent-return": "warn",
     },
   },
-  // Relax rules for test files
+  // Relax rules for test files (includes React component tests, *.test.tsx)
   {
-    files: ["**/*.test.ts", "**/*.property.test.ts", "**/*.integration.test.ts"],
+    files: ["**/*.test.ts", "**/*.test.tsx", "**/*.property.test.ts", "**/*.integration.test.ts"],
     rules: {
       "@typescript-eslint/no-unused-expressions": "off",
       "@typescript-eslint/no-explicit-any": "off",
