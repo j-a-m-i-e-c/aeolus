@@ -43,9 +43,11 @@ export default tseslint.config(
       "consistent-return": "off",
     },
   },
-  // Declaration files describe external/runtime shapes where `any` is often intentional.
+  // The custom-UI type shim mirrors React's own upstream typings (IntrinsicElements
+  // catch-all, FC/hook generics), which are intentionally `any`. Scope the exemption
+  // to that file so `any` is still caught in every other declaration file.
   {
-    files: ["**/*.d.ts"],
+    files: ["**/ui-types.d.ts"],
     rules: {
       "@typescript-eslint/no-explicit-any": "off",
     },
