@@ -9,6 +9,12 @@
   "lint-staged": {
     "src/**/*.ts": [
       "eslint --max-warnings 0 --no-warn-ignored"
+    ],
+    "frontend/src/**/*.{ts,tsx}": [
+      "eslint --max-warnings 0 --no-warn-ignored"
+    ],
+    "e2e/**/*.ts": [
+      "eslint --max-warnings 0 --no-warn-ignored"
     ]
   },
   "scripts": {
