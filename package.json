@@ -21,7 +21,8 @@
     "prepare": "husky"
   },
   "overrides": {
-    "ip-address": ">=10.1.1"
+    "ip-address": ">=10.1.1",
+    "esbuild": "^0.28.1"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",
@@ -29,7 +30,7 @@
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
-    "esbuild": "^0.28.0",
+    "esbuild": "^0.28.1",
     "express": "^4.21.2",
     "express-rate-limit": "^8.5.2",
     "isolated-vm": "^5.0.1",
@@ -65,7 +66,7 @@
     "lint-staged": "^17.0.7",
     "supertest": "^7.2.2",
     "tsup": "^8.3.6",
-    "tsx": "^4.19.2",
+    "tsx": "^4.23.1",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.59.3",
     "vitest": "^3.0.4"
