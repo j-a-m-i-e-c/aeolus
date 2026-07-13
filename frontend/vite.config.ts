@@ -41,6 +41,12 @@ export default defineConfig({
         "src/components/FlowDiagram.tsx", // node/edge flow diagram
         "src/components/panes/types.ts", // type-only module
       ],
+      thresholds: {
+        lines: 90,
+        statements: 90,
+        functions: 75,
+        branches: 70,
+      },
     },
   },
 });
