@@ -7,10 +7,26 @@ vi.mock("./env", () => ({ API_URL: "http://test.local:3001" }));
 
 import {
   fetchDevices,
+  fetchDevice,
+  fetchState,
+  fetchHealth,
   sendAction,
+  publishMqtt,
+  fetchAutomations,
   deleteAutomation,
+  fetchLayout,
   saveLayout,
+  fetchAvailableConnectors,
+  fetchEnabledConnectors,
   enableConnector,
+  disableConnector,
+  retryConnector,
+  executeConnectorSetupStep,
+  fetchSetupSteps,
+  patchConnectorConfig,
+  fetchDeviceHistory,
+  clearDeviceHistory,
+  clearAllDeviceHistory,
 } from "./api-client";
 import { authFetch } from "./auth-fetch";
 
@@ -89,5 +105,106 @@ describe("api-client", () => {
 
     const body = JSON.parse(mockAuthFetch.mock.calls[0][1]?.body as string);
     expect(body).toEqual({ connector_type: "hue", config: { bridgeIp: "1.2.3.4" } });
+  });
+});
+
+describe("api-client — remaining endpoints", () => {
+  beforeEach(() => {
+    mockAuthFetch.mockReset();
+  });
+
+  const base = "http://test.local:3001";
+
+  it("issues GET requests to the expected paths", async () => {
+    const cases: Array<[() => Promise<unknown>, string]> = [
+      [() => fetchDevice("d1"), "/api/devices/d1"],
+      [fetchState, "/api/state"],
+      [fetchHealth, "/api/health"],
+      [fetchAutomations, "/api/automations"],
+      [fetchLayout, "/api/layout"],
+      [fetchAvailableConnectors, "/api/connectors/available"],
+      [fetchEnabledConnectors, "/api/connectors"],
+      [() => fetchSetupSteps("c1"), "/api/connectors/c1/setup-steps"],
+    ];
+
+    for (const [fn, path] of cases) {
+      mockAuthFetch.mockResolvedValueOnce(jsonResponse({ ok: true }));
+      await fn();
+      expect(mockAuthFetch).toHaveBeenLastCalledWith(
+        `${base}${path}`,
+        expect.objectContaining({ headers: { "Content-Type": "application/json" } }),
+      );
+    }
+  });
+
+  it("publishes an MQTT message via POST", async () => {
+    mockAuthFetch.mockResolvedValue(jsonResponse({ success: true }));
+    await publishMqtt("sensors/temp", "21.5");
+    const [url, init] = mockAuthFetch.mock.calls[0];
+    expect(url).toBe(`${base}/api/mqtt/publish`);
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(init?.body as string)).toEqual({ topic: "sensors/temp", payload: "21.5" });
+  });
+
+  it("disables a connector via DELETE", async () => {
+    mockAuthFetch.mockResolvedValue(jsonResponse({ success: true }));
+    await disableConnector("c-2");
+    const [url, init] = mockAuthFetch.mock.calls[0];
+    expect(url).toBe(`${base}/api/connectors/c-2`);
+    expect(init?.method).toBe("DELETE");
+  });
+
+  it("retries a connector via POST", async () => {
+    mockAuthFetch.mockResolvedValue(jsonResponse({ success: true }));
+    await retryConnector("c-3");
+    const [url, init] = mockAuthFetch.mock.calls[0];
+    expect(url).toBe(`${base}/api/connectors/c-3/retry`);
+    expect(init?.method).toBe("POST");
+  });
+
+  it("executes a connector setup step with its params as the body", async () => {
+    mockAuthFetch.mockResolvedValue(jsonResponse({ done: true }));
+    await executeConnectorSetupStep("c-4", "pair", { code: "1234" });
+    const [url, init] = mockAuthFetch.mock.calls[0];
+    expect(url).toBe(`${base}/api/connectors/c-4/setup/pair`);
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(init?.body as string)).toEqual({ code: "1234" });
+  });
+
+  it("patches connector config with a { config } body", async () => {
+    mockAuthFetch.mockResolvedValue(jsonResponse({ success: true }));
+    await patchConnectorConfig("c-5", { pollMs: 5000 });
+    const [url, init] = mockAuthFetch.mock.calls[0];
+    expect(url).toBe(`${base}/api/connectors/c-5`);
+    expect(init?.method).toBe("PATCH");
+    expect(JSON.parse(init?.body as string)).toEqual({ config: { pollMs: 5000 } });
+  });
+
+  it("fetches device history with a limit query when provided", async () => {
+    mockAuthFetch.mockResolvedValue(jsonResponse([]));
+    await fetchDeviceHistory("d-9", 25);
+    expect(mockAuthFetch.mock.calls[0][0]).toBe(`${base}/api/devices/d-9/history?limit=25`);
+  });
+
+  it("fetches device history without a query when no limit is given", async () => {
+    mockAuthFetch.mockResolvedValue(jsonResponse([]));
+    await fetchDeviceHistory("d-9");
+    expect(mockAuthFetch.mock.calls[0][0]).toBe(`${base}/api/devices/d-9/history`);
+  });
+
+  it("clears one device's history via DELETE", async () => {
+    mockAuthFetch.mockResolvedValue(jsonResponse({ success: true, deleted: 3 }));
+    await clearDeviceHistory("d-9");
+    const [url, init] = mockAuthFetch.mock.calls[0];
+    expect(url).toBe(`${base}/api/devices/d-9/history`);
+    expect(init?.method).toBe("DELETE");
+  });
+
+  it("clears all device history via DELETE", async () => {
+    mockAuthFetch.mockResolvedValue(jsonResponse({ success: true, deleted: 10 }));
+    await clearAllDeviceHistory();
+    const [url, init] = mockAuthFetch.mock.calls[0];
+    expect(url).toBe(`${base}/api/devices/history/all`);
+    expect(init?.method).toBe("DELETE");
   });
 });

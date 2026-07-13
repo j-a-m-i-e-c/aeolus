@@ -30,6 +30,16 @@ export default defineConfig({
         "src/vite-env.d.ts",
         "src/**/*.d.ts",
         "src/types/**",
+        // e2e territory — high-effort / low-jsdom-fit; exercised by Playwright, not
+        // unit tests.
+        "src/components/ScriptEditor.tsx", // Monaco editor
+        "src/components/UiEditor.tsx", // Monaco editor
+        "src/lib/monaco-setup.ts", // Monaco worker/env wiring
+        "src/components/MetricSparkline.tsx", // SVG chart
+        "src/components/StateHistoryChart.tsx", // SVG chart
+        "src/pages/data-store/TimeSeriesChart.tsx", // SVG chart
+        "src/components/FlowDiagram.tsx", // node/edge flow diagram
+        "src/components/panes/types.ts", // type-only module
       ],
     },
   },
