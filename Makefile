@@ -46,8 +46,7 @@ seed: ## Seed demo data via Docker, no host Node needed (usage: make seed PASS=y
 	docker compose --profile seed run --rm -e SEED_USER="$(USER)" -e SEED_PASS="$(PASS)" seed
 
 reset: ## Wipe database and restart fresh (deletes all data!)
-	docker compose down
-	rm -f data/aeolus.db
+	docker compose down -v
 	docker compose up -d
 	@echo "⏳ Waiting for backend to start..."
 	@sleep 12
