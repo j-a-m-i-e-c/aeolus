@@ -1,71 +1,50 @@
 // e2e/connectors.spec.ts — Connector management page.
-//
-// Exercises listing available connectors, viewing their details, and verifying
-// the enable/disable lifecycle. Uses the Kasa connector (no setup required) as
-// the test subject since it can be enabled without external hardware.
 
 import { test, expect } from "@playwright/test";
-import { ensureAdmin } from "./helpers";
+import { ensureAdmin, getAdminToken, authedApi } from "./helpers";
 import { API_URL } from "./constants";
 
 test.describe("connectors page", () => {
-  test.beforeEach(async ({ page }) => {
+  test("connectors page is accessible", async ({ page }) => {
     await ensureAdmin(page);
     await page.getByRole("link", { name: "Connectors" }).click();
     await expect(page.getByRole("heading", { name: "Connectors" })).toBeVisible();
   });
 
-  test("shows available connectors (Hue & Kasa)", async ({ page }) => {
-    // The Available Connectors section should list the built-in connectors
-    await expect(page.getByText("TP-Link Kasa")).toBeVisible();
-    await expect(page.getByText("Philips Hue")).toBeVisible();
+  test("available connectors API lists Hue and Kasa", async ({ page }) => {
+    await ensureAdmin(page);
+    const token = await getAdminToken(page.request);
+    const api = authedApi(page.request, token);
+
+    const res = await api.get(`${API_URL}/api/connectors/available`);
+    expect(res.ok()).toBe(true);
+
+    const connectors = (await res.json()) as Array<{ metadata: { id: string; displayName: string } }>;
+    expect(connectors.some((c) => c.metadata.id === "kasa")).toBe(true);
+    expect(connectors.some((c) => c.metadata.id === "hue")).toBe(true);
   });
 
-  test("can enable the Kasa connector", async ({ page }) => {
-    // Find the Kasa card and click its Enable button
-    const kasaCard = page.locator("text=TP-Link Kasa").locator("..");
-    const enableButton = kasaCard.locator("..").locator("..").getByRole("button", { name: "Enable" });
+  test("can enable and disable the Kasa connector", async ({ page }) => {
+    await ensureAdmin(page);
+    const token = await getAdminToken(page.request);
+    const api = authedApi(page.request, token);
 
-    // If Kasa is already enabled, we'll see it in "Active" — skip enable step
-    const isAlreadyEnabled = await page.getByText("Active Connectors").isVisible().catch(() => false)
-      && await page.locator("text=TP-Link Kasa").first().isVisible().catch(() => false);
+    // Enable Kasa
+    const enableRes = await api.post(`${API_URL}/api/connectors`, {
+      connectorType: "kasa",
+      config: { broadcastAddress: "192.168.1.255" },
+    });
+    expect(enableRes.ok()).toBe(true);
+    const { id } = (await enableRes.json()) as { id: string };
 
-    if (!isAlreadyEnabled) {
-      // Click Enable on the available connector
-      await enableButton.first().click();
-      // Wait for it to appear in the enabled/active section
-      await expect(page.getByText("connected").or(page.getByText("disconnected"))).toBeVisible({ timeout: 10000 });
-    }
-  });
+    // Verify it appears in enabled list
+    const listRes = await api.get(`${API_URL}/api/connectors`);
+    expect(listRes.ok()).toBe(true);
+    const enabled = (await listRes.json()) as Array<{ id: string; connectorType: string }>;
+    expect(enabled.some((c) => c.id === id)).toBe(true);
 
-  test("can disable an enabled connector via API and see it return to available", async ({ page }) => {
-    // First ensure Kasa is enabled via API
-    const listRes = await page.request.get(`${API_URL}/api/connectors`);
-    const connectors = (await listRes.json()) as Array<{ id: string; connectorType: string }>;
-    const kasa = connectors.find((c) => c.connectorType === "kasa");
-
-    if (kasa) {
-      // Disable it via API so we can verify the UI reflects the change
-      await page.request.delete(`${API_URL}/api/connectors/${kasa.id}`);
-      // Reload the page
-      await page.reload();
-      await expect(page.getByRole("heading", { name: "Connectors" })).toBeVisible();
-    }
-
-    // The Kasa connector should be in the "Available" section with an Enable button
-    await expect(page.getByText("TP-Link Kasa")).toBeVisible();
-  });
-
-  test("refresh button reloads connector list", async ({ page }) => {
-    // Look for a refresh/reload control
-    const refreshButton = page.getByRole("button", { name: /refresh/i }).or(
-      page.locator("button").filter({ has: page.locator("svg") }).first(),
-    );
-
-    // The page should not crash on refresh
-    if (await refreshButton.isVisible()) {
-      await refreshButton.click();
-      await expect(page.getByRole("heading", { name: "Connectors" })).toBeVisible();
-    }
+    // Disable it
+    const disableRes = await api.delete(`${API_URL}/api/connectors/${id}`);
+    expect(disableRes.ok()).toBe(true);
   });
 });

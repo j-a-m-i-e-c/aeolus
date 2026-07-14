@@ -5,7 +5,7 @@
 // except the dedicated first-run test can run regardless of DB state — which is
 // what makes local iteration (`make e2e`) and future seeded specs pleasant.
 
-import { expect, type Page } from "@playwright/test";
+import { expect, type Page, type APIRequestContext } from "@playwright/test";
 import { ADMIN, API_URL } from "./constants";
 
 /** True when the backend has no admin yet (first-run). */
@@ -49,4 +49,45 @@ export async function ensureAdmin(page: Page): Promise<void> {
   } else {
     await login(page);
   }
+}
+
+/**
+ * Get a Bearer token for the admin account via the login API.
+ * Use this token in `page.request` headers for authenticated API calls.
+ */
+export async function getAdminToken(request: APIRequestContext): Promise<string> {
+  // Try login first (admin already exists)
+  const loginRes = await request.post(`${API_URL}/api/auth/login`, {
+    data: { username: ADMIN.username, password: ADMIN.password },
+  });
+  if (loginRes.ok()) {
+    const body = (await loginRes.json()) as { accessToken: string };
+    return body.accessToken;
+  }
+
+  // If login fails, maybe we need to set up first
+  const setupRes = await request.post(`${API_URL}/api/auth/setup`, {
+    data: { username: ADMIN.username, password: ADMIN.password },
+  });
+  if (setupRes.ok()) {
+    const body = (await setupRes.json()) as { accessToken: string };
+    return body.accessToken;
+  }
+
+  throw new Error(`Failed to get admin token: login=${loginRes.status()}, setup=${setupRes.status()}`);
+}
+
+/**
+ * Create an authenticated API helper that includes the Bearer token.
+ * Call after ensureAdmin() to get a token-bearing request wrapper.
+ */
+export function authedApi(request: APIRequestContext, token: string) {
+  const headers = { Authorization: `Bearer ${token}` };
+  return {
+    get: (url: string) => request.get(url, { headers }),
+    post: (url: string, data?: unknown) => request.post(url, { headers, data }),
+    put: (url: string, data?: unknown) => request.put(url, { headers, data }),
+    patch: (url: string, data?: unknown) => request.patch(url, { headers, data }),
+    delete: (url: string) => request.delete(url, { headers }),
+  };
 }
