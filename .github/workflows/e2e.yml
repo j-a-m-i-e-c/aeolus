@@ -1,0 +1,72 @@
+name: E2E (daily)
+
+# Runs once a day at 06:00 UTC, but only if main has new commits since the
+# last successful run. Can also be triggered manually.
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  check-for-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      has_changes: ${{ steps.check.outputs.has_changes }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for commits in the last 24h
+        id: check
+        run: |
+          COMMITS=$(git log --oneline --since="24 hours ago" --count | head -1)
+          COUNT=$(git log --oneline --since="24 hours ago" | wc -l)
+          if [ "$COUNT" -gt "0" ]; then
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+            echo "Found $COUNT commit(s) in the last 24h — running e2e."
+          else
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+            echo "No new commits in 24h — skipping e2e."
+          fi
+
+  e2e:
+    needs: check-for-changes
+    if: needs.check-for-changes.outputs.has_changes == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Start the stack
+        run: docker compose up -d --build
+
+      - name: Run Playwright e2e
+        run: npm run test:e2e
+
+      - name: Backend logs (on failure)
+        if: failure()
+        run: docker compose logs --no-color --tail 200
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 3
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v

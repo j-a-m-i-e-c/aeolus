@@ -63,52 +63,9 @@ jobs:
       - name: Run tests with coverage
         run: npm run test:coverage
 
-  # End-to-end tests against the REAL Docker Compose stack (Option A).
-  # Kept separate from the coverage jobs (vitest) — this exercises live wiring:
-  # auth, cookies, WebSocket, the seed. Gated on the fast checks so we don't
-  # burn ~minutes spinning up compose when lint/types/units are already broken.
-  e2e:
-    needs: [lint, backend, frontend]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          # Dockerfile embeds build-info from git history.
-          fetch-depth: 0
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-
-      - run: npm ci
-
-      - name: Install Playwright browser
-        run: npx playwright install --with-deps chromium
-
-      # Fresh runner => empty volumes => backend boots with an empty DB, which is
-      # exactly what the first-run setup journey needs.
-      - name: Start the stack
-        run: docker compose up -d --build
-
-      - name: Run Playwright e2e
-        run: npm run test:e2e
-
-      - name: Backend logs (on failure)
-        if: failure()
-        run: docker compose logs --no-color --tail 200
-
-      - name: Upload Playwright report
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: playwright-report
-          path: playwright-report/
-          retention-days: 7
-
-      - name: Tear down
-        if: always()
-        run: docker compose down -v
+  # End-to-end tests run on a daily schedule (see .github/workflows/e2e.yml).
+  # They're too slow/expensive to run on every push. The daily job checks
+  # whether main has new commits since the last successful run.
 
   build-images:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
