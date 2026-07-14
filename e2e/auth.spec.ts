@@ -36,9 +36,11 @@ test.describe("authentication", () => {
   test("admin reaches the dashboard and can log out", async ({ page }) => {
     await ensureAdmin(page);
 
-    await expect(
-      page.getByRole("heading", { name: "Welcome to Aeolus" }),
-    ).toBeVisible();
+    // Dashboard shows either WelcomeScreen or SystemPage depending on device state
+    const hasContent = await page.getByRole("heading", { name: "Welcome to Aeolus" }).or(
+      page.getByRole("heading", { name: "System" }),
+    ).isVisible({ timeout: 10000 });
+    expect(hasContent).toBe(true);
 
     // Log out via the sidebar control (title="Sign out") → back to login.
     await page.getByTitle("Sign out").click();

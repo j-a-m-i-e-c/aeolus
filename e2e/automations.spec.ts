@@ -124,11 +124,7 @@ test.describe("automations", () => {
     const token = await getAdminToken(page.request);
     const api = authedApi(page.request, token);
 
-    const scriptSource = `
-      export default function handler(context: EventContext): void {
-        log("Script rule executed from e2e test");
-      }
-    `;
+    const scriptSource = `export default function handler(context) { log("E2E test"); }`;
 
     const createRes = await api.post(`${API_URL}/api/automations`, {
       name: `Script Rule ${Date.now()}`,

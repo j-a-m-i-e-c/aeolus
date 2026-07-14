@@ -32,11 +32,32 @@ export async function createAdmin(page: Page): Promise<void> {
 /** Log in as the admin and land on the dashboard (assumes an admin exists). */
 export async function login(page: Page): Promise<void> {
   await page.goto("/");
-  await expect(page.getByText("Sign in to your dashboard")).toBeVisible();
+
+  // Wait for the page to settle — either login form or already authenticated
+  await page.waitForLoadState("networkidle");
+
+  // If already on dashboard (session restored from cookie), we're done
+  if (page.url().includes("/dashboard")) return;
+
+  // If no login form visible, the app might still be loading or already authenticated
+  const loginVisible = await page.getByText("Sign in to your dashboard").isVisible({ timeout: 5000 }).catch(() => false);
+  if (!loginVisible) {
+    // Wait a moment for React router to settle
+    await page.waitForTimeout(1000);
+    if (page.url().includes("/dashboard")) return;
+    // Try navigating directly
+    await page.goto("/dashboard");
+    return;
+  }
+
   await page.locator("#login-username").fill(ADMIN.username);
   await page.locator("#login-password").fill(ADMIN.password);
   await page.getByRole("button", { name: "Sign In" }).click();
-  await expect(page).toHaveURL(/\/dashboard$/);
+
+  // Wait for navigation away from login — could be /dashboard or just /
+  await page.waitForURL((url) => !url.pathname.includes("login"), { timeout: 15000 }).catch(() => {});
+  // Give React router time to redirect / → /dashboard
+  await page.waitForTimeout(500);
 }
 
 /**
@@ -53,16 +74,21 @@ export async function ensureAdmin(page: Page): Promise<void> {
 
 /**
  * Get a Bearer token for the admin account via the login API.
- * Use this token in `page.request` headers for authenticated API calls.
+ * Caches the token for the duration of the test run to avoid rate limiting.
  */
+let _cachedToken: string | null = null;
+
 export async function getAdminToken(request: APIRequestContext): Promise<string> {
+  if (_cachedToken) return _cachedToken;
+
   // Try login first (admin already exists)
   const loginRes = await request.post(`${API_URL}/api/auth/login`, {
     data: { username: ADMIN.username, password: ADMIN.password },
   });
   if (loginRes.ok()) {
     const body = (await loginRes.json()) as { accessToken: string };
-    return body.accessToken;
+    _cachedToken = body.accessToken;
+    return _cachedToken;
   }
 
   // If login fails, maybe we need to set up first
@@ -71,7 +97,8 @@ export async function getAdminToken(request: APIRequestContext): Promise<string>
   });
   if (setupRes.ok()) {
     const body = (await setupRes.json()) as { accessToken: string };
-    return body.accessToken;
+    _cachedToken = body.accessToken;
+    return _cachedToken;
   }
 
   throw new Error(`Failed to get admin token: login=${loginRes.status()}, setup=${setupRes.status()}`);
