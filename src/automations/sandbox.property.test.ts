@@ -188,3 +188,121 @@ describe("Property 13: actionAll dispatches only to filter-matched devices", () 
     );
   });
 });
+
+// ─── Feature: verified-command-execution ─────────────────────────────────────
+
+import { classifySandboxError, type SandboxFailureReason } from "./sandbox.js";
+
+// ─── Property 1: Sandbox error classification is accurate and honors precedence ─────
+
+// Feature: verified-command-execution, Property 1: Sandbox error classification is accurate and honors precedence
+describe("Property 1: Sandbox error classification is accurate and honors precedence", () => {
+  it("timeout signature always classifies as timeout regardless of disposal", () => {
+    fc.assert(
+      fc.property(
+        fc.boolean(), // isolateWasDisposed
+        fc.constantFrom(
+          "Script execution timed out",
+          "execution timed out after 5000ms",
+          "TIMED OUT",
+        ),
+        (disposed, message) => {
+          const result = classifySandboxError(new Error(message), disposed);
+          expect(result.reason).toBe("timeout");
+          expect(result.error).toBe(message);
+        },
+      ),
+      { numRuns: 200 },
+    );
+  });
+
+  it("memory signature classifies as memory when no timeout signature", () => {
+    fc.assert(
+      fc.property(
+        fc.constantFrom(
+          "memory limit reached",
+          "Array buffer allocation failed",
+          "Isolate was disposed",
+        ),
+        fc.boolean(),
+        (message, disposed) => {
+          const result = classifySandboxError(new Error(message), disposed);
+          expect(result.reason).toBe("memory");
+          expect(result.error).toBe(message);
+        },
+      ),
+      { numRuns: 200 },
+    );
+  });
+
+  it("isolateWasDisposed=true classifies as memory when no timeout signature", () => {
+    fc.assert(
+      fc.property(
+        fc.string({ minLength: 1 }).filter((s) => !/timed out/i.test(s) && !/memory limit|array buffer allocation failed|disposed/i.test(s)),
+        (message) => {
+          const result = classifySandboxError(new Error(message), true);
+          expect(result.reason).toBe("memory");
+          expect(result.error).toBe(message);
+        },
+      ),
+      { numRuns: 200 },
+    );
+  });
+
+  it("any other error classifies as runtime", () => {
+    fc.assert(
+      fc.property(
+        fc.string({ minLength: 1 }).filter((s) => !/timed out/i.test(s) && !/memory limit|array buffer allocation failed|disposed/i.test(s)),
+        (message) => {
+          const result = classifySandboxError(new Error(message), false);
+          expect(result.reason).toBe("runtime");
+          expect(result.error).toBe(message);
+        },
+      ),
+      { numRuns: 200 },
+    );
+  });
+
+  it("error string is always non-empty and equals the original message", () => {
+    fc.assert(
+      fc.property(
+        fc.string({ minLength: 1 }),
+        fc.boolean(),
+        (message, disposed) => {
+          const result = classifySandboxError(new Error(message), disposed);
+          expect(result.error).toBe(message);
+          expect(result.error.length).toBeGreaterThan(0);
+        },
+      ),
+      { numRuns: 200 },
+    );
+  });
+
+  it("timeout precedence wins over memory (timeout signature + disposal)", () => {
+    // When both timeout and memory signatures apply, timeout wins (chronological first)
+    const result = classifySandboxError(new Error("Script execution timed out"), true);
+    expect(result.reason).toBe("timeout");
+  });
+});
+
+// ─── Property 2: Sandbox execution always resolves ───────────────────────────
+
+// Feature: verified-command-execution, Property 2: Sandbox execution always resolves
+describe("Property 2: Sandbox execution always resolves", () => {
+  it("classifySandboxError always returns a valid reason and never throws", () => {
+    fc.assert(
+      fc.property(
+        fc.string(), // arbitrary error message (including empty)
+        fc.boolean(), // isolateWasDisposed
+        (message, disposed) => {
+          // Should never throw
+          const result = classifySandboxError(new Error(message), disposed);
+          const validReasons: SandboxFailureReason[] = ["runtime", "timeout", "memory"];
+          expect(validReasons).toContain(result.reason);
+          expect(typeof result.error).toBe("string");
+        },
+      ),
+      { numRuns: 200 },
+    );
+  });
+});

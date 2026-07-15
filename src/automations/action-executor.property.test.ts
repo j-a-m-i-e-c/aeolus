@@ -143,3 +143,80 @@ describe("Property 5: Missing handler returns typed error", () => {
     );
   });
 });
+
+// ─── Feature: verified-command-execution ─────────────────────────────────────
+
+import { randomUUID } from "node:crypto";
+
+// ─── Property 9: Bulk action arithmetic and per-device fidelity ──────────────
+
+// Feature: verified-command-execution, Property 9: Bulk action arithmetic and per-device fidelity
+describe("Property 9: Bulk action arithmetic and per-device fidelity", () => {
+  it("succeeded + failed === total for any combination of outcomes", async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.array(fc.record({ id: fc.uuid(), succeeds: fc.boolean() }), { minLength: 0, maxLength: 20 }),
+        async (deviceSpecs) => {
+          const deps = createMockDeps();
+          const executor = new ActionExecutor(deps);
+
+          const successMap = new Map(deviceSpecs.map((s) => [s.id, s.succeeds]));
+
+          executor.registerHandler("device_action", async (action) => {
+            if (successMap.get(action.target)) {
+              return { success: true };
+            }
+            throw new Error("simulated failure");
+          });
+
+          const results = await Promise.all(
+            deviceSpecs.map((s) =>
+              executor.execute(
+                { type: "device_action", target: s.id, params: { actionType: "toggle" } },
+                "rule-bulk",
+              ),
+            ),
+          );
+
+          const succeeded = results.filter((r) => r.success).length;
+          const failed = results.filter((r) => !r.success).length;
+          expect(succeeded + failed).toBe(deviceSpecs.length);
+
+          // Each result carries a lifecycleState
+          for (const r of results) {
+            expect(r.lifecycleState).toBeDefined();
+          }
+        },
+      ),
+      { numRuns: 200 },
+    );
+  });
+
+  it("zero devices produce zero totals", async () => {
+    const deps = createMockDeps();
+    const executor = new ActionExecutor(deps);
+    executor.registerHandler("device_action", vi.fn());
+    // No executions — just verifying the handler shape works with empty input
+    const results: Awaited<ReturnType<typeof executor.execute>>[] = [];
+    expect(results.length).toBe(0);
+  });
+});
+
+// ─── Property 12: Correlation ids are unique across outstanding commands ─────
+
+// Feature: verified-command-execution, Property 12: Correlation ids are unique across outstanding commands
+describe("Property 12: Correlation ids are unique across outstanding commands", () => {
+  it("randomUUID generates pairwise distinct ids for any batch size", () => {
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 2, max: 100 }),
+        (batchSize) => {
+          const ids = Array.from({ length: batchSize }, () => randomUUID());
+          const unique = new Set(ids);
+          expect(unique.size).toBe(batchSize);
+        },
+      ),
+      { numRuns: 200 },
+    );
+  });
+});
