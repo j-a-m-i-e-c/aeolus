@@ -525,3 +525,208 @@ describe("MqttService", () => {
     });
   });
 });
+
+describe("MqttService ack-topic routing", () => {
+  let eventBus: EventEmitter;
+  let ackService: InstanceType<typeof MqttService>;
+  let mockClient: ReturnType<typeof createMockMqttClientInstance>;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    eventBus = new EventEmitter();
+    mockClient = createMockMqttClientInstance();
+    mockConnect.mockReturnValue(mockClient);
+
+    ackService = new MqttService(
+      {
+        brokerUrl: "mqtt://localhost:1883",
+        topics: ["sensor/#"],
+        baseRetryDelayMs: 1000,
+        maxBackoffMs: 30000,
+        ackTopicFilter: "aeolus/acks/#",
+      },
+      eventBus,
+    );
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.clearAllMocks();
+  });
+
+  it("routes ack-topic messages to the ackRouter instead of DEVICE_STATE_CHANGE", async () => {
+    const routeFn = vi.fn();
+    const observeStateFn = vi.fn();
+    ackService.setAckRouter({ route: routeFn, observeState: observeStateFn });
+
+    const connectPromise = ackService.connect();
+    mockClient.emit("connect");
+    await connectPromise;
+
+    const stateEvents: unknown[] = [];
+    eventBus.on(DEVICE_STATE_CHANGE, (e) => stateEvents.push(e));
+
+    // Simulate ack message with correlation data
+    const messageHandler = mockClient.listeners("message")[0] as (topic: string, payload: Buffer, packet: unknown) => void;
+    messageHandler(
+      "aeolus/acks/device-1",
+      Buffer.from(JSON.stringify({ correlationId: "abc-123", status: "executed" })),
+      { properties: {} },
+    );
+
+    expect(routeFn).toHaveBeenCalledOnce();
+    expect(routeFn).toHaveBeenCalledWith(expect.objectContaining({ correlationId: "abc-123", status: "executed" }));
+    expect(stateEvents).toHaveLength(0); // Not emitted as device state
+  });
+
+  it("handles ack message with MQTT 5 Correlation Data property", async () => {
+    const routeFn = vi.fn();
+    ackService.setAckRouter({ route: routeFn, observeState: vi.fn() });
+
+    const connectPromise = ackService.connect();
+    mockClient.emit("connect");
+    await connectPromise;
+
+    const messageHandler = mockClient.listeners("message")[0] as (topic: string, payload: Buffer, packet: unknown) => void;
+    messageHandler(
+      "aeolus/acks/device-1",
+      Buffer.from(JSON.stringify({ status: "done" })),
+      { properties: { correlationData: Buffer.from("mqtt5-corr-id") } },
+    );
+
+    expect(routeFn).toHaveBeenCalledWith(expect.objectContaining({ correlationId: "mqtt5-corr-id" }));
+  });
+
+  it("drops ack message with no resolvable correlation id", async () => {
+    const routeFn = vi.fn();
+    ackService.setAckRouter({ route: routeFn, observeState: vi.fn() });
+
+    const connectPromise = ackService.connect();
+    mockClient.emit("connect");
+    await connectPromise;
+
+    const messageHandler = mockClient.listeners("message")[0] as (topic: string, payload: Buffer, packet: unknown) => void;
+    // No correlationId in payload, no correlationData in packet
+    messageHandler(
+      "aeolus/acks/device-1",
+      Buffer.from(JSON.stringify({ status: "done" })),
+      { properties: {} },
+    );
+
+    expect(routeFn).not.toHaveBeenCalled();
+  });
+
+  it("handles non-JSON ack payload gracefully", async () => {
+    const routeFn = vi.fn();
+    ackService.setAckRouter({ route: routeFn, observeState: vi.fn() });
+
+    const connectPromise = ackService.connect();
+    mockClient.emit("connect");
+    await connectPromise;
+
+    const messageHandler = mockClient.listeners("message")[0] as (topic: string, payload: Buffer, packet: unknown) => void;
+    // Non-JSON payload with MQTT 5 correlation data
+    messageHandler(
+      "aeolus/acks/device-1",
+      Buffer.from("not-json"),
+      { properties: { correlationData: Buffer.from("corr-id-1") } },
+    );
+
+    expect(routeFn).toHaveBeenCalledWith(expect.objectContaining({ correlationId: "corr-id-1" }));
+  });
+
+  it("does not route when no ackRouter is set", async () => {
+    // No setAckRouter called
+    const connectPromise = ackService.connect();
+    mockClient.emit("connect");
+    await connectPromise;
+
+    const messageHandler = mockClient.listeners("message")[0] as (topic: string, payload: Buffer, packet: unknown) => void;
+    // Should not throw
+    expect(() => {
+      messageHandler(
+        "aeolus/acks/device-1",
+        Buffer.from(JSON.stringify({ correlationId: "id", status: "done" })),
+        { properties: {} },
+      );
+    }).not.toThrow();
+  });
+
+  it("feeds observeState on normal (non-ack) topic messages", async () => {
+    const observeStateFn = vi.fn();
+    ackService.setAckRouter({ route: vi.fn(), observeState: observeStateFn });
+
+    const connectPromise = ackService.connect();
+    mockClient.emit("connect");
+    await connectPromise;
+
+    const messageHandler = mockClient.listeners("message")[0] as (topic: string, payload: Buffer, packet: unknown) => void;
+    messageHandler("sensor/temperature/kitchen", Buffer.from('{"value": 23}'), { properties: {} });
+
+    expect(observeStateFn).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ value: 23 }),
+    );
+  });
+
+  it("subscribes to the ack topic filter alongside normal topics", async () => {
+    const connectPromise = ackService.connect();
+    mockClient.emit("connect");
+    await connectPromise;
+
+    const subscribedTopics = mockClient.subscribe.mock.calls.map((c) => c[0]);
+    expect(subscribedTopics).toContain("aeolus/acks/#");
+    expect(subscribedTopics).toContain("sensor/#");
+  });
+
+  it("publishes with correlationData and responseTopic properties", async () => {
+    const connectPromise = ackService.connect();
+    mockClient.emit("connect");
+    await connectPromise;
+
+    ackService.publish("device/cmd", '{"action":"on"}', {
+      correlationData: Buffer.from("corr-123"),
+      responseTopic: "aeolus/acks/dev-1",
+    });
+
+    expect(mockClient.publish).toHaveBeenCalledWith(
+      "device/cmd",
+      '{"action":"on"}',
+      expect.objectContaining({
+        properties: expect.objectContaining({
+          correlationData: Buffer.from("corr-123"),
+          responseTopic: "aeolus/acks/dev-1",
+        }),
+      }),
+      expect.any(Function),
+    );
+  });
+
+  it("isAckTopic matches exact prefix without wildcard", async () => {
+    // Service with a non-wildcard ack filter
+    const svc = new MqttService(
+      {
+        brokerUrl: "mqtt://localhost:1883",
+        topics: ["#"],
+        baseRetryDelayMs: 1000,
+        maxBackoffMs: 30000,
+        ackTopicFilter: "aeolus/acks",
+      },
+      eventBus,
+    );
+    const routeFn = vi.fn();
+    svc.setAckRouter({ route: routeFn, observeState: vi.fn() });
+
+    mockClient = createMockMqttClientInstance();
+    mockConnect.mockReturnValue(mockClient);
+
+    const connectPromise = svc.connect();
+    mockClient.emit("connect");
+    await connectPromise;
+
+    const messageHandler = mockClient.listeners("message")[0] as (topic: string, payload: Buffer, packet: unknown) => void;
+    messageHandler("aeolus/acks", Buffer.from(JSON.stringify({ correlationId: "x", status: "ok" })), { properties: {} });
+
+    expect(routeFn).toHaveBeenCalledOnce();
+  });
+});

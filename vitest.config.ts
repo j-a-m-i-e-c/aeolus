@@ -38,7 +38,7 @@ export default defineConfig({
       ],
       thresholds: {
         lines: 90,
-        branches: 89,
+        branches: 90,
         functions: 90,
         "src/core/": { lines: 85 },
         "src/mqtt/": { lines: 80 },
