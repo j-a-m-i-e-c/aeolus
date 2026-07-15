@@ -1,4 +1,3 @@
-/// <reference types="node" />
 // frontend/src/sandbox/nginx-csp.test.ts — Config/smoke test asserting CSP hardening in nginx.conf
 // Parses the two CSP strings from frontend/nginx.conf and validates:
 // - Host script-src has neither 'unsafe-eval' nor blob: (Req 11.1)

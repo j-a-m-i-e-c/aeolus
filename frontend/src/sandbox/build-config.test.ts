@@ -1,4 +1,3 @@
-/// <reference types="node" />
 // frontend/src/sandbox/build-config.test.ts — Asserts the Vite config declares the sandbox-runtime entry
 
 import { describe, it, expect } from "vitest";
