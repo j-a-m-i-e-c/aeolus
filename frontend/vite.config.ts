@@ -67,9 +67,9 @@ export default defineConfig({
         "src/components/ConnectorsPage.tsx", // multi-step setup wizards
         "src/components/AutomationsPage.tsx", // Monaco + script execution
         "src/components/DeviceDetail.tsx", // device action execution
-        "src/components/TabLayout.tsx", // drag-and-drop pane layout
-        "src/components/Sidebar.tsx", // nav + tab DnD
-        "src/components/panes/AutomationPane.tsx", // script editor integration
+        "src/components/TabLayout.tsx", // drag-and-drop pane layout (DnD API not in jsdom)
+        "src/components/Sidebar.tsx", // nav + tab DnD (DnD API not in jsdom)
+        "src/components/panes/AutomationPane.tsx", // TODO: has tests but ~75% func coverage; close gap then remove
         "src/components/panes/HueControlPane.tsx", // color picker + sliders
         "src/components/panes/KasaControlPane.tsx", // device control with actions
         "src/pages/UserManagementPage.tsx", // admin CRUD modals
@@ -81,12 +81,6 @@ export default defineConfig({
         "src/components/CommandPalette.tsx", // keyboard shortcut modal
         "src/components/SnippetPicker.tsx", // code snippet insertion
         "src/components/panes/StateHistoryPane.tsx", // time-series chart interaction
-        "src/components/panes/UiTriggerButtonPane.tsx", // action dispatch UI
-        "src/components/panes/MqttViewerPane.tsx", // MQTT message stream
-        "src/components/panes/hue/HueTempSlider.tsx", // Hue slider
-        "src/components/UserSelector.tsx", // user selection modal
-        "src/pages/ManagementPage.tsx", // admin management page
-        "src/components/InsightsButton.tsx", // AI insights button
         // Sandbox runtime/host — requires real iframe + MessagePort (exercised by
         // Playwright e2e, not jsdom unit tests). The pure logic (rpc-types, sdk-broker,
         // sdk-client, module-loader, shim, sandbox-pool) IS unit-tested.
