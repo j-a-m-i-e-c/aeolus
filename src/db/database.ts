@@ -6,9 +6,16 @@ import fs from "node:fs";
 import path from "node:path";
 import { config } from "../config.js";
 import logger from "../logger.js";
+import { runMigrations } from "./migration-runner.js";
+import { migrations } from "./migrations/index.js";
 
 let db: DatabaseType | null = null;
 
+/**
+ * Legacy schema initializer — retained as the body of the baseline migration
+ * and for backward-compatible tests that call it directly. New code should not
+ * call this; use getDatabase() which applies versioned migrations.
+ */
 export function initSchema(database: DatabaseType): void {
   database.exec(`
     CREATE TABLE IF NOT EXISTS devices (
@@ -175,6 +182,8 @@ export function initSchema(database: DatabaseType): void {
  * Migrate existing databases that have the old CHECK(type IN (...)) constraint
  * on the devices table. SQLite doesn't support ALTER TABLE DROP CONSTRAINT,
  * so we recreate the table without it: rename → create → copy → drop old.
+ *
+ * @deprecated Used only by the legacy initSchema path. New code uses migration 003.
  */
 function migrateRemoveTypeCheck(database: DatabaseType): void {
   const row = database.prepare(
@@ -182,13 +191,13 @@ function migrateRemoveTypeCheck(database: DatabaseType): void {
   ).get() as { sql: string } | undefined;
 
   if (!row) {
-    return; // No devices table found — nothing to migrate
+    return;
   }
 
   const createSql = row.sql;
 
   if (!/CHECK\s*\(/i.test(createSql)) {
-    return; // No CHECK constraint — already migrated or fresh database
+    return;
   }
 
   logger.info("Migrating devices table to remove CHECK constraint on type column");
@@ -227,7 +236,10 @@ function migrateRemoveTypeCheck(database: DatabaseType): void {
 
 /**
  * Get the database instance. Creates and initializes on first call.
- * Synchronous — no Promise, no WASM compilation.
+ *
+ * Opens the database, sets WAL mode and foreign keys, then applies all
+ * pending versioned migrations. If any migration fails, throws — no
+ * half-migrated instance is returned.
  */
 export function getDatabase(): DatabaseType {
   if (db) return db;
@@ -241,9 +253,10 @@ export function getDatabase(): DatabaseType {
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
 
-  initSchema(db);
+  // Apply versioned migrations (replaces ad-hoc initSchema)
+  runMigrations(db, migrations, { dbPath: config.dbPath });
 
-  logger.info({ dbPath: config.dbPath }, "Database initialized (better-sqlite3, WAL mode)");
+  logger.info({ dbPath: config.dbPath }, "Database initialized (migrations applied, WAL mode)");
   return db;
 }
 
