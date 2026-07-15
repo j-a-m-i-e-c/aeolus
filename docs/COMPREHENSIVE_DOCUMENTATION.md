@@ -242,7 +242,19 @@ aeolus/
 │       │       └── custom/              # Custom automation UI components
 │       │           └── types.ts         # CustomComponentProps interface
 │       ├── hooks/
-│       │   └── useDynamicComponent.ts # Runtime loader for custom automation UI modules (blob URL + dynamic import)
+│       │   └── (empty — useDynamicComponent removed; sandbox/ replaces it)
+│       ├── sandbox/                    # Custom UI sandboxing (opaque-origin iframe isolation)
+│       │   ├── rpc-types.ts            # Shared RPC envelope + per-op schema validators
+│       │   ├── sdk-broker.ts           # Host-side SdkBroker (validate/dispatch/scope)
+│       │   ├── sandbox-host.ts         # Singleton broker with deps bound to authFetch/stores
+│       │   ├── sandbox-pool.ts         # LRU-capped pool (4 frames) for constrained hardware
+│       │   ├── useSandboxedComponent.ts # Host hook (iframe lifecycle + handshake + MessageChannel)
+│       │   ├── SandboxHost.tsx         # Host component wrapped in CustomComponentBoundary
+│       │   └── runtime/                # Code that runs INSIDE the sandboxed iframe
+│       │       ├── entry.ts            # Bootstrap (handshake, port, module eval, render)
+│       │       ├── sdk-client.ts       # In-frame SDK client (request/response, timeouts)
+│       │       ├── shim.tsx            # Compatibility shim (CustomComponentProps reconstruction)
+│       │       └── module-loader.ts    # In-frame rewriteImports + blob eval
 │       ├── pages/
 │       │   ├── DataStorePage.tsx      # Data Store page (setup wizard or data explorer)
 │       │   └── data-store/           # Data Store sub-components
@@ -531,13 +543,45 @@ Custom automation UI components are transpiled on the backend at save time and l
 - `GET /api/automations/:id/ui-module` serves the compiled JS with `Content-Type: application/javascript` and `Cache-Control: no-cache`
 - Returns 404 if the rule has no compiled UI module
 
-**Frontend (`useDynamicComponent` hook + `window.__AEOLUS_EXTERNALS__`):**
-- `main.tsx` registers `window.__AEOLUS_EXTERNALS__` with references to `React`, `ReactDOM`, and `react/jsx-runtime` so dynamically loaded modules can resolve React imports without bundling their own copy
-- The `useDynamicComponent(ruleId, hasUiSource)` hook fetches the compiled JS from `/api/automations/:id/ui-module`
-- `rewriteImports(source)` converts ES module import statements for `react`, `react-dom`, and `react/jsx-runtime` into destructuring assignments from `window.__AEOLUS_EXTERNALS__` (e.g. `import { jsx as _jsx } from "react/jsx-runtime"` becomes `const { jsx: _jsx } = window.__AEOLUS_EXTERNALS__["react/jsx-runtime"]`)
-- The rewritten source is loaded via a blob URL + dynamic `import()`, then the default export is validated as a React component
-- `AutomationPane` uses the `useDynamicComponent` hook via a `DynamicCustomSection` helper component (extracted to satisfy React's rules of hooks)
-- Components render inside a `CustomComponentBoundary` error boundary for crash isolation
+**Frontend — Opaque-Origin Sandbox Isolation (`frontend/src/sandbox/`):**
+
+Custom UI components execute inside an **opaque-origin sandboxed iframe** (`<iframe sandbox="allow-scripts">`). The `allow-same-origin` token is deliberately omitted, so the browser assigns each frame a unique null origin distinct from the host dashboard. Same-origin policy then blocks the frame from reading `useAuthStore`, `authFetch`, `window.__AEOLUS_EXTERNALS__`, or any Host Dashboard global. The only communication path is a validated `postMessage`/`MessagePort`-based RPC channel.
+
+**Trust Boundary — Prohibited Capabilities:**
+Custom UI code running inside the sandbox **cannot**:
+- Read the raw authentication token (`accessToken`)
+- Make arbitrary authenticated requests as the signed-in user
+- Exfiltrate credentials via network egress (sandbox CSP: `connect-src 'none'`)
+- Access another component's state (broker scopes every operation to the frame's granted entity)
+- Escape to the Host Dashboard window or DOM
+
+**Architecture:**
+1. The **host** (AutomationPane) fetches the compiled module source via `authFetch` (keeping the token host-side)
+2. The inert source text (not the token) is posted into the frame over the dedicated `MessagePort`
+3. The **sandbox runtime** (`assets/sandbox-runtime.js`) inside the frame rewrites React imports to a frame-local global (`globalThis.__SANDBOX_EXTERNALS__`), builds a Blob in its own realm, and `import()`s it there
+4. A **compatibility shim** reconstructs the exact `CustomComponentProps` interface (`read`/`save`/`saveAndFire`/`fire`/`control`/`publish`/`devices`/`history`/`lastFired`/`enabled`/`ruleId`/`ruleName`), routing every call through the **Aeolus UI SDK** over the RPC channel
+5. The host-side **SdkBroker** validates every inbound message (origin + schema), scopes each privileged operation to the frame's immutable entity grant, and performs the effect with trusted credentials
+
+**Key Files:**
+- `frontend/src/sandbox/rpc-types.ts` — shared RPC envelope and per-op schema validators
+- `frontend/src/sandbox/sdk-broker.ts` — host-side broker (validate/dispatch/scope)
+- `frontend/src/sandbox/sandbox-host.ts` — singleton broker instance with deps bound to authFetch/stores
+- `frontend/src/sandbox/sandbox-pool.ts` — LRU-capped pool (default 4 frames) for Raspberry Pi hardware
+- `frontend/src/sandbox/useSandboxedComponent.ts` — React hook managing iframe lifecycle + handshake + MessageChannel
+- `frontend/src/sandbox/SandboxHost.tsx` — host-side component wrapped in CustomComponentBoundary
+- `frontend/src/sandbox/runtime/entry.ts` — in-frame bootstrap (handshake, port receipt, module eval, render)
+- `frontend/src/sandbox/runtime/sdk-client.ts` — in-frame SDK client (request/response, timeout, mirrors)
+- `frontend/src/sandbox/runtime/shim.tsx` — compatibility shim + reactive wrapper
+- `frontend/src/sandbox/runtime/module-loader.ts` — in-frame rewriteImports + blob eval
+- `frontend/public/sandbox.html` — static sandbox document loaded by nginx
+
+**CSP Hardening (`frontend/nginx.conf`):**
+- Host `script-src` no longer includes `'unsafe-eval'` or `blob:` (removed once custom UI execution moved into the sandbox)
+- Host retains `worker-src 'self' blob:` for Monaco editor workers (separate from script-src execution)
+- `/sandbox.html` has its own narrow CSP: `script-src 'self' blob:; connect-src 'none'; base-uri 'none'; form-action 'none'`
+
+**Backend isolation (out of scope for custom-ui-sandboxing):**
+The *backend* automation scripts run in `isolated-vm` — a genuine V8 isolate with 32 MB memory and 5 s timeout (`src/automations/sandbox.ts`). That isolation is independent and predates this frontend work. The frontend sandbox described here addresses only the *browser-side* trust boundary for custom UI components rendered in the dashboard.
 
 ### Execution Log (`src/automations/execution-log.ts`)
 
@@ -2077,8 +2121,8 @@ Records device state snapshots to SQLite for historical trend analysis. Each sta
 
 ---
 
-**Last Updated:** June 2025
-**Version:** 0.16.0
+**Last Updated:** July 2025
+**Version:** 0.17.0
 **Status:** MVP Development
 
 ## Future Enhancements

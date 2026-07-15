@@ -1,6 +1,6 @@
 // frontend/src/components/panes/AutomationPane.tsx — Self-contained automation pane (setup / status / editing)
 
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Power,
   PowerOff,
@@ -20,13 +20,13 @@ import { UiEditor } from "../UiEditor";
 import { FlowDiagram } from "../FlowDiagram";
 import { ActivityFeed } from "../ActivityFeed";
 import { SnippetPicker } from "../SnippetPicker";
-import { CustomComponentBoundary } from "../CustomComponentBoundary";
 import { TriggerSelector } from "../TriggerSelector";
-import { useDynamicComponent } from "../../hooks/useDynamicComponent";
+import { SandboxHost } from "../../sandbox/SandboxHost";
+import type { PropsPayload } from "../../sandbox/rpc-types";
 import type { ExecutionEntry } from "./custom/types";
 import { useDashboardStore } from "../../store/dashboard-store";
 import { useDeviceStore } from "../../store/device-store";
-import { useAutomationStateStore, sendStateUpdate, sendStateUpdateAndFire } from "../../store/automation-state-store";
+import { useAutomationStateStore } from "../../store/automation-state-store";
 import type { PaneConfig } from "../../types/dashboard";
 
 import { API_URL } from "../../lib/env";
@@ -435,59 +435,11 @@ export function AutomationPane({ config, paneId }: Props) {
     [mode, handleSave, handleUpdate],
   );
 
-  // control helper for custom components (was deviceAction)
-  const control = useCallback(
-    async (deviceId: string, actionType: string, params?: Record<string, unknown>) => {
-      await authFetch(`${API_URL}/api/devices/${deviceId}/action`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: actionType, params }),
-      });
-    },
-    [],
-  );
-
-  // publish helper for custom components (was mqttPublish)
-  const publish = useCallback((topic: string, payload: string) => {
-    authFetch(`${API_URL}/api/mqtt/publish`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ topic, payload }),
-    }).catch(() => {});
-  }, []);
-
-  // Convert plain object state to Map for the read() method
-  const stateMap = useMemo(() => new Map(Object.entries(ruleState)), [ruleState]);
-
-  // read helper — returns value for a given key from the state map
-  const read = useCallback(
-    (key: string) => stateMap.get(key),
-    [stateMap],
-  );
-
-  // save helper bound to current ruleId (was stateSet)
-  const save = useCallback(
-    (key: string, value: unknown) => sendStateUpdate(ruleId, key, value),
-    [ruleId],
-  );
-
-  // saveAndFire helper — persist state AND fire the Logic tab (was stateSetAndFire)
-  const saveAndFire = useCallback(
-    (key: string, value: unknown) => sendStateUpdateAndFire(ruleId, key, value),
-    [ruleId],
-  );
-
-  // fire helper — fires the Logic tab script with a synthetic event (was emit)
-  const fire = useCallback(
-    (eventName: string, payload?: Record<string, unknown>) => {
-      authFetch(`${API_URL}/api/automations/${ruleId}/fire`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ eventName, ...(payload ?? {}) }),
-      }).catch(() => {});
-    },
-    [ruleId],
-  );
+  // NOTE: The custom-component privileged callbacks (control / publish / read /
+  // save / saveAndFire / fire) formerly defined here are now handled by the shared
+  // host SdkBroker (frontend/src/sandbox/sandbox-host.ts). Custom UI runs inside an
+  // opaque-origin sandbox iframe and reaches Aeolus only via the capability-scoped
+  // Aeolus UI SDK over the RPC channel — no privileged functions are passed in.
 
   // ═══════════════════════════════════════════════════════════════════
   // RENDER
@@ -603,13 +555,8 @@ export function AutomationPane({ config, paneId }: Props) {
             hasUiSource={hasUiSource}
             lastFired={lastFired}
             devices={devices}
-            control={control}
-            publish={publish}
             history={executionHistory}
-            read={read}
-            save={save}
-            saveAndFire={saveAndFire}
-            fire={fire}
+            state={ruleState}
           />
         </div>
       </div>
@@ -983,9 +930,9 @@ export function AutomationPane({ config, paneId }: Props) {
   );
 }
 
-// ── Helper component for dynamic custom UI loading ──
-// Extracted as a separate component so the useDynamicComponent hook
-// can be called unconditionally (hooks can't be called conditionally).
+// ── Helper component for custom UI rendering ──
+// Chooses between the sandboxed custom UI (SandboxHost), the structured flow
+// diagram, and the activity feed based on the rule's shape.
 
 import type { Device } from "../../store/device-store";
 
@@ -995,13 +942,9 @@ interface DynamicCustomSectionProps {
   hasUiSource: boolean;
   lastFired: number | null;
   devices: Record<string, Device>;
-  control: (deviceId: string, actionType: string, params?: Record<string, unknown>) => Promise<void>;
-  publish: (topic: string, payload: string) => void;
   history: ExecutionEntry[];
-  read: (key: string) => unknown;
-  save: (key: string, value: unknown) => void;
-  saveAndFire: (key: string, value: unknown) => void;
-  fire: (eventName: string, payload?: Record<string, unknown>) => void;
+  /** Initial per-rule state snapshot passed to the sandbox at init. */
+  state: Record<string, unknown>;
 }
 
 function DynamicCustomSection({
@@ -1010,52 +953,31 @@ function DynamicCustomSection({
   hasUiSource,
   lastFired,
   devices,
-  control,
-  publish,
   history,
-  read,
-  save,
-  saveAndFire,
-  fire,
+  state,
 }: DynamicCustomSectionProps) {
-  const { Component, loading: dynamicLoading, error: dynamicError } = useDynamicComponent(ruleId, hasUiSource);
-  const [customFallback, setCustomFallback] = useState(false);
-
-  if (hasUiSource && dynamicLoading) {
+  // Custom UI runs inside an opaque-origin sandbox iframe. All privileged calls
+  // (control/publish/save/saveAndFire/fire/read) are handled by the shared host
+  // SdkBroker over the RPC channel — never by code passed into the frame.
+  if (hasUiSource) {
+    const propsPayload: PropsPayload = {
+      entityType: "automation",
+      ruleId,
+      ruleName: rule.name,
+      lastFired,
+      enabled: rule.enabled,
+      devices: Object.values(devices),
+      history,
+      state,
+    };
     return (
-      <div className="h-full flex items-center justify-center">
-        <Loader2 size={18} className="animate-spin text-[#6B7785]" />
-      </div>
-    );
-  }
-
-  if (hasUiSource && dynamicError) {
-    return (
-      <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#EF4444]/10 border border-[#EF4444]/30">
-        <AlertTriangle size={14} className="text-[#EF4444] shrink-0" />
-        <span className="text-xs text-[#EF4444]">{dynamicError}</span>
-      </div>
-    );
-  }
-
-  if (hasUiSource && Component && !customFallback) {
-    return (
-      <CustomComponentBoundary onFallback={() => setCustomFallback(true)}>
-        <Component
-          devices={Object.values(devices)}
-          ruleId={ruleId}
-          ruleName={rule.name}
-          lastFired={lastFired}
-          enabled={rule.enabled}
-          control={control}
-          publish={publish}
-          history={history}
-          read={read}
-          save={save}
-          saveAndFire={saveAndFire}
-          fire={fire}
-        />
-      </CustomComponentBoundary>
+      <SandboxHost
+        entityType="automation"
+        entityId={ruleId}
+        hasUiSource={hasUiSource}
+        props={propsPayload}
+        className="h-full w-full"
+      />
     );
   }
 

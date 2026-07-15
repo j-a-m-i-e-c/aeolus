@@ -13,6 +13,26 @@ export default defineConfig({
   server: {
     port: 3000,
   },
+  build: {
+    rollupOptions: {
+      // Two entries: the main dashboard app (index.html) and the self-contained
+      // sandbox runtime that executes INSIDE the opaque-origin iframe. The runtime
+      // is emitted at a stable, unhashed path so the static public/sandbox.html can
+      // reference it directly (`/assets/sandbox-runtime.js`).
+      input: {
+        index: path.resolve(__dirname, "index.html"),
+        "sandbox-runtime": path.resolve(__dirname, "src/sandbox/runtime/entry.ts"),
+      },
+      output: {
+        entryFileNames: (chunkInfo) =>
+          chunkInfo.name === "sandbox-runtime"
+            ? "assets/sandbox-runtime.js"
+            : "assets/[name]-[hash].js",
+        chunkFileNames: "assets/[name]-[hash].js",
+        assetFileNames: "assets/[name]-[hash][extname]",
+      },
+    },
+  },
   test: {
     globals: true,
     environment: "jsdom",
@@ -62,12 +82,17 @@ export default defineConfig({
         "src/components/SnippetPicker.tsx", // code snippet insertion
         "src/components/panes/StateHistoryPane.tsx", // time-series chart interaction
         "src/components/panes/UiTriggerButtonPane.tsx", // action dispatch UI
-        "src/hooks/useDynamicComponent.ts", // dynamic import (covered by rewriteImports test)
         "src/components/panes/MqttViewerPane.tsx", // MQTT message stream
         "src/components/panes/hue/HueTempSlider.tsx", // Hue slider
         "src/components/UserSelector.tsx", // user selection modal
         "src/pages/ManagementPage.tsx", // admin management page
         "src/components/InsightsButton.tsx", // AI insights button
+        // Sandbox runtime/host — requires real iframe + MessagePort (exercised by
+        // Playwright e2e, not jsdom unit tests). The pure logic (rpc-types, sdk-broker,
+        // sdk-client, module-loader, shim, sandbox-pool) IS unit-tested.
+        "src/sandbox/runtime/entry.ts", // iframe bootstrap (postMessage + createRoot)
+        "src/sandbox/useSandboxedComponent.ts", // iframe lifecycle hook (real DOM + MessageChannel)
+        "src/sandbox/SandboxHost.tsx", // React component mounting real iframes (hook requires real iframe)
       ],
       thresholds: {
         lines: 90,

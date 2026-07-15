@@ -43,9 +43,10 @@ vi.mock("../TriggerSelector", () => ({
   ),
 }));
 
-const useDynamicComponentMock = vi.fn();
-vi.mock("../../hooks/useDynamicComponent", () => ({
-  useDynamicComponent: (...args: unknown[]) => useDynamicComponentMock(...args),
+vi.mock("../../sandbox/SandboxHost", () => ({
+  SandboxHost: ({ entityType, entityId }: { entityType: string; entityId: string }) => (
+    <div data-testid="sandbox-host" data-entity-type={entityType} data-entity-id={entityId} />
+  ),
 }));
 
 const updatePaneConfig = vi.fn();
@@ -95,7 +96,6 @@ describe("AutomationPane — setup mode", () => {
   beforeEach(() => {
     mockAuthFetch.mockReset();
     updatePaneConfig.mockClear();
-    useDynamicComponentMock.mockReturnValue({ Component: null, loading: false, error: null });
   });
 
   it("renders the setup form with the logic editor and a disabled Save", () => {
@@ -153,7 +153,6 @@ describe("AutomationPane — status mode", () => {
   beforeEach(() => {
     mockAuthFetch.mockReset();
     updatePaneConfig.mockClear();
-    useDynamicComponentMock.mockReturnValue({ Component: null, loading: false, error: null });
   });
 
   it("loads the rule and shows its topic + activity feed (no ui/structured)", async () => {
@@ -203,16 +202,13 @@ describe("AutomationPane — status mode", () => {
     expect(await screen.findByTestId("flow-diagram")).toBeInTheDocument();
   });
 
-  it("renders the dynamic custom component when the rule has uiSource", async () => {
+  it("renders SandboxHost with entityType=automation and the rule id when uiSource present", async () => {
     routeStatus({ ...RULE, uiSource: "export default () => null" });
-    useDynamicComponentMock.mockReturnValue({
-      Component: () => <div data-testid="dynamic-component" />,
-      loading: false,
-      error: null,
-    });
     render(<AutomationPane config={{ ruleId: "r1" } as unknown as PaneConfig} />);
-    expect(await screen.findByTestId("custom-boundary")).toBeInTheDocument();
-    expect(screen.getByTestId("dynamic-component")).toBeInTheDocument();
+    const host = await screen.findByTestId("sandbox-host");
+    expect(host).toBeInTheDocument();
+    expect(host).toHaveAttribute("data-entity-type", "automation");
+    expect(host).toHaveAttribute("data-entity-id", "r1");
   });
 
   it("shows the not-found state and resets the pane", async () => {

@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Aeolus Sandbox</title>
+    <!--
+      This document is loaded into an opaque-origin sandboxed iframe
+      (sandbox="allow-scripts", no allow-same-origin). Its Content-Security-Policy
+      is served by nginx (see frontend/nginx.conf, location = /sandbox.html):
+      it permits executing the bundled runtime + the compiled component module
+      (script-src 'self' blob:) but blocks network egress (connect-src 'none'),
+      so the Aeolus UI SDK over the RPC channel is the only interaction path.
+      No inline privileged data is placed here.
+    -->
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: transparent;
+        color: #e6edf3;
+        font-family: Inter, system-ui, sans-serif;
+      }
+      #sandbox-root {
+        width: 100%;
+        height: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="sandbox-root"></div>
+    <script type="module" src="/assets/sandbox-runtime.js"></script>
+  </body>
+</html>
