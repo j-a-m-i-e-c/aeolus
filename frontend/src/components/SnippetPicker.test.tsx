@@ -1,4 +1,4 @@
-// frontend/src/components/SnippetPicker.test.tsx — Code snippet picker
+// frontend/src/components/SnippetPicker.test.tsx — Unit tests for SnippetPicker
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
@@ -6,78 +6,133 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 const { mockAuthFetch } = vi.hoisted(() => ({ mockAuthFetch: vi.fn() }));
 vi.mock("../lib/auth-fetch", () => ({ authFetch: mockAuthFetch }));
 
+// SnippetPicker uses import.meta.env.VITE_API_URL at module level — vitest handles it via .env
+
 import { SnippetPicker } from "./SnippetPicker";
 
-const API_SNIPPETS = [
+const MOCK_SNIPPETS = [
   {
     category: "MQTT",
     icon: "radio",
     snippets: [
-      { id: "s1", name: "Publish", description: "Publish a message", code: "mqtt.publish('a','b')" },
-      { id: "s2", name: "Subscribe", description: "Subscribe to topic", code: "mqtt.sub('a')" },
+      { id: "mqtt-pub", name: "Publish", description: "Publish a message", code: "mqtt.publish('topic', 'msg');" },
+      { id: "mqtt-sub", name: "Subscribe", description: "Subscribe to topic", code: "mqtt.subscribe('topic');" },
+    ],
+  },
+  {
+    category: "Devices",
+    icon: "cpu",
+    snippets: [
+      { id: "dev-toggle", name: "Toggle", description: "Toggle a device", code: "devices.action('id', 'toggle');" },
     ],
   },
 ];
 
-function jsonResponse(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), { status });
-}
-
 describe("SnippetPicker", () => {
+  const onInsert = vi.fn();
+  const onClose = vi.fn();
+
   beforeEach(() => {
+    onInsert.mockReset();
+    onClose.mockReset();
     mockAuthFetch.mockReset();
-    mockAuthFetch.mockResolvedValue(jsonResponse(API_SNIPPETS));
   });
 
-  it("shows a loading state then renders snippet groups", async () => {
-    render(<SnippetPicker onInsert={() => {}} />);
+  function renderWithLogicMode() {
+    mockAuthFetch.mockResolvedValue({
+      ok: true,
+      json: async () => MOCK_SNIPPETS,
+    });
+    return render(<SnippetPicker onInsert={onInsert} onClose={onClose} mode="logic" />);
+  }
+
+  it("shows loading state initially", () => {
+    mockAuthFetch.mockReturnValue(new Promise(() => {})); // never resolves
+    render(<SnippetPicker onInsert={onInsert} mode="logic" />);
     expect(screen.getByText("Loading snippets…")).toBeInTheDocument();
-    expect(await screen.findByText("MQTT")).toBeInTheDocument();
   });
 
-  it("expands a group and shows snippets", async () => {
-    render(<SnippetPicker onInsert={() => {}} />);
-    await screen.findByText("MQTT");
-    // First group auto-expanded
-    expect(screen.getByText("Publish")).toBeInTheDocument();
+  it("fetches snippets from the API and displays groups", async () => {
+    renderWithLogicMode();
+    await waitFor(() => expect(screen.getByText("MQTT")).toBeInTheDocument());
+    expect(screen.getByText("Devices")).toBeInTheDocument();
+  });
+
+  it("first group is expanded by default showing its snippets", async () => {
+    renderWithLogicMode();
+    await waitFor(() => expect(screen.getByText("Publish")).toBeInTheDocument());
     expect(screen.getByText("Subscribe")).toBeInTheDocument();
   });
 
-  it("calls onInsert with the snippet code when clicked", async () => {
-    const onInsert = vi.fn();
-    render(<SnippetPicker onInsert={onInsert} />);
-    await screen.findByText("Publish");
+  it("toggling a collapsed group expands it", async () => {
+    renderWithLogicMode();
+    await waitFor(() => expect(screen.getByText("Devices")).toBeInTheDocument());
+    // Devices group starts collapsed
+    expect(screen.queryByText("Toggle")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText("Devices"));
+    expect(screen.getByText("Toggle")).toBeInTheDocument();
+  });
+
+  it("toggling an expanded group collapses it", async () => {
+    renderWithLogicMode();
+    await waitFor(() => expect(screen.getByText("Publish")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("MQTT"));
+    expect(screen.queryByText("Publish")).not.toBeInTheDocument();
+  });
+
+  it("calls onInsert with snippet code when clicked", async () => {
+    renderWithLogicMode();
+    await waitFor(() => expect(screen.getByText("Publish")).toBeInTheDocument());
     fireEvent.click(screen.getByText("Publish"));
-    expect(onInsert).toHaveBeenCalledWith("mqtt.publish('a','b')");
+    expect(onInsert).toHaveBeenCalledWith("mqtt.publish('topic', 'msg');");
+  });
+
+  it("shows 'Inserted' indicator briefly after insert", async () => {
+    renderWithLogicMode();
+    await waitFor(() => expect(screen.getByText("Publish")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("Publish"));
+    expect(screen.getByText("Inserted")).toBeInTheDocument();
   });
 
   it("filters snippets by search query", async () => {
-    render(<SnippetPicker onInsert={() => {}} />);
-    await screen.findByText("Publish");
-    fireEvent.change(screen.getByPlaceholderText("Search snippets…"), { target: { value: "Subscribe" } });
-    expect(screen.queryByText("Publish")).not.toBeInTheDocument();
-    expect(screen.getByText("Subscribe")).toBeInTheDocument();
+    renderWithLogicMode();
+    await waitFor(() => expect(screen.getByText("Publish")).toBeInTheDocument());
+    fireEvent.change(screen.getByPlaceholderText("Search snippets…"), { target: { value: "toggle" } });
+    // MQTT group should be hidden (no matching snippets)
+    expect(screen.queryByText("MQTT")).not.toBeInTheDocument();
+    // Devices group should remain visible since it has a matching snippet
+    expect(screen.getByText("Devices")).toBeInTheDocument();
+    // Expand the filtered Devices group to see the snippet
+    fireEvent.click(screen.getByText("Devices"));
+    expect(screen.getByText("Toggle")).toBeInTheDocument();
   });
 
-  it("shows 'No snippets match' when search has no results", async () => {
-    render(<SnippetPicker onInsert={() => {}} />);
-    await screen.findByText("Publish");
-    fireEvent.change(screen.getByPlaceholderText("Search snippets…"), { target: { value: "zzzzz" } });
+  it("shows no-results message when search has no matches", async () => {
+    renderWithLogicMode();
+    await waitFor(() => expect(screen.getByText("Publish")).toBeInTheDocument());
+    fireEvent.change(screen.getByPlaceholderText("Search snippets…"), { target: { value: "zzznomatch" } });
     expect(screen.getByText(/No snippets match/)).toBeInTheDocument();
   });
 
   it("calls onClose when close button is clicked", async () => {
-    const onClose = vi.fn();
-    render(<SnippetPicker onInsert={() => {}} onClose={onClose} />);
-    await screen.findByText("Publish");
+    renderWithLogicMode();
+    await waitFor(() => expect(screen.getByText("Snippets")).toBeInTheDocument());
     fireEvent.click(screen.getByTitle("Close snippets"));
     expect(onClose).toHaveBeenCalled();
   });
 
-  it("in UI mode, falls back to hardcoded snippets if API fails", async () => {
-    mockAuthFetch.mockRejectedValue(new Error("fail"));
-    render(<SnippetPicker onInsert={() => {}} mode="ui" />);
-    // Should still render the hardcoded UI snippets
-    await waitFor(() => expect(screen.getByText("Status Card")).toBeInTheDocument());
+  it("falls back to hardcoded UI snippets when API fails in UI mode", async () => {
+    mockAuthFetch.mockRejectedValue(new Error("network"));
+    render(<SnippetPicker onInsert={onInsert} mode="ui" />);
+    await waitFor(() => expect(screen.getByText("General")).toBeInTheDocument());
+    expect(screen.getByText("Status Card")).toBeInTheDocument();
+  });
+
+  it("does not render anything when groups are empty and not loading", async () => {
+    mockAuthFetch.mockResolvedValue({ ok: true, json: async () => [] });
+    const { container } = render(<SnippetPicker onInsert={onInsert} mode="logic" />);
+    await waitFor(() => expect(screen.queryByText("Loading snippets…")).not.toBeInTheDocument());
+    // When groups are empty, the component returns null
+    expect(container.firstChild).toBeNull();
   });
 });

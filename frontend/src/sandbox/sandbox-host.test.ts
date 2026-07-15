@@ -21,7 +21,7 @@ vi.mock("../store/automation-state-store", () => ({
     () => mockStoreState,
     {
       getState: () => mockStoreState,
-      subscribe: (...args: unknown[]) => mockSubscribe(...args),
+      subscribe: (...args: unknown[]) => mockSubscribe(...(args as [])),
     },
   ),
 }));
@@ -296,7 +296,7 @@ describe("sandbox-host — panel path + subscribeState coalescing", () => {
 
     // Capture the zustand subscriber callback
     let storeCallback: ((state: { stateByRule: Record<string, Record<string, unknown>> }) => void) | null = null;
-    mockSubscribe.mockImplementation((cb: (state: { stateByRule: Record<string, Record<string, unknown>> }) => void) => {
+    (mockSubscribe as ReturnType<typeof vi.fn>).mockImplementation((cb: (state: { stateByRule: Record<string, Record<string, unknown>> }) => void) => {
       storeCallback = cb;
       return vi.fn();
     });

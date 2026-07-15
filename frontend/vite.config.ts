@@ -71,15 +71,11 @@ export default defineConfig({
         "src/components/Sidebar.tsx", // nav + tab DnD (DnD API not in jsdom)
         "src/components/panes/AutomationPane.tsx", // TODO: has tests but ~75% func coverage; close gap then remove
         "src/components/panes/HueControlPane.tsx", // color picker + sliders
-        "src/components/panes/KasaControlPane.tsx", // device control with actions
         "src/pages/UserManagementPage.tsx", // admin CRUD modals
         "src/pages/data-store/SettingsPanel.tsx", // config forms
         "src/pages/data-store/SetupWizard.tsx", // multi-step wizard
         "src/pages/data-store/CollectionDetail.tsx", // chart + query interaction
         "src/pages/data-store/CollectionList.tsx", // list + modals
-        "src/pages/data-store/DataExplorer.tsx", // tab navigation + query builder
-        "src/components/CommandPalette.tsx", // keyboard shortcut modal
-        "src/components/SnippetPicker.tsx", // code snippet insertion
         "src/components/panes/StateHistoryPane.tsx", // time-series chart interaction
         // Sandbox runtime/host — requires real iframe + MessagePort (exercised by
         // Playwright e2e, not jsdom unit tests). The pure logic (rpc-types, sdk-broker,

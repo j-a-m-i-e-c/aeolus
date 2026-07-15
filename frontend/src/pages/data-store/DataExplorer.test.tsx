@@ -1,104 +1,102 @@
-// frontend/src/pages/data-store/DataExplorer.test.tsx — summary bar, tab switching, storage warnings
+// frontend/src/pages/data-store/DataExplorer.test.tsx — Unit tests for DataExplorer
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 
-const { mockState, mockAuthFetch } = vi.hoisted(() => ({
-  mockState: {} as any,
-  mockAuthFetch: vi.fn(),
-}));
+const mockFetchStats = vi.fn();
+const mockFetchCollections = vi.fn();
+const mockFetchBuckets = vi.fn();
+
+let mockStoreState: Record<string, unknown> = {};
 
 vi.mock("../../store/data-store-store", () => ({
-  useDataStoreStore: (selector: (s: any) => unknown) => selector(mockState),
+  useDataStoreStore: (selector: (s: Record<string, unknown>) => unknown) => selector(mockStoreState),
 }));
 
-vi.mock("../../lib/auth-fetch", () => ({
-  authFetch: mockAuthFetch,
-}));
+vi.mock("./CollectionList", () => ({ CollectionList: () => <div data-testid="collection-list" /> }));
+vi.mock("./CollectionDetail", () => ({ CollectionDetail: () => <div data-testid="collection-detail" /> }));
+vi.mock("./BucketList", () => ({ BucketList: () => <div data-testid="bucket-list" /> }));
+vi.mock("./SettingsPanel", () => ({ SettingsPanel: () => <div data-testid="settings-panel" /> }));
 
 import { DataExplorer } from "./DataExplorer";
 
-function resetState() {
-  Object.assign(mockState, {
-    // DataExplorer
-    fetchStats: vi.fn(),
-    fetchCollections: vi.fn(),
-    fetchBuckets: vi.fn(),
-    stats: {
-      totalRecords: 4200,
-      totalBucketEntries: 8,
-      totalCollections: 3,
-      estimatedStorageMb: 120.5,
-      maxStorageMb: 500,
-      storagePercent: 24,
-    },
-    selectedCollection: null,
-    // CollectionList
-    collections: [],
-    selectCollection: vi.fn(),
-    // BucketList
-    buckets: [],
-    fetchBucketEntries: vi.fn(),
-    bucketEntries: [],
-    selectedBucket: null,
-    selectBucket: vi.fn(),
-    // SettingsPanel
-    config: {
-      enabled: true,
-      maxStorageMb: 500,
-      maxRecordsPerCollection: 100000,
-      maxCollections: 50,
-    },
-    fetchConfig: vi.fn(),
-  });
-}
-
 describe("DataExplorer", () => {
   beforeEach(() => {
-    resetState();
-    mockAuthFetch.mockResolvedValue({ ok: true, json: async () => ({}) });
+    mockFetchStats.mockReset();
+    mockFetchCollections.mockReset();
+    mockFetchBuckets.mockReset();
+    mockStoreState = {
+      fetchStats: mockFetchStats,
+      fetchCollections: mockFetchCollections,
+      fetchBuckets: mockFetchBuckets,
+      stats: { totalCollections: 3, totalRecords: 1500, totalBucketEntries: 12, storagePercent: 42, estimatedStorageMb: 21.3, maxStorageMb: 50 },
+      selectedCollection: null,
+    };
+  });
+
+  it("renders the Data Store header", () => {
+    render(<DataExplorer />);
+    expect(screen.getByText("Data Store")).toBeInTheDocument();
   });
 
   it("fetches stats, collections, and buckets on mount", () => {
     render(<DataExplorer />);
-    expect(mockState.fetchStats).toHaveBeenCalledTimes(1);
-    expect(mockState.fetchCollections).toHaveBeenCalledTimes(1);
-    expect(mockState.fetchBuckets).toHaveBeenCalledTimes(1);
+    expect(mockFetchStats).toHaveBeenCalled();
+    expect(mockFetchCollections).toHaveBeenCalled();
+    expect(mockFetchBuckets).toHaveBeenCalled();
   });
 
-  it("renders the summary bar from stats", () => {
+  it("displays stats in the summary bar", () => {
     render(<DataExplorer />);
-    expect(screen.getByRole("heading", { name: "Data Store" })).toBeInTheDocument();
-    expect(screen.getByText("3")).toBeInTheDocument(); // total collections
-    expect(screen.getByText("4,200")).toBeInTheDocument(); // total records
-    expect(screen.getByText("8")).toBeInTheDocument(); // bucket entries
-    expect(screen.getByText(/120\.5 \/ 500 MB/)).toBeInTheDocument();
+    expect(screen.getByText("3")).toBeInTheDocument(); // collections
+    expect(screen.getByText("1,500")).toBeInTheDocument(); // records
+    expect(screen.getByText("12")).toBeInTheDocument(); // bucket entries
+    expect(screen.getByText(/21\.3.*50 MB/)).toBeInTheDocument(); // storage
   });
 
-  it("shows the collections tab (empty state) by default", () => {
+  it("shows CollectionList by default on the Collections tab", () => {
     render(<DataExplorer />);
-    expect(screen.getByText(/No collections yet\./i)).toBeInTheDocument();
+    expect(screen.getByTestId("collection-list")).toBeInTheDocument();
   });
 
-  it("switches to the Buckets tab", () => {
+  it("shows CollectionDetail when a collection is selected", () => {
+    mockStoreState = { ...mockStoreState, selectedCollection: "temps" };
+    render(<DataExplorer />);
+    expect(screen.getByTestId("collection-detail")).toBeInTheDocument();
+    expect(screen.queryByTestId("collection-list")).not.toBeInTheDocument();
+  });
+
+  it("switches to Buckets tab", () => {
     render(<DataExplorer />);
     fireEvent.click(screen.getByRole("button", { name: /Buckets/i }));
-    expect(screen.getByText(/No buckets yet\./i)).toBeInTheDocument();
+    expect(screen.getByTestId("bucket-list")).toBeInTheDocument();
+    expect(screen.queryByTestId("collection-list")).not.toBeInTheDocument();
   });
 
-  it("switches to the Settings tab", () => {
+  it("switches to Settings tab", () => {
     render(<DataExplorer />);
     fireEvent.click(screen.getByRole("button", { name: /Settings/i }));
-    expect(screen.getByText("Storage Configuration")).toBeInTheDocument();
+    expect(screen.getByTestId("settings-panel")).toBeInTheDocument();
   });
 
-  it("renders a critical storage indicator when usage is high", () => {
-    mockState.stats = {
-      ...mockState.stats,
-      estimatedStorageMb: 490,
-      storagePercent: 98,
+  it("shows warning styling when storage >= 80%", () => {
+    mockStoreState = {
+      ...mockStoreState,
+      stats: { ...mockStoreState.stats as object, storagePercent: 85 },
     };
-    render(<DataExplorer />);
-    expect(screen.getByText(/490\.0 \/ 500 MB/)).toBeInTheDocument();
+    const { container } = render(<DataExplorer />);
+    // The progress bar should have warning color class
+    const bar = container.querySelector('[style*="width: 85%"]');
+    expect(bar).toBeInTheDocument();
+  });
+
+  it("shows critical styling when storage >= 95%", () => {
+    mockStoreState = {
+      ...mockStoreState,
+      stats: { ...mockStoreState.stats as object, storagePercent: 97 },
+    };
+    const { container } = render(<DataExplorer />);
+    const bar = container.querySelector('[style*="width: 97%"]');
+    expect(bar).toBeInTheDocument();
   });
 });

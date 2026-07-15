@@ -1,88 +1,138 @@
-// frontend/src/components/CommandPalette.test.tsx — Cmd+K quick search
+// frontend/src/components/CommandPalette.test.tsx — Unit tests for command palette
 
-import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
-
-vi.mock("framer-motion", () => {
-  const cache = new Map<string, React.FC<Record<string, unknown> & { children?: React.ReactNode }>>();
-  return {
-    AnimatePresence: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-    motion: new Proxy({}, {
-      get: (_t, key: string) => {
-        if (!cache.has(key)) {
-          cache.set(key, ({ children, ...rest }) => {
-            const { initial: _i, animate: _a, exit: _e, transition: _tr, ...dom } = rest;
-            return <div {...(dom as Record<string, unknown>)}>{children}</div>;
-          });
-        }
-        return cache.get(key);
-      },
-    }),
-  };
-});
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 
 vi.mock("../store/device-store", () => ({
-  useDeviceStore: (sel: (s: { devices: Record<string, unknown> }) => unknown) => sel({
-    devices: {
-      d1: { id: "d1", name: "Living Room Light", type: "light", topic: "light/living", state: {}, lastSeen: 0 },
-      d2: { id: "d2", name: "Kitchen Sensor", type: "sensor", topic: "sensor/kitchen", state: {}, lastSeen: 0 },
-    },
-  }),
+  useDeviceStore: (selector: (s: { devices: Record<string, unknown> }) => unknown) =>
+    selector({
+      devices: {
+        "light-1": { id: "light-1", name: "Bedroom Light", type: "light", integration: "hue", state: {} },
+        "sensor-2": { id: "sensor-2", name: "Kitchen Temp", type: "sensor", integration: "mqtt", state: {} },
+      },
+    }),
 }));
 
-vi.mock("../lib/api-client", () => ({ publishMqtt: vi.fn().mockResolvedValue({ success: true }) }));
+const mockPublishMqtt = vi.fn();
+vi.mock("../lib/api-client", () => ({
+  publishMqtt: (...args: unknown[]) => mockPublishMqtt(...args),
+}));
+
+vi.mock("framer-motion", () => ({
+  motion: {
+    div: ({ children, ...props }: Record<string, unknown>) => {
+      const { initial: _i, animate: _a, exit: _e, transition: _t, ...rest } = props;
+      return <div {...rest}>{children as React.ReactNode}</div>;
+    },
+  },
+  AnimatePresence: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}));
 
 import { CommandPalette } from "./CommandPalette";
 
 describe("CommandPalette", () => {
-  it("is hidden by default", () => {
-    render(<CommandPalette onSelectDevice={() => {}} />);
-    expect(screen.queryByPlaceholderText(/Search devices/)).not.toBeInTheDocument();
+  const onSelectDevice = vi.fn();
+
+  beforeEach(() => {
+    onSelectDevice.mockReset();
+    mockPublishMqtt.mockReset();
+    mockPublishMqtt.mockResolvedValue({ success: true });
   });
 
-  it("opens on Ctrl+K and shows devices", () => {
-    render(<CommandPalette onSelectDevice={() => {}} />);
+  function openPalette() {
     fireEvent.keyDown(window, { key: "k", ctrlKey: true });
-    expect(screen.getByPlaceholderText(/Search devices/)).toBeInTheDocument();
-    expect(screen.getByText("Living Room Light")).toBeInTheDocument();
-    expect(screen.getByText("Kitchen Sensor")).toBeInTheDocument();
+  }
+
+  it("is not visible by default", () => {
+    render(<CommandPalette onSelectDevice={onSelectDevice} />);
+    expect(screen.queryByPlaceholderText(/search devices/i)).not.toBeInTheDocument();
   });
 
-  it("filters devices by search query", () => {
-    render(<CommandPalette onSelectDevice={() => {}} />);
-    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
-    fireEvent.change(screen.getByPlaceholderText(/Search devices/), { target: { value: "Kitchen" } });
-    expect(screen.getByText("Kitchen Sensor")).toBeInTheDocument();
-    expect(screen.queryByText("Living Room Light")).not.toBeInTheDocument();
+  it("opens with Ctrl+K and shows the search input", () => {
+    render(<CommandPalette onSelectDevice={onSelectDevice} />);
+    openPalette();
+    expect(screen.getByPlaceholderText(/search devices/i)).toBeInTheDocument();
   });
 
-  it("calls onSelectDevice when a device is clicked", () => {
-    const onSelect = vi.fn();
-    render(<CommandPalette onSelectDevice={onSelect} />);
-    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
-    fireEvent.click(screen.getByText("Living Room Light"));
-    expect(onSelect).toHaveBeenCalledWith("d1");
+  it("closes with Escape", () => {
+    render(<CommandPalette onSelectDevice={onSelectDevice} />);
+    openPalette();
+    expect(screen.getByPlaceholderText(/search devices/i)).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByPlaceholderText(/search devices/i)).not.toBeInTheDocument();
+  });
+
+  it("shows all devices when query is empty", () => {
+    render(<CommandPalette onSelectDevice={onSelectDevice} />);
+    openPalette();
+    expect(screen.getByText("Bedroom Light")).toBeInTheDocument();
+    expect(screen.getByText("Kitchen Temp")).toBeInTheDocument();
+  });
+
+  it("filters devices by name", () => {
+    render(<CommandPalette onSelectDevice={onSelectDevice} />);
+    openPalette();
+    fireEvent.change(screen.getByPlaceholderText(/search devices/i), { target: { value: "bedroom" } });
+    expect(screen.getByText("Bedroom Light")).toBeInTheDocument();
+    expect(screen.queryByText("Kitchen Temp")).not.toBeInTheDocument();
+  });
+
+  it("shows no results message when nothing matches", () => {
+    render(<CommandPalette onSelectDevice={onSelectDevice} />);
+    openPalette();
+    fireEvent.change(screen.getByPlaceholderText(/search devices/i), { target: { value: "zzznomatch" } });
+    expect(screen.getByText("No results")).toBeInTheDocument();
   });
 
   it("shows a publish option when query contains a slash", () => {
-    render(<CommandPalette onSelectDevice={() => {}} />);
-    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
-    fireEvent.change(screen.getByPlaceholderText(/Search devices/), { target: { value: "test/topic" } });
-    expect(screen.getByText("Publish to test/topic")).toBeInTheDocument();
+    render(<CommandPalette onSelectDevice={onSelectDevice} />);
+    openPalette();
+    fireEvent.change(screen.getByPlaceholderText(/search devices/i), { target: { value: "home/lights" } });
+    expect(screen.getByText("Publish to home/lights")).toBeInTheDocument();
   });
 
-  it("closes on Escape", () => {
-    render(<CommandPalette onSelectDevice={() => {}} />);
-    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
-    expect(screen.getByPlaceholderText(/Search devices/)).toBeInTheDocument();
-    fireEvent.keyDown(window, { key: "Escape" });
-    expect(screen.queryByPlaceholderText(/Search devices/)).not.toBeInTheDocument();
+  it("calls onSelectDevice and closes when a device is clicked", () => {
+    render(<CommandPalette onSelectDevice={onSelectDevice} />);
+    openPalette();
+    fireEvent.click(screen.getByText("Bedroom Light"));
+    expect(onSelectDevice).toHaveBeenCalledWith("light-1");
+    expect(screen.queryByPlaceholderText(/search devices/i)).not.toBeInTheDocument();
   });
 
-  it("shows 'No results' when nothing matches", () => {
-    render(<CommandPalette onSelectDevice={() => {}} />);
-    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
-    fireEvent.change(screen.getByPlaceholderText(/Search devices/), { target: { value: "zzzznotfound" } });
-    expect(screen.getByText("No results")).toBeInTheDocument();
+  it("selects device with Enter key", () => {
+    render(<CommandPalette onSelectDevice={onSelectDevice} />);
+    openPalette();
+    const input = screen.getByPlaceholderText(/search devices/i);
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onSelectDevice).toHaveBeenCalledWith("light-1");
+  });
+
+  it("navigates with arrow keys", () => {
+    render(<CommandPalette onSelectDevice={onSelectDevice} />);
+    openPalette();
+    const input = screen.getByPlaceholderText(/search devices/i);
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onSelectDevice).toHaveBeenCalledWith("sensor-2");
+  });
+
+  it("publishes MQTT message when publish option is selected", async () => {
+    vi.spyOn(window, "prompt").mockReturnValue("test-payload");
+    render(<CommandPalette onSelectDevice={onSelectDevice} />);
+    openPalette();
+    fireEvent.change(screen.getByPlaceholderText(/search devices/i), { target: { value: "home/test" } });
+    fireEvent.click(screen.getByText("Publish to home/test"));
+    await waitFor(() => expect(mockPublishMqtt).toHaveBeenCalledWith("home/test", "test-payload"));
+    vi.restoreAllMocks();
+  });
+
+  it("does not publish when prompt is cancelled", async () => {
+    vi.spyOn(window, "prompt").mockReturnValue(null);
+    render(<CommandPalette onSelectDevice={onSelectDevice} />);
+    openPalette();
+    fireEvent.change(screen.getByPlaceholderText(/search devices/i), { target: { value: "home/test" } });
+    fireEvent.click(screen.getByText("Publish to home/test"));
+    expect(mockPublishMqtt).not.toHaveBeenCalled();
+    vi.restoreAllMocks();
   });
 });
