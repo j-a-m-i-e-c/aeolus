@@ -58,7 +58,9 @@ Follow Conventional Commits (https://www.conventionalcommits.org/).
 - supertest for API integration tests
 - Test files live next to source: `*.test.ts`, `*.property.test.ts`
 - Run `npx vitest run` before committing
-- Run `npx tsc --noEmit` to verify type safety
+- Run `npx tsc --noEmit` to verify type safety (backend)
+- Run `npx tsc --noEmit -p tsconfig.json` in `frontend/` to verify frontend type safety (this is what CI runs — it excludes `@types/node` so test files using Node APIs need `/// <reference types="node" />`)
+- Run `npx vitest run --coverage` to verify coverage thresholds are met
 
 ### ESLint
 - Flat config at `eslint.config.js`
