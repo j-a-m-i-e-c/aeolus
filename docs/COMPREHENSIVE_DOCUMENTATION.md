@@ -127,13 +127,16 @@ aeolus/
 │   │   ├── state-history.ts          # Per-device state history with throttling + pruning
 │   │   └── types.ts                  # All shared TypeScript interfaces
 │   ├── mqtt/
-│   │   ├── mqtt-service.ts           # Broker connection + message handling
+│   │   ├── mqtt-service.ts           # Broker connection + message handling + ack routing
+│   │   ├── command-envelope.ts       # Correlated command envelope builder (MQTT 5 properties + payload mirroring)
 │   │   ├── topic-parser.ts           # MQTT topic → device metadata
 │   │   └── topic-parser.test.ts      # Unit tests
 │   ├── automations/
 │   │   ├── automation-engine.ts      # Rule evaluation engine (dispatches to Sandbox or ActionExecutor)
 │   │   ├── action-executor.ts        # Central dispatch service for all automation actions
 │   │   ├── automation-state-store.ts # Per-rule key-value store with SQLite persistence + in-memory cache
+│   │   ├── command-lifecycle.ts      # Command lifecycle transition table + tier selection helpers
+│   │   ├── pending-command-tracker.ts # In-memory correlation of MQTT acks/observations to commands
 │   │   ├── cron-timer-manager.ts     # Per-rule cron timer management (start/stop/stopAll)
 │   │   ├── cron-utils.ts             # Shared cron expression utilities (validation, presets, description)
 │   │   ├── transpiler.ts             # TypeScript → JavaScript transpilation (logic scripts + UI components)
@@ -146,7 +149,7 @@ aeolus/
 │   │   ├── condition-registry.ts     # Factory registry for condition predicates
 │   │   └── rule-registry.ts          # In-memory rule store
 │   ├── connectors/                   # Pluggable connector framework
-│   │   ├── connector.interface.ts    # Core interfaces (Connector, ConnectorMetadata, CapabilityDescriptor, etc.)
+│   │   ├── connector.interface.ts    # Core interfaces (Connector, ConnectorMetadata, CapabilityDescriptor, AcknowledgementCapability, etc.)
 │   │   ├── capability-action-map.ts  # Fallback capability → action descriptor mapping + MQTT_COMMAND_DESCRIPTOR
 │   │   ├── connector-registry.ts     # Auto-discovery + manual registration of connector modules
 │   │   ├── connector-manager.ts      # Lifecycle management (enable/disable/poll/action routing)
@@ -174,7 +177,14 @@ aeolus/
 │   ├── websocket/
 │   │   └── ws-server.ts              # WebSocket server
 │   ├── db/
-│   │   └── database.ts              # better-sqlite3 setup + schema (devices, automation_rules, automation_state, tabs, panes, connectors, auth, history)
+│   │   ├── database.ts              # better-sqlite3 setup + getDatabase() entry point
+│   │   ├── migration-runner.ts      # Versioned, transactional migration runner
+│   │   ├── migration-errors.ts      # Structured error types (MigrationError, DatabaseNewerThanBinaryError, etc.)
+│   │   └── migrations/
+│   │       ├── index.ts             # Migration interface, ordered registry, duplicate-id guard
+│   │       ├── 001-baseline.ts      # Baseline schema (13 tables, 3 indexes)
+│   │       ├── 002-automation-rules-columns.ts  # Guarded column adds + rule_type backfill
+│   │       └── 003-devices-remove-check.ts      # Guarded CHECK constraint removal
 │   ├── config.ts                     # Environment variable loading
 │   ├── log-buffer.ts                 # In-memory circular buffer for recent log entries
 │   ├── logger.ts                     # pino logger with log buffer interception
@@ -403,7 +413,7 @@ Factory registry for condition predicates, keyed by condition type string. Repla
 
 ### Action Executor (`src/automations/action-executor.ts`)
 
-Central dispatch service for all automation actions. Every action — whether from a form rule or a script rule — flows through this single pipeline. Uses a **handler registry** pattern — a `Map<string, ActionHandler>` — instead of a switch statement, so adding a new action type means calling `registerHandler()` and nothing else. The `execute()` method returns an `ActionResult { success, data?, error? }` — it never throws.
+Central dispatch service for all automation actions. Every action — whether from a form rule or a script rule — flows through this single pipeline. Uses a **handler registry** pattern — a `Map<string, ActionHandler>` — instead of a switch statement, so adding a new action type means calling `registerHandler()` and nothing else. The `execute()` method returns an `ActionResult { success, data?, error?, lifecycleState? }` — it never throws.
 
 - `ActionDescriptor.type` is an open `string`, not a fixed union — any action type is accepted
 - `registerHandler(type, handler)` — register a handler for an action type (overwrites if already registered)
@@ -415,8 +425,10 @@ Central dispatch service for all automation actions. Every action — whether fr
   - `log` — logs a message from an automation rule
   - `delay` — pauses execution for a specified duration (`setTimeout` wrapper)
   - `webhook` — sends an HTTP request via `fetch()` with configurable method, headers, and body
-- `execute()` looks up the handler by `action.type` in the registry; if no handler is found, logs a warning with the unrecognised type and rule ID
+- `execute(action, ruleId, confirm?)` looks up the handler by `action.type` in the registry; if no handler is found, logs a warning with the unrecognised type and rule ID
 - Each action is wrapped in try/catch — errors are logged with the rule ID, never thrown
+- **Command Lifecycle:** every command passes through explicit lifecycle states (`REQUESTED → DISPATCHED | FAILED`). When a device declares acknowledgement capability or `confirm` options are supplied, the command registers with the `PendingCommandTracker` and awaits the terminal state (`ACKNOWLEDGED`, `OBSERVED`, `TIMED_OUT`, or `STATE_MISMATCH`).
+- **Confirmation tier selection:** the executor picks the highest available tier — Observed (when `confirm` present) > Acknowledged (when connector declares capability) > Dispatch (default). Dispatch-only commands resolve synchronously.
 - Emits `AUTOMATION_FIRED` on the event bus after each successful action
 - `executeSequence()` runs actions in order, continuing on individual failures
 
@@ -445,10 +457,12 @@ Secure execution environment for user-authored automation scripts using `isolate
 
 - Creates a fresh V8 isolate per execution with a 32 MB memory limit
 - Enforces a 5-second execution timeout to prevent infinite loops
+- **Truthful execution results:** `execute()` returns a discriminated `SandboxExecutionResult` that is either `{ success: true }` or `{ success: false, error, reason }` where `reason` is one of `"runtime"`, `"timeout"`, `"memory"`, or `"unavailable"`. It resolves for every outcome and never rejects the promise.
+- **Error classification precedence:** timeout signature first, memory (isolate disposed or memory-related message) second, runtime (any other error) last. This ensures the AutomationEngine records true failures instead of reporting all executions as successful.
 - Exposes a controlled API surface as globals: `devices`, `mqtt`, `log`, `context`, `http`, `automation`, `state`, `db`
 - `devices.get/list/filter` — synchronous, data copied into isolate via `ivm.ExternalCopy`
-- `devices.action()` — host-side callback via `ivm.Reference` delegating to ConnectorManager.executeAction(); returns `ActionResult { success, data?, error? }` (never throws)
-- `devices.actionAll(filter, actionType, params)` — bulk execution across all devices matching the filter via `Promise.allSettled`; returns `BulkActionResult { total, succeeded, failed, results[] }` (never throws)
+- `devices.action(deviceId, actionType, params?, confirm?)` — host-side callback via `ivm.Reference` delegating to ActionExecutor; returns `ActionResult { success, data?, error?, lifecycleState? }` (never throws). Optional 4th `confirm` argument enables physical-effect confirmation (see Command Lifecycle below).
+- `devices.actionAll(filter, actionType, params?, confirm?)` — bulk execution across all devices matching the filter via `Promise.allSettled`; returns `BulkActionResult { total, succeeded, failed, results[] }` (never throws). Each device gets its own `correlationId` for independent tracking.
 - `mqtt.publish()` — host-side callback via `ivm.Reference` delegating to MqttService
 - `log.info/warn/error` — host-side callbacks delegating to the application logger with ruleId context
 - `context` — frozen object with `topic`, `deviceId`, `state`, `timestamp` from the triggering event
@@ -530,10 +544,52 @@ Custom automation UI components are transpiled on the backend at save time and l
 In-memory ring buffer that records every automation execution for debugging.
 
 - Stores up to 200 entries in a ring buffer (oldest evicted when full)
-- Each entry records: rule ID, rule name, rule type, trigger topic, actions with success/failure, duration, and timestamp
+- Each entry records: rule ID, rule name, rule type, trigger topic, actions with success/failure/reason/lifecycleState, duration, and timestamp
+- `reason` field on action entries categorizes script failures as `"runtime"`, `"timeout"`, `"memory"`, or `"unavailable"`
+- `lifecycleState` field on action entries records the terminal command lifecycle state (e.g. `"DISPATCHED"`, `"OBSERVED"`, `"TIMED_OUT"`)
 - `list(limit?)` returns the most recent entries (newest first)
 - `getByRuleId(ruleId)` filters entries for a specific rule
 - Exposed via `GET /api/automations/history` for the frontend
+
+### Command Lifecycle (`src/automations/command-lifecycle.ts`)
+
+Pure helper module that defines the ordered lifecycle states a device command passes through and enforces monotonic-advance transitions. Used by both the ActionExecutor and PendingCommandTracker.
+
+- `canTransition(from, to)` — returns true when the transition is allowed by the state machine
+- `isTerminal(state)` — returns true when no further transition is possible
+- `isSuccessState(state)` — returns true for states that can represent success (DISPATCHED, ACKNOWLEDGED, OBSERVED)
+- `selectRequiredTier(hasConfirm, hasAckCapability)` — selects the highest available tier: Observed > Acknowledged > Dispatch
+
+**Command lifecycle flow:**
+```
+REQUESTED → DISPATCHED (broker/hub accepted) or FAILED (dispatch error)
+DISPATCHED → ACKNOWLEDGED (device confirms) → OBSERVED (physical effect confirmed)
+                                             → TIMED_OUT | STATE_MISMATCH
+DISPATCHED → OBSERVED | FAILED | TIMED_OUT | STATE_MISMATCH (direct observation without ack)
+```
+
+Devices without acknowledgement capability skip the ACKNOWLEDGED state entirely. Dispatch-only commands terminate truthfully at DISPATCHED — Aeolus never fabricates an ACKNOWLEDGED result from broker receipt alone.
+
+### Pending Command Tracker (`src/automations/pending-command-tracker.ts`)
+
+In-memory registry of outstanding commands awaiting acknowledgement and/or observation. Correlates MQTT acknowledgements back to the dispatched command using a `correlationId`.
+
+- `register(command)` — registers a dispatched command; returns a promise resolving once with the terminal resolution (never rejects). Arms an OS timer for timeout.
+- `route(message)` — routes a correlated ack message to its pending command. Idempotent per tier (duplicate acks are absorbed).
+- `observeState(deviceId, state)` — feeds ambient `DEVICE_STATE_CHANGE` events for observation-only confirmation.
+- Per-command timeout fires independently of MQTT connectivity — commands never hang indefinitely.
+- Uses the `command-lifecycle.ts` transition guards for all state changes.
+- On process restart, outstanding commands are lost (purely in-memory — accepted limitation, bounded by per-command timeout).
+
+### Command Envelope (`src/mqtt/command-envelope.ts`)
+
+Builder for correlated MQTT command payloads. Assigns a `correlationId` (UUID) and `responseTopic`, mirrored in BOTH the MQTT 5 message properties (Correlation Data / Response Topic) AND the JSON payload, so firmware reading either mechanism can reply.
+
+### MQTT Ack Routing
+
+The `MqttService` subscribes to the `aeolus/acks/#` topic space. Messages on this space are routed to the `PendingCommandTracker` rather than emitted as ordinary `DEVICE_STATE_CHANGE` events. Correlation id resolution precedence: MQTT 5 Correlation Data property → payload `correlationId` field → no match.
+
+Normal (non-ack) topics continue to emit `DEVICE_STATE_CHANGE` and also feed `PendingCommandTracker.observeState()` for observation-only confirmation.
 
 ### Log Buffer (`src/log-buffer.ts`)
 
@@ -569,6 +625,8 @@ The connector framework is a pluggable architecture that replaces the previous h
 Connector devices flow through the same `DEVICE_STATE_CHANGE` event bus as MQTT devices, using synthetic topics in the format `connector/{integration}/{deviceId}`. This unifies the device pipeline so automations can match on connector device events using the standard topic pattern system.
 
 Each connector module optionally exports a `snippets: SnippetDescriptor[]` array — code templates for the automation script editor that appear grouped under the connector's display name in the snippet picker. Connectors can also optionally export `actionHandlers: Record<string, ActionHandler>` and `conditions: Record<string, ConditionFactory>` to contribute custom action handlers and condition factories to the automation system. When a connector is enabled, the ConnectorManager registers these with the ActionExecutor and ConditionRegistry respectively; when disabled, they are unregistered. This is part of the connector developer contract: when building a new connector, ship snippets, action handlers, and condition factories alongside it so users can write automations for your devices.
+
+**Acknowledgement Capability:** Connectors may optionally implement `getAcknowledgementCapability(deviceId)` to declare that a device can itself acknowledge command receipt/execution. Only devices with this capability can reach the `ACKNOWLEDGED` lifecycle state. The declaration includes optional `responseTopic`, `ackIndicatorField` (default "status"), and `ackIndicatorValues`. Devices without this declaration terminate at the Dispatch tier unless the caller supplies `confirm` options for observation.
 
 #### ConnectorRegistry (`src/connectors/connector-registry.ts`)
 
@@ -1235,7 +1293,20 @@ interface ActionResult {
   data?: Record<string, unknown>;
   /** Human-readable error message. Present when success is false. */
   error?: string;
+  /** Final command lifecycle state. Optional for backward compatibility — always populated by new code. */
+  lifecycleState?: CommandLifecycleState;
+  /** Correlation id assigned at dispatch. Present for MQTT commands that correlate. */
+  correlationId?: string;
 }
+
+type CommandLifecycleState =
+  | "REQUESTED"    // Command received, not yet dispatched
+  | "DISPATCHED"   // Broker/hub accepted the command
+  | "ACKNOWLEDGED" // Device itself confirmed receipt (capability-gated)
+  | "OBSERVED"     // Physical effect confirmed via state observation
+  | "FAILED"       // Dispatch or predicate failed
+  | "TIMED_OUT"    // Confirmation timeout elapsed
+  | "STATE_MISMATCH"; // Observed state contradicts expected effect
 ```
 
 ### BulkActionResult
@@ -1290,7 +1361,14 @@ interface ExecutionLogEntry {
   ruleName: string;
   ruleType: "file" | "form" | "script";
   triggerTopic: string;
-  actions: Array<{ type: string; target: string; success: boolean; error?: string }>;
+  actions: Array<{
+    type: string;
+    target: string;
+    success: boolean;
+    error?: string;
+    reason?: "runtime" | "timeout" | "memory" | "unavailable"; // Script failure cause
+    lifecycleState?: CommandLifecycleState; // Command outcome state
+  }>;
   duration: number;     // ms
   timestamp: number;
 }
@@ -1516,7 +1594,35 @@ CREATE INDEX idx_ds_records_collection_ts
 
 CREATE INDEX idx_ds_records_collection_tags
   ON ds_records(collection, tags);
+
+-- Migration history (versioned-db-migrations)
+CREATE TABLE schema_migrations (
+  id INTEGER PRIMARY KEY,        -- Migration_Id; enforces at-most-once
+  name TEXT NOT NULL,            -- Migration name for logs/history
+  applied_at INTEGER NOT NULL    -- Epoch ms when the migration was applied
+);
 ```
+
+### Database Migration System (`src/db/migration-runner.ts`)
+
+Versioned, ordered, transactional migration system that replaces the former ad-hoc `initSchema()` approach. Every schema change is now an explicitly numbered, guarded migration applied exactly once.
+
+- **Version tracking:** `schema_migrations` table records which migrations have run. Schema_Version = `MAX(id)`.
+- **Ordered, exactly-once:** Migrations are numbered (001, 002, 003...) and applied in ascending order. Each is skipped if already recorded.
+- **Transactional:** Each migration runs inside a `db.transaction()` — if `up()` throws, the transaction rolls back and no record is written. The runner halts on first failure.
+- **Legacy adoption:** Existing databases (created before version tracking) are detected via the `automation_rules` sentinel table and stamped at the baseline without re-running creates.
+- **Guarded migrations:** Each migration checks whether its change already exists before applying (e.g. checking `PRAGMA table_info` for columns, `sqlite_master` for CHECK constraints). Safe to run against databases at any intermediate state.
+- **Safety checkpoint:** Before migrating a non-empty database, a WAL-consistent backup is created at `<dbPath>.pre-migration.<timestamp>.bak`. Keeps the 5 most recent.
+- **Newer-than-binary fail-safe:** If the database has a migration record newer than the running binary expects, startup refuses to proceed (prevents silent corruption on downgrade).
+- **FK handling:** `PRAGMA foreign_keys` is toggled OFF outside each migration transaction (SQLite ignores it inside), then restored ON after commit with a `foreign_key_check` verification.
+- **Startup integration:** `getDatabase()` calls `runMigrations()` — either the DB reaches Expected_Version or the process fails to start.
+
+**Current migrations:**
+| Id | Name | Description |
+|----|------|-------------|
+| 1 | baseline | Full original schema (13 tables, 3 indexes) |
+| 2 | automation-rules-columns | Adds script-rule columns + rule_type backfill |
+| 3 | devices-remove-check | Removes CHECK constraint from devices table |
 
 ## Environment Variables
 
@@ -1681,6 +1787,7 @@ Three configurable levels managed from the dashboard: Open, Shared Password, or 
 - **Duration parser as pure module for property-based testing:** The `src/data-store/duration.ts` module has zero dependencies and no side effects, making it ideal for exhaustive property-based testing with fast-check. Separating it from the DataStore class keeps the test surface clean.
 - **Single DataStore class mirrors existing StateHistory/ConnectorStore patterns:** All logic (write, query, buckets, retention, config, safeguards) lives in one class that receives the better-sqlite3 Database instance. This consistency makes the codebase predictable — developers familiar with one storage component can immediately understand the others.
 - **better-sqlite3 for storage:** A native, synchronous SQLite binding with WAL mode. Synchronous calls keep the storage code simple (no Promise plumbing through the event path), and WAL mode gives good concurrent read performance. The tradeoff is a native addon that compiles per-platform — the Dockerfile builds it for ARM64.
+- **Versioned migrations over ad-hoc schema evolution:** The original `initSchema()` relied on `CREATE TABLE IF NOT EXISTS` + swallowed `ALTER TABLE` errors to be re-runnable on every boot. This gives no way to know what schema version a deployed database is at, no defined ordering, and no tested upgrade path. The migration runner tracks version via a `schema_migrations` table, applies numbered migrations transactionally in order exactly once, and gates startup on the DB reaching the expected version. Recovery is via per-migration rollback + a pre-migration file backup — no reverse/down migrations in v1, keeping it simple. The runner uses `schema_migrations` (a table with history) rather than `PRAGMA user_version` (a single integer with no audit trail) because the requirements demand observability of which migrations ran and when.
 - **EventEmitter over message queue:** Simple pub/sub is sufficient at MVP scale. No need for Redis/RabbitMQ for a local-first system.
 - **Zustand over Redux:** Lightweight, minimal boilerplate, matches the "clarity over decoration" design principle.
 - **Express over Fastify:** Broader ecosystem familiarity, easier WebSocket integration via ws library.

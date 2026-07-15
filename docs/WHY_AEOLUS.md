@@ -291,27 +291,40 @@ Connectors can optionally export `snippets` (code templates for the editor), `ac
 
 This is the contribution path: you buy some hardware (Shelly plugs, Zigbee sensors, a Sonos speaker, an industrial PLC), write a connector for it, and submit a PR. The platform grows one developer at a time, each bringing their own hardware. The person building a custom ocean-sensor buoy doesn't care how many integrations exist elsewhere — they care that they can support *their* device in an afternoon.
 
-### The Action System: Structured Results, Not Fire-and-Forget
+### The Action System: Verified Execution, Not Fire-and-Forget
 
-Every device action flows through a central `ActionExecutor` with a handler registry pattern:
+Every device action flows through a central `ActionExecutor` with a handler registry pattern and a **three-tier verification lifecycle**:
 
 ```
-devices.action("light-1", "setBrightness", { brightness: 80 })
+devices.action("pump-1", "start", { speed: 80 }, {
+  condition: (state) => state.running === true,
+  timeoutMs: 10000
+})
     │
-    ▼
-ActionExecutor.execute({ type: "device_action", target: "light-1", params: {...} })
+    ▼ REQUESTED
+ActionExecutor.execute(...)
     │
-    ▼
-ConnectorManager.executeAction("light-1", action)
+    ▼ DISPATCHED (broker/hub accepted the command)
+PendingCommandTracker.register(correlationId, timeout)
     │
-    ▼
-HueConnector.execute(action)  →  HTTP PUT to Hue bridge
+    ├─── Device publishes ack → ACKNOWLEDGED
     │
-    ▼
-ActionResult { success: true }  (or { success: false, error: "Bridge unreachable" })
+    ├─── Observed state satisfies predicate → OBSERVED ✓ (success: true)
+    │
+    ├─── Timeout elapses → TIMED_OUT ✗ (success: false)
+    │
+    └─── Observed state contradicts → STATE_MISMATCH ✗ (success: false)
 ```
 
-Built-in action handlers: `publish` (MQTT), `toggle`, `device_action`, `log`, `delay`, `webhook`. Connectors register additional handlers when enabled (`hue_scene`, `hue_color_loop`, etc.) and unregister them when disabled. The system never throws — every action returns an `ActionResult` with success/failure, so your logic can actually branch on whether a command worked.
+**Three truthful tiers, degrading by device capability:**
+
+1. **Dispatch (universal)** — the broker or hub accepted the command. Every device supports this. `DISPATCHED` is the honest terminal state for simple devices.
+2. **Acknowledged (capability-gated)** — the device itself confirms receipt. Only available when a connector declares an acknowledgement capability. Uses MQTT 5 Correlation Data and Response Topic properties for precise command-to-reply matching.
+3. **Observed (opt-in via `confirm`)** — a sensor or state reading confirms the physical effect. Works regardless of whether the actuator can acknowledge — you just need something that reports the resulting state.
+
+Built-in action handlers: `publish` (MQTT), `toggle`, `device_action`, `log`, `delay`, `webhook`. Connectors register additional handlers when enabled (`hue_scene`, `hue_color_loop`, etc.) and unregister them when disabled. The system never throws — every action returns an `ActionResult` with `success`, `lifecycleState`, and optional `error`, so your logic can branch on whether a command was sent, acknowledged, or physically confirmed.
+
+The same truthfulness extends to script execution: the sandbox reports whether a script actually ran to completion (vs. throwing, timing out at 5s, or exhausting 32MB), so the execution log, metrics, and downstream events reflect reality rather than assuming success.
 
 ---
 
@@ -470,9 +483,10 @@ All visible from the dashboard with dedicated panes — no external tooling need
 The entire platform state is one SQLite file. Copy it to a USB stick, put it on another Pi, `docker compose up` — you're running.
 
 - **Install** — `docker compose up`. Three containers: Mosquitto (MQTT broker), the Express backend (API + automation engine + WebSocket), and the React/nginx frontend.
-- **Updates** — `git pull && docker compose up -d --build`.
-- **Backup** — copy one `.db` file.
+- **Updates** — `git pull && docker compose up -d --build`. Schema migrations run automatically on startup — the database upgrades itself to the version the new binary expects, transactionally, with a pre-migration backup. No manual SQL, no downtime.
+- **Backup** — copy one `.db` file. (The migration system also creates automatic `.pre-migration.*.bak` snapshots before each upgrade.)
 - **Footprint** — ~150MB RAM, comfortable on a Raspberry Pi 4/5.
+- **Downgrade safety** — if you accidentally run an older binary against a newer database, Aeolus refuses to start rather than silently corrupting data.
 
 ### Security Hardening (From the Actual Image)
 

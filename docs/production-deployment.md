@@ -284,6 +284,10 @@ sudo cp ~/backups/aeolus-20240115-030000.db \
 docker compose up -d
 ```
 
+### Automatic pre-migration backups
+
+When Aeolus upgrades to a new version that includes schema migrations, it automatically creates a WAL-consistent backup of the database before applying any changes. These are stored alongside the DB file as `aeolus.db.pre-migration.<timestamp>.bak` (the 5 most recent are retained). If an upgrade goes wrong, you can restore from one of these without needing your own backup. Migrations are transactional — a failed migration rolls back cleanly and Aeolus refuses to start rather than leaving the database half-changed.
+
 ---
 
 ## 6. Monitoring
