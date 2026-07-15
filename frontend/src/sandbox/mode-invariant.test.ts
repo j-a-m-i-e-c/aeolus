@@ -1,3 +1,4 @@
+/// <reference types="node" />
 // frontend/src/sandbox/mode-invariant.test.ts — Asserts trusted and untrusted modes are identical in v1
 // Both modes must produce a frame with sandbox="allow-scripts" only and go through the same broker.
 
