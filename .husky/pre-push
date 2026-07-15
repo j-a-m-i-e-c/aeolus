@@ -1,10 +1,10 @@
 # Mirror the CI gates locally so pushes fail fast.
-# Type check, then run the test suite. Either failing aborts the push.
+# Type check, then run the test suite with coverage. Either failing aborts the push.
 echo "→ pre-push: type checking (tsc --noEmit)..."
 npx tsc --noEmit || exit 1
 
-echo "→ pre-push: running tests (vitest run)..."
-npm test || exit 1
+echo "→ pre-push: running tests with coverage (vitest run --coverage)..."
+npm test -- --coverage || exit 1
 
 echo "→ pre-push: frontend type check + tests..."
 (cd frontend && npx tsc --noEmit -p tsconfig.json && npm test) || exit 1
