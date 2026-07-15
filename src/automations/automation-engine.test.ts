@@ -31,7 +31,7 @@ describe("AutomationEngine", () => {
   });
 
   it("dispatches script rules through Sandbox when compiled_js is present", async () => {
-    const executeFn = vi.fn().mockResolvedValue(undefined);
+    const executeFn = vi.fn().mockResolvedValue({ success: true });
     const sandbox: Sandbox = { execute: executeFn } as unknown as Sandbox;
     const pushFn = vi.fn();
     const executionLog = { push: pushFn } as unknown as ExecutionLog;
@@ -113,7 +113,7 @@ describe("AutomationEngine", () => {
   });
 
   it("records failed script execution in ExecutionLog", async () => {
-    const executeFn = vi.fn().mockRejectedValue(new Error("sandbox boom"));
+    const executeFn = vi.fn().mockResolvedValue({ success: false, error: "sandbox boom", reason: "runtime" });
     const sandbox: Sandbox = { execute: executeFn } as unknown as Sandbox;
     const pushFn = vi.fn();
     const executionLog = { push: pushFn } as unknown as ExecutionLog;
@@ -177,7 +177,7 @@ describe("AutomationEngine", () => {
 
   it("records execution duration in the log entry", async () => {
     const executeFn = vi.fn().mockImplementation(
-      () => new Promise((r) => setTimeout(r, 20)),
+      () => new Promise((r) => setTimeout(() => r({ success: true }), 20)),
     );
     const sandbox: Sandbox = { execute: executeFn } as unknown as Sandbox;
     const pushFn = vi.fn();

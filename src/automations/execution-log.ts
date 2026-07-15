@@ -5,13 +5,25 @@
  * to keep memory usage bounded on constrained devices (Raspberry Pi).
  */
 
+import type { CommandLifecycleState } from "../core/types.js";
+import type { SandboxFailureReason } from "./sandbox.js";
+
 export interface ExecutionLogEntry {
   id: string;
   ruleId: string;
   ruleName: string;
   ruleType: "form" | "script";
   triggerTopic: string;
-  actions: Array<{ type: string; target: string; success: boolean; error?: string }>;
+  actions: Array<{
+    type: string;
+    target: string;
+    success: boolean;
+    error?: string;
+    /** Categorized script-failure cause (script rules only). Additive — optional. */
+    reason?: SandboxFailureReason;
+    /** Final command lifecycle state (device commands). Additive — optional. */
+    lifecycleState?: CommandLifecycleState;
+  }>;
   duration: number; // ms
   timestamp: number;
 }

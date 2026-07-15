@@ -20,6 +20,7 @@ import { migrateLegacyHueCredentials } from "./connectors/migrate-legacy-hue.js"
 import { ActionExecutor, handlePublish, handleToggle, handleDeviceAction, handleLog, handleDelay, handleWebhook } from "./automations/action-executor.js";
 import { ConditionRegistry } from "./automations/condition-registry.js";
 import { ExecutionLog } from "./automations/execution-log.js";
+import { PendingCommandTracker } from "./automations/pending-command-tracker.js";
 import { Sandbox } from "./automations/sandbox.js";
 import { AutomationStateStore } from "./automations/automation-state-store.js";
 import { WsServer } from "./websocket/ws-server.js";
@@ -74,7 +75,7 @@ async function main(): Promise<void> {
 
   // 3. MQTT Service
   const mqttService = new MqttService(
-    { brokerUrl: config.mqttBrokerUrl, topics: config.mqttTopics },
+    { brokerUrl: config.mqttBrokerUrl, topics: config.mqttTopics, ackTopicFilter: "aeolus/acks/#" },
     eventBus
   );
 
@@ -98,10 +99,18 @@ async function main(): Promise<void> {
   migrateLegacyHueCredentials(connectorStore);
 
   // 5. Action Executor, Execution Log, and Sandbox
+  // Tracker correlates MQTT acknowledgements/observations back to dispatched
+  // commands; injected into both the ActionExecutor (register) and the MQTT
+  // ingestion path (route/observeState).
+  const pendingCommandTracker = new PendingCommandTracker();
+  mqttService.setAckRouter(pendingCommandTracker);
+
   const actionExecutor = new ActionExecutor({
     mqttService,
     connectorManager,
     logger,
+    deviceRegistry: registry,
+    pendingCommandTracker,
   });
 
   // Register built-in action handlers

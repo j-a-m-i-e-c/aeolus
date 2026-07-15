@@ -2,7 +2,7 @@
 
 import type { DeviceRegistry } from "../core/device-registry.js";
 import type { Device, Action, ActionResult } from "../core/types.js";
-import type { CapabilityDescriptor } from "./connector.interface.js";
+import type { CapabilityDescriptor, AcknowledgementCapability } from "./connector.interface.js";
 import { CAPABILITY_ACTION_MAP, MQTT_COMMAND_DESCRIPTOR } from "./capability-action-map.js";
 import type { ConnectorRegistry } from "./connector-registry.js";
 import type { MqttService } from "../mqtt/mqtt-service.js";
@@ -51,7 +51,11 @@ export class ActionRouter {
    *
    * Requirements: 1.2, 1.3, 1.4, 5.1–5.6, 6.1–6.7
    */
-  async executeAction(deviceId: string, action: Action): Promise<ActionResult> {
+  async executeAction(
+    deviceId: string,
+    action: Action,
+    correlation?: { correlationId: string; responseTopic: string },
+  ): Promise<ActionResult> {
     // Task 5.2 — device-not-found guard
     const device = this.deviceRegistry.getById(deviceId);
     if (!device) {
@@ -78,7 +82,7 @@ export class ActionRouter {
 
     // Task 5.4 — MQTT command publishing path
     if (device.integration === "mqtt") {
-      return this.executeMqttAction(device, action);
+      return this.executeMqttAction(device, action, correlation);
     }
 
     // Task 5.5 — connector execute with try/catch
@@ -240,10 +244,35 @@ export class ActionRouter {
   }
 
   /**
-   * Execute an action on an MQTT device by publishing to its command topic.
-   * Requirements: 5.1–5.6
+   * Return the acknowledgement capability declared for a device by its
+   * connector, or undefined when none is declared. MQTT devices without a
+   * connector-declared capability default to no acknowledgement (Dispatch tier).
+   * Requirements: 9.1, 9.2
    */
-  private executeMqttAction(device: Device, action: Action): ActionResult {
+  getAcknowledgementCapability(deviceId: string): AcknowledgementCapability | undefined {
+    const device = this.deviceRegistry.getById(deviceId);
+    if (!device) return undefined;
+    for (const instance of this.instances.values()) {
+      if (instance.record.connectorType === device.integration) {
+        return instance.connector.getAcknowledgementCapability?.(deviceId);
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Execute an action on an MQTT device by publishing to its command topic.
+   *
+   * When a {@link CommandEnvelope} correlation is supplied, the correlation id
+   * and response topic are set as MQTT 5 properties AND mirrored into the JSON
+   * payload so firmware reading either mechanism can reply (Req 10.1).
+   * Requirements: 5.1–5.6, 10.1
+   */
+  private executeMqttAction(
+    device: Device,
+    action: Action,
+    correlation?: { correlationId: string; responseTopic: string },
+  ): ActionResult {
     if (!this.mqttService || !this.mqttService.isConnected()) {
       return { success: false, error: "MQTT broker not connected" };
     }
@@ -259,15 +288,34 @@ export class ActionRouter {
     const commandTopic = explicitCommandTopic
       ?? (topic ? topic.split("/").slice(0, -1).concat("set").join("/") : `${device.id}/set`);
 
-    // Determine payload
-    const payload = action.params.payload !== undefined
-      ? (typeof action.params.payload === "string"
-          ? action.params.payload
-          : JSON.stringify(action.params.payload))
-      : JSON.stringify(action.params);
+    // Determine payload; mirror correlation fields into the JSON body when present.
+    let payload: string;
+    if (correlation) {
+      const base = action.params.payload !== undefined && typeof action.params.payload === "object" && action.params.payload !== null
+        ? (action.params.payload as Record<string, unknown>)
+        : action.params;
+      payload = JSON.stringify({
+        ...base,
+        correlationId: correlation.correlationId,
+        responseTopic: correlation.responseTopic,
+      });
+    } else {
+      payload = action.params.payload !== undefined
+        ? (typeof action.params.payload === "string"
+            ? action.params.payload
+            : JSON.stringify(action.params.payload))
+        : JSON.stringify(action.params);
+    }
 
     try {
-      this.mqttService.publish(commandTopic, payload);
+      if (correlation) {
+        this.mqttService.publish(commandTopic, payload, {
+          correlationData: Buffer.from(correlation.correlationId, "utf8"),
+          responseTopic: correlation.responseTopic,
+        });
+      } else {
+        this.mqttService.publish(commandTopic, payload);
+      }
       return { success: true };
     } catch (err) {
       return { success: false, error: (err as Error).message };

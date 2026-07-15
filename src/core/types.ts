@@ -67,6 +67,46 @@ export interface ActionRequest {
   params?: Record<string, unknown>;
 }
 
+/**
+ * Ordered lifecycle states a device command passes through.
+ *
+ * The reachable states depend on the target device's declared capabilities and
+ * whether Confirmation_Options are supplied:
+ *   REQUESTED    -> DISPATCHED | FAILED
+ *   DISPATCHED   -> ACKNOWLEDGED | OBSERVED | TIMED_OUT | STATE_MISMATCH
+ *   ACKNOWLEDGED -> OBSERVED | TIMED_OUT | STATE_MISMATCH
+ * Terminal success: DISPATCHED (dispatch-only), ACKNOWLEDGED (ack-only tier), OBSERVED.
+ * Terminal failure: FAILED, TIMED_OUT, STATE_MISMATCH.
+ */
+export type CommandLifecycleState =
+  | "REQUESTED"
+  | "DISPATCHED"
+  | "ACKNOWLEDGED"
+  | "OBSERVED"
+  | "FAILED"
+  | "TIMED_OUT"
+  | "STATE_MISMATCH";
+
+/**
+ * Optional confirmation of a command's physical effect.
+ *
+ * When supplied on a device action, the ActionExecutor observes a device's
+ * state (the target device by default, or `deviceId` when given) and only
+ * reports success once `condition` evaluates truthy — advancing the command to
+ * the OBSERVED state — or fails with TIMED_OUT / STATE_MISMATCH otherwise.
+ */
+export interface ConfirmOptions {
+  /** Device to observe; defaults to the command's target device when omitted. */
+  deviceId?: string;
+  /** Predicate evaluated against the Observed_Device state. */
+  condition: (state: Record<string, unknown>) => boolean;
+  /** Timeout in ms before TIMED_OUT. Defaults to DEFAULT_CONFIRM_TIMEOUT_MS. */
+  timeoutMs?: number;
+}
+
+/** Default confirmation timeout applied when ConfirmOptions omit timeoutMs (Req 5.7). */
+export const DEFAULT_CONFIRM_TIMEOUT_MS = 5000;
+
 /** Result returned by ConnectorManager.executeAction() and devices.action(). */
 export interface ActionResult {
   /** Whether the action completed without error. Always a boolean, never undefined. */
@@ -75,6 +115,14 @@ export interface ActionResult {
   data?: Record<string, unknown>;
   /** Human-readable error message. Present when success is false. */
   error?: string;
+  /**
+   * Final Command_Lifecycle state for this command.
+   * Optional for backward compatibility — existing readers of success/data/error
+   * are unaffected. Always populated by the verified-command-execution code path.
+   */
+  lifecycleState?: CommandLifecycleState;
+  /** Correlation id assigned at dispatch. Present for MQTT commands that correlate. */
+  correlationId?: string;
 }
 
 /** Result returned by devices.actionAll(). */

@@ -4,7 +4,7 @@ import type { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
 import { DEVICE_STATE_CHANGE, AUTOMATION_FIRED, AUTOMATION_EXECUTION_COMPLETE, AUTOMATION_RULE_REGISTERED, AUTOMATION_RULE_UNREGISTERED } from "../core/event-bus.js";
 import type { NormalizedEvent, EventContext, Rule } from "../core/types.js";
-import type { Sandbox, SandboxContext } from "./sandbox.js";
+import type { Sandbox, SandboxContext, SandboxFailureReason } from "./sandbox.js";
 import type { ActionExecutor } from "./action-executor.js";
 import type { ExecutionLog, ExecutionLogEntry } from "./execution-log.js";
 import { RuleRegistry } from "./rule-registry.js";
@@ -155,10 +155,13 @@ export class AutomationEngine {
       timestamp: context.timestamp,
     };
 
-    const promise = this.sandbox!.execute(compiledJs, sandboxContext, rule.id);
-    promise
-      .then(() => {
-        const duration = Date.now() - start;
+    // Sandbox.execute() resolves a SandboxExecutionResult for every outcome and
+    // never rejects, so we branch on the real result rather than assuming the
+    // promise resolving means success. (The previous .catch() branch was dead code.)
+    void this.sandbox!.execute(compiledJs, sandboxContext, rule.id).then((result) => {
+      const duration = Date.now() - start;
+
+      if (result && result.success) {
         this.recordExecution(rule, context, duration, true);
         this.eventBus.emit(AUTOMATION_FIRED, {
           ruleId: rule.id,
@@ -167,15 +170,16 @@ export class AutomationEngine {
           deviceId: context.deviceId,
           timestamp: Date.now(),
         });
-      })
-      .catch((err) => {
-        const duration = Date.now() - start;
-        this.recordExecution(rule, context, duration, false, (err as Error).message);
+      } else {
+        const error = result && !result.success ? result.error : undefined;
+        const reason = result && !result.success ? result.reason : undefined;
+        this.recordExecution(rule, context, duration, false, error, reason);
         logger.error(
-          { ruleId: rule.id, error: (err as Error).message },
+          { ruleId: rule.id, reason, error },
           "Script rule execution failed",
         );
-      });
+      }
+    });
   }
 
   /** Execute a non-script rule (e.g. a form rule) directly, without the sandbox. */
@@ -220,6 +224,7 @@ export class AutomationEngine {
     duration: number,
     success: boolean,
     error?: string,
+    reason?: SandboxFailureReason,
   ): void {
     // Emit AUTOMATION_EXECUTION_COMPLETE for MetricsService (counters + histograms)
     this.eventBus.emit(AUTOMATION_EXECUTION_COMPLETE, {
@@ -246,6 +251,7 @@ export class AutomationEngine {
           target: ctx.topic,
           success,
           ...(error ? { error } : {}),
+          ...(reason ? { reason } : {}),
         },
       ],
       duration,

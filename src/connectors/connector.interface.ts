@@ -253,6 +253,25 @@ export interface CapabilityDescriptor {
 }
 
 /**
+ * Declares whether a device can itself acknowledge command receipt/execution.
+ *
+ * Returned per-device by {@link Connector.getAcknowledgementCapability}. Only
+ * devices declaring `supported: true` can reach the `ACKNOWLEDGED` lifecycle
+ * state; all others terminate at most at the Dispatch tier unless the caller
+ * supplies Confirmation_Options.
+ */
+export interface AcknowledgementCapability {
+  /** True when this device publishes a Device_Acknowledgement Aeolus can ingest. */
+  supported: boolean;
+  /** Response-topic space the device publishes acks to (e.g. "aeolus/acks/controller-1"). */
+  responseTopic?: string;
+  /** Field name in the ack message whose presence/value confirms receipt (default "status"). */
+  ackIndicatorField?: string;
+  /** Value(s) of ackIndicatorField that count as acknowledgement (default: any non-empty). */
+  ackIndicatorValues?: string[];
+}
+
+/**
  * The core Connector interface that all connector implementations must satisfy.
  *
  * Instances are created by the module's `createConnector(config)` factory
@@ -380,6 +399,19 @@ export interface Connector {
    * @returns Array of CapabilityDescriptor, or undefined to use the fallback map.
    */
   getActionCatalog?(deviceId: string): CapabilityDescriptor[] | undefined;
+
+  /**
+   * Return the acknowledgement capability for a device, or undefined to
+   * indicate the device reaches at most the Dispatch confirmation tier.
+   *
+   * Analogous to {@link getActionCatalog}. When absent (or returning
+   * `undefined`/`{ supported: false }`), the ActionExecutor never advances the
+   * command to `ACKNOWLEDGED` — dispatch is the truthful terminal success
+   * state unless Confirmation_Options are supplied.
+   *
+   * Requirements: 9.1
+   */
+  getAcknowledgementCapability?(deviceId: string): AcknowledgementCapability | undefined;
 }
 
 /**

@@ -12,6 +12,7 @@ import type {
   SetupStepDescriptor,
   SetupStepResult,
   CapabilityDescriptor,
+  AcknowledgementCapability,
 } from "./connector.interface.js";
 import type { ConnectorRegistry } from "./connector-registry.js";
 import type { ConnectorStore } from "./connector-store.js";
@@ -335,8 +336,20 @@ export class ConnectorManager {
    * Route an action to the correct connector based on the device's integration field.
    * Delegates to {@link ActionRouter}; returns an ActionResult and never throws.
    */
-  async executeAction(deviceId: string, action: Action): Promise<ActionResult> {
-    return this.actionRouter.executeAction(deviceId, action);
+  async executeAction(
+    deviceId: string,
+    action: Action,
+    correlation?: { correlationId: string; responseTopic: string },
+  ): Promise<ActionResult> {
+    return this.actionRouter.executeAction(deviceId, action, correlation);
+  }
+
+  /**
+   * Return the acknowledgement capability declared for a device by its
+   * connector, or undefined when none is declared (Dispatch tier).
+   */
+  getAcknowledgementCapability(deviceId: string): AcknowledgementCapability | undefined {
+    return this.actionRouter.getAcknowledgementCapability(deviceId);
   }
 
   /**

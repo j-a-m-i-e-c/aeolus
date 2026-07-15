@@ -1,19 +1,59 @@
 // src/mqtt/mqtt-service.ts — MQTT broker connection and message ingestion
 
-import mqtt, { type MqttClient } from "mqtt";
+import mqtt, { type MqttClient, type IPublishPacket } from "mqtt";
 import type { EventEmitter } from "node:events";
 import { parseTopic } from "./topic-parser.js";
 import { DEVICE_STATE_CHANGE, MQTT_RAW_MESSAGE, MQTT_CONNECTION_STATE, MQTT_MESSAGE_PROCESSED, MQTT_MESSAGE_PUBLISHED } from "../core/event-bus.js";
 import type { NormalizedEvent } from "../core/types.js";
+import type { AckMessage } from "../automations/pending-command-tracker.js";
 import logger from "../logger.js";
 
 export type MqttConnectionState = "disconnected" | "connecting" | "connected" | "waiting_retry";
+
+/**
+ * Sink for correlated command replies and observation state.
+ *
+ * Implemented by {@link PendingCommandTracker}; injected at composition so
+ * MqttService has no hard dependency on the ActionExecutor (mirrors
+ * ActionRouter.setMqttService()).
+ */
+export interface AckRouter {
+  route(message: AckMessage): void;
+  observeState(deviceId: string, state: Record<string, unknown>): void;
+}
 
 export interface MqttServiceConfig {
   brokerUrl: string;
   topics: string[];
   baseRetryDelayMs: number;
   maxBackoffMs: number;
+  /**
+   * Response-topic space Aeolus subscribes to for device acknowledgements
+   * (e.g. "aeolus/acks/#"). Messages on this space are routed to the
+   * PendingCommandTracker rather than emitted as ordinary device state.
+   */
+  ackTopicFilter?: string;
+}
+
+/**
+ * Resolve the correlation id for an incoming response-topic message.
+ *
+ * Precedence (Req 10.5–10.8): the MQTT 5 Correlation Data property wins when
+ * present; otherwise the payload `correlationId` field is used; when neither is
+ * present, returns `undefined` and the message matches no pending command.
+ * Exported as a pure helper for property testing.
+ */
+export function resolveCorrelationId(
+  correlationData?: Buffer | Uint8Array,
+  payloadCorrelationId?: string,
+): string | undefined {
+  if (correlationData !== undefined && correlationData.length > 0) {
+    return Buffer.from(correlationData).toString("utf8");
+  }
+  if (payloadCorrelationId !== undefined && payloadCorrelationId !== "") {
+    return payloadCorrelationId;
+  }
+  return undefined;
 }
 
 const DEFAULT_CONFIG: Partial<MqttServiceConfig> = {
@@ -39,6 +79,15 @@ export class MqttService {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private intentionalDisconnect = false;
   private credentials: { username?: string; password?: string } | null = null;
+  private ackRouter?: AckRouter;
+
+  /**
+   * Inject the sink for correlated command replies / observation state.
+   * Set once at composition, mirroring ActionRouter.setMqttService().
+   */
+  setAckRouter(ackRouter: AckRouter): void {
+    this.ackRouter = ackRouter;
+  }
 
   constructor(config: Partial<MqttServiceConfig> & Pick<MqttServiceConfig, "brokerUrl" | "topics">, eventBus: EventEmitter) {
     this.config = { ...DEFAULT_CONFIG, ...config } as MqttServiceConfig;
@@ -139,7 +188,12 @@ export class MqttService {
 
   private subscribeToTopics(): void {
     if (!this.client) return;
-    for (const topic of this.config.topics) {
+    const topics = [...this.config.topics];
+    // Also subscribe to the acknowledgement response-topic space when configured.
+    if (this.config.ackTopicFilter && !topics.includes(this.config.ackTopicFilter)) {
+      topics.push(this.config.ackTopicFilter);
+    }
+    for (const topic of topics) {
       this.client.subscribe(topic, (err) => {
         if (err) {
           logger.error({ topic, error: err.message }, "Failed to subscribe to topic");
@@ -152,9 +206,9 @@ export class MqttService {
 
   private setupMessageHandler(): void {
     if (!this.client) return;
-    this.client.on("message", (topic: string, payload: Buffer) => {
+    this.client.on("message", (topic: string, payload: Buffer, packet: IPublishPacket) => {
       logger.debug({ topic, payloadLength: payload.length }, "MQTT message received");
-      this.handleMessage(topic, payload);
+      this.handleMessage(topic, payload, packet);
     });
   }
 
@@ -169,12 +223,21 @@ export class MqttService {
     });
   }
 
-  private handleMessage(topic: string, payload: Buffer): void {
+  private handleMessage(topic: string, payload: Buffer, packet?: IPublishPacket): void {
     const start = Date.now();
     const raw = payload.toString();
 
     // Emit raw message for MQTT inspector
     this.eventBus.emit(MQTT_RAW_MESSAGE, { topic, payload: raw, timestamp: Date.now() });
+
+    // Acknowledgement response-topic messages are routed to the tracker rather
+    // than treated as ordinary device state (Req 10.5–10.8).
+    if (this.isAckTopic(topic)) {
+      this.handleAckMessage(topic, raw, packet);
+      const ackDurationMs = Date.now() - start;
+      this.eventBus.emit(MQTT_MESSAGE_PROCESSED, { topic, durationMs: ackDurationMs });
+      return;
+    }
 
     const parsed = parseTopic(topic);
     if (!parsed) {
@@ -215,9 +278,58 @@ export class MqttService {
 
     this.eventBus.emit(DEVICE_STATE_CHANGE, event);
 
+    // Feed observation-only confirmation off ambient device state (Req 5.8).
+    this.ackRouter?.observeState(parsed.deviceId, state);
+
     // Emit processing complete event for MetricsService histogram
     const durationMs = Date.now() - start;
     this.eventBus.emit(MQTT_MESSAGE_PROCESSED, { topic, durationMs });
+  }
+
+  /** True when `topic` falls within the configured ack response-topic space. */
+  private isAckTopic(topic: string): boolean {
+    const filter = this.config.ackTopicFilter;
+    if (!filter) return false;
+    // Strip an MQTT multi-level wildcard suffix ("aeolus/acks/#" → "aeolus/acks/").
+    const prefix = filter.endsWith("/#") ? filter.slice(0, -1) : filter;
+    return topic === prefix || topic.startsWith(prefix);
+  }
+
+  /**
+   * Parse a response-topic message into an {@link AckMessage} and route it to
+   * the tracker. Resolves the correlation id from the MQTT 5 Correlation Data
+   * property when present, else the payload `correlationId`. Messages with no
+   * resolvable correlation id are dropped for correlation (Req 10.8).
+   */
+  private handleAckMessage(topic: string, raw: string, packet?: IPublishPacket): void {
+    if (!this.ackRouter) return;
+
+    let payloadObject: Record<string, unknown> = {};
+    try {
+      const parsed = JSON.parse(raw);
+      if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+        payloadObject = parsed as Record<string, unknown>;
+      }
+    } catch {
+      // Non-JSON ack payload — no payload correlation id available.
+    }
+
+    const correlationData = packet?.properties?.correlationData as Buffer | undefined;
+    const payloadCorrelationId =
+      typeof payloadObject.correlationId === "string" ? payloadObject.correlationId : undefined;
+    const correlationId = resolveCorrelationId(correlationData, payloadCorrelationId);
+
+    if (!correlationId) {
+      logger.debug({ topic }, "Ack message carried no resolvable correlation id — ignored");
+      return;
+    }
+
+    const message: AckMessage = {
+      correlationId,
+      ...(typeof payloadObject.status === "string" ? { status: payloadObject.status } : {}),
+      state: payloadObject,
+    };
+    this.ackRouter.route(message);
   }
 
   async disconnect(): Promise<void> {
@@ -259,16 +371,35 @@ export class MqttService {
     return this.connectionState;
   }
 
-  /** Publish a message to the MQTT broker. Commands expire after 30 seconds by default. */
-  publish(topic: string, payload: string, options?: { messageExpiryInterval?: number }): void {
+  /**
+   * Publish a message to the MQTT broker. Commands expire after 30 seconds by default.
+   *
+   * The optional MQTT 5 Correlation Data and Response Topic properties are set
+   * only when provided, so existing callers (and callers passing only
+   * `messageExpiryInterval`) are unaffected.
+   */
+  publish(
+    topic: string,
+    payload: string,
+    options?: {
+      messageExpiryInterval?: number;
+      correlationData?: Buffer;
+      responseTopic?: string;
+    },
+  ): void {
     if (!this.client || this.connectionState !== "connected") {
       throw new Error("MQTT client not connected");
     }
-    this.client.publish(topic, payload, {
-      properties: {
-        messageExpiryInterval: options?.messageExpiryInterval ?? 30,
-      },
-    }, (err) => {
+    const properties: mqtt.IClientPublishOptions["properties"] = {
+      messageExpiryInterval: options?.messageExpiryInterval ?? 30,
+    };
+    if (options?.correlationData !== undefined) {
+      properties.correlationData = options.correlationData;
+    }
+    if (options?.responseTopic !== undefined) {
+      properties.responseTopic = options.responseTopic;
+    }
+    this.client.publish(topic, payload, { properties }, (err) => {
       if (err) {
         logger.error({ topic, error: err.message }, "Failed to publish MQTT message");
       } else {

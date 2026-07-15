@@ -4,7 +4,7 @@ import type { ActionExecutor } from "./action-executor.js";
 import type { AutomationStateStore } from "./automation-state-store.js";
 import type { DeviceRegistry } from "../core/device-registry.js";
 import type { DataStore } from "../data-store/data-store.js";
-import type { Device, ActionResult, BulkActionResult } from "../core/types.js";
+import type { Device, ActionResult, BulkActionResult, ConfirmOptions } from "../core/types.js";
 import logger from "../logger.js";
 
 // isolated-vm is a native addon that requires C++ compilation.
@@ -17,6 +17,96 @@ try {
   ivm = (mod.default ?? mod) as typeof import("isolated-vm");
 } catch {
   logger.warn("isolated-vm not available — sandbox execution disabled (expected on Windows dev)");
+}
+
+/** Categorized cause of a sandbox execution failure. */
+export type SandboxFailureReason = "runtime" | "timeout" | "memory" | "unavailable";
+
+/**
+ * Discriminated result of a single sandbox execution.
+ *
+ * `Sandbox.execute()` resolves this for every outcome and never rejects, so the
+ * AutomationEngine can act on the true outcome rather than assuming success.
+ */
+export type SandboxExecutionResult =
+  | { success: true }
+  | { success: false; error: string; reason: SandboxFailureReason };
+
+/**
+ * Classify a thrown isolate error into a failure reason, honoring chronological
+ * precedence (Req 1.8 — report the first-detected condition):
+ *   1. timeout — the error message carries the isolated-vm timeout signature
+ *   2. memory  — the isolate was torn down (wasDisposed) or the message carries
+ *                a memory/allocation/disposed signature
+ *   3. runtime — any other thrown error (user throw, TypeError, etc.)
+ *
+ * The returned `error` is always the underlying `err.message` (Req 1.5).
+ * Exported for property/unit testing without a live isolate.
+ */
+export function classifySandboxError(
+  err: Error,
+  isolateWasDisposed: boolean,
+): { reason: Exclude<SandboxFailureReason, "unavailable">; error: string } {
+  const message = err.message;
+  if (/timed out/i.test(message)) {
+    return { reason: "timeout", error: message };
+  }
+  if (isolateWasDisposed || /memory limit|array buffer allocation failed|disposed/i.test(message)) {
+    return { reason: "memory", error: message };
+  }
+  return { reason: "runtime", error: message };
+}
+
+/**
+ * Build a host-side {@link ConfirmOptions} from the pieces threaded across the
+ * isolate boundary by the `devices.action` / `devices.actionAll` wrappers.
+ *
+ * The predicate may arrive either as a native host-callable function or as an
+ * isolated-vm `Reference` (depending on how the runtime marshals function
+ * arguments), so the wrapper handles both. When it is a Reference, the observed
+ * state is copied into the isolate before applying the predicate, mirroring the
+ * existing host-callback marshalling.
+ *
+ * NOTE: the exact function-marshalling behaviour of isolated-vm can only be
+ * validated against a native build (Docker/Pi), not the Windows dev box where
+ * isolated-vm is unavailable.
+ */
+function buildConfirmOptions(
+  condition: unknown,
+  confirmDeviceId?: string,
+  confirmTimeoutMs?: number,
+): ConfirmOptions | undefined {
+  if (typeof condition !== "function" && !isIvmReference(condition)) return undefined;
+
+  let predicate: (state: Record<string, unknown>) => boolean;
+  if (isIvmReference(condition)) {
+    predicate = (state: Record<string, unknown>): boolean => {
+      const arg = ivm ? new ivm.ExternalCopy(state).copyInto() : state;
+      return Boolean(condition.applySync(undefined, [arg]));
+    };
+  } else {
+    const fn = condition as (state: Record<string, unknown>) => unknown;
+    predicate = (state: Record<string, unknown>): boolean => Boolean(fn(state));
+  }
+
+  return {
+    condition: predicate,
+    ...(typeof confirmDeviceId === "string" ? { deviceId: confirmDeviceId } : {}),
+    ...(typeof confirmTimeoutMs === "number" ? { timeoutMs: confirmTimeoutMs } : {}),
+  };
+}
+
+/** Minimal shape of an isolated-vm Reference we call synchronously. */
+interface IvmCallableReference {
+  applySync(receiver: unknown, args: unknown[]): unknown;
+}
+
+function isIvmReference(value: unknown): value is IvmCallableReference {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as { applySync?: unknown }).applySync === "function"
+  );
 }
 
 /** Dependencies injected into the Sandbox. */
@@ -77,10 +167,23 @@ const BOOTSTRAP_SCRIPT = `
     list: function() { return data; },
     get: function(id) { return map[id]; },
     filter: function(predicate) { return data.filter(predicate); },
-    action: function(deviceId, actionType, params) {
+    action: function(deviceId, actionType, params, confirm) {
+      // 3-arg form is preserved byte-for-byte. When a 4th confirm object is
+      // supplied, its predicate is forwarded like the actionAll filter, with
+      // deviceId/timeoutMs passed as copyable primitives.
+      if (confirm && typeof confirm.condition === 'function') {
+        return actionRef.apply(undefined,
+          [deviceId, actionType, params, confirm.condition, confirm.deviceId, confirm.timeoutMs],
+          { result: { promise: true } });
+      }
       return actionRef.apply(undefined, [deviceId, actionType, params], { result: { promise: true } });
     },
-    actionAll: function(filter, actionType, params) {
+    actionAll: function(filter, actionType, params, confirm) {
+      if (confirm && typeof confirm.condition === 'function') {
+        return actionAllRef.apply(undefined,
+          [filter, actionType, params, confirm.condition, confirm.deviceId, confirm.timeoutMs],
+          { result: { promise: true } });
+      }
       return actionAllRef.apply(undefined, [filter, actionType, params], { result: { promise: true } });
     }
   };
@@ -211,11 +314,26 @@ export class Sandbox {
     this.onStateChange = deps.onStateChange;
   }
 
-  /** Execute compiled JS in an isolated V8 context. Never throws. */
-  async execute(compiledJs: string, context: SandboxContext, ruleId: string): Promise<void> {
+  /**
+   * Execute compiled JS in an isolated V8 context.
+   *
+   * Resolves a {@link SandboxExecutionResult} for every outcome and never
+   * rejects (Req 1.7). Success maps to `{ success: true }`; runtime throws,
+   * the 5 s timeout, and the 32 MB memory limit map to a classified failure;
+   * an unavailable isolated-vm runtime maps to `reason: "unavailable"`.
+   */
+  async execute(
+    compiledJs: string,
+    context: SandboxContext,
+    ruleId: string,
+  ): Promise<SandboxExecutionResult> {
     if (!ivm) {
       logger.error({ ruleId }, "Sandbox execution skipped — isolated-vm not available");
-      return;
+      return {
+        success: false,
+        reason: "unavailable",
+        error: "Sandbox execution unavailable — isolated-vm is not installed",
+      };
     }
 
     let isolate: InstanceType<(typeof ivm)["Isolate"]> | null = null;
@@ -244,11 +362,15 @@ export class Sandbox {
       // Compile and run user script with timeout
       const script = await isolate.compileScript(compiledJs);
       await script.run(ivmContext, { timeout: EXECUTION_TIMEOUT_MS });
+      return { success: true };
     } catch (err) {
+      const wasDisposed = isolate?.isDisposed ?? false;
+      const { reason, error } = classifySandboxError(err as Error, wasDisposed);
       logger.error(
-        { ruleId, error: (err as Error).message },
+        { ruleId, reason, error },
         `Sandbox execution error for rule ${ruleId}`,
       );
+      return { success: false, reason, error };
     } finally {
       if (isolate) {
         try {
@@ -302,11 +424,16 @@ export class Sandbox {
         deviceId: string,
         actionType: string,
         params?: Record<string, unknown>,
+        condition?: unknown,
+        confirmDeviceId?: string,
+        confirmTimeoutMs?: number,
       ): Promise<ActionResult> {
         try {
+          const confirm = buildConfirmOptions(condition, confirmDeviceId, confirmTimeoutMs);
           const result = await actionExecutor.execute(
             { type: "device_action", target: deviceId, params: { actionType, ...(params ?? {}) } },
             ruleId,
+            confirm,
           );
           return result;
         } catch {
@@ -325,6 +452,9 @@ export class Sandbox {
         filter: (device: Device) => boolean,
         actionType: string,
         params?: Record<string, unknown>,
+        condition?: unknown,
+        confirmDeviceId?: string,
+        confirmTimeoutMs?: number,
       ): Promise<BulkActionResult> {
         // Catch predicate throws
         let matched: Device[];
@@ -344,11 +474,16 @@ export class Sandbox {
           return { total: 0, succeeded: 0, failed: 0, results: [] };
         }
 
+        // Each matched device gets its own confirmation (and its own correlationId
+        // assigned inside execute()), observing the target device by default.
+        const confirm = buildConfirmOptions(condition, confirmDeviceId, confirmTimeoutMs);
+
         const settled = await Promise.allSettled(
           matched.map((device) =>
             actionExecutor.execute(
               { type: "device_action", target: device.id, params: { actionType, ...(params ?? {}) } },
               ruleId,
+              confirm,
             ).then((result): { deviceId: string } & ActionResult => ({ deviceId: device.id, ...result }))
              .catch((err): { deviceId: string } & ActionResult => ({
                deviceId: device.id,

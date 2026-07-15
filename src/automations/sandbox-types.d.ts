@@ -5,6 +5,18 @@
  * No imports needed — just start writing.
  */
 
+/** Result returned by device action calls. */
+interface ActionResult {
+  /** Whether the action completed without error. */
+  success: boolean;
+  /** Connector-supplied data payload. Present on success when the connector returns data. */
+  data?: Record<string, unknown>;
+  /** Human-readable error message. Present when success is false. */
+  error?: string;
+  /** Final command lifecycle state (e.g. "DISPATCHED", "OBSERVED", "TIMED_OUT"). */
+  lifecycleState?: string;
+}
+
 /** An IoT device in the Aeolus device registry. */
 interface Device {
   /** Unique device identifier. */
@@ -55,8 +67,16 @@ declare const devices: {
    * @param deviceId - The target device ID.
    * @param actionType - The action to perform (e.g. "toggle", "setBrightness").
    * @param params - Optional parameters for the action.
+   * @param confirm - Optional confirmation options to verify the physical effect.
    */
-  action(deviceId: string, actionType: string, params?: Record<string, unknown>): Promise<void>;
+  action(deviceId: string, actionType: string, params?: Record<string, unknown>, confirm?: {
+    /** Device to observe (defaults to target device). */
+    deviceId?: string;
+    /** Predicate evaluated against the observed device state. */
+    condition: (state: Record<string, unknown>) => boolean;
+    /** Timeout in ms before TIMED_OUT (default 5000). */
+    timeoutMs?: number;
+  }): Promise<ActionResult>;
 };
 
 /**
