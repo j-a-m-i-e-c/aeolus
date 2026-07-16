@@ -12,6 +12,13 @@ export default defineConfig({
   },
   server: {
     port: 3000,
+    // Allow the opaque-origin sandbox iframe (Origin: null) to load modules.
+    // In production, nginx handles this via its own headers. In dev, the sandbox
+    // iframe has no origin (sandbox="allow-scripts" without allow-same-origin)
+    // so the browser blocks module loads unless the server sends CORS headers.
+    headers: {
+      "Access-Control-Allow-Origin": "*",
+    },
   },
   build: {
     rollupOptions: {
