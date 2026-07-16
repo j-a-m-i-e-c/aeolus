@@ -58,6 +58,17 @@ describe("nginx.conf CSP hardening", () => {
     });
   });
 
+  describe("Sandbox asset loading (/assets/)", () => {
+    it("serves /assets/ with Access-Control-Allow-Origin so the opaque-origin frame can load its module scripts", () => {
+      // The sandbox iframe has an opaque (null) origin, and module scripts always
+      // fetch in CORS mode. Without this header the runtime load is blocked and the
+      // handshake times out. Assert the /assets/ location declares the CORS header.
+      const assetsBlock = nginxConf.match(/location \/assets\/ \{[^}]+\}/);
+      expect(assetsBlock, "could not find location /assets/ block").not.toBeNull();
+      expect(assetsBlock![0]).toMatch(/add_header\s+Access-Control-Allow-Origin\s+"\*"/);
+    });
+  });
+
   describe("Sandbox CSP (/sandbox.html)", () => {
     it("has connect-src 'none' (no network egress)", () => {
       expect(sandboxDirectives["connect-src"]).toBe("'none'");
