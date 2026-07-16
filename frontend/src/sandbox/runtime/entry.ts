@@ -17,6 +17,15 @@ import * as React from "react";
 import * as ReactDOM from "react-dom";
 import { createRoot } from "react-dom/client";
 import * as jsxRuntime from "react/jsx-runtime";
+// Global stylesheet (Tailwind base/components/utilities). The custom UI author's
+// component uses the same Tailwind utility classes the host app compiles. Because
+// the frame is an isolated opaque-origin document, it does NOT inherit the host
+// page's CSS — we must bundle the same stylesheet here so authored styling renders
+// (Req 5.4). Vite emits it as a hashed asset and injects the <link> into the built
+// sandbox.html; in dev it is served over the module graph. sandbox.html re-asserts
+// a transparent background so this stylesheet's `body` background does not paint an
+// opaque rectangle over the host pane.
+import "../../index.css";
 import { SANDBOX_EXTERNALS_GLOBAL, loadModule } from "./module-loader";
 import { createSdkClient } from "./sdk-client";
 import { ShimHost } from "./shim";

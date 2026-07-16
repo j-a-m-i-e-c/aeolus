@@ -18,7 +18,11 @@
       body {
         margin: 0;
         padding: 0;
-        background: transparent;
+        /* The bundled Tailwind stylesheet (imported by the runtime) sets an
+           opaque body background for the host page; inside this frame we want it
+           transparent so the custom UI blends into its host pane. !important keeps
+           this authoritative regardless of stylesheet injection order. */
+        background: transparent !important;
         color: #e6edf3;
         font-family: Inter, system-ui, sans-serif;
       }
