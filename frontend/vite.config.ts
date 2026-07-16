@@ -15,21 +15,13 @@ export default defineConfig({
   },
   build: {
     rollupOptions: {
-      // Two entries: the main dashboard app (index.html) and the self-contained
-      // sandbox runtime that executes INSIDE the opaque-origin iframe. The runtime
-      // is emitted at a stable, unhashed path so the static public/sandbox.html can
-      // reference it directly (`/assets/sandbox-runtime.js`).
+      // Two HTML entries: the main dashboard app and the sandbox frame document.
+      // Vite transforms both: dev serves them with HMR, build bundles + hashes
+      // the JS. The sandbox entry is emitted at a stable path (/sandbox.html)
+      // so the iframe src can reference it directly.
       input: {
         index: path.resolve(__dirname, "index.html"),
-        "sandbox-runtime": path.resolve(__dirname, "src/sandbox/runtime/entry.ts"),
-      },
-      output: {
-        entryFileNames: (chunkInfo) =>
-          chunkInfo.name === "sandbox-runtime"
-            ? "assets/sandbox-runtime.js"
-            : "assets/[name]-[hash].js",
-        chunkFileNames: "assets/[name]-[hash].js",
-        assetFileNames: "assets/[name]-[hash][extname]",
+        sandbox: path.resolve(__dirname, "sandbox.html"),
       },
     },
   },

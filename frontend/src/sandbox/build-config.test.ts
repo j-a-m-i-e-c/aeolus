@@ -6,20 +6,15 @@ import { resolve } from "path";
 
 const viteConfig = readFileSync(resolve(__dirname, "../../vite.config.ts"), "utf-8");
 
-describe("Vite build config — sandbox-runtime entry", () => {
-  it("declares a 'sandbox-runtime' rollup input entry", () => {
-    expect(viteConfig).toContain('"sandbox-runtime"');
-    expect(viteConfig).toContain("src/sandbox/runtime/entry.ts");
+describe("Vite build config — sandbox entry", () => {
+  it("declares a 'sandbox' HTML input entry", () => {
+    expect(viteConfig).toContain("sandbox.html");
+    expect(viteConfig).toMatch(/sandbox:\s*path\.resolve/);
   });
 
-  it("emits the sandbox-runtime at assets/sandbox-runtime.js (stable, unhashed)", () => {
-    expect(viteConfig).toContain("assets/sandbox-runtime.js");
-  });
-
-  it("has two build inputs (index + sandbox-runtime)", () => {
-    // Both input keys must be present
+  it("has two build inputs (index + sandbox)", () => {
     expect(viteConfig).toMatch(/input:\s*\{/);
     expect(viteConfig).toMatch(/index:\s*path\.resolve/);
-    expect(viteConfig).toContain('"sandbox-runtime"');
+    expect(viteConfig).toMatch(/sandbox:\s*path\.resolve/);
   });
 });
