@@ -32,7 +32,7 @@ import { sandboxBroker } from "./sandbox-host";
 describe("sandbox-host deps wiring", () => {
   beforeEach(() => {
     mockAuthFetch.mockReset();
-    mockAuthFetch.mockResolvedValue(new Response("", { status: 200 }));
+    mockAuthFetch.mockResolvedValue(new Response(JSON.stringify({ success: true }), { status: 200, headers: { "Content-Type": "application/json" } }));
     mockSendStateUpdate.mockReset();
     mockSendStateUpdateAndFire.mockReset();
     mockSubscribe.mockReset();
@@ -65,6 +65,11 @@ describe("sandbox-host deps wiring", () => {
         body: JSON.stringify({ type: "toggle", params: undefined }),
       }),
     );
+
+    // The RPC response should include the structured CommandResult
+    const response = (port.postMessage as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(response.ok).toBe(true);
+    expect(response.result).toEqual({ success: true });
     sandboxBroker.unregister("f1");
   });
 
@@ -192,7 +197,7 @@ function createFakePort(): MessagePort {
 describe("sandbox-host — panel path + subscribeState coalescing", () => {
   beforeEach(() => {
     mockAuthFetch.mockReset();
-    mockAuthFetch.mockResolvedValue(new Response("", { status: 200 }));
+    mockAuthFetch.mockResolvedValue(new Response(JSON.stringify({ success: true }), { status: 200, headers: { "Content-Type": "application/json" } }));
     mockSendStateUpdate.mockReset();
     mockSendStateUpdateAndFire.mockReset();
     mockSubscribe.mockReset();

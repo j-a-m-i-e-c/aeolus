@@ -2,15 +2,37 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { EventEmitter } from "node:events";
-import { DEVICE_STATE_CHANGE, AUTOMATION_FIRED } from "../core/event-bus.js";
+import { DEVICE_STATE_CHANGE, AUTOMATION_FIRED, AUTOMATION_COMPLETED } from "../core/event-bus.js";
 import { AutomationEngine } from "./automation-engine.js";
-import type { Rule, NormalizedEvent } from "../core/types.js";
+import { ExecutionRecorder } from "./execution-recorder.js";
+import { CommandResultCollector } from "./command-result-collector.js";
+import type { Rule, NormalizedEvent, ActionResult } from "../core/types.js";
 import type { Sandbox } from "./sandbox.js";
 import type { ExecutionLog } from "./execution-log.js";
+import type { Logger } from "pino";
 
 vi.mock("../logger.js", () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
+
+const silentLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } as unknown as Logger;
+
+/** Build an engine wired to a spy ExecutionLog through the real Execution_Owner. */
+function makeEngine(
+  eventBus: EventEmitter,
+  opts: { sandbox?: Sandbox; pushFn?: ReturnType<typeof vi.fn> } = {},
+): { engine: AutomationEngine; pushFn: ReturnType<typeof vi.fn> } {
+  const pushFn = opts.pushFn ?? vi.fn();
+  const executionLog = { push: pushFn } as unknown as ExecutionLog;
+  const executionRecorder = new ExecutionRecorder({ eventBus, executionLog, logger: silentLogger });
+  const collector = new CommandResultCollector();
+  const engine = new AutomationEngine(eventBus, {
+    ...(opts.sandbox ? { sandbox: opts.sandbox } : {}),
+    executionRecorder,
+    collector,
+  });
+  return { engine, pushFn };
+}
 
 function makeEvent(overrides: Partial<NormalizedEvent> = {}): NormalizedEvent {
   return {
@@ -33,10 +55,7 @@ describe("AutomationEngine", () => {
   it("dispatches script rules through Sandbox when compiled_js is present", async () => {
     const executeFn = vi.fn().mockResolvedValue({ success: true });
     const sandbox: Sandbox = { execute: executeFn } as unknown as Sandbox;
-    const pushFn = vi.fn();
-    const executionLog = { push: pushFn } as unknown as ExecutionLog;
-
-    const engine = new AutomationEngine(eventBus, { sandbox, executionLog });
+    const { engine, pushFn } = makeEngine(eventBus, { sandbox });
 
     const rule = {
       id: "script-rule-1",
@@ -63,21 +82,19 @@ describe("AutomationEngine", () => {
     );
     // The rule's own action function should NOT be called for script rules
     expect(rule.action).not.toHaveBeenCalled();
-    // Execution should be logged
+    // Execution should be logged once, via the Execution_Owner
     expect(pushFn).toHaveBeenCalledOnce();
     expect(pushFn.mock.calls[0][0]).toMatchObject({
       ruleId: "script-rule-1",
       ruleName: "Test Script",
       ruleType: "script",
+      success: true,
     });
   });
 
-  it("executes non-script rules directly without Sandbox", async () => {
+  it("executes non-script rules directly without Sandbox and emits exactly one started + one completed", async () => {
     const actionFn = vi.fn();
-    const pushFn = vi.fn();
-    const executionLog = { push: pushFn } as unknown as ExecutionLog;
-
-    const engine = new AutomationEngine(eventBus, { executionLog });
+    const { engine, pushFn } = makeEngine(eventBus);
 
     const rule: Rule = {
       id: "direct-rule-1",
@@ -87,8 +104,10 @@ describe("AutomationEngine", () => {
     };
     engine.register(rule);
 
-    const firedEvents: unknown[] = [];
+    const firedEvents: Array<{ executionId: string; ruleId: string }> = [];
+    const completedEvents: Array<{ result: { executionId: string; success: boolean } }> = [];
     eventBus.on(AUTOMATION_FIRED, (e) => firedEvents.push(e));
+    eventBus.on(AUTOMATION_COMPLETED, (e) => completedEvents.push(e));
 
     eventBus.emit(DEVICE_STATE_CHANGE, makeEvent());
 
@@ -101,24 +120,55 @@ describe("AutomationEngine", () => {
         deviceId: "sensor-1",
       }),
     );
-    // AUTOMATION_FIRED should be emitted
+    // Exactly one AUTOMATION_FIRED (started), carrying the executionId (Req 6.1, 6.4).
     expect(firedEvents.length).toBe(1);
     expect(firedEvents[0]).toMatchObject({ ruleId: "direct-rule-1" });
-    // Execution logged
+    expect(typeof firedEvents[0].executionId).toBe("string");
+    // Exactly one AUTOMATION_COMPLETED, correlated by executionId (Req 6.2, 6.7).
+    expect(completedEvents.length).toBe(1);
+    expect(completedEvents[0].result.executionId).toBe(firedEvents[0].executionId);
+    expect(completedEvents[0].result.success).toBe(true);
+    // Execution logged once
     expect(pushFn).toHaveBeenCalledOnce();
     expect(pushFn.mock.calls[0][0]).toMatchObject({
       ruleId: "direct-rule-1",
       ruleType: "form",
+      success: true,
     });
+  });
+
+  it("incorporates a form rule's returned Command_Result and records failure when it failed", async () => {
+    const failing: ActionResult = { success: false, error: "device offline", lifecycleState: "FAILED" };
+    const actionFn = vi.fn().mockResolvedValue(failing);
+    const { engine, pushFn } = makeEngine(eventBus);
+
+    const rule: Rule = {
+      id: "form-fail",
+      topic: "home/sensor/temperature",
+      name: "Form Fail",
+      action: actionFn,
+    };
+    engine.register(rule);
+
+    const completedEvents: Array<{ result: { success: boolean; failureReason?: string } }> = [];
+    eventBus.on(AUTOMATION_COMPLETED, (e) => completedEvents.push(e));
+
+    eventBus.emit(DEVICE_STATE_CHANGE, makeEvent());
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(pushFn).toHaveBeenCalledOnce();
+    const entry = pushFn.mock.calls[0][0];
+    expect(entry.success).toBe(false);
+    expect(entry.failureReason).toContain("device offline");
+    expect(entry.actions[0]).toMatchObject({ success: false, error: "device offline", lifecycleState: "FAILED" });
+    expect(completedEvents[0].result.success).toBe(false);
+    expect(completedEvents[0].result.failureReason).toContain("device offline");
   });
 
   it("records failed script execution in ExecutionLog", async () => {
     const executeFn = vi.fn().mockResolvedValue({ success: false, error: "sandbox boom", reason: "runtime" });
     const sandbox: Sandbox = { execute: executeFn } as unknown as Sandbox;
-    const pushFn = vi.fn();
-    const executionLog = { push: pushFn } as unknown as ExecutionLog;
-
-    const engine = new AutomationEngine(eventBus, { sandbox, executionLog });
+    const { engine, pushFn } = makeEngine(eventBus, { sandbox });
 
     const rule = {
       id: "fail-script",
@@ -136,8 +186,8 @@ describe("AutomationEngine", () => {
     expect(pushFn).toHaveBeenCalledOnce();
     const entry = pushFn.mock.calls[0][0];
     expect(entry.ruleId).toBe("fail-script");
-    expect(entry.actions[0].success).toBe(false);
-    expect(entry.actions[0].error).toBe("sandbox boom");
+    expect(entry.success).toBe(false);
+    expect(entry.failureReason).toBe("sandbox boom");
   });
 
   it("works without optional deps (backward compat)", () => {
@@ -180,10 +230,7 @@ describe("AutomationEngine", () => {
       () => new Promise((r) => setTimeout(() => r({ success: true }), 20)),
     );
     const sandbox: Sandbox = { execute: executeFn } as unknown as Sandbox;
-    const pushFn = vi.fn();
-    const executionLog = { push: pushFn } as unknown as ExecutionLog;
-
-    const engine = new AutomationEngine(eventBus, { sandbox, executionLog });
+    const { engine, pushFn } = makeEngine(eventBus, { sandbox });
 
     const rule = {
       id: "timed-rule",
@@ -204,11 +251,37 @@ describe("AutomationEngine", () => {
     expect(entry.duration).toBeLessThan(500);
   });
 
+  describe("fire()", () => {
+    it("resolves with the assembled AutomationExecutionResult", async () => {
+      const okResult: ActionResult = { success: true, lifecycleState: "DISPATCHED" };
+      const actionFn = vi.fn().mockResolvedValue(okResult);
+      const { engine } = makeEngine(eventBus);
+
+      engine.register({ id: "manual-1", topic: "", name: "Manual", action: actionFn });
+
+      const result = await engine.fire("manual-1", {
+        topic: "manual/manual-1",
+        deviceId: "manual-fire",
+        state: {},
+        timestamp: Date.now(),
+      });
+
+      expect(result.success).toBe(true);
+      expect(typeof result.executionId).toBe("string");
+      expect(result.commandResults).toEqual([okResult]);
+    });
+
+    it("rejects for an unknown rule", async () => {
+      const { engine } = makeEngine(eventBus);
+      await expect(
+        engine.fire("nope", { topic: "x", deviceId: "y", state: {}, timestamp: Date.now() }),
+      ).rejects.toThrow(/not found/);
+    });
+  });
+
   describe("cron-triggered rules", () => {
     it("registers a cron rule and starts a timer", () => {
-      const pushFn = vi.fn();
-      const executionLog = { push: pushFn } as unknown as ExecutionLog;
-      const engine = new AutomationEngine(eventBus, { executionLog });
+      const { engine } = makeEngine(eventBus);
 
       const actionFn = vi.fn();
       const rule: Rule = {
@@ -256,9 +329,7 @@ describe("AutomationEngine", () => {
 
   describe("async rule action failure", () => {
     it("records failed async direct rule execution", async () => {
-      const pushFn = vi.fn();
-      const executionLog = { push: pushFn } as unknown as ExecutionLog;
-      const engine = new AutomationEngine(eventBus, { executionLog });
+      const { engine, pushFn } = makeEngine(eventBus);
 
       const actionFn = vi.fn().mockRejectedValue(new Error("async boom"));
       const rule: Rule = {
@@ -275,8 +346,8 @@ describe("AutomationEngine", () => {
       expect(pushFn).toHaveBeenCalledOnce();
       const entry = pushFn.mock.calls[0][0];
       expect(entry.ruleId).toBe("async-fail");
-      expect(entry.actions[0].success).toBe(false);
-      expect(entry.actions[0].error).toBe("async boom");
+      expect(entry.success).toBe(false);
+      expect(entry.failureReason).toBe("async boom");
     });
   });
 

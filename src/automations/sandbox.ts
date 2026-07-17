@@ -1,6 +1,7 @@
 // src/automations/sandbox.ts — Secure isolated-vm sandbox for user-authored automation scripts
 
-import type { ActionExecutor } from "./action-executor.js";
+import type { CommandService } from "./command-service.js";
+import type { CommandResultCollector } from "./command-result-collector.js";
 import type { AutomationStateStore } from "./automation-state-store.js";
 import type { DeviceRegistry } from "../core/device-registry.js";
 import type { DataStore } from "../data-store/data-store.js";
@@ -111,10 +112,11 @@ function isIvmReference(value: unknown): value is IvmCallableReference {
 
 /** Dependencies injected into the Sandbox. */
 export interface SandboxDeps {
-  actionExecutor: ActionExecutor;
+  actionExecutor: CommandService;
   deviceRegistry: DeviceRegistry;
   stateStore?: AutomationStateStore;
   dataStore?: DataStore;
+  collector?: CommandResultCollector;
   onStateChange?: (ruleId: string, key: string, value: unknown) => void;
 }
 
@@ -300,10 +302,11 @@ const BOOTSTRAP_SCRIPT = `
  * Errors are always caught, logged with the rule ID, and never propagated.
  */
 export class Sandbox {
-  private actionExecutor: ActionExecutor;
+  private actionExecutor: CommandService;
   private deviceRegistry: DeviceRegistry;
   private stateStore?: AutomationStateStore;
   private dataStore?: DataStore;
+  private collector?: CommandResultCollector;
   private onStateChange?: (ruleId: string, key: string, value: unknown) => void;
 
   constructor(deps: SandboxDeps) {
@@ -311,6 +314,7 @@ export class Sandbox {
     this.deviceRegistry = deps.deviceRegistry;
     this.stateStore = deps.stateStore;
     this.dataStore = deps.dataStore;
+    this.collector = deps.collector;
     this.onStateChange = deps.onStateChange;
   }
 
@@ -418,6 +422,7 @@ export class Sandbox {
     // Host-side callback for devices.action() — returns ActionResult
     // Requirements: 1.5, 1.6, 9.1
     const actionExecutor = this.actionExecutor;
+    const collector = this.collector;
     await jail.set(
       "__actionRef",
       new ivm.Reference(async function (
@@ -435,6 +440,9 @@ export class Sandbox {
             ruleId,
             confirm,
           );
+          // Push the Command_Result into the collector for the running executionId
+          // (Req 2.4, 4.3, 5.3 — script-path commands aggregated via AsyncLocalStorage)
+          collector?.pushCurrent(result);
           return result;
         } catch {
           // Should never reach here since execute() never throws, but guard anyway
@@ -484,7 +492,12 @@ export class Sandbox {
               { type: "device_action", target: device.id, params: { actionType, ...(params ?? {}) } },
               ruleId,
               confirm,
-            ).then((result): { deviceId: string } & ActionResult => ({ deviceId: device.id, ...result }))
+            ).then((result): { deviceId: string } & ActionResult => {
+              // Push each per-device Command_Result into the collector
+              // (Req 2.4, 4.3, 5.3 — script-path commands aggregated via AsyncLocalStorage)
+              collector?.pushCurrent(result);
+              return { deviceId: device.id, ...result };
+            })
              .catch((err): { deviceId: string } & ActionResult => ({
                deviceId: device.id,
                success: false,

@@ -80,7 +80,7 @@ describe("MQTT-to-Automation Pipeline Integration", () => {
       expect(actionFn).toHaveBeenCalledTimes(1);
     });
 
-    it("records successful execution in the execution log", () => {
+    it("records successful execution in the execution log", async () => {
       const rule: Rule = {
         id: "rule-logged",
         name: "Logged Rule",
@@ -91,10 +91,14 @@ describe("MQTT-to-Automation Pipeline Integration", () => {
       automation.engine.register(rule);
       mqttClient.simulateMessage("sensor/garage", JSON.stringify({ open: true }));
 
+      // Recording is performed by the Execution_Owner after the (async) execution
+      // resolves, so allow a microtask/timer tick before asserting.
+      await new Promise((resolve) => setTimeout(resolve, 20));
+
       const entries = automation.executionLog.getByRuleId("rule-logged");
       expect(entries).toHaveLength(1);
       expect(entries[0].ruleId).toBe("rule-logged");
-      expect(entries[0].actions[0].success).toBe(true);
+      expect(entries[0].success).toBe(true);
     });
   });
 
@@ -249,8 +253,8 @@ describe("MQTT-to-Automation Pipeline Integration", () => {
 
       const entries = automation.executionLog.getByRuleId("rule-async-fail");
       expect(entries).toHaveLength(1);
-      expect(entries[0].actions[0].success).toBe(false);
-      expect(entries[0].actions[0].error).toBe("Async action failed");
+      expect(entries[0].success).toBe(false);
+      expect(entries[0].failureReason).toBe("Async action failed");
     });
 
     it("pipeline continues processing after action failure", () => {
@@ -331,7 +335,7 @@ describe("MQTT-to-Automation Pipeline Integration", () => {
       expect(wildcardAction).toHaveBeenCalledTimes(1);
     });
 
-    it("records execution log entries for all matching rules", () => {
+    it("records execution log entries for all matching rules", async () => {
       const rules: Rule[] = [
         { id: "log-rule-1", name: "Log Rule 1", topic: "switch/main", action: vi.fn() },
         { id: "log-rule-2", name: "Log Rule 2", topic: "switch/main", action: vi.fn() },
@@ -342,6 +346,9 @@ describe("MQTT-to-Automation Pipeline Integration", () => {
       }
 
       mqttClient.simulateMessage("switch/main", JSON.stringify({ state: "on" }));
+
+      // Recording happens after each (async) execution resolves.
+      await new Promise((resolve) => setTimeout(resolve, 20));
 
       const allEntries = automation.executionLog.list();
       expect(allEntries).toHaveLength(2);

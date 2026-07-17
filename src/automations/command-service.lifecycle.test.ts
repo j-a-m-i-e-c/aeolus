@@ -1,31 +1,31 @@
-// src/automations/action-executor.lifecycle.test.ts — Branch coverage for the command lifecycle paths
+// src/automations/command-service.lifecycle.test.ts — Branch coverage for the command lifecycle paths
 
 import { describe, it, expect, vi } from "vitest";
-import { ActionExecutor, type ActionExecutorDeps } from "./action-executor.js";
+import { CommandService, type CommandServiceDeps } from "./command-service.js";
 import { PendingCommandTracker } from "./pending-command-tracker.js";
 
 vi.mock("../logger.js", () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
-function createMockDeps(overrides?: Partial<ActionExecutorDeps>): ActionExecutorDeps {
+function createMockDeps(overrides?: Partial<CommandServiceDeps>): CommandServiceDeps {
   return {
-    mqttService: { isConnected: vi.fn().mockReturnValue(true), publish: vi.fn() } as unknown as ActionExecutorDeps["mqttService"],
+    mqttService: { isConnected: vi.fn().mockReturnValue(true), publish: vi.fn() } as unknown as CommandServiceDeps["mqttService"],
     connectorManager: {
       executeAction: vi.fn().mockResolvedValue({ success: true }),
       getAcknowledgementCapability: vi.fn().mockReturnValue(undefined),
-    } as unknown as ActionExecutorDeps["connectorManager"],
-    logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } as unknown as ActionExecutorDeps["logger"],
+    } as unknown as CommandServiceDeps["connectorManager"],
+    logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } as unknown as CommandServiceDeps["logger"],
     ...overrides,
   };
 }
 
-describe("ActionExecutor lifecycle branches", () => {
+describe("CommandService lifecycle branches", () => {
   describe("confirm flow", () => {
     it("returns FAILED when observed device is not found in registry", async () => {
       const deviceRegistry = { getById: vi.fn().mockReturnValue(undefined) };
-      const deps = createMockDeps({ deviceRegistry: deviceRegistry as unknown as ActionExecutorDeps["deviceRegistry"] });
-      const executor = new ActionExecutor(deps);
+      const deps = createMockDeps({ deviceRegistry: deviceRegistry as unknown as CommandServiceDeps["deviceRegistry"] });
+      const executor = new CommandService(deps);
       executor.registerHandler("device_action", vi.fn());
 
       const result = await executor.execute(
@@ -43,10 +43,10 @@ describe("ActionExecutor lifecycle branches", () => {
       const tracker = new PendingCommandTracker();
       const deviceRegistry = { getById: vi.fn().mockReturnValue({ id: "dev-1" }) };
       const deps = createMockDeps({
-        deviceRegistry: deviceRegistry as unknown as ActionExecutorDeps["deviceRegistry"],
+        deviceRegistry: deviceRegistry as unknown as CommandServiceDeps["deviceRegistry"],
         pendingCommandTracker: tracker,
       });
-      const executor = new ActionExecutor(deps);
+      const executor = new CommandService(deps);
       executor.registerHandler("device_action", vi.fn());
 
       const promise = executor.execute(
@@ -71,10 +71,10 @@ describe("ActionExecutor lifecycle branches", () => {
       const tracker = new PendingCommandTracker();
       const deviceRegistry = { getById: vi.fn().mockReturnValue({ id: "dev-1" }) };
       const deps = createMockDeps({
-        deviceRegistry: deviceRegistry as unknown as ActionExecutorDeps["deviceRegistry"],
+        deviceRegistry: deviceRegistry as unknown as CommandServiceDeps["deviceRegistry"],
         pendingCommandTracker: tracker,
       });
-      const executor = new ActionExecutor(deps);
+      const executor = new CommandService(deps);
       executor.registerHandler("device_action", vi.fn());
 
       const promise = executor.execute(
@@ -94,7 +94,7 @@ describe("ActionExecutor lifecycle branches", () => {
   describe("handler returning explicit failure", () => {
     it("returns FAILED with handler error when handler returns success:false", async () => {
       const deps = createMockDeps();
-      const executor = new ActionExecutor(deps);
+      const executor = new CommandService(deps);
       executor.registerHandler("device_action", async () => ({ success: false, error: "device offline" }));
 
       const result = await executor.execute(
@@ -109,7 +109,7 @@ describe("ActionExecutor lifecycle branches", () => {
 
     it("returns dispatch data on successful handler with data", async () => {
       const deps = createMockDeps();
-      const executor = new ActionExecutor(deps);
+      const executor = new CommandService(deps);
       executor.registerHandler("device_action", async () => ({ success: true, data: { watts: 42 } }));
 
       const result = await executor.execute(
@@ -133,11 +133,11 @@ describe("ActionExecutor lifecycle branches", () => {
         getAcknowledgementCapability: vi.fn().mockReturnValue({ supported: true, responseTopic: "aeolus/acks/dev-1" }),
       };
       const deps = createMockDeps({
-        deviceRegistry: deviceRegistry as unknown as ActionExecutorDeps["deviceRegistry"],
+        deviceRegistry: deviceRegistry as unknown as CommandServiceDeps["deviceRegistry"],
         pendingCommandTracker: tracker,
-        connectorManager: connectorManager as unknown as ActionExecutorDeps["connectorManager"],
+        connectorManager: connectorManager as unknown as CommandServiceDeps["connectorManager"],
       });
-      const executor = new ActionExecutor(deps);
+      const executor = new CommandService(deps);
       executor.registerHandler("device_action", vi.fn());
 
       const promise = executor.execute(
@@ -166,12 +166,12 @@ describe("ActionExecutor lifecycle branches", () => {
         getAcknowledgementCapability: vi.fn().mockReturnValue({ supported: true }),
       };
       const deps = createMockDeps({
-        deviceRegistry: deviceRegistry as unknown as ActionExecutorDeps["deviceRegistry"],
+        deviceRegistry: deviceRegistry as unknown as CommandServiceDeps["deviceRegistry"],
         pendingCommandTracker: tracker,
-        connectorManager: connectorManager as unknown as ActionExecutorDeps["connectorManager"],
+        connectorManager: connectorManager as unknown as CommandServiceDeps["connectorManager"],
         ackResponseTopicBase: "aeolus/acks",
       });
-      const executor = new ActionExecutor(deps);
+      const executor = new CommandService(deps);
       executor.registerHandler("device_action", vi.fn());
 
       const promise = executor.execute(
@@ -194,11 +194,11 @@ describe("ActionExecutor lifecycle branches", () => {
       const deviceRegistry = { getById: vi.fn().mockReturnValue({ id: "dev-1" }) };
       const loggerMock = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
       const deps = createMockDeps({
-        deviceRegistry: deviceRegistry as unknown as ActionExecutorDeps["deviceRegistry"],
+        deviceRegistry: deviceRegistry as unknown as CommandServiceDeps["deviceRegistry"],
         pendingCommandTracker: tracker,
-        logger: loggerMock as unknown as ActionExecutorDeps["logger"],
+        logger: loggerMock as unknown as CommandServiceDeps["logger"],
       });
-      const executor = new ActionExecutor(deps);
+      const executor = new CommandService(deps);
       executor.registerHandler("device_action", vi.fn());
 
       const promise = executor.execute(
@@ -219,8 +219,8 @@ describe("ActionExecutor lifecycle branches", () => {
 
     it("logs error for FAILED state", async () => {
       const loggerMock = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
-      const deps = createMockDeps({ logger: loggerMock as unknown as ActionExecutorDeps["logger"] });
-      const executor = new ActionExecutor(deps);
+      const deps = createMockDeps({ logger: loggerMock as unknown as CommandServiceDeps["logger"] });
+      const executor = new CommandService(deps);
       executor.registerHandler("device_action", async () => { throw new Error("boom"); });
 
       await executor.execute(
@@ -238,7 +238,7 @@ describe("ActionExecutor lifecycle branches", () => {
   describe("no handler returns FAILED with lifecycleState", () => {
     it("reports lifecycleState FAILED when no handler is registered", async () => {
       const deps = createMockDeps();
-      const executor = new ActionExecutor(deps);
+      const executor = new CommandService(deps);
 
       const result = await executor.execute(
         { type: "unknown_type", target: "dev-1", params: {} },

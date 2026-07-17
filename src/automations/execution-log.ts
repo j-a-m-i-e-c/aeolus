@@ -26,6 +26,17 @@ export interface ExecutionLogEntry {
   }>;
   duration: number; // ms
   timestamp: number;
+  /**
+   * Execution-level outcome recorded by the Execution_Owner
+   * (unified-command-boundary Req 5.5, 8.1). Additive — optional so existing
+   * writers/readers are unaffected.
+   */
+  success?: boolean;
+  /**
+   * Execution-level failure description; present iff `success === false`
+   * (unified-command-boundary Req 5.6). Additive — optional.
+   */
+  failureReason?: string;
 }
 
 export class ExecutionLog {

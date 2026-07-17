@@ -1,4 +1,14 @@
-// src/automations/action-executor.ts — Central dispatch service for all automation actions
+// src/automations/command-service.ts — The single physical-command boundary
+// (formerly ActionExecutor). Every Command_Source routes physical device
+// commands through this service so correlation, dispatch, acknowledgement, and
+// observation are applied identically regardless of origin.
+//
+// ARCHITECTURE NOTE (unified-command-boundary, Req 1.1 / 2.7 / 2.8):
+// `connectorManager.executeAction(` MUST appear only inside this module's
+// built-in handlers (handleToggle / handleDeviceAction). No Command_Source is
+// handed a ConnectorManager reference; the composition root grants it to the
+// CommandServiceDeps object alone, so an unverified command cannot reach the
+// ConnectorManager by construction.
 
 import type { Logger } from "pino";
 import { randomUUID } from "node:crypto";
@@ -7,8 +17,7 @@ import type { ConnectorManager } from "../connectors/connector-manager.js";
 import type { DeviceRegistry } from "../core/device-registry.js";
 import type { ActionResult, CommandLifecycleState, ConfirmOptions } from "../core/types.js";
 import { DEFAULT_CONFIRM_TIMEOUT_MS } from "../core/types.js";
-import { eventBus, AUTOMATION_FIRED } from "../core/event-bus.js";
-import { selectRequiredTier } from "./command-lifecycle.js";
+import { selectRequiredTier, type ConfirmationTier } from "./command-lifecycle.js";
 import type { PendingCommandTracker } from "./pending-command-tracker.js";
 
 /** Correlation fields attached to a command envelope for MQTT-correlating dispatch. */
@@ -17,13 +26,13 @@ export interface CommandCorrelation {
   responseTopic: string;
 }
 
-/** Descriptor for a single automation action to be dispatched. */
+/** Descriptor for a single physical device command to be dispatched. */
 export interface ActionDescriptor {
   type: string;
   target: string;
   params: Record<string, unknown>;
   /**
-   * Correlation envelope fields, assigned by the ActionExecutor before dispatch
+   * Correlation envelope fields, assigned by the CommandService before dispatch
    * for commands that expect a device reply. Forwarded to the connector/MQTT
    * layer so the published command carries MQTT 5 Correlation Data / Response
    * Topic. Absent for dispatch-only commands.
@@ -31,9 +40,10 @@ export interface ActionDescriptor {
   correlation?: CommandCorrelation;
 }
 
-/** Dependencies injected into the ActionExecutor. */
-export interface ActionExecutorDeps {
+/** Dependencies injected into the CommandService. */
+export interface CommandServiceDeps {
   mqttService: MqttService;
+  /** The ONLY holder of this reference outside ConnectorManager itself. */
   connectorManager: ConnectorManager;
   logger: Logger;
   /** Device registry, used to validate Confirmation_Options observed devices (Req 5.5). */
@@ -53,21 +63,39 @@ export interface ActionExecutorDeps {
 export type ActionHandler = (
   action: ActionDescriptor,
   ruleId: string,
-  deps: ActionExecutorDeps,
+  deps: CommandServiceDeps,
 ) => void | ActionResult | Promise<void | ActionResult>;
 
-/**
- * Dispatches automation action descriptors to the appropriate service.
- *
- * Every action — whether from a form rule, script rule, or file-based rule —
- * flows through this single pipeline. Each action is wrapped in try/catch;
- * errors are logged with the rule ID and never thrown.
- */
-export class ActionExecutor {
-  private handlers = new Map<string, ActionHandler>();
-  private deps: ActionExecutorDeps;
+/** Numeric rank for confirmation tiers so an over-request can be detected. */
+function tierRank(tier: ConfirmationTier): number {
+  switch (tier) {
+    case "dispatch":
+      return 0;
+    case "acknowledged":
+      return 1;
+    case "observed":
+      return 2;
+  }
+}
 
-  constructor(deps: ActionExecutorDeps) {
+/**
+ * The single physical-command boundary through which every Command_Source
+ * (script rule, form rule, REST device-action, dashboard control, custom-UI
+ * control, CLI/fleet) dispatches a physical device command.
+ *
+ * Every command flows through the identical dispatch-and-confirmation pipeline;
+ * each command is wrapped in try/catch, errors are logged with the rule ID and
+ * never thrown, and exactly one terminal {@link ActionResult} is returned.
+ *
+ * This service records nothing about automation executions and does NOT emit
+ * AUTOMATION_FIRED — the AutomationEngine is the sole emitter of that started
+ * signal (Req 6.3, 8.5).
+ */
+export class CommandService {
+  private handlers = new Map<string, ActionHandler>();
+  private deps: CommandServiceDeps;
+
+  constructor(deps: CommandServiceDeps) {
     this.deps = deps;
   }
 
@@ -82,22 +110,31 @@ export class ActionExecutor {
   }
 
   /**
-   * Execute a single action descriptor, driving it through the command
-   * lifecycle.
+   * Process exactly one physical device command through the identical
+   * dispatch-and-confirmation path regardless of Command_Source (Req 1.2, 2.10).
    *
-   * Returns an ActionResult — never throws — carrying the final
-   * {@link CommandLifecycleState}:
+   * Never throws; always returns one Command_Result carrying a terminal
+   * {@link CommandLifecycleState} (Req 1.3, 1.7):
    *   - dispatch-only commands resolve synchronously (REQUESTED → DISPATCHED | FAILED)
    *   - commands with an acknowledgement capability and/or Confirmation_Options
    *     register with the {@link PendingCommandTracker} and await the terminal
    *     resolution (ACKNOWLEDGED / OBSERVED / TIMED_OUT / STATE_MISMATCH / FAILED)
    *
-   * Requirements: 4.2–4.9, 5.1–5.9, 6.1, 9.6, 10.2–10.4
+   * @param requiredTier optional explicit tier ceiling requested by the author.
+   *   When omitted, the service auto-selects the highest available tier. When
+   *   supplied it is validated against the device capability ceiling (`observed`
+   *   needs Confirmation_Options; `acknowledged` needs a declared acknowledgement
+   *   capability); an over-request is clamped down to the highest provable tier
+   *   and the clamp is logged, so the returned lifecycleState is always one that
+   *   was actually reached — never an aspirational one.
+   *
+   * Requirements: 1.5, 4.2–4.9, 5.1–5.9, 6.1, 9.6, 10.2–10.4
    */
   async execute(
     action: ActionDescriptor,
     ruleId: string,
     confirm?: ConfirmOptions,
+    requiredTier?: ConfirmationTier,
   ): Promise<ActionResult> {
     // REQUESTED
     const handler = this.handlers.get(action.type);
@@ -117,11 +154,28 @@ export class ActionExecutor {
     const ackCapability = this.resolveAckCapability(targetDeviceId);
     const hasAckCapability = ackCapability?.supported === true;
     const hasConfirm = confirm !== undefined;
-    const tier = selectRequiredTier(hasConfirm, hasAckCapability);
 
-    // Validate the observed device exists before dispatching (Req 5.5).
+    // The highest tier this command can prove given its inputs — the capability
+    // ceiling. `observed` requires Confirmation_Options; `acknowledged` requires
+    // a declared acknowledgement capability; `dispatch` is always provable.
+    const ceiling = selectRequiredTier(hasConfirm, hasAckCapability);
+    const tier = this.resolveEffectiveTier(
+      requiredTier,
+      ceiling,
+      hasConfirm,
+      hasAckCapability,
+      ruleId,
+      targetDeviceId,
+    );
+
+    // Validate the observed device exists before dispatching (Req 5.5). Only
+    // meaningful when we will actually observe (tier === "observed").
     const observedDeviceId = confirm?.deviceId ?? targetDeviceId;
-    if (hasConfirm && this.deps.deviceRegistry && !this.deps.deviceRegistry.getById(observedDeviceId)) {
+    if (
+      tier === "observed" &&
+      this.deps.deviceRegistry &&
+      !this.deps.deviceRegistry.getById(observedDeviceId)
+    ) {
       return {
         success: false,
         error: `Confirmation observed device '${observedDeviceId}' not found`,
@@ -167,7 +221,6 @@ export class ActionExecutor {
 
     // Dispatch-only tier → DISPATCHED is the truthful terminal success (Req 4.8, 9.3, 9.5).
     if (tier === "dispatch" || !this.deps.pendingCommandTracker) {
-      this.emitFired(ruleId, action);
       this.logTerminal(ruleId, action.target, "DISPATCHED");
       return {
         success: true,
@@ -189,9 +242,6 @@ export class ActionExecutor {
       ...(ackCapability?.ackIndicatorValues ? { ackIndicatorValues: ackCapability.ackIndicatorValues } : {}),
     });
 
-    if (resolution.success) {
-      this.emitFired(ruleId, action);
-    }
     this.logTerminal(
       ruleId,
       action.target,
@@ -210,6 +260,42 @@ export class ActionExecutor {
     };
   }
 
+  /**
+   * Resolve the effective confirmation tier from an optional explicit request,
+   * validated and clamped against the device's capability ceiling.
+   *
+   * A requested tier that the device can prove is honoured (allowing an author
+   * to require a *lower* tier than the maximum). A requested tier that exceeds
+   * what the device can prove is an over-request and is clamped down to the
+   * highest provable tier, with the clamp logged — so the command never reports
+   * a lifecycleState it could not actually reach.
+   */
+  private resolveEffectiveTier(
+    requiredTier: ConfirmationTier | undefined,
+    ceiling: ConfirmationTier,
+    hasConfirm: boolean,
+    hasAckCapability: boolean,
+    ruleId: string,
+    target: string,
+  ): ConfirmationTier {
+    if (requiredTier === undefined) return ceiling;
+
+    const provable =
+      requiredTier === "dispatch" ||
+      (requiredTier === "acknowledged" && hasAckCapability) ||
+      (requiredTier === "observed" && hasConfirm);
+
+    if (provable) return requiredTier;
+
+    // Over-request: the device cannot prove the requested tier. Clamp down to
+    // the highest provable tier and log the downgrade (Req 1.5).
+    this.deps.logger.warn(
+      { ruleId, target, requiredTier, clampedTo: ceiling },
+      `Requested completion tier '${requiredTier}' exceeds device capability; clamping to '${ceiling}'`,
+    );
+    return ceiling;
+  }
+
   /** Resolve the acknowledgement capability declared for a device, if any. */
   private resolveAckCapability(deviceId: string) {
     return this.deps.connectorManager.getAcknowledgementCapability?.(deviceId);
@@ -218,16 +304,6 @@ export class ActionExecutor {
   /** Base response-topic space for command acknowledgements. */
   private get ackResponseTopicBase(): string {
     return this.deps.ackResponseTopicBase ?? "aeolus/acks";
-  }
-
-  /** Emit the per-action AUTOMATION_FIRED event on a successful outcome. */
-  private emitFired(ruleId: string, action: ActionDescriptor): void {
-    eventBus.emit(AUTOMATION_FIRED, {
-      ruleId,
-      actionType: action.type,
-      target: action.target,
-      timestamp: Date.now(),
-    });
   }
 
   /**

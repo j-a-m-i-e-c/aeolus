@@ -13,23 +13,31 @@ import {
   sendStateUpdate,
   sendStateUpdateAndFire,
 } from "../store/automation-state-store";
-import { SdkBroker, type BrokerDeps } from "./sdk-broker";
+import { SdkBroker, type BrokerDeps, type CommandResult } from "./sdk-broker";
 import type { EntityType } from "./rpc-types";
 
 // ─── Privileged effect implementations ──────────────────────────────────────
 
-/** Device action — identical to AutomationPane's `control` callback. */
+/** Device action — returns the structured Command_Result from the backend (Req 3.4). */
 async function control(
   _entityId: string,
   deviceId: string,
   actionType: string,
   params?: Record<string, unknown>,
-): Promise<void> {
-  await authFetch(`${API_URL}/api/devices/${deviceId}/action`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ type: actionType, params }),
-  });
+): Promise<CommandResult> {
+  try {
+    const response = await authFetch(`${API_URL}/api/devices/${deviceId}/action`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: actionType, params }),
+    });
+    const body = await response.json() as CommandResult;
+    return body;
+  } catch (error) {
+    // Network/fetch failure — resolve with success:false rather than rejecting (Req 3.4)
+    const message = error instanceof Error ? error.message : "Control request failed";
+    return { success: false, error: message };
+  }
 }
 
 /** MQTT publish — identical to AutomationPane's `publish` callback. */

@@ -21,7 +21,7 @@ function createFakePort(): MessagePort {
 
 function createSpyDeps(): BrokerDeps {
   return {
-    control: vi.fn(async () => {}),
+    control: vi.fn(async () => ({ success: true })),
     save: vi.fn(),
     saveAndFire: vi.fn(),
     fire: vi.fn(),

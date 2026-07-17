@@ -17,7 +17,7 @@ import type {
 import type { ConnectorRegistry } from "./connector-registry.js";
 import type { ConnectorStore } from "./connector-store.js";
 import { ActionRouter } from "./action-router.js";
-import type { ActionExecutor } from "../automations/action-executor.js";
+import type { CommandService } from "../automations/command-service.js";
 import type { ConditionRegistry } from "../automations/condition-registry.js";
 import type { MqttService } from "../mqtt/mqtt-service.js";
 import logger from "../logger.js";
@@ -49,7 +49,7 @@ export class ConnectorManager {
   private contributedHandlers = new Map<string, string[]>();
   /** Tracks which condition types each instance contributed, for cleanup on disable. */
   private contributedConditions = new Map<string, string[]>();
-  private actionExecutor?: ActionExecutor;
+  private actionExecutor?: CommandService;
   private conditionRegistry?: ConditionRegistry;
   private readonly actionRouter: ActionRouter;
 
@@ -68,13 +68,13 @@ export class ConnectorManager {
   }
 
   /**
-   * Set the ActionExecutor and ConditionRegistry dependencies.
+   * Set the CommandService and ConditionRegistry dependencies.
    *
    * Called after construction to break the circular dependency between
-   * ConnectorManager and ActionExecutor. Must be called before
+   * ConnectorManager and CommandService. Must be called before
    * `restoreFromStore()` so contributed handlers are registered on startup.
    */
-  setRegistries(actionExecutor: ActionExecutor, conditionRegistry: ConditionRegistry): void {
+  setRegistries(actionExecutor: CommandService, conditionRegistry: ConditionRegistry): void {
     this.actionExecutor = actionExecutor;
     this.conditionRegistry = conditionRegistry;
   }

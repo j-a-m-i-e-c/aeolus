@@ -7,7 +7,7 @@ import path from "node:path";
 import { config } from "./config.js";
 import logger from "./logger.js";
 import { getDatabase, closeDatabase } from "./db/database.js";
-import { eventBus, DEVICE_STATE_CHANGE, AUTOMATION_STATE_CHANGE, WS_STATE_CHANGE, MQTT_RAW_MESSAGE, AUTOMATION_FIRED, DATA_STORE_WRITE, DATA_STORE_COLLECTION_DELETED } from "./core/event-bus.js";
+import { eventBus, DEVICE_STATE_CHANGE, AUTOMATION_STATE_CHANGE, WS_STATE_CHANGE, MQTT_RAW_MESSAGE, AUTOMATION_FIRED, AUTOMATION_COMPLETED, DATA_STORE_WRITE, DATA_STORE_COLLECTION_DELETED } from "./core/event-bus.js";
 import { DeviceRegistry } from "./core/device-registry.js";
 import { MqttService } from "./mqtt/mqtt-service.js";
 import { AutomationEngine } from "./automations/automation-engine.js";
@@ -17,9 +17,11 @@ import { ConnectorStore } from "./connectors/connector-store.js";
 import * as hueModule from "./connectors/hue/index.js";
 import * as kasaModule from "./connectors/kasa/index.js";
 import { migrateLegacyHueCredentials } from "./connectors/migrate-legacy-hue.js";
-import { ActionExecutor, handlePublish, handleToggle, handleDeviceAction, handleLog, handleDelay, handleWebhook } from "./automations/action-executor.js";
+import { CommandService, handlePublish, handleToggle, handleDeviceAction, handleLog, handleDelay, handleWebhook } from "./automations/command-service.js";
 import { ConditionRegistry } from "./automations/condition-registry.js";
 import { ExecutionLog } from "./automations/execution-log.js";
+import { ExecutionRecorder } from "./automations/execution-recorder.js";
+import { CommandResultCollector } from "./automations/command-result-collector.js";
 import { PendingCommandTracker } from "./automations/pending-command-tracker.js";
 import { Sandbox } from "./automations/sandbox.js";
 import { AutomationStateStore } from "./automations/automation-state-store.js";
@@ -88,7 +90,7 @@ async function main(): Promise<void> {
   const provisioningService = new MqttProvisioningService(mqttService, configWriter, reloader);
   await provisioningService.initialize();
 
-  // 4. Connector Framework (needed before ActionExecutor)
+  // 4. Connector Framework (needed before CommandService)
   const connectorStore = new ConnectorStore(db);
   const connectorRegistry = new ConnectorRegistry();
   const connectorManager = new ConnectorManager(connectorRegistry, connectorStore, registry, eventBus);
@@ -100,12 +102,13 @@ async function main(): Promise<void> {
 
   // 5. Action Executor, Execution Log, and Sandbox
   // Tracker correlates MQTT acknowledgements/observations back to dispatched
-  // commands; injected into both the ActionExecutor (register) and the MQTT
+  // commands; injected into both the CommandService (register) and the MQTT
   // ingestion path (route/observeState).
   const pendingCommandTracker = new PendingCommandTracker();
   mqttService.setAckRouter(pendingCommandTracker);
+  mqttService.setDeviceRegistry(registry);
 
-  const actionExecutor = new ActionExecutor({
+  const actionExecutor = new CommandService({
     mqttService,
     connectorManager,
     logger,
@@ -141,12 +144,21 @@ async function main(): Promise<void> {
     dataStore.startRetentionTimer();
   }
 
-  const sandbox = new Sandbox({ actionExecutor, deviceRegistry: registry, stateStore, dataStore, onStateChange: (ruleId, key, value) => {
+  // 7. Automation Engine (with sandbox, command service, collector, and the
+  // single Execution_Owner that records history/metrics/completion/audit).
+  const collector = new CommandResultCollector();
+
+  const sandbox = new Sandbox({ actionExecutor, deviceRegistry: registry, stateStore, dataStore, collector, onStateChange: (ruleId, key, value) => {
     eventBus.emit(AUTOMATION_STATE_CHANGE, { ruleId, key, value });
   } });
 
-  // 7. Automation Engine (with sandbox, action executor, and execution log)
-  const engine = new AutomationEngine(eventBus, { sandbox, actionExecutor, executionLog });
+  const executionRecorder = new ExecutionRecorder({ eventBus, executionLog, logger });
+  const engine = new AutomationEngine(eventBus, {
+    sandbox,
+    commandService: actionExecutor,
+    executionRecorder,
+    collector,
+  });
   loadUiRules(engine, db, registry, actionExecutor, conditionRegistry);
 
 
@@ -199,7 +211,21 @@ async function main(): Promise<void> {
   app.use(authenticate);
 
   app.use("/api/auth", createAuthRoutes());
-  app.use("/api/devices", createDeviceRoutes(registry, connectorManager, stateHistory));
+  // The device-action route is a Command_Source: it routes commands through the
+  // CommandService (the single physical-command boundary) and is NOT handed a
+  // ConnectorManager reference. The action catalog is served through a bound,
+  // read-only getActionCatalog accessor only (unified-command-boundary, Req
+  // 1.1, 2.2, 2.6, 2.7, 2.8). The ConnectorManager.executeAction() reference is
+  // granted to exactly one collaborator — the CommandService deps object above.
+  app.use(
+    "/api/devices",
+    createDeviceRoutes(
+      registry,
+      actionExecutor,
+      (id) => connectorManager.getActionCatalog(id),
+      stateHistory,
+    ),
+  );
   app.use("/api/state", createStateRoutes(registry));
   app.use("/api/health", createHealthRoutes(mqttService, registry, engine, startTime));
   app.use("/api/mqtt", createMqttRoutes(mqttService));
@@ -222,6 +248,7 @@ async function main(): Promise<void> {
     { eventName: WS_STATE_CHANGE, messageType: "state-change" },
     { eventName: MQTT_RAW_MESSAGE, messageType: "mqtt-message" },
     { eventName: AUTOMATION_FIRED, messageType: "automation-fired" },
+    { eventName: AUTOMATION_COMPLETED, messageType: "automation-completed" },
     { eventName: AUTOMATION_STATE_CHANGE, messageType: "automation-state" },
     { eventName: DATA_STORE_WRITE, messageType: "data-store-write" },
     { eventName: DATA_STORE_COLLECTION_DELETED, messageType: "data-store-collection-deleted" },

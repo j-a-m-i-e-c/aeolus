@@ -1,40 +1,40 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
-  ActionExecutor,
+  CommandService,
   type ActionDescriptor,
-  type ActionExecutorDeps,
+  type CommandServiceDeps,
   handlePublish,
   handleToggle,
   handleDeviceAction,
   handleLog,
   handleDelay,
   handleWebhook,
-} from "./action-executor.js";
+} from "./command-service.js";
 
-function createMockDeps(): ActionExecutorDeps {
+function createMockDeps(): CommandServiceDeps {
   return {
     mqttService: {
       isConnected: vi.fn().mockReturnValue(true),
       publish: vi.fn(),
-    } as unknown as ActionExecutorDeps["mqttService"],
+    } as unknown as CommandServiceDeps["mqttService"],
     connectorManager: {
       executeAction: vi.fn(),
-    } as unknown as ActionExecutorDeps["connectorManager"],
+    } as unknown as CommandServiceDeps["connectorManager"],
     logger: {
       info: vi.fn(),
       warn: vi.fn(),
       error: vi.fn(),
-    } as unknown as ActionExecutorDeps["logger"],
+    } as unknown as CommandServiceDeps["logger"],
   };
 }
 
-describe("ActionExecutor", () => {
-  let executor: ActionExecutor;
-  let deps: ActionExecutorDeps;
+describe("CommandService", () => {
+  let executor: CommandService;
+  let deps: CommandServiceDeps;
 
   beforeEach(() => {
     deps = createMockDeps();
-    executor = new ActionExecutor(deps);
+    executor = new CommandService(deps);
   });
 
   describe("dispatching to correct handler", () => {
@@ -213,7 +213,7 @@ describe("ActionExecutor", () => {
 // ── Built-in handler tests ──────────────────────────────────────────────────
 
 describe("handlePublish", () => {
-  let deps: ActionExecutorDeps;
+  let deps: CommandServiceDeps;
 
   beforeEach(() => {
     deps = createMockDeps();
@@ -242,7 +242,7 @@ describe("handlePublish", () => {
 });
 
 describe("handleToggle", () => {
-  let deps: ActionExecutorDeps;
+  let deps: CommandServiceDeps;
 
   beforeEach(() => {
     deps = createMockDeps();
@@ -260,7 +260,7 @@ describe("handleToggle", () => {
 });
 
 describe("handleDeviceAction", () => {
-  let deps: ActionExecutorDeps;
+  let deps: CommandServiceDeps;
 
   beforeEach(() => {
     deps = createMockDeps();
@@ -288,7 +288,7 @@ describe("handleDeviceAction", () => {
 });
 
 describe("handleLog", () => {
-  let deps: ActionExecutorDeps;
+  let deps: CommandServiceDeps;
 
   beforeEach(() => {
     deps = createMockDeps();
@@ -314,7 +314,7 @@ describe("handleLog", () => {
 });
 
 describe("handleDelay", () => {
-  let deps: ActionExecutorDeps;
+  let deps: CommandServiceDeps;
 
   beforeEach(() => {
     deps = createMockDeps();
@@ -355,7 +355,7 @@ describe("handleDelay", () => {
 });
 
 describe("handleWebhook", () => {
-  let deps: ActionExecutorDeps;
+  let deps: CommandServiceDeps;
   const originalFetch = globalThis.fetch;
 
   beforeEach(() => {

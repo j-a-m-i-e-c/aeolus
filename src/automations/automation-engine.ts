@@ -2,36 +2,78 @@
 
 import type { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
-import { DEVICE_STATE_CHANGE, AUTOMATION_FIRED, AUTOMATION_EXECUTION_COMPLETE, AUTOMATION_RULE_REGISTERED, AUTOMATION_RULE_UNREGISTERED } from "../core/event-bus.js";
+import {
+  DEVICE_STATE_CHANGE,
+  AUTOMATION_FIRED,
+  AUTOMATION_RULE_REGISTERED,
+  AUTOMATION_RULE_UNREGISTERED,
+} from "../core/event-bus.js";
 import type { NormalizedEvent, EventContext, Rule } from "../core/types.js";
-import type { Sandbox, SandboxContext, SandboxFailureReason } from "./sandbox.js";
-import type { ActionExecutor } from "./action-executor.js";
-import type { ExecutionLog, ExecutionLogEntry } from "./execution-log.js";
+import type { Sandbox, SandboxContext } from "./sandbox.js";
+import type { CommandService } from "./command-service.js";
+import type { ExecutionLog } from "./execution-log.js";
+import { ExecutionRecorder, type ExecutionRecordRule } from "./execution-recorder.js";
+import { CommandResultCollector } from "./command-result-collector.js";
+import { assembleExecutionResult, type LogicOutcome } from "./execution-result.js";
+import type { AutomationExecutionResult, CommandResult } from "./execution-types.js";
 import { RuleRegistry } from "./rule-registry.js";
 import { CronTimerManager } from "./cron-timer-manager.js";
 import logger from "../logger.js";
 
-/** Optional dependencies for script/form rule execution. */
+/** Optional dependencies for script/form rule execution (unified-command-boundary Req 4–8). */
 export interface AutomationEngineDeps {
   sandbox?: Sandbox;
-  actionExecutor?: ActionExecutor;
+  /** The single physical-command boundary (renamed from ActionExecutor, Req 1.6). */
+  commandService?: CommandService;
+  /** The single Execution_Owner that records history/metrics/completion/audit (Req 8). */
+  executionRecorder?: ExecutionRecorder;
+  /** Per-execution Command_Result sink, keyed by executionId (Req 4.3, 5.1, 5.3). */
+  collector?: CommandResultCollector;
+  /**
+   * @deprecated Legacy convenience. When `executionRecorder` is not supplied but
+   * `executionLog` is, the engine builds a default {@link ExecutionRecorder}
+   * around it so existing wiring keeps working. Composition (task 6.7) passes an
+   * explicit `executionRecorder` instead.
+   */
   executionLog?: ExecutionLog;
+}
+
+/** Runtime guard: is the value a Command_Result (has a boolean `success`)? */
+function isCommandResult(value: unknown): value is CommandResult {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as { success?: unknown }).success === "boolean"
+  );
 }
 
 export class AutomationEngine {
   private registry: RuleRegistry;
   private eventBus: EventEmitter;
   private sandbox?: Sandbox;
-  private actionExecutor?: ActionExecutor;
-  private executionLog?: ExecutionLog;
+  private commandService?: CommandService;
+  private executionRecorder?: ExecutionRecorder;
+  private collector: CommandResultCollector;
   private cronTimerManager: CronTimerManager;
 
   constructor(eventBus: EventEmitter, deps?: AutomationEngineDeps) {
     this.registry = new RuleRegistry();
     this.eventBus = eventBus;
     this.sandbox = deps?.sandbox;
-    this.actionExecutor = deps?.actionExecutor;
-    this.executionLog = deps?.executionLog;
+    this.commandService = deps?.commandService;
+    this.collector = deps?.collector ?? new CommandResultCollector();
+
+    if (deps?.executionRecorder) {
+      this.executionRecorder = deps.executionRecorder;
+    } else if (deps?.executionLog) {
+      // Legacy path — build a default Execution_Owner around the provided log.
+      this.executionRecorder = new ExecutionRecorder({
+        eventBus,
+        executionLog: deps.executionLog,
+        logger,
+      });
+    }
+
     this.cronTimerManager = new CronTimerManager();
     this.eventBus.on(DEVICE_STATE_CHANGE, (event: NormalizedEvent) => {
       this.evaluate(event);
@@ -54,12 +96,7 @@ export class AutomationEngine {
           state: { ruleId: rule.id, cronExpression: rule.cronExpression, firedAt: Date.now() },
           timestamp: Date.now(),
         };
-        const compiledJs = rule.compiled_js;
-        if (compiledJs && this.sandbox) {
-          this.executeScriptRule(rule, compiledJs, context);
-        } else {
-          this.executeDirectRule(rule, context);
-        }
+        void this.executeRule(rule, context);
       });
       if (started) {
         logger.debug({ ruleId: rule.id, cronExpression: rule.cronExpression }, "Cron timer started for rule");
@@ -86,17 +123,15 @@ export class AutomationEngine {
     return this.registry.getRule(id);
   }
 
-  /** Manually fire a rule by ID, routing through the sandbox for script rules. */
-  async fire(ruleId: string, context: EventContext): Promise<void> {
+  /**
+   * Manually fire a rule by ID, resolving with the eventual
+   * {@link AutomationExecutionResult} once the execution reaches an outcome
+   * (Req 7.1). Routes script rules through the sandbox.
+   */
+  async fire(ruleId: string, context: EventContext): Promise<AutomationExecutionResult> {
     const rule = this.registry.getRule(ruleId);
     if (!rule) throw new Error(`Rule ${ruleId} not found`);
-
-    const compiledJs = rule.compiled_js;
-    if (compiledJs && this.sandbox) {
-      this.executeScriptRule(rule, compiledJs, context);
-    } else {
-      this.executeDirectRule(rule, context);
-    }
+    return this.executeRule(rule, context);
   }
 
   /** Get rule count */
@@ -125,29 +160,56 @@ export class AutomationEngine {
 
       try {
         if (rule.condition && !rule.condition(context)) continue;
-
-        // Check if this is a script rule (has compiled_js attached)
-        const compiledJs = rule.compiled_js;
-
-        if (compiledJs && this.sandbox) {
-          // Script rule — dispatch through Sandbox
-          this.executeScriptRule(rule, compiledJs, context);
-        } else {
-          // Form rule (or any rule without compiled JS) — execute action directly
-          this.executeDirectRule(rule, context);
-        }
       } catch (err) {
         logger.error(
           { ruleId: rule.id, topic: event.topic, error: (err as Error).message },
-          "Rule action threw error",
+          "Rule condition threw error",
         );
+        continue;
       }
+
+      // Each matching rule runs as its own Automation_Execution. Executions are
+      // not awaited here so concurrent rules interleave; each is correlated by
+      // its own executionId (Req 6.7).
+      void this.executeRule(rule, context);
     }
   }
 
-  /** Execute a script rule through the Sandbox with execution logging. */
-  private executeScriptRule(rule: Rule, compiledJs: string, context: EventContext): void {
+  /** Route a rule to the script or form execution path. Never rejects. */
+  private executeRule(rule: Rule, context: EventContext): Promise<AutomationExecutionResult> {
+    const compiledJs = rule.compiled_js;
+    if (compiledJs && this.sandbox) {
+      return this.executeScriptRule(rule, compiledJs, context);
+    }
+    return this.executeDirectRule(rule, context);
+  }
+
+  /**
+   * Execute a script rule through the Sandbox. Establishes the executionId on
+   * the collector's AsyncLocalStorage so sandbox-issued Command_Results are
+   * attributed to this execution, then combines the sandbox outcome with the
+   * collected Command_Results into a single {@link AutomationExecutionResult}
+   * (Req 5.3, 5.4).
+   *
+   * NOTE (cross-spec seam): the sandbox host callbacks pushing each Command_Result
+   * into the collector is task 6.4; until it lands the collected list is empty for
+   * the script path, so a script rule's result reflects the sandbox outcome only.
+   * Full script-path truthfulness additionally depends on the async-await-in-scripts
+   * companion fix (out of scope here).
+   */
+  private async executeScriptRule(
+    rule: Rule,
+    compiledJs: string,
+    context: EventContext,
+  ): Promise<AutomationExecutionResult> {
+    const executionId = randomUUID();
     const start = Date.now();
+
+    // Exactly one "started" signal, emitted synchronously before any await so it
+    // always precedes AUTOMATION_COMPLETED for this execution (Req 6.1, 6.6).
+    this.emitFired(rule, context, executionId);
+    this.collector.open(executionId);
+
     const sandboxContext: SandboxContext = {
       topic: context.topic,
       deviceId: context.deviceId,
@@ -155,110 +217,99 @@ export class AutomationEngine {
       timestamp: context.timestamp,
     };
 
-    // Sandbox.execute() resolves a SandboxExecutionResult for every outcome and
-    // never rejects, so we branch on the real result rather than assuming the
-    // promise resolving means success. (The previous .catch() branch was dead code.)
-    void this.sandbox!.execute(compiledJs, sandboxContext, rule.id).then((result) => {
-      const duration = Date.now() - start;
+    // Sandbox.execute() resolves for every outcome and never rejects.
+    const sandboxResult = await this.collector.context.run(executionId, () =>
+      this.sandbox!.execute(compiledJs, sandboxContext, rule.id),
+    );
 
-      if (result && result.success) {
-        this.recordExecution(rule, context, duration, true);
-        this.eventBus.emit(AUTOMATION_FIRED, {
-          ruleId: rule.id,
-          ruleName: rule.name || "Unnamed Rule",
-          topic: context.topic,
-          deviceId: context.deviceId,
-          timestamp: Date.now(),
-        });
-      } else {
-        const error = result && !result.success ? result.error : undefined;
-        const reason = result && !result.success ? result.reason : undefined;
-        this.recordExecution(rule, context, duration, false, error, reason);
-        logger.error(
-          { ruleId: rule.id, reason, error },
-          "Script rule execution failed",
-        );
-      }
-    });
+    const logic: LogicOutcome =
+      sandboxResult && sandboxResult.success
+        ? { ok: true }
+        : {
+            ok: false,
+            error:
+              sandboxResult && !sandboxResult.success
+                ? sandboxResult.error
+                : "Sandbox execution failed",
+          };
+
+    if (!logic.ok) {
+      const reason = sandboxResult && !sandboxResult.success ? sandboxResult.reason : undefined;
+      logger.error({ ruleId: rule.id, reason, error: logic.error }, "Script rule execution failed");
+    }
+
+    const commandResults = this.collector.close(executionId);
+    const result = assembleExecutionResult(executionId, logic, commandResults);
+    this.record(rule, context, result, Date.now() - start);
+    return result;
   }
 
-  /** Execute a non-script rule (e.g. a form rule) directly, without the sandbox. */
-  private executeDirectRule(rule: Rule, context: EventContext): void {
+  /**
+   * Execute a non-script rule (e.g. a form rule) directly, without the sandbox.
+   * Awaits the action's returned Command_Result (form rules return one once
+   * migrated), incorporates it into the {@link AutomationExecutionResult}, and
+   * records the execution (Req 5.1, 5.2).
+   */
+  private async executeDirectRule(rule: Rule, context: EventContext): Promise<AutomationExecutionResult> {
+    const executionId = randomUUID();
     const start = Date.now();
 
-    const result = rule.action(context);
+    // Exactly one "started" signal, before any await (Req 6.1, 6.6). The
+    // previous premature emission on the async path is removed.
+    this.emitFired(rule, context, executionId);
+    this.collector.open(executionId);
 
-    // Emit automation fired event for the event log
+    let logic: LogicOutcome = { ok: true };
+    try {
+      // Run under the ALS context so any collector.pushCurrent() during the
+      // action attributes to this execution. The action's return value is a
+      // Command_Result for migrated form rules (task 6.3) and void otherwise.
+      const returned = await this.collector.context.run(
+        executionId,
+        () => Promise.resolve(rule.action(context)) as Promise<unknown>,
+      );
+      if (isCommandResult(returned)) {
+        this.collector.push(executionId, returned);
+      }
+    } catch (err) {
+      logic = { ok: false, error: (err as Error).message };
+      logger.error({ ruleId: rule.id, error: (err as Error).message }, "Rule action failed");
+    }
+
+    const commandResults = this.collector.close(executionId);
+    const result = assembleExecutionResult(executionId, logic, commandResults);
+    this.record(rule, context, result, Date.now() - start);
+    return result;
+  }
+
+  /** Emit exactly one AUTOMATION_FIRED ("started") for an execution (Req 6.1). */
+  private emitFired(rule: Rule, context: EventContext, executionId: string): void {
     this.eventBus.emit(AUTOMATION_FIRED, {
+      executionId,
       ruleId: rule.id,
       ruleName: rule.name || "Unnamed Rule",
       topic: context.topic,
       deviceId: context.deviceId,
       timestamp: Date.now(),
     });
-
-    if (result instanceof Promise) {
-      result
-        .then(() => {
-          const duration = Date.now() - start;
-          this.recordExecution(rule, context, duration, true);
-        })
-        .catch((err) => {
-          const duration = Date.now() - start;
-          this.recordExecution(rule, context, duration, false, (err as Error).message);
-          logger.error(
-            { ruleId: rule.id, error: (err as Error).message },
-            "Async rule action failed",
-          );
-        });
-    } else {
-      const duration = Date.now() - start;
-      this.recordExecution(rule, context, duration, true);
-    }
   }
 
-  /** Record an execution entry in the ExecutionLog if available. */
-  private recordExecution(
+  /** Hand the assembled result to the single Execution_Owner (Req 8). */
+  private record(
     rule: Rule,
     ctx: EventContext,
-    duration: number,
-    success: boolean,
-    error?: string,
-    reason?: SandboxFailureReason,
+    result: AutomationExecutionResult,
+    durationMs: number,
   ): void {
-    // Emit AUTOMATION_EXECUTION_COMPLETE for MetricsService (counters + histograms)
-    this.eventBus.emit(AUTOMATION_EXECUTION_COMPLETE, {
-      ruleId: rule.id,
-      ruleName: rule.name || "Unnamed Rule",
-      status: success ? "success" : "error",
-      durationMs: duration,
-    });
-
-    if (!this.executionLog) return;
-
-    const compiledJs = rule.compiled_js;
-    const ruleType: ExecutionLogEntry["ruleType"] = compiledJs ? "script" : "form";
-
-    const entry: ExecutionLogEntry = {
-      id: randomUUID(),
-      ruleId: rule.id,
-      ruleName: rule.name || "Unnamed Rule",
+    if (!this.executionRecorder) return;
+    const ruleType: ExecutionRecordRule["ruleType"] = rule.compiled_js ? "script" : "form";
+    const recordRule: ExecutionRecordRule = {
+      id: rule.id,
+      ...(rule.name ? { name: rule.name } : {}),
       ruleType,
       triggerTopic: ctx.topic,
-      actions: [
-        {
-          type: ruleType === "script" ? "script" : "action",
-          target: ctx.topic,
-          success,
-          ...(error ? { error } : {}),
-          ...(reason ? { reason } : {}),
-        },
-      ],
-      duration,
-      timestamp: Date.now(),
     };
-
-    this.executionLog.push(entry);
+    this.executionRecorder.record({ rule: recordRule, result, durationMs });
   }
 
   /** Check if a rule topic pattern matches an event topic */

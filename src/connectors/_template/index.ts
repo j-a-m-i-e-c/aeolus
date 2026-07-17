@@ -15,7 +15,7 @@ import type {
   Connector,
   SnippetDescriptor,
 } from "../connector.interface.js";
-import type { ActionHandler } from "../../automations/action-executor.js";
+import type { ActionHandler } from "../../automations/command-service.js";
 import type { ConditionFactory } from "../../automations/condition-registry.js";
 import { TemplateConnector } from "./connector.js";
 

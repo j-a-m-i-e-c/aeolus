@@ -6,7 +6,7 @@ import fs from "node:fs";
 import type { Database as DatabaseType } from "better-sqlite3";
 import type { AutomationEngine } from "../../automations/automation-engine.js";
 import type { DeviceRegistry } from "../../core/device-registry.js";
-import type { ActionExecutor, ActionDescriptor } from "../../automations/action-executor.js";
+import type { CommandService, ActionDescriptor } from "../../automations/command-service.js";
 import type { ExecutionLog } from "../../automations/execution-log.js";
 import type { EventContext, NormalizedEvent, Rule } from "../../core/types.js";
 import type { ConditionRegistry } from "../../automations/condition-registry.js";
@@ -49,7 +49,7 @@ export function createAutomationRoutes(
   engine: AutomationEngine,
   db: DatabaseType,
   registry: DeviceRegistry,
-  actionExecutor: ActionExecutor,
+  actionExecutor: CommandService,
   executionLog: ExecutionLog,
   sandboxTypesPath: string,
   connectorRegistry?: ConnectorRegistry,
@@ -404,10 +404,15 @@ export function createAutomationRoutes(
     }
 
     // Fire through the engine (routes script rules through sandbox)
-    await engine.fire(id, context);
+    const result = await engine.fire(id, context);
 
     logger.info({ ruleId: id, ruleName: rule.name }, "Automation rule manually fired");
-    res.json({ success: true, ruleId: id });
+    res.json({
+      success: result.success,
+      ruleId: id,
+      executionId: result.executionId,
+      ...(result.failureReason ? { failureReason: result.failureReason } : {}),
+    });
   }));
 
   /** GET /api/automations/:id/state — return all state key-value pairs for a rule */
@@ -570,7 +575,7 @@ function compileScriptSource(source: string, triggerTopic: string): ResolvedScri
 function registerUiRule(
   engine: AutomationEngine,
   registry: DeviceRegistry,
-  actionExecutor: ActionExecutor,
+  actionExecutor: CommandService,
   stored: StoredRule,
   conditionRegistry?: ConditionRegistry,
 ): void {
@@ -617,7 +622,7 @@ function registerUiRule(
         target: stored.action_target,
         params,
       };
-      await actionExecutor.execute(descriptor, stored.id);
+      return actionExecutor.execute(descriptor, stored.id);
     };
 
     engine.register({
@@ -637,7 +642,7 @@ export function loadUiRules(
   engine: AutomationEngine,
   db: DatabaseType,
   registry: DeviceRegistry,
-  actionExecutor: ActionExecutor,
+  actionExecutor: CommandService,
   conditionRegistry?: ConditionRegistry,
 ): void {
   const rows = db.prepare("SELECT * FROM automation_rules WHERE enabled = 1").all() as StoredRule[];

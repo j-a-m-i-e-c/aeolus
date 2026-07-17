@@ -18,7 +18,7 @@ import { createLayoutRoutes } from "../api/routes/layout.routes.js";
 import { createSystemRoutes } from "../api/routes/system.routes.js";
 import { DeviceRegistry } from "../core/device-registry.js";
 import { AutomationEngine } from "../automations/automation-engine.js";
-import { ActionExecutor, handlePublish, handleToggle, handleDeviceAction, handleLog, handleDelay, handleWebhook, type ActionExecutorDeps } from "../automations/action-executor.js";
+import { CommandService, handlePublish, handleToggle, handleDeviceAction, handleLog, handleDelay, handleWebhook, type CommandServiceDeps } from "../automations/command-service.js";
 import { ConditionRegistry } from "../automations/condition-registry.js";
 import { ExecutionLog } from "../automations/execution-log.js";
 import { AutomationStateStore } from "../automations/automation-state-store.js";
@@ -68,11 +68,11 @@ export function createTestApp(
 
   const dataStore = new DataStore(db, eventBus);
 
-  const actionExecutor = new ActionExecutor({
+  const actionExecutor = new CommandService({
     mqttService: createStubMqttService(),
     connectorManager: undefined,
     logger: createSilentLogger(),
-  } as unknown as ActionExecutorDeps);
+  } as unknown as CommandServiceDeps);
   actionExecutor.registerHandler("publish", handlePublish);
   actionExecutor.registerHandler("toggle", handleToggle);
   actionExecutor.registerHandler("device_action", handleDeviceAction);
@@ -89,7 +89,7 @@ export function createTestApp(
   const stateStore = new AutomationStateStore(db);
   stateStore.loadFromDb();
 
-  const engine = new AutomationEngine(eventBus, { actionExecutor, executionLog });
+  const engine = new AutomationEngine(eventBus, { commandService: actionExecutor, executionLog });
 
   // Stub MQTT service for health route
   const stubMqttService = createStubMqttService();
@@ -98,7 +98,7 @@ export function createTestApp(
   // ─── Routes ──────────────────────────────────────────────────────────────
 
   app.use("/api/auth", createAuthRoutes());
-  app.use("/api/devices", createDeviceRoutes(registry, undefined as never));
+  app.use("/api/devices", createDeviceRoutes(registry, actionExecutor, () => []));
   app.use("/api/state", createStateRoutes(registry));
   app.use("/api/health", createHealthRoutes(stubMqttService as never, registry, engine, startTime));
   app.use("/api/automations", createAutomationRoutes(

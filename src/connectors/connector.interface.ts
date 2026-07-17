@@ -1,7 +1,7 @@
 // src/connectors/connector.interface.ts — Core TypeScript interfaces for the Connector Framework
 
 import type { DeviceType, Device, Action } from "../core/types.js";
-import type { ActionHandler } from "../automations/action-executor.js";
+import type { ActionHandler } from "../automations/command-service.js";
 import type { ConditionFactory } from "../automations/condition-registry.js";
 
 /**

@@ -1,18 +1,55 @@
 // src/api/routes/device.routes.ts — Device CRUD and action endpoints
+//
+// The device-action endpoint (POST /:id/action) routes every command through
+// the CommandService — the single physical-command boundary — rather than
+// calling ConnectorManager.executeAction() directly. This route is a
+// Command_Source and therefore is NOT handed a ConnectorManager reference: the
+// action catalog is served through a read-only `getActionCatalog` accessor
+// bound from the manager at composition (unified-command-boundary, Req 2.1,
+// 2.8, 3.1–3.6).
 
 import { Router } from "express";
 import type { DeviceRegistry } from "../../core/device-registry.js";
-import type { ConnectorManager } from "../../connectors/connector-manager.js";
+import type { CommandService } from "../../automations/command-service.js";
+import type { CapabilityDescriptor } from "../../connectors/connector.interface.js";
 import type { StateHistory } from "../../core/state-history.js";
+import type { ActionResult } from "../../core/types.js";
+import { config } from "../../config.js";
 import { NotFoundError } from "../middleware/error-handler.js";
 import { asyncHandler } from "../middleware/async-handler.js";
 import { validateAction } from "../middleware/validators.js";
 import { requireTabPermission } from "../../auth/auth-middleware.js";
 import logger from "../../logger.js";
 
+/**
+ * Race a promise against a timeout, resolving with `onTimeout()` if the promise
+ * has not settled within `timeoutMs`. Never rejects on timeout; the in-flight
+ * promise is left to settle on its own. Used to bound the REST device-action
+ * route so a command still awaiting acknowledgement/observation cannot hang the
+ * HTTP response (Req 3.6). The startup assertion `restActionTimeoutMs >=
+ * maxConfirmTimeoutMs` guarantees this never preempts a legitimately-confirming
+ * command (Req 3.7).
+ */
+export async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  onTimeout: () => T,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<T>((resolve) => {
+    timer = setTimeout(() => resolve(onTimeout()), timeoutMs);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 export function createDeviceRoutes(
   registry: DeviceRegistry,
-  connectorManager: ConnectorManager,
+  commandService: CommandService,
+  getActionCatalog: (id: string) => CapabilityDescriptor[],
   stateHistory?: StateHistory,
 ): Router {
   const router = Router();
@@ -41,8 +78,9 @@ export function createDeviceRoutes(
       return;
     }
 
-    // Delegate catalog resolution to ConnectorManager
-    const catalog = connectorManager.getActionCatalog(id);
+    // Resolve the catalog through the injected read-only accessor. The route is
+    // a Command_Source and never holds a full ConnectorManager reference.
+    const catalog = getActionCatalog(id);
     res.json(catalog);
   });
 
@@ -97,15 +135,24 @@ export function createDeviceRoutes(
     return res.json({ success: true, deleted });
   });
 
-  /** POST /api/devices/:id/action — execute action on device */
+  /** POST /api/devices/:id/action — execute action on device via the CommandService */
   router.post("/:id/action", requireTabPermission("interact"), validateAction, asyncHandler(async (req, res) => {
     const id = req.params.id as string;
 
-    const result = await connectorManager.executeAction(id, {
-      type: req.body.type,
-      deviceId: id,
-      params: req.body.params || {},
-    });
+    // Route through the single physical-command boundary. Bound by an outer
+    // timeout so the HTTP response is never held open indefinitely (Req 3.6).
+    const result = await withTimeout(
+      commandService.execute(
+        { type: req.body.type, target: id, params: req.body.params ?? {} },
+        `rest:${id}`,
+      ),
+      config.restActionTimeoutMs,
+      (): ActionResult => ({
+        success: false,
+        lifecycleState: "TIMED_OUT",
+        error: "Device command timed out",
+      }),
+    );
 
     if (result.success) {
       logger.info({ deviceId: id, action: req.body.type }, "Action executed");
@@ -113,7 +160,8 @@ export function createDeviceRoutes(
       logger.warn({ deviceId: id, action: req.body.type, error: result.error }, "Action failed");
     }
 
-    // Always HTTP 200 — callers must inspect ActionResult.success
+    // Always HTTP 200 for domain outcomes — callers inspect the Command_Result
+    // (success / lifecycleState / error) rather than the HTTP status (Req 3.5).
     res.json(result);
   }));
 

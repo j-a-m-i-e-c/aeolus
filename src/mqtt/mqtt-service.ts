@@ -6,6 +6,7 @@ import { parseTopic } from "./topic-parser.js";
 import { DEVICE_STATE_CHANGE, MQTT_RAW_MESSAGE, MQTT_CONNECTION_STATE, MQTT_MESSAGE_PROCESSED, MQTT_MESSAGE_PUBLISHED } from "../core/event-bus.js";
 import type { NormalizedEvent } from "../core/types.js";
 import type { AckMessage } from "../automations/pending-command-tracker.js";
+import type { DeviceRegistry } from "../core/device-registry.js";
 import logger from "../logger.js";
 
 export type MqttConnectionState = "disconnected" | "connecting" | "connected" | "waiting_retry";
@@ -80,6 +81,7 @@ export class MqttService {
   private intentionalDisconnect = false;
   private credentials: { username?: string; password?: string } | null = null;
   private ackRouter?: AckRouter;
+  private deviceRegistry?: DeviceRegistry;
 
   /**
    * Inject the sink for correlated command replies / observation state.
@@ -87,6 +89,16 @@ export class MqttService {
    */
   setAckRouter(ackRouter: AckRouter): void {
     this.ackRouter = ackRouter;
+  }
+
+  /**
+   * Inject the device registry for best-effort command-topic observability.
+   * When set, publish() emits a debug signal when the target topic corresponds
+   * to a known device — indicating an unverified device command was published
+   * outside the CommandService boundary (Req 2.13).
+   */
+  setDeviceRegistry(registry: DeviceRegistry): void {
+    this.deviceRegistry = registry;
   }
 
   constructor(config: Partial<MqttServiceConfig> & Pick<MqttServiceConfig, "brokerUrl" | "topics">, eventBus: EventEmitter) {
@@ -407,6 +419,35 @@ export class MqttService {
         this.eventBus.emit(MQTT_MESSAGE_PUBLISHED, { topic });
       }
     });
+
+    // Best-effort observability signal for raw publishes targeting a device
+    // command topic (Req 2.13). Never blocks or rejects the publish above.
+    this.emitCommandTopicSignal(topic);
+  }
+
+  /**
+   * Best-effort, non-blocking observability signal (Req 2.13).
+   * When a device registry is available and the publish topic parses to a device
+   * ID that exists in the registry, emit a debug log indicating an unverified
+   * device command was published outside the CommandService boundary.
+   *
+   * This produces NO Command_Result and NO lifecycleState (Req 2.12).
+   * A signal failure never affects the publish — the entire check is swallowed.
+   */
+  private emitCommandTopicSignal(topic: string): void {
+    try {
+      if (!this.deviceRegistry) return;
+      const parsed = parseTopic(topic);
+      if (!parsed) return;
+      if (this.deviceRegistry.getById(parsed.deviceId)) {
+        logger.debug(
+          { topic },
+          `Unverified device command published to ${topic}`,
+        );
+      }
+    } catch {
+      // Intentionally swallowed — signal failures must never affect the publish.
+    }
   }
 
   private setConnectionState(state: MqttConnectionState): void {

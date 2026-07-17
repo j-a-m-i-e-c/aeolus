@@ -29,7 +29,7 @@ function createSpyDeps(): BrokerDeps & { calls: Array<{ op: string; args: unknow
   const calls: Array<{ op: string; args: unknown[] }> = [];
   return {
     calls,
-    control: vi.fn(async (...args: unknown[]) => { calls.push({ op: "control", args }); }),
+    control: vi.fn(async (...args: unknown[]) => { calls.push({ op: "control", args }); return { success: true }; }),
     save: vi.fn((...args: unknown[]) => { calls.push({ op: "save", args }); }),
     saveAndFire: vi.fn((...args: unknown[]) => { calls.push({ op: "saveAndFire", args }); }),
     fire: vi.fn((...args: unknown[]) => { calls.push({ op: "fire", args }); }),
@@ -371,6 +371,7 @@ describe("Feature: custom-ui-sandboxing, Property 4: Every well-formed request y
             if (throwSet.has(currentId)) {
               throw new Error("Device unreachable");
             }
+            return { success: true };
           });
 
           const broker = new SdkBroker(deps);

@@ -18,6 +18,17 @@ import {
   type RpcErrorCode,
 } from "./rpc-types";
 
+// ─── Command result type ─────────────────────────────────────────────────────
+
+/** Structured outcome of a device command, as returned by the backend REST route. */
+export interface CommandResult {
+  success: boolean;
+  data?: Record<string, unknown>;
+  error?: string;
+  lifecycleState?: string;
+  correlationId?: string;
+}
+
 // ─── Public interfaces ───────────────────────────────────────────────────────
 
 /** Immutable capability grant for a single sandboxed frame. */
@@ -35,8 +46,8 @@ export interface FrameGrant {
  * store mutations, MQTT publish). The broker never holds a token or fetch ref.
  */
 export interface BrokerDeps {
-  /** Execute a device action. */
-  control: (entityId: string, deviceId: string, actionType: string, params?: Record<string, unknown>) => Promise<void>;
+  /** Execute a device action — resolves with the structured Command_Result (including failures). */
+  control: (entityId: string, deviceId: string, actionType: string, params?: Record<string, unknown>) => Promise<CommandResult>;
   /** Persist a state key-value pair for the entity. */
   save: (entityType: EntityType, entityId: string, key: string, value: unknown) => void;
   /** Persist state AND fire the logic tab. */
@@ -230,13 +241,12 @@ export class SdkBroker {
         return undefined;
 
       case "control":
-        await this.deps.control(
+        return await this.deps.control(
           entityId,
           params.deviceId as string,
           params.actionType as string,
           params.params as Record<string, unknown> | undefined,
         );
-        return undefined;
 
       case "publish":
         this.deps.publish(params.topic as string, params.payload as string);

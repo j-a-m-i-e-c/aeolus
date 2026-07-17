@@ -1,0 +1,19 @@
+# docker-compose.override.yml — Local development overrides (Docker Desktop).
+#
+# On Linux (CI, Raspberry Pi), network_mode: host works and exposes all ports.
+# On Docker Desktop (Windows/Mac), host networking runs inside the VM, so
+# containers aren't reachable on localhost. This override switches to bridge
+# networking with explicit port mappings for local development and e2e testing.
+#
+# This file is auto-loaded by `docker compose up` when present alongside
+# docker-compose.yml. It's gitignored because CI doesn't need it.
+
+services:
+  backend:
+    network_mode: bridge
+    ports:
+      - "${API_PORT:-3001}:3001"
+    # Override MQTT broker URL to use the container name instead of localhost
+    environment:
+      MQTT_BROKER_URL: mqtt://mosquitto:1883
+      RATE_LIMIT_RPM: "10000"

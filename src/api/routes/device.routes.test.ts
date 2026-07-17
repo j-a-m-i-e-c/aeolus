@@ -5,7 +5,8 @@ import express from "express";
 import { createDeviceRoutes } from "./device.routes.js";
 import { errorHandler } from "../middleware/error-handler.js";
 import type { DeviceRegistry } from "../../core/device-registry.js";
-import type { ConnectorManager } from "../../connectors/connector-manager.js";
+import type { CommandService } from "../../automations/command-service.js";
+import type { CapabilityDescriptor } from "../../connectors/connector.interface.js";
 import type { StateHistory } from "../../core/state-history.js";
 import type { Device } from "../../core/types.js";
 
@@ -79,7 +80,8 @@ function makeDevice(id: string, overrides: Partial<Device> = {}): Device {
 describe("device.routes", () => {
   let app: express.Express;
   let mockRegistry: Record<string, any>;
-  let mockConnectorManager: Record<string, any>;
+  let mockCommandService: Record<string, any>;
+  let mockGetActionCatalog: ReturnType<typeof vi.fn>;
   let mockStateHistory: Record<string, any>;
 
   beforeEach(() => {
@@ -88,10 +90,11 @@ describe("device.routes", () => {
       getById: vi.fn().mockReturnValue(undefined),
     };
 
-    mockConnectorManager = {
-      executeAction: vi.fn().mockResolvedValue({ success: true }),
-      getActionCatalog: vi.fn().mockReturnValue([]),
+    mockCommandService = {
+      execute: vi.fn().mockResolvedValue({ success: true, lifecycleState: "DISPATCHED" }),
     };
+
+    mockGetActionCatalog = vi.fn().mockReturnValue([] as CapabilityDescriptor[]);
 
     mockStateHistory = {
       getHistory: vi.fn().mockReturnValue([]),
@@ -106,7 +109,8 @@ describe("device.routes", () => {
       "/api/devices",
       createDeviceRoutes(
         mockRegistry as unknown as DeviceRegistry,
-        mockConnectorManager as unknown as ConnectorManager,
+        mockCommandService as unknown as CommandService,
+        mockGetActionCatalog as unknown as (id: string) => CapabilityDescriptor[],
         mockStateHistory as unknown as StateHistory,
       ),
     );
@@ -152,6 +156,30 @@ describe("device.routes", () => {
     });
   });
 
+  describe("GET /api/devices/:id/actions", () => {
+    it("should return 404 when device not found", async () => {
+      const res = await request(app, "GET", "/api/devices/nonexistent/actions");
+      expect(res.status).toBe(404);
+      expect((res.body as any).error).toContain("Device not found");
+    });
+
+    it("should return the action catalog via the injected accessor", async () => {
+      const device = makeDevice("dev-1");
+      mockRegistry.getById.mockReturnValue(device);
+      const catalog: CapabilityDescriptor[] = [
+        { type: "toggle", displayName: "Toggle", params: [] } as unknown as CapabilityDescriptor,
+      ];
+      mockGetActionCatalog.mockReturnValue(catalog);
+
+      const res = await request(app, "GET", "/api/devices/dev-1/actions");
+      expect(res.status).toBe(200);
+      expect(mockGetActionCatalog).toHaveBeenCalledWith("dev-1");
+      const body = res.body as any[];
+      expect(body).toHaveLength(1);
+      expect(body[0].type).toBe("toggle");
+    });
+  });
+
   describe("GET /api/devices/:id/history", () => {
     it("should return empty array when stateHistory is not provided", async () => {
       // Create app without stateHistory
@@ -161,7 +189,8 @@ describe("device.routes", () => {
         "/api/devices",
         createDeviceRoutes(
           mockRegistry as unknown as DeviceRegistry,
-          mockConnectorManager as unknown as ConnectorManager,
+          mockCommandService as unknown as CommandService,
+          mockGetActionCatalog as unknown as (id: string) => CapabilityDescriptor[],
           undefined,
         ),
       );
@@ -228,7 +257,8 @@ describe("device.routes", () => {
         "/api/devices",
         createDeviceRoutes(
           mockRegistry as unknown as DeviceRegistry,
-          mockConnectorManager as unknown as ConnectorManager,
+          mockCommandService as unknown as CommandService,
+          mockGetActionCatalog as unknown as (id: string) => CapabilityDescriptor[],
           undefined,
         ),
       );
@@ -265,7 +295,8 @@ describe("device.routes", () => {
         "/api/devices",
         createDeviceRoutes(
           mockRegistry as unknown as DeviceRegistry,
-          mockConnectorManager as unknown as ConnectorManager,
+          mockCommandService as unknown as CommandService,
+          mockGetActionCatalog as unknown as (id: string) => CapabilityDescriptor[],
           undefined,
         ),
       );
@@ -287,17 +318,18 @@ describe("device.routes", () => {
   });
 
   describe("POST /api/devices/:id/action", () => {
-    it("should return 404 when device not found", async () => {
-      // executeAction now handles not-found and returns ActionResult { success: false }
-      mockConnectorManager.executeAction.mockResolvedValue({
+    it("should return HTTP 200 with success:false when the command fails (e.g. device not found)", async () => {
+      // The CommandService owns validation and returns a terminal Command_Result.
+      mockCommandService.execute.mockResolvedValue({
         success: false,
+        lifecycleState: "FAILED",
         error: "Device 'nonexistent' not found",
       });
 
       const res = await request(app, "POST", "/api/devices/nonexistent/action", {
         type: "toggle",
       });
-      // HTTP 200 with ActionResult — callers inspect success field
+      // HTTP 200 with Command_Result — callers inspect success field
       expect(res.status).toBe(200);
       expect((res.body as any).success).toBe(false);
       expect((res.body as any).error).toContain("not found");
@@ -312,10 +344,10 @@ describe("device.routes", () => {
       expect((res.body as any).error).toContain("Action type is required");
     });
 
-    it("should execute action and return ActionResult", async () => {
+    it("should route the action through the CommandService and return the Command_Result", async () => {
       const device = makeDevice("dev-1");
       mockRegistry.getById.mockReturnValue(device);
-      mockConnectorManager.executeAction.mockResolvedValue({ success: true });
+      mockCommandService.execute.mockResolvedValue({ success: true, lifecycleState: "DISPATCHED" });
 
       const res = await request(app, "POST", "/api/devices/dev-1/action", {
         type: "toggle",
@@ -323,41 +355,41 @@ describe("device.routes", () => {
       });
       expect(res.status).toBe(200);
       expect((res.body as any).success).toBe(true);
-      expect(mockConnectorManager.executeAction).toHaveBeenCalledWith("dev-1", {
-        type: "toggle",
-        deviceId: "dev-1",
-        params: { on: false },
-      });
+      expect((res.body as any).lifecycleState).toBe("DISPATCHED");
+      expect(mockCommandService.execute).toHaveBeenCalledWith(
+        { type: "toggle", target: "dev-1", params: { on: false } },
+        "rest:dev-1",
+      );
     });
 
     it("should pass empty params when not provided in body", async () => {
       const device = makeDevice("dev-1");
       mockRegistry.getById.mockReturnValue(device);
-      mockConnectorManager.executeAction.mockResolvedValue({ success: true });
+      mockCommandService.execute.mockResolvedValue({ success: true, lifecycleState: "DISPATCHED" });
 
       const res = await request(app, "POST", "/api/devices/dev-1/action", {
         type: "setBrightness",
       });
       expect(res.status).toBe(200);
-      expect(mockConnectorManager.executeAction).toHaveBeenCalledWith("dev-1", {
-        type: "setBrightness",
-        deviceId: "dev-1",
-        params: {},
-      });
+      expect(mockCommandService.execute).toHaveBeenCalledWith(
+        { type: "setBrightness", target: "dev-1", params: {} },
+        "rest:dev-1",
+      );
     });
 
     it("should return HTTP 200 with success: false when action fails (not HTTP 500)", async () => {
       const device = makeDevice("dev-1");
       mockRegistry.getById.mockReturnValue(device);
-      mockConnectorManager.executeAction.mockResolvedValue({
+      mockCommandService.execute.mockResolvedValue({
         success: false,
+        lifecycleState: "FAILED",
         error: "Connector offline",
       });
 
       const res = await request(app, "POST", "/api/devices/dev-1/action", {
         type: "toggle",
       });
-      // Per design: domain failures return HTTP 200 with ActionResult, not HTTP 500
+      // Per design: domain failures return HTTP 200 with Command_Result, not HTTP 500
       expect(res.status).toBe(200);
       expect((res.body as any).success).toBe(false);
       expect((res.body as any).error).toContain("Connector offline");
