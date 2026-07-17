@@ -1,83 +1,102 @@
 ---
 inclusion: auto
-description: Core project context, design standards, and architecture reference for Aeolus
+description: Current project context, design standards and architecture boundaries for Aeolus
 ---
 
-# Aeolus Project Context
+# Aeolus project context
 
-## Project Overview
+## Project overview
 
-Aeolus is a self-hosted, local-first IoT platform running on Raspberry Pi. It bridges custom microcontrollers (ESP32/Arduino via MQTT), commercial smart devices (Philips Hue, TP-Link Kasa via pluggable connectors), and external APIs into one unified system with code-driven automations and a React dashboard.
+Aeolus is a self-hosted, local-first edge application platform. It joins MQTT devices, local product integrations, automation Logic, custom React UI and persistent site data in one installation.
 
-**Key characteristics:**
-- Single-user, local network deployment (no auth needed for MVP)
-- Three Docker services: Mosquitto MQTT broker, Express.js backend, React frontend (nginx)
-- SQLite (sql.js) for all persistence — no external database
-- MQTT 5.0 protocol with message expiry on published commands
-- Automation scripts run in isolated-vm V8 sandboxes (32MB memory, 5s timeout)
-- Custom React UI components transpiled at runtime, loaded via dynamic import
+The normal deployment is a Raspberry Pi or Linux host running:
 
-## Current Feature Set
+- Eclipse Mosquitto;
+- a Node.js/TypeScript backend;
+- a React frontend served by nginx;
+- a local SQLite database.
 
-- **MQTT-first device communication** — bidirectional, any topic accepted
-- **Pluggable connector framework** — Hue (color/CT/Zigbee search/firmware awareness), Kasa (auto-discovery)
-- **Services framework** — Cron schedules, API triggers, system events
-- **Code-driven automations** — Monaco editor with IntelliSense, flow diagrams, custom React UI components
-- **Data Store** — persistent time-series collections + key-value buckets (disabled by default, setup wizard)
-- **Modular dashboard** — 3 pinned tabs (System, Connectors, Data) + custom tabs with drag-and-drop panes
-- **State history** — per-device SVG trend charts with time range filtering
-- **Self-update** — one-click update from the dashboard via Docker rebuild
+## Current platform characteristics
 
-## Design & Branding
+- Authentication is always active for the dashboard and API.
+- Human JWT access and MQTT broker credentials are separate systems.
+- The default Compose deployment does not grant the backend Mosquitto file or reload privileges; dashboard MQTT provisioning needs explicit deployment wiring.
+- Persistence uses `better-sqlite3` with versioned startup migrations.
+- MQTT devices and connector-backed products enter a common device/event model.
+- Bundled connectors are registered explicitly in `src/index.ts`.
+- Script Logic runs in fresh `isolated-vm` isolates with memory and time limits.
+- Custom React UI runs inside an opaque-origin sandboxed iframe.
+- Logic and its paired UI share private persistent automation state.
+- The Data Store provides time-series collections and key-value buckets.
+- Logs, metrics, device history, health and migration checkpoints are platform features.
+- Commands can model dispatch, acknowledgement and observed outcomes where the path supports them.
+- Aeolus reports update availability but does not self-update from the dashboard.
 
-When designing or modifying any frontend UI, always reference `docs/BRANDING.md` for:
+## Design and branding
 
-- Color palette: Aeolus Blue `#3BA4FF`, Wind Cyan `#5CE1E6`, Deep Void `#0B0F14`, Graphite `#121821`, Slate `#1A2330`
-- Feedback colors: Emerald `#22C55E` (success), Amber `#F59E0B` (warning), Soft Red `#EF4444` (error)
-- Text hierarchy: Primary `#E6EDF3`, Secondary `#9AA6B2`, Muted `#6B7785`, Border `#2A3441`
-- Typography: Inter (primary), JetBrains Mono (code/MQTT topics)
-- Design pillars: clarity over decoration, bold contrast, subtle motion, data-first UI, airy spacing
-- Motion: 150-250ms ease-in-out transitions, no bouncing — "feels like airflow"
-- Components: cards with `#121821` bg and 12-16px border radius, thin stroke Lucide icons
-- Signature gradient: `linear-gradient(135deg, #3BA4FF, #5CE1E6)` — used sparingly for hero elements
+For frontend work, use `docs/BRANDING.md`.
 
-Use Tailwind theme tokens (background, surface, primary, accent) rather than raw hex values.
+Important design principles:
 
-## Architecture Quick Reference
+- clarity over decoration;
+- data first;
+- strong contrast;
+- restrained motion;
+- useful empty and failure states;
+- Tailwind theme tokens instead of scattered raw colours.
 
+## Architecture quick reference
+
+```text
+MQTT devices and local products
+              ↕
+MQTT service and connector manager
+              ↓
+typed event bus
+       ↙             ↘
+device registry   automation engine
+       ↘             ↙
+      SQLite, REST and WebSocket
+              ↕
+dashboard and sandboxed custom UI
 ```
-Event Sources (MQTT devices, Connectors, Services)
-        ↓
-Internal Event Bus (DEVICE_STATE_CHANGE, AUTOMATION_STATE_CHANGE, etc.)
-        ↓
-Device Registry (SQLite) + Automation Engine (V8 Sandbox)
-        ↓
-Actions (MQTT publish, device actions, HTTP webhooks, logging)
-        ↓
-WebSocket Server → React Dashboard (real-time updates)
-        ↓
-Data Store (time-series collections, key-value buckets)
+
+For the component-level diagram, see `docs/reference/architecture.md` or the detailed architecture section in `docs/WHY_AEOLUS.md`.
+
+## Key reference documents
+
+- `docs/README.md` - documentation map
+- `docs/WHY_AEOLUS.md` - technical product argument
+- `docs/reference/` - current implementation reference
+- `docs/security/` - authentication, permissions and MQTT security
+- `docs/production-deployment.md` - deployment and operations
+- `docs/MICROCONTROLLERS.md` - MQTT device examples
+- `src/connectors/README.md` - connector developer guide
+- `docs/ROADMAP.md` - active and future work
+
+`.kiro/specs/` contains historical implementation plans. Treat the code, tests and maintained reference docs as current when a completed spec differs from them.
+
+## Technology
+
+| Layer | Technology |
+|---|---|
+| Backend | Node.js 22, Express, TypeScript, `better-sqlite3`, mqtt.js, `ws`, `isolated-vm`, pino |
+| Frontend | React 19, Vite, Zustand, Tailwind CSS, Monaco, `react-grid-layout` |
+| Testing | Vitest, fast-check, supertest, Testing Library, Playwright |
+| Infrastructure | Docker Compose, Eclipse Mosquitto, nginx, GitHub Actions |
+
+## Source entry points
+
+```text
+src/index.ts
+src/core/
+src/automations/
+src/connectors/
+src/data-store/
+src/api/routes/
+src/websocket/
+frontend/src/sandbox/
+frontend/src/lib/
 ```
 
-## Key Reference Documents
-
-- `docs/COMPREHENSIVE_DOCUMENTATION.md` — Full technical docs (MUST be updated with every significant change)
-- `docs/BRANDING.md` — Design system, color palette, typography, component styles
-- `docs/ROADMAP.md` — Future plans and opportunities
-- `docs/production-deployment.md` — MQTT auth, HTTPS, firewall, backups, monitoring
-- `docs/MICROCONTROLLERS.md` — ESP32/Arduino MQTT templates
-- `src/connectors/README.md` — Connector developer guide
-
-## Tech Stack
-
-| Layer | Tech |
-|-------|------|
-| Backend | Node.js 22, Express, TypeScript (strict), sql.js, mqtt.js (MQTT 5.0), isolated-vm, pino |
-| Frontend | React 19, Vite, Zustand, Tailwind CSS, Monaco Editor, Lucide, Framer Motion |
-| Testing | Vitest, fast-check (property-based testing), supertest |
-| Infra | Docker Compose, Eclipse Mosquitto 2, GitHub Actions CI/CD |
-| Quality | ESLint (flat config), Zod validation, express-rate-limit, structured error responses |
-
----
-
-**Last Updated**: 2026-05-15
+Last reviewed: 2026-07-17

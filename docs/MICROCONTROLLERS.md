@@ -1,24 +1,22 @@
-# 🔌 Connecting Microcontrollers to Aeolus
+# Connecting microcontrollers to Aeolus
 
-Your microcontroller connects to the Mosquitto MQTT broker on the Aeolus Pi (`aeolus.local:1883`), publishes sensor data, and optionally subscribes to command topics to receive instructions. Devices appear in the dashboard automatically — no registration needed.
+Microcontrollers connect to the local Mosquitto broker, publish telemetry and optionally subscribe to command topics.
 
-> **Note:** Aeolus does not currently handle compiling or uploading firmware to your microcontrollers. You'll need the [Arduino IDE](https://www.arduino.cc/en/software), [PlatformIO](https://platformio.org/), or [ESP-IDF](https://docs.espressif.com/projects/esp-idf/en/latest/) to flash your boards. OTA firmware management from the Aeolus dashboard is on the [roadmap](ROADMAP.md).
+Aeolus discovers devices from incoming MQTT topics. Firmware flashing and OTA updates remain outside the platform.
 
----
+## 1. Publish telemetry
 
-## Quick Start — Publish Sensor Data
-
-Connect to the broker and publish a reading. That's it — the device appears in Aeolus instantly.
+A simple ESP32 publisher:
 
 ```cpp
 #include <WiFi.h>
 #include <PubSubClient.h>
 
-WiFiClient wifiClient;
-PubSubClient mqtt(wifiClient);
+WiFiClient wifi;
+PubSubClient mqtt(wifi);
 
 void setup() {
-  WiFi.begin("your-wifi-ssid", "your-wifi-password");
+  WiFi.begin("your-ssid", "your-password");
   while (WiFi.status() != WL_CONNECTED) delay(500);
 
   mqtt.setServer("aeolus.local", 1883);
@@ -26,323 +24,259 @@ void setup() {
 
 void loop() {
   if (!mqtt.connected()) {
-    mqtt.connect("my-sensor");
+    mqtt.connect("workshop-temperature");
   }
-  mqtt.loop();
 
-  // Publish a temperature reading — device auto-registers in Aeolus
-  mqtt.publish("sensor/kitchen/temp", "{\"value\":23.5,\"unit\":\"°C\"}");
+  mqtt.loop();
+  mqtt.publish(
+    "sensor/workshop/temperature",
+    "{\"value\":23.5,\"unit\":\"°C\"}"
+  );
   delay(5000);
 }
 ```
 
-## Quick Start — Receive Commands
+After the message arrives, Aeolus creates or updates a device for that topic.
 
-Subscribe to a topic and act on messages from Aeolus automations or the dashboard.
+## Topic conventions
+
+Aeolus accepts arbitrary valid topics. A useful convention is:
+
+```text
+{type}/{location}/{metric}
+```
+
+Examples:
+
+| Topic | Meaning |
+|---|---|
+| `sensor/workshop/temperature` | Workshop temperature |
+| `sensor/tank/level` | Tank level |
+| `switch/escape-room/door` | Escape-room door state |
+| `sensor/vessel/depth` | Research-vessel depth |
+| `light/stage/front-wash` | Stage fixture state |
+
+Recognised first segments help Aeolus choose a device type and display name, but unfamiliar topic shapes are still accepted.
+
+## Payloads
+
+Recommended:
+
+```json
+{
+  "value": 23.5,
+  "unit": "°C",
+  "battery": 82
+}
+```
+
+Aeolus also accepts numbers, strings, booleans and JSON objects with several fields.
+
+## MQTT credentials
+
+Broker authentication depends on the configured security mode:
+
+- Open: no username or password;
+- Shared: one shared credential;
+- Per-Device: a unique credential for each client.
+
+See [Add an MQTT device](how-to/add-mqtt-device.md).
+
+## 2. Receive commands
+
+An actuator subscribes to a command topic and publishes its resulting state on a normal state topic.
 
 ```cpp
 #include <WiFi.h>
 #include <PubSubClient.h>
 
 #define RELAY_PIN 5
-WiFiClient wifiClient;
-PubSubClient mqtt(wifiClient);
 
-void onMessage(char* topic, byte* payload, unsigned int length) {
-  String msg = String((char*)payload).substring(0, length);
-  if (msg == "{\"action\":\"open\"}")  digitalWrite(RELAY_PIN, HIGH);
-  if (msg == "{\"action\":\"close\"}") digitalWrite(RELAY_PIN, LOW);
+WiFiClient wifi;
+PubSubClient mqtt(wifi);
+
+const char* COMMAND_TOPIC = "switch/workshop/extractor/set";
+const char* STATE_TOPIC = "switch/workshop/extractor";
+
+void publishState() {
+  const bool on = digitalRead(RELAY_PIN) == HIGH;
+  mqtt.publish(STATE_TOPIC, on
+    ? "{\"on\":true}"
+    : "{\"on\":false}");
 }
 
-void setup() {
-  pinMode(RELAY_PIN, OUTPUT);
-  WiFi.begin("your-wifi-ssid", "your-wifi-password");
-  while (WiFi.status() != WL_CONNECTED) delay(500);
-
-  mqtt.setServer("aeolus.local", 1883);
-  mqtt.setCallback(onMessage);
-}
-
-void loop() {
-  if (!mqtt.connected()) {
-    mqtt.connect("my-actuator");
-    mqtt.subscribe("valve/irrigation/command");
-  }
-  mqtt.loop();
-}
-```
-
----
-
-## MQTT Topic Convention
-
-Aeolus accepts **any** MQTT topic structure — every valid topic is parsed, and the device appears in the dashboard automatically. The recommended format is `{type}/{location}/{metric}`, which gives you better auto-generated device names, but it is not required.
-
-| Segment | Purpose | Examples |
-|---------|---------|----------|
-| `type` | Device category (recommended first segment) | `sensor`, `light`, `switch`, `motion`, `valve`, `climate` |
-| `location` | Where the device is | `kitchen`, `garage`, `outdoor`, `tank` |
-| `metric` | What's being measured (optional) | `temp`, `humidity`, `level`, `light` |
-
-> **Not required.** The convention above is a recommendation for cleaner device names. Aeolus will parse and accept any topic — single-segment, multi-segment, or with device types it has never seen before.
-
-**Standard examples (recommended format):**
-
-| Topic | Auto-Generated Name |
-|-------|---------------------|
-| `sensor/kitchen/temp` | Kitchen Temp |
-| `sensor/outdoor/humidity` | Outdoor Humidity |
-| `light/bedroom` | Bedroom |
-| `motion/hallway` | Hallway |
-| `sensor/tank/level` | Tank Level |
-| `valve/irrigation/command` | Irrigation Command |
-
-**Non-standard examples (also work):**
-
-| Topic | Auto-Generated Name |
-|-------|---------------------|
-| `thermostat/living/temp` | Thermostat Living Temp |
-| `mydevice/room1/status` | Mydevice Room1 Status |
-| `heartbeat` | Heartbeat |
-| `status` | Status |
-| `custom-sensor/zone-a/co2` | Custom-Sensor Zone-A Co2 |
-
-For topics that start with a recognized type (`sensor`, `switch`, `light`, `climate`, `plug`, `valve`, `pump`, `motion`, `fan`, `lock`, `cover`), the type is stripped from the display name. For all other topics, every segment is included in the name. Either way, the device is fully functional.
-
-## Payload Format
-
-Aeolus accepts multiple payload formats:
-
-```json
-// JSON object (recommended)
-{ "value": 23.5, "unit": "°C" }
-
-// Plain number
-23.5
-
-// JSON with multiple fields
-{ "temperature": 23.5, "humidity": 61, "battery": 3.2 }
-
-// String
-"on"
-```
-
----
-
-## Sending Commands from Aeolus
-
-Once your actuator is subscribed to a command topic, you can send commands from Aeolus in three ways:
-
-### 1. MQTT Inspector (dashboard)
-
-Open the MQTT Inspector pane, type the topic and payload, and hit publish:
-
-- **Topic:** `valve/irrigation/command`
-- **Payload:** `{"action": "open"}`
-
-### 2. Automation script
-
-```javascript
-automation({
-  conditions: [
-    function isSoilDry(ctx) {
-      return ctx.state.value < 30;
-    }
-  ],
-  actions: [
-    function startIrrigation(ctx) {
-      mqtt.publish("valve/irrigation/command", JSON.stringify({ action: "open" }));
-      log.info("Irrigation started — soil moisture low");
-    }
-  ]
-});
-```
-
-### 3. REST API
-
-```bash
-curl -X POST http://aeolus.local:3001/api/mqtt/publish \
-  -H "Content-Type: application/json" \
-  -d '{"topic": "valve/irrigation/command", "message": "{\"action\": \"open\"}"}'
-```
-
----
-
-## Testing Without Hardware
-
-Use the MQTT Inspector in the dashboard to publish test messages, or use `mosquitto_pub` from any machine on your network:
-
-```bash
-# Simulate a temperature reading
-mosquitto_pub -h aeolus.local -t "sensor/kitchen/temp" -m '{"value": 23.5, "unit": "°C"}'
-
-# Simulate a motion event
-mosquitto_pub -h aeolus.local -t "motion/hallway" -m '{"value": true}'
-```
-
----
-
-## Tips
-
-- **Use unique client IDs** — include the MAC address or device name to avoid MQTT connection conflicts
-- **Publish state on connect** — actuators should publish their current state when they first connect so the dashboard is accurate
-- **Use QoS 0** for sensor data (fire-and-forget) and **QoS 1** for commands (at-least-once delivery)
-- **Add a status topic** — actuators should publish their state to a separate topic so Aeolus can track whether the command was executed
-- **Handle reconnection** — Wi-Fi and MQTT connections drop; always reconnect in the loop and re-subscribe after reconnecting
-
----
-
-## Full Example — Sensor + Actuator Combined
-
-A complete, production-style template that reads a DHT22 sensor, publishes readings, listens for commands to control a relay, and handles Wi-Fi/MQTT reconnection properly.
-
-### Required Libraries
-
-Install via Arduino IDE Library Manager or PlatformIO:
-
-| Library | Purpose |
-|---------|---------|
-| `PubSubClient` | MQTT client (by Nick O'Leary) |
-| `DHT sensor library` | DHT11/DHT22 support (by Adafruit) |
-
-For PlatformIO, add to `platformio.ini`:
-
-```ini
-[env:esp32]
-platform = espressif32
-board = esp32dev
-framework = arduino
-lib_deps =
-  knolleary/PubSubClient@^2.8
-  adafruit/DHT sensor library@^1.4
-```
-
-### ESP32 (Arduino framework)
-
-```cpp
-#include <WiFi.h>
-#include <PubSubClient.h>
-#include <DHT.h>
-
-// ── Configuration ──────────────────────────────────────
-const char* WIFI_SSID     = "your-wifi-ssid";
-const char* WIFI_PASSWORD = "your-wifi-password";
-const char* MQTT_SERVER   = "aeolus.local";
-const int   MQTT_PORT     = 1883;
-
-// Topics — follow the {type}/{location}/{metric} convention
-const char* TOPIC_TEMP     = "sensor/garden/temp";
-const char* TOPIC_HUMIDITY = "sensor/garden/humidity";
-const char* TOPIC_MOISTURE = "sensor/garden/moisture";
-const char* TOPIC_COMMAND  = "valve/garden/command";
-const char* TOPIC_STATUS   = "switch/garden-valve";
-
-// Hardware
-#define DHT_PIN      4
-#define DHT_TYPE     DHT22
-#define RELAY_PIN    5
-#define MOISTURE_PIN 34
-
-// ── Globals ────────────────────────────────────────────
-WiFiClient wifiClient;
-PubSubClient mqtt(wifiClient);
-DHT dht(DHT_PIN, DHT_TYPE);
-
-unsigned long lastPublish = 0;
-const unsigned long PUBLISH_INTERVAL = 10000;  // 10 seconds
-
-// ── MQTT message handler ───────────────────────────────
 void onMessage(char* topic, byte* payload, unsigned int length) {
   String message;
-  for (unsigned int i = 0; i < length; i++) message += (char)payload[i];
-  Serial.printf("Received: %s → %s\n", topic, message.c_str());
+  for (unsigned int i = 0; i < length; i++) {
+    message += static_cast<char>(payload[i]);
+  }
 
-  if (message == "{\"action\":\"open\"}") {
+  if (message.indexOf("\"on\":true") >= 0) {
     digitalWrite(RELAY_PIN, HIGH);
-    mqtt.publish(TOPIC_STATUS, "{\"value\":\"on\"}");
-  } else if (message == "{\"action\":\"close\"}") {
+  } else if (message.indexOf("\"on\":false") >= 0) {
     digitalWrite(RELAY_PIN, LOW);
-    mqtt.publish(TOPIC_STATUS, "{\"value\":\"off\"}");
-  } else if (message == "{\"action\":\"toggle\"}") {
-    bool current = digitalRead(RELAY_PIN);
-    digitalWrite(RELAY_PIN, !current);
-    mqtt.publish(TOPIC_STATUS, !current ? "{\"value\":\"on\"}" : "{\"value\":\"off\"}");
   }
+
+  publishState();
 }
 
-// ── WiFi ───────────────────────────────────────────────
-void connectWiFi() {
-  Serial.print("Connecting to WiFi");
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-  Serial.printf("\nConnected — IP: %s\n", WiFi.localIP().toString().c_str());
-}
-
-// ── MQTT ───────────────────────────────────────────────
-void connectMQTT() {
+void connectMqtt() {
   while (!mqtt.connected()) {
-    Serial.print("Connecting to MQTT...");
-    String clientId = "aeolus-garden-" + String(WiFi.macAddress());
-    if (mqtt.connect(clientId.c_str())) {
-      Serial.println(" connected");
-      mqtt.subscribe(TOPIC_COMMAND);
-      // Publish current state on connect
-      bool current = digitalRead(RELAY_PIN);
-      mqtt.publish(TOPIC_STATUS, current ? "{\"value\":\"on\"}" : "{\"value\":\"off\"}");
+    if (mqtt.connect("workshop-extractor")) {
+      mqtt.subscribe(COMMAND_TOPIC);
+      publishState();
     } else {
-      Serial.printf(" failed (rc=%d), retrying in 5s\n", mqtt.state());
       delay(5000);
     }
   }
 }
 
-// ── Setup ──────────────────────────────────────────────
 void setup() {
-  Serial.begin(115200);
   pinMode(RELAY_PIN, OUTPUT);
-  digitalWrite(RELAY_PIN, LOW);
-  dht.begin();
-  connectWiFi();
-  mqtt.setServer(MQTT_SERVER, MQTT_PORT);
+  WiFi.begin("your-ssid", "your-password");
+  while (WiFi.status() != WL_CONNECTED) delay(500);
+
+  mqtt.setServer("aeolus.local", 1883);
   mqtt.setCallback(onMessage);
+  connectMqtt();
 }
 
-// ── Loop ───────────────────────────────────────────────
 void loop() {
-  if (WiFi.status() != WL_CONNECTED) connectWiFi();
-  if (!mqtt.connected()) connectMQTT();
+  if (!mqtt.connected()) connectMqtt();
   mqtt.loop();
-
-  if (millis() - lastPublish >= PUBLISH_INTERVAL) {
-    lastPublish = millis();
-
-    float temp = dht.readTemperature();
-    float humidity = dht.readHumidity();
-    int moisture = map(analogRead(MOISTURE_PIN), 4095, 0, 0, 100);
-
-    char payload[64];
-
-    if (!isnan(temp)) {
-      snprintf(payload, sizeof(payload), "{\"value\":%.1f,\"unit\":\"°C\"}", temp);
-      mqtt.publish(TOPIC_TEMP, payload);
-    }
-    if (!isnan(humidity)) {
-      snprintf(payload, sizeof(payload), "{\"value\":%.1f,\"unit\":\"%%\"}", humidity);
-      mqtt.publish(TOPIC_HUMIDITY, payload);
-    }
-    snprintf(payload, sizeof(payload), "{\"value\":%d,\"unit\":\"%%\"}", moisture);
-    mqtt.publish(TOPIC_MOISTURE, payload);
-  }
 }
 ```
 
----
+Publishing state after a command lets the dashboard and automations see what the device reports.
 
-## What's Next
+## Command topic selection
 
-- Browse the [Automation docs](../README.md#automations) to write rules that react to your device data
-- Check the [MQTT Inspector](../README.md#dashboard) to see your devices appear in real time
-- See the [Roadmap](ROADMAP.md) for upcoming features like OTA firmware updates
+For an MQTT device action, Aeolus uses:
+
+1. an explicit `commandTopic` on the device when available;
+2. otherwise the state topic with its last segment replaced by `set`;
+3. otherwise `{deviceId}/set`.
+
+For example:
+
+```text
+sensor/workshop/fan/state
+```
+
+becomes:
+
+```text
+sensor/workshop/fan/set
+```
+
+Choose topic shapes deliberately when the derived form is not suitable.
+
+## Sending commands
+
+### Preferred: device action
+
+Free-form Logic can target the registered device rather than hardcoding the transport:
+
+```javascript
+const result = await devices.action(
+  "switch-workshop-extractor",
+  "command",
+  {
+    payload: { on: true }
+  }
+);
+
+if (!result.success) {
+  log.error(result.error ?? "Extractor command failed");
+}
+```
+
+The exact device ID is visible in Aeolus. MQTT devices expose a `command` action in their action catalog.
+
+To wait for a state reported by the same device:
+
+```javascript
+const result = await devices.action(
+  "switch-workshop-extractor",
+  "command",
+  { payload: { on: true } },
+  {
+    condition: state => state.on === true,
+    timeoutMs: 5000
+  }
+);
+```
+
+Confirmation can also observe another device. A pump command could, for example, wait for a flow sensor rather than trusting a relay state.
+
+### Raw MQTT publish
+
+For transport-level testing or protocols that are not modelled as a device action:
+
+```javascript
+mqtt.publish(
+  "switch/workshop/extractor/set",
+  JSON.stringify({ on: true })
+);
+```
+
+Raw publish means that Aeolus handed a message to the MQTT client. It does not by itself verify the physical result.
+
+### MQTT inspector
+
+The dashboard MQTT inspector is useful for testing telemetry and command topics manually.
+
+### HTTP API
+
+```bash
+curl -X POST http://aeolus.local:3001/api/mqtt/publish \
+  -H "Authorization: Bearer $AEOLUS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "topic": "switch/workshop/extractor/set",
+    "payload": { "on": true }
+  }'
+```
+
+This is also a raw publish path.
+
+## Testing without hardware
+
+```bash
+mosquitto_pub \
+  -h aeolus.local \
+  -t "sensor/workshop/temperature" \
+  -m '{"value":23.5,"unit":"°C"}'
+
+mosquitto_pub \
+  -h aeolus.local \
+  -t "switch/escape-room/door" \
+  -m '{"locked":true}'
+```
+
+Add `-u` and `-P` when broker authentication is enabled.
+
+## Firmware practices
+
+- Use a unique MQTT client ID.
+- Reconnect Wi-Fi and MQTT without blocking forever.
+- Re-subscribe after every reconnect.
+- Publish current state after connecting.
+- Use retained state only when a new subscriber should receive the last value.
+- Use QoS 0 for frequent disposable telemetry and QoS 1 where delivery matters.
+- Make command handling idempotent because QoS 1 can deliver duplicates.
+- Use independent electrical and mechanical protection for physical equipment.
+- Keep credentials out of public repositories.
+
+## Command acknowledgement
+
+The Aeolus runtime has command correlation and lifecycle primitives. Firmware-level correlated acknowledgement should be implemented against the command contract used by the current release.
+
+Until that contract is finalised, always publish an ordinary device state after applying a command and use observed-state confirmation where a physical result matters.
+
+## Further reading
+
+- [Automation runtime](reference/automations.md)
+- [MQTT security](security/mqtt.md)
+- [Testing](TESTING.md)
+- [Roadmap](ROADMAP.md)

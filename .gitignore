@@ -18,3 +18,6 @@ scripts/seed/_*.mjs
 
 # Local working notes
 docs/temp-chatgpt-convo
+
+# Site-specific frontend build endpoints
+frontend/.env.production.local

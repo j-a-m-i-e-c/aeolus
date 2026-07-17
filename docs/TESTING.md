@@ -1,93 +1,115 @@
-# Testing Strategy
+# Testing strategy
 
-Aeolus uses a multi-layered testing approach to ensure reliability across the full stack.
+Aeolus uses several test layers because no single style catches the full range of problems in an edge platform.
 
-## Test Runner
+## Test tools
 
-- **Vitest** — fast, TypeScript-native, ESM-first
-- **fast-check** via `@fast-check/vitest` — property-based testing
-- **supertest** — HTTP integration testing against Express
+- **Vitest** for backend and frontend tests
+- **fast-check** through `@fast-check/vitest` for property-based testing
+- **supertest** for HTTP integration tests
+- **Testing Library** and jsdom for React behaviour
+- **Playwright** for browser and full-stack end-to-end tests
 
-## Test Layers
+## Test layers
 
-### 1. Unit Tests (`*.test.ts`)
+### Unit tests
 
-Standard isolated tests with mocked dependencies. Each module has a colocated test file.
+Colocated `*.test.ts` and `*.test.tsx` files test modules with focused dependencies.
 
-```
+```text
 src/connectors/connector-manager.ts
 src/connectors/connector-manager.test.ts
 ```
 
-**Coverage:** Core services, API routes, middleware, auth, data store, connectors.
+### Property-based tests
 
-### 2. Property-Based Tests (`*.property.test.ts`)
+`*.property.test.ts` files generate varied inputs and check invariants, especially around parsers, lifecycle transitions, registries, migrations and validation.
 
-Generate thousands of random inputs to verify invariants hold universally — not just for hand-picked examples.
+### Backend integration tests
 
-```typescript
-it.prop([fc.string()], "topic parser never throws", (topic) => {
-  const result = parseTopic(topic);
-  // Always returns ParsedTopic or null — never throws
-  expect(result === null || typeof result.deviceId === "string").toBe(true);
-});
-```
+`src/__integration__/` runs real Express routes and SQLite-backed services. Current coverage includes API routes, Data Store behaviour, metrics history and the MQTT-to-automation pipeline.
 
-**Coverage:** MQTT topic parsing, device registry, sandbox action dispatch, connector manager, auth services, middleware validation, data store duration parsing.
+### Frontend tests
 
-### 3. Integration Tests (`__integration__/`)
+Frontend Vitest tests cover stores, utilities and practical component behaviour. Browser-specific areas such as Monaco, drag-and-drop and real iframe communication are covered more effectively through Playwright.
 
-Full Express app with real SQLite database, middleware pipeline, and route handlers. No mocks — tests the actual request/response cycle.
+### End-to-end tests
 
-**Coverage:** Device routes, automation routes, data store API, MQTT provisioning.
+Playwright starts against the Docker Compose stack and exercises first-run setup, authentication and user-visible workflows in a real browser.
 
-### 4. Frontend Tests (`frontend/src/**/*.test.ts`)
+## Coverage thresholds
 
-Vitest + jsdom with `@testing-library/react` for the React dashboard. Coverage
-currently focuses on the Zustand stores and `lib/` utilities (the pure,
-logic-heavy layer); component-level tests are being backfilled. This is the
-lightest-covered part of the codebase relative to the backend.
-
-## Coverage Thresholds
-
-Configured in `vitest.config.ts`:
+Backend thresholds from `vitest.config.ts`:
 
 | Scope | Lines | Branches | Functions |
-|-------|-------|----------|-----------|
-| Global | 90% | 70% | 75% |
-| `src/core/` | 85% | — | — |
-| `src/mqtt/` | 80% | — | — |
-| `src/data-store/` | 80% | — | — |
-| `src/automations/` | 50% | — | — |
+|---|---:|---:|---:|
+| Global | 90% | 90% | 90% |
+| `src/core/` | 85% | global | global |
+| `src/mqtt/` | 80% | global | global |
+| `src/data-store/` | 80% | global | global |
+| `src/automations/` | 50% | global | global |
 
-The lower automations threshold reflects that the V8 sandbox (`isolated-vm`) requires native compilation and is tested primarily through property tests and integration tests rather than direct unit tests.
+The automation line threshold is lower because the native isolate boundary is excluded from direct coverage. The surrounding runtime, lifecycle and integration behaviour is tested separately.
 
-## Running Tests
+Frontend thresholds from `frontend/vite.config.ts` are 90% for lines, statements, functions and branches over the included jsdom-suitable source.
+
+## Common commands
 
 ```bash
-# Run all tests
-make test
+# Backend tests
+npm test
 
-# Run with coverage report
+# Backend coverage
 npx vitest run --coverage
 
-# Run a specific file
-npx vitest run src/mqtt/topic-parser.test.ts
+# Frontend tests and coverage
+cd frontend
+npm test
+npm run test:coverage
 
-# Watch mode (development)
-npx vitest
+# End-to-end tests against a running stack
+cd ..
+npm run test:e2e
+
+# Full local typecheck, lint and unit test gate
+make verify
+
+# Fresh Docker stack followed by end-to-end tests
+make e2e-fresh
 ```
 
-## Writing Tests
+## CI
 
-- **Colocate** test files next to source (`module.ts` → `module.test.ts`)
-- **Property tests** go in `module.property.test.ts` for invariant verification
-- **Use mocks sparingly** — prefer integration tests for route handlers
-- **Name tests descriptively** — the test name should read as a specification
+### Pushes and pull requests
 
-## CI Integration
+- repository-wide ESLint with zero warnings;
+- backend TypeScript check;
+- backend tests with coverage;
+- frontend TypeScript check;
+- frontend tests with coverage.
 
-Tests run automatically on every push and PR via GitHub Actions:
-- TypeScript type check (`tsc --noEmit`)
-- Full test suite with coverage (`vitest run --coverage`)
-- ESLint (blocking — errors fail the build)
+### Pushes to `main`
+
+After the normal checks pass, CI builds backend and frontend Docker images.
+
+### Daily E2E
+
+When `main` has changed in the previous 24 hours, the daily workflow:
+
+1. builds and starts Docker Compose;
+2. installs Chromium;
+3. runs Playwright;
+4. uploads reports and backend logs on failure;
+5. tears the stack down.
+
+The workflow can also be triggered manually.
+
+## Test-writing guidelines
+
+- Place tests next to the code they describe.
+- Prefer behaviour and contracts over implementation detail.
+- Use property tests where many inputs should obey the same invariant.
+- Use integration tests for route and persistence boundaries.
+- Use Playwright for browser APIs, sandboxed iframes, Monaco and drag-and-drop.
+- Add a regression test when fixing a bug.
+- Keep test names readable as specifications.

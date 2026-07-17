@@ -1,92 +1,85 @@
 ---
 inclusion: auto
-description: Rules for keeping COMPREHENSIVE_DOCUMENTATION.md up to date when making architectural changes
+description: Rules for keeping the Aeolus documentation accurate without duplicating the same reference in several files
 ---
 
-# Documentation Update Rules
+# Documentation update rules
 
-## CRITICAL: Keep COMPREHENSIVE_DOCUMENTATION.md in Sync
+## Authority
 
-`docs/COMPREHENSIVE_DOCUMENTATION.md` is the **single source of truth** for the entire Aeolus platform. It MUST stay in sync with the codebase at all times.
+The code, schemas and tests are the final authority for exact behaviour.
 
-**After EVERY significant change, update the comprehensive docs.** This is not optional — it's part of the definition of done for any feature or fix that changes behavior, adds endpoints, modifies the schema, or introduces new components.
+Documentation should describe stable contracts and user-visible behaviour. Do not maintain a second handwritten copy of every class and file.
 
-### When to update
+## Choose the correct document
 
-Update the documentation on EVERY commit that does any of the following:
+### Public project story
 
-**Backend changes:**
-- New or modified API endpoint (add to both the detailed API Reference section AND the Additional API Endpoints table)
-- New route file created (add to Project Structure tree)
-- Database schema change (new table, column, index — update the SQLite Schema section)
-- New environment variable or removal of one (update the Environment Variables table AND .env.example)
-- New core service or module (add to Core Components section with description)
-- Changes to MQTT topic handling or event bus events
-- New integration added (add to Core Components and update Architecture diagram if needed)
-- Error handling changes (update the Error Handling table)
-- Changes to Docker Compose services, ports, or volumes
+Update `README.md` when:
 
-**Frontend changes:**
-- New page added to the dashboard (add to Dashboard Features with its own subsection listing all features)
-- New component that adds user-visible functionality (add to the relevant page subsection in Dashboard Features)
-- New UI control or interaction pattern (e.g. colour picker, drag-to-reorder, debounced slider — document it)
-- Changes to state management (new Zustand store fields, new WebSocket message types)
-- New component file created (add to Project Structure tree)
+- first-run commands or ports change;
+- a major public capability changes;
+- the documentation map changes;
+- screenshots or the main architecture summary change.
 
-**Infrastructure changes:**
-- New script added (add to Project Structure tree)
-- Deployment workflow changes
-- Docker configuration changes
-- New Kiro hooks or steering files
+Update `docs/WHAT_IS_AEOLUS.md` when the non-technical explanation changes.
 
-**General:**
-- Design decisions worth documenting (add to Design Decisions section)
-- New future enhancement ideas discussed (add to Future Enhancements section)
+Update `docs/WHY_AEOLUS.md` when the technical product thesis or major architecture rationale changes.
 
-### What to update
+### Technical reference
 
-For each change, check and update ALL of these sections as applicable:
+Use the narrowest file under `docs/reference/`:
 
-1. **Project Structure** — Every new file should appear in the tree
-2. **Core Components** — New backend services get their own subsection
-3. **API Reference** — Detailed endpoint docs for major endpoints
-4. **Additional API Endpoints** — Summary table for all endpoints
-5. **Dashboard Features** — Organized by page, every user-visible feature listed
-6. **Data Models** — Schema changes, new interfaces
-7. **Environment Variables** — Table must match .env.example exactly
-8. **Error Handling** — New error scenarios
-9. **Design Decisions** — Architectural choices and rationale
-10. **Future Enhancements** — Planned features, ideas from conversations
-11. **Last Updated date** — Always update to today's date
-12. **Version** — Bump patch for fixes, minor for features, major for breaking changes
+- `architecture.md`
+- `automations.md`
+- `connectors.md`
+- `data-and-storage.md`
+- `api.md`
+- `dashboard.md`
+- `operations.md`
 
-### What NOT to update
+Examples:
 
-- Pure refactors that don't change external behavior
-- Code style or formatting changes
-- Test-only changes (unless adding a new testing pattern worth documenting)
-- Dependency version bumps with no API changes
+- new API route: update `reference/api.md`;
+- new migration or storage contract: update `reference/data-and-storage.md`;
+- sandbox or command semantics: update `reference/automations.md`;
+- Docker, environment or CI changes: update `reference/operations.md`.
 
-## README.md
+### Security
 
-The README is the public-facing quick start guide. Update it when:
+Use the appropriate file under `docs/security/` for authentication, tokens, permissions or MQTT security.
 
-- Setup instructions change (new prerequisites, different commands)
-- New major feature is added that should be highlighted (keep it concise — link to comprehensive docs for details)
-- API endpoints table changes
-- Deployment instructions change
-- Integration setup flow changes (e.g. Hue moved from env vars to self-service)
+### Task guides
 
-The README should always reflect the current recommended way to set up and use Aeolus. Remove outdated instructions immediately.
+Update a how-to guide when the exact steps a user follows change.
 
-## BRANDING.md
+### Developer guides
 
-When designing or modifying UI components, always reference `docs/BRANDING.md` for:
+- connector contract: `src/connectors/README.md`
+- testing process: `docs/TESTING.md`
+- contribution process: `CONTRIBUTING.md`
+- frontend design: `docs/BRANDING.md`
 
-- Color palette (Aeolus Blue #3BA4FF, Wind Cyan #5CE1E6, Deep Void #0B0F14, Graphite #121821, Slate #1A2330)
-- The design pillars: clarity over decoration, bold contrast, subtle motion, data-first UI, airy spacing
-- Typography: Inter (primary), JetBrains Mono (code/MQTT topics)
-- Brand personality: calm, intelligent, precise, invisible but powerful
-- Motion: smooth 150-250ms ease-in-out transitions, no bouncing
+## Avoid duplication
 
-All new UI should feel consistent with the Aeolus aesthetic. Use the Tailwind theme tokens (background, surface, primary, accent) rather than raw hex values.
+Do not paste a full explanation into README, WHY and a reference file.
+
+Prefer:
+
+- one short summary;
+- one direct link to the maintained detail.
+
+Compatibility stubs such as `docs/COMPREHENSIVE_DOCUMENTATION.md` and `docs/AUTHENTICATION.md` only link to the split docs. Do not add new reference content to them.
+
+## Definition of done
+
+For a behaviour-changing change:
+
+- implementation and tests agree;
+- the relevant schema or type declarations are updated;
+- the narrow relevant document is updated;
+- setup examples still run;
+- internal links remain valid;
+- old claims are removed rather than contradicted elsewhere.
+
+Pure refactors and test-only changes do not require documentation unless they change the development workflow.

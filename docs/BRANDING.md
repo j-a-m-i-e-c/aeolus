@@ -1,382 +1,222 @@
-# 🌬️ Aeolus — Design System & Style Guide
+# Aeolus design system
 
-## Brand Essence
+Aeolus should feel calm, capable and technical. It deals with real devices and operating environments, so the interface needs to make state, change and failure easy to read without looking like a generic industrial control panel.
 
-**Aeolus** represents invisible force, flow, and control.
+## Design principles
 
-It is:
+1. **Clarity before decoration.** Important state should be obvious at a glance.
+2. **Data first.** Values, units, timestamps and status deserve more visual weight than chrome.
+3. **Calm motion.** Animation should explain a transition, not compete for attention.
+4. **Consistent depth.** Background, surfaces and elevated panels should form a predictable hierarchy.
+5. **Room to breathe.** Dense information is acceptable; cramped information is not.
+6. **Purpose-built views.** A CTD profiler, game-master console and workshop dashboard do not need to look identical, but they should still feel like Aeolus.
 
-* Clean
-* Powerful
-* Precise
-* Invisible but ever-present
+## Colour system
 
-### Core Concept
+The current tokens are defined in `frontend/tailwind.config.js`.
 
-> Devices communicate through “the wind” — unseen, seamless, continuous.
+### Core palette
 
----
+| Role | Token | Value |
+|---|---|---|
+| Application background | `background` | `#0B0F14` |
+| Main surface | `surface` | `#121821` |
+| Elevated surface | `elevated` | `#1A2330` |
+| Primary accent | `primary` | `#3BA4FF` |
+| Secondary accent | `accent` | `#5CE1E6` |
 
-## Visual Direction
+### Status colours
 
-### Design Pillars
+| Meaning | Token | Value |
+|---|---|---|
+| Healthy or successful | `success` | `#22C55E` |
+| Warning or attention | `warning` | `#F59E0B` |
+| Error or destructive action | `error` | `#EF4444` |
 
-1. **Clarity over decoration**
-2. **Bold contrast**
-3. **Subtle motion (not flashy)**
-4. **Data-first UI**
-5. **Airy spacing (breathing room)**
+### Text and borders
 
----
+| Role | Value |
+|---|---|
+| Primary text | `#E6EDF3` |
+| Secondary text | `#9AA6B2` |
+| Muted text | `#6B7785` |
+| Border | `#2A3441` |
 
-## Color System
-
-### 🎯 Primary Palette
-
-| Role              | Color       | Hex       |
-| ----------------- | ----------- | --------- |
-| Background (Dark) | Deep Void   | `#0B0F14` |
-| Surface           | Graphite    | `#121821` |
-| Elevated Surface  | Slate       | `#1A2330` |
-| Primary Accent    | Aeolus Blue | `#3BA4FF` |
-| Secondary Accent  | Wind Cyan   | `#5CE1E6` |
-
----
-
-### ⚡ Accent & Feedback
-
-| Role    | Color    | Hex       |
-| ------- | -------- | --------- |
-| Success | Emerald  | `#22C55E` |
-| Warning | Amber    | `#F59E0B` |
-| Error   | Soft Red | `#EF4444` |
-
----
-
-### 🧠 Neutral System
-
-| Role           | Color     |
-| -------------- | --------- |
-| Primary Text   | `#E6EDF3` |
-| Secondary Text | `#9AA6B2` |
-| Muted Text     | `#6B7785` |
-| Border         | `#2A3441` |
-
----
-
-### Gradient (Signature Look)
-
-Used sparingly for hero elements:
+Use the blue-to-cyan gradient sparingly for selected tabs, key calls to action and small brand moments:
 
 ```css
-background: linear-gradient(135deg, #3BA4FF, #5CE1E6);
+background: linear-gradient(135deg, #3ba4ff, #5ce1e6);
 ```
 
----
+A gradient should signal importance. It should not become the default background for every control.
 
 ## Typography
 
-### Font Stack
+The configured font stacks are:
 
-Primary:
-
-* Inter (clean, modern, dev-friendly)
-
-Alternative:
-
-* SF Pro (if Apple ecosystem)
-
-Monospace:
-
-* JetBrains Mono (for code + MQTT topics)
-
----
-
-### Type Scale
-
-| Usage | Size    | Weight |
-| ----- | ------- | ------ |
-| H1    | 32px    | 700    |
-| H2    | 24px    | 600    |
-| H3    | 18px    | 600    |
-| Body  | 14–16px | 400    |
-| Small | 12px    | 400    |
-| Code  | 13px    | 500    |
-
----
-
-### Tone
-
-* No fluff
-* Short labels
-* Technical but readable
-
-Example:
-
-* ✅ “Device Offline”
-* ❌ “Oops! Something went wrong with your device”
-
----
-
-## Layout System
-
-### Grid
-
-* 8px base spacing system
-* Consistent padding: 16px / 24px
-
----
-
-### Layout Philosophy
-
-* Left sidebar navigation
-* Main content = modular cards
-* Avoid deep nesting
-
----
-
-### Example Layout
-
-```id="n6w9e1"
-[ Sidebar ]  [ Top Bar ]
-             [ Dashboard Grid ]
-             [ Device Cards ]
+```text
+Interface: Inter, system-ui, sans-serif
+Code and machine data: JetBrains Mono, monospace
 ```
 
----
+Use the sans-serif stack for navigation, labels, explanations and controls. Use monospace for:
+
+- source code;
+- MQTT topics;
+- identifiers;
+- raw payloads;
+- compact measurements where alignment matters.
+
+Suggested scale:
+
+| Use | Size | Weight |
+|---|---:|---:|
+| Page title | 30 to 34 px | 700 |
+| Section title | 22 to 26 px | 600 |
+| Card title | 16 to 18 px | 600 |
+| Body | 14 to 16 px | 400 |
+| Supporting text | 12 to 13 px | 400 |
+| Code | 13 px | 500 |
+
+## Language and labels
+
+Write like an operator tool, not a chatbot.
+
+Prefer:
+
+```text
+Device offline
+Command timed out
+Last seen 4 minutes ago
+```
+
+Avoid:
+
+```text
+Oops! Something went wrong.
+Uh-oh, we could not find your device!
+```
+
+Labels should be short, but errors should still say what happened and what the user can do next.
+
+## Layout
+
+Aeolus uses an 8 px spacing rhythm. Common component padding is 16 or 24 px.
+
+The application structure is:
+
+```text
+Sidebar | page or dashboard workspace
+        | cards, panes, editors and detail views
+```
+
+Avoid deep nesting of cards inside cards. Borders, surface changes and spacing should be enough to show hierarchy.
 
 ## Components
 
-### 🧱 Cards (Core UI Element)
+### Cards and panes
 
-Used for:
+Use cards for a single coherent unit such as a device, metric group, automation or configuration area.
 
-* Devices
-* Sensors
-* Automations
+Typical treatment:
 
-Style:
+- `surface` background;
+- subtle `#2A3441` border;
+- 12 to 16 px radius;
+- restrained shadow only when depth is useful;
+- clear title, status and primary action.
 
-* Background: `#121821`
-* Border radius: 12–16px
-* Subtle border
-* Soft shadow
+### Buttons
 
----
+- **Primary:** the main action on the current surface. Blue or restrained blue-to-cyan treatment.
+- **Secondary:** neutral surface with a visible border.
+- **Ghost:** low-emphasis navigation or utility action.
+- **Destructive:** red only when the action is genuinely destructive.
 
-### 🔘 Buttons
+Do not put several equally loud primary buttons beside one another.
 
-#### Primary
+### Toggles and live controls
 
-* Blue gradient
-* Bold text
-* Slight glow on hover
+Controls should visibly distinguish:
 
-#### Secondary
+- current observed state;
+- pending command;
+- unavailable or offline state;
+- failed command.
 
-* Outline
-* Minimal fill
+A colour change alone is not enough. Use text, icons or progress treatment where the distinction matters.
 
-#### Ghost
+### Data displays
 
-* No background
-* Text only
+Always show units when a value is ambiguous. Include timestamps or freshness indicators for live data. Avoid making stale state look current.
 
----
+Charts should favour readable trends and thresholds over decoration. Use animation carefully for live updates; values should not flash or jump unnecessarily.
 
-### 🎚️ Toggles (Important)
+### Editors and inspectors
 
-These are everywhere.
+Monaco, MQTT payloads and diagnostic views can be dense. Keep surrounding controls quiet so the technical content remains the focus.
 
-Style:
+## Icons
 
-* Smooth animated transitions
-* Glow when active
-* Color shift (grey → blue)
+Aeolus uses Lucide icons. Keep stroke weight and size consistent within a surface.
 
----
+Icons support labels; they should not replace unfamiliar labels. A plug, wave or radio symbol can mean several things depending on context.
 
-### 📊 Data Displays
+## Motion
 
-* Use monospace for:
+Most interface transitions should sit between 150 and 250 ms with an ease-in-out curve.
 
-  * MQTT topics
-  * Raw values
-* Keep alignment clean
-* Avoid clutter
+Useful motion includes:
 
----
+- a toggle moving to its new state;
+- a pane entering edit mode;
+- a value updating without a full redraw;
+- a connection indicator changing state;
+- a small hover lift where the element is clickable.
 
-## Iconography
+Avoid bouncing, repeated pulsing and large background animation. Motion should feel more like airflow than fireworks.
 
-### Style
+## Logo and visual motifs
 
-* Thin stroke icons
-* Consistent weight
-* Minimal detail
+The Aeolus mark combines the letter A with wind or signal movement. It should work:
 
-### Library
+- as a small favicon;
+- on the dark application background;
+- in a single colour;
+- without a wordmark when space is limited.
 
-* Lucide (recommended)
+Supporting motifs can include flow lines, waves and circular movement, but the product UI should not be covered in wind graphics. The name provides the metaphor; the interface still has work to do.
 
----
+## Custom application UI
 
-### Common Icons
+User-authored UI may be much more specialised than the core dashboard. A stage cue stack, mine ventilation view or spacecraft subsystem panel can establish its own information hierarchy.
 
-* Device → square/box
-* Light → bulb
-* Sensor → radar/wave
-* MQTT → signal/wifi
+It should still reuse the Aeolus defaults where practical:
 
----
+- dark surfaces;
+- blue and cyan accents;
+- Inter and JetBrains Mono;
+- familiar status colours;
+- clear spacing and borders;
+- restrained motion.
 
-## Motion & Animation
+The goal is family resemblance, not rigid sameness.
 
-### Philosophy
+## Accessibility
 
-> Motion should feel like airflow — smooth and natural.
+- Keep text contrast high against dark surfaces.
+- Do not communicate status through colour alone.
+- Preserve visible keyboard focus.
+- Give icon-only controls accessible names.
+- Keep hit areas large enough for touch screens.
+- Respect reduced-motion preferences for non-essential animation.
 
----
+## Final check
 
-### Guidelines
+A finished Aeolus screen should answer three questions quickly:
 
-* 150–250ms transitions
-* Ease-in-out
-* No bouncing
+1. What is happening?
+2. Is anything wrong or stale?
+3. What can I safely do from here?
 
----
-
-### Examples
-
-* Toggle switch slides smoothly
-* Cards fade + lift on hover
-* Data updates subtly (no flashing)
-
----
-
-## Dashboard Design
-
-### Key Sections
-
-1. Device Grid
-2. Live Data Stream
-3. Automation Status
-4. System Health
-
----
-
-### Device Card Example
-
-```id="n2u6rx"
-[ Light: Living Room ]
-Status: ON
-Brightness: 80%
-
-[ Toggle ]   [ Adjust ]
-```
-
----
-
-## Developer-Focused UI Elements
-
-### Code Blocks
-
-* Dark background
-* Syntax highlighting
-* Monospace font
-
----
-
-### MQTT Inspector (Cool Feature)
-
-```id="0p9e8c"
-Topic: sensor/kitchen/temp
-Payload: 22.4
-Timestamp: 12:03:22
-```
-
----
-
-## Branding Elements
-
-### Logo Direction
-
-Concept:
-
-* Wind swirl
-* Signal waves
-* Circular motion
-
-Style:
-
-* Minimal
-* Geometric
-* Works as app icon
-
----
-
-### Visual Motifs
-
-* Flow lines
-* Subtle particle movement
-* Wave patterns
-
----
-
-## Do / Don’t
-
-### ✅ Do
-
-* Keep everything minimal
-* Use spacing generously
-* Prioritize readability
-
-### ❌ Don’t
-
-* Overuse gradients
-* Add unnecessary animations
-* Clutter dashboards
-
----
-
-## UI Personality
-
-If Aeolus were a product personality:
-
-* Calm
-* Intelligent
-* Precise
-* Invisible but powerful
-
----
-
-## Inspiration References
-
-* Linear.app (clean SaaS)
-* Vercel dashboard
-* Modern dev tools (Grafana-lite feel)
-
----
-
-## Implementation Notes
-
-### Tailwind Tokens Example
-
-```js
-colors: {
-  background: "#0B0F14",
-  surface: "#121821",
-  primary: "#3BA4FF",
-  accent: "#5CE1E6",
-}
-```
-
----
-
-## Final Design Principle
-
-> “If it feels obvious, fast, and calm — it’s correct.”
-
----
-
-END OF STYLE GUIDE
+If those answers are clear and the interface feels calm, the design is doing its job.

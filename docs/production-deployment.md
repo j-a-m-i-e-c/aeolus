@@ -23,7 +23,7 @@ Authentication is always on — there is no anonymous/disabled mode for the dash
 
 After setup you get a JWT-based session: a short-lived access token (15 min) held in memory plus an httpOnly refresh cookie (7 days). Non-admin users belong to groups with per-tab `read` / `interact` / `write` permissions.
 
-For the full auth model — token flow, group permissions, user management API, and emergency admin recovery — see **[`AUTHENTICATION.md`](AUTHENTICATION.md)**.
+For the full auth model — token flow, group permissions, user management API, and emergency admin recovery — see **[security reference](security/README.md)**.
 
 ### JWT secret
 
@@ -35,69 +35,112 @@ By default Aeolus generates a random 256-bit signing key on first run and stores
 
 The committed `mosquitto/mosquitto.conf` ships with `allow_anonymous true` — fine for a trusted LAN during setup, but you should lock it down for production.
 
-### Recommended: manage it from the dashboard
+### Security modes in Aeolus
 
-Aeolus manages MQTT authentication for you from the **Security** tab. Choose one of three levels:
+The **Security → MQTT Security** screen supports three modes:
 
 | Level | Description |
 |-------|-------------|
-| **Open** | No authentication (development / trusted networks) |
-| **Shared Password** | One credential shared by all devices |
-| **Per-Device** | A unique username/password per device |
+| **Open** | No authentication, for development or a tightly trusted network |
+| **Shared Password** | One credential shared by external devices |
+| **Per-Device** | A separate username and password for each device |
 
-Switching levels regenerates the Mosquitto password file and reloads the broker automatically. Per-device credentials are created under **Security → MQTT Credentials**; the password is shown once on creation. The backend maintains its own credential (`aeolus-backend`) automatically. See [`AUTHENTICATION.md`](AUTHENTICATION.md#mqtt-credential-workflow) for the credential workflow and device firmware notes.
+The backend provisioning service can write the Mosquitto configuration and password file, then reload the broker. That requires deployment-specific access to those files and to a broker reload mechanism.
 
-### Manual fallback
+> **Default Docker Compose note:** the committed `docker-compose.yml` deliberately does not mount the Docker socket or the Mosquitto configuration into the backend container. As a result, automatic broker reconfiguration from the dashboard is not wired into the default hardened Compose deployment. Use the manual procedure below, or create a narrowly scoped provisioning arrangement for your environment. Do not expose the full Docker socket merely to make this feature work.
 
-If you'd rather configure the broker by hand instead of through the dashboard:
+See [MQTT security](security/mqtt.md) for the credential model and provisioning API.
+
+### Manual broker configuration
+
+The default Compose deployment is easiest to secure with a host-managed password file and a small override file.
+
+1. Create the password file on the host:
 
 ```bash
-# Create the password file (runs inside the Mosquitto container)
-docker exec -it aeolus-mosquitto mosquitto_passwd -c /mosquitto/config/passwd aeolus
+mkdir -p mosquitto
+touch mosquitto/password_file
 
-# Add more users without -c (which would overwrite the file)
-docker exec -it aeolus-mosquitto mosquitto_passwd /mosquitto/config/passwd another_user
+docker run --rm \
+  -v "$PWD/mosquitto:/work" \
+  eclipse-mosquitto:2 \
+  mosquitto_passwd -b -c /work/password_file aeolus 'replace-this-password'
 ```
 
-Then edit `mosquitto/mosquitto.conf`:
+Add more users without `-c`, because `-c` recreates the file:
+
+```bash
+docker run --rm \
+  -v "$PWD/mosquitto:/work" \
+  eclipse-mosquitto:2 \
+  mosquitto_passwd -b /work/password_file another-user 'another-password'
+```
+
+2. Update `mosquitto/mosquitto.conf`:
 
 ```conf
 listener 1883
 allow_anonymous false
-password_file /mosquitto/config/passwd
+password_file /mosquitto/config/password_file
 persistence true
 persistence_location /mosquitto/data/
 log_dest stdout
 ```
 
-Point the backend at the broker with credentials (only needed for the manual approach — `docker-compose.yml` otherwise sets `MQTT_BROKER_URL` to `mqtt://localhost:1883`):
+3. Create `docker-compose.override.yml` so the broker can read the file and the backend uses its own broker credential:
+
+```yaml
+services:
+  mosquitto:
+    volumes:
+      - ./mosquitto/password_file:/mosquitto/config/password_file:ro
+
+  backend:
+    environment:
+      MQTT_BROKER_URL: ${MQTT_BROKER_URL}
+```
+
+4. Add the URL to `.env`. URL-encode any reserved characters in the password.
 
 ```env
-MQTT_BROKER_URL=mqtt://aeolus:your_password@localhost:1883
+MQTT_BROKER_URL=mqtt://aeolus:replace-this-password@localhost:1883
 ```
 
-Restart the stack:
+5. Recreate the services and inspect the logs:
 
 ```bash
-docker compose down && docker compose up -d
+docker compose up -d --force-recreate
+docker logs aeolus-mosquitto --tail 50
+docker logs aeolus-backend --tail 50
 ```
+
+The host password file is ignored by Git. Back it up securely with the rest of the deployment configuration.
 
 ---
 
 ## 3. HTTPS via Reverse Proxy
 
-The frontend serves on port 3000 (HTTP) and the backend API on port 3001. Use a reverse proxy for TLS termination.
+The default frontend build talks directly to `http://<host>:3001` and `ws://<host>:3001/ws`. When the dashboard itself is served over HTTPS, browsers will block those insecure requests. Build the frontend with secure API and WebSocket URLs before placing it behind a reverse proxy.
 
-### Option A: Caddy (simplest)
+For a single origin such as `https://aeolus.local`, create `frontend/.env.production.local`:
 
-```bash
-sudo apt install caddy
+```env
+VITE_API_URL=https://aeolus.local
+VITE_WS_URL=wss://aeolus.local/ws
 ```
 
-Edit `/etc/caddy/Caddyfile`:
+Then rebuild the frontend:
+
+```bash
+docker compose build --no-cache frontend
+docker compose up -d frontend
+```
+
+Keep that local environment file out of version control if it contains site-specific hostnames.
+
+### Caddy example
 
 ```caddyfile
-# For LAN access with an automatic self-signed cert
 https://aeolus.local {
   tls internal
 
@@ -116,20 +159,10 @@ https://aeolus.local {
 ```
 
 ```bash
-sudo systemctl restart caddy
+sudo systemctl reload caddy
 ```
 
-### Option B: nginx with self-signed certs
-
-```bash
-sudo openssl req -x509 -nodes -days 365 \
-  -newkey rsa:2048 \
-  -keyout /etc/ssl/private/aeolus.key \
-  -out /etc/ssl/certs/aeolus.crt \
-  -subj "/CN=aeolus.local"
-```
-
-Create `/etc/nginx/sites-available/aeolus`:
+### nginx example
 
 ```nginx
 server {
@@ -158,30 +191,7 @@ server {
 }
 ```
 
-```bash
-sudo ln -s /etc/nginx/sites-available/aeolus /etc/nginx/sites-enabled/
-sudo nginx -t && sudo systemctl restart nginx
-```
-
-### Option C: Public access via Cloudflare Tunnel
-
-If you need external access without opening ports:
-
-```bash
-# Install cloudflared
-curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64.deb -o cloudflared.deb
-sudo dpkg -i cloudflared.deb
-
-# Authenticate and create the tunnel
-cloudflared tunnel login
-cloudflared tunnel create aeolus
-cloudflared tunnel route dns aeolus aeolus.yourdomain.com
-
-# Run the tunnel
-cloudflared tunnel --url http://localhost:3000 run aeolus
-```
-
-Cloudflare handles TLS automatically — no certs to manage.
+Public tunnels should point at the reverse proxy, not only at the frontend container, so `/api` and `/ws` share the same protected origin. Restrict public access with the tunnel provider's identity controls as well as Aeolus authentication.
 
 ---
 
@@ -220,30 +230,36 @@ All persistent state lives in a single SQLite database (`better-sqlite3`, WAL mo
 
 ### Locate the database
 
+Docker Compose volume names depend on the project directory or `-p` project name. Ask Docker for the mounted host path instead of assuming a fixed volume name:
+
 ```bash
-docker volume inspect aeolus_backend_data | grep Mountpoint
-# Typically: /var/lib/docker/volumes/aeolus_backend_data/_data/aeolus.db
+BACKEND_DATA_DIR=$(docker inspect aeolus-backend \
+  --format '{{range .Mounts}}{{if eq .Destination "/app/data"}}{{.Source}}{{end}}{{end}}')
+DB_PATH="$BACKEND_DATA_DIR/aeolus.db"
+printf '%s\n' "$DB_PATH"
 ```
 
 ### Safe backup
 
-Because the database runs in WAL mode, a plain `cp` of the `.db` file while the backend is running can miss data still in the write-ahead log. Two safe options:
+Because the database runs in WAL mode, copying only `aeolus.db` while the backend is running can miss data still in the write-ahead log.
 
-**Option A — stop, copy, restart (simplest, guaranteed consistent):**
+**Option A: stop, copy, restart**
 
 ```bash
+mkdir -p "$HOME/backups/aeolus"
 docker compose stop backend
-sudo cp /var/lib/docker/volumes/aeolus_backend_data/_data/aeolus.db \
-  ~/backups/aeolus-$(date +%Y%m%d-%H%M%S).db
+sudo cp "$DB_PATH" "$HOME/backups/aeolus/aeolus-$(date +%Y%m%d-%H%M%S).db"
 docker compose start backend
 ```
 
-**Option B — online consistent copy (no downtime):**
+**Option B: SQLite online backup**
+
+Install the SQLite CLI on the host, then create a consistent snapshot without stopping Aeolus:
 
 ```bash
-# Copies a consistent snapshot even while the DB is in use
-sqlite3 /var/lib/docker/volumes/aeolus_backend_data/_data/aeolus.db \
-  ".backup '/home/pi/backups/aeolus-$(date +%Y%m%d-%H%M%S).db'"
+mkdir -p "$HOME/backups/aeolus"
+sudo sqlite3 "$DB_PATH" \
+  ".backup '$HOME/backups/aeolus/aeolus-$(date +%Y%m%d-%H%M%S).db'"
 ```
 
 ### Automated nightly backup
@@ -251,18 +267,19 @@ sqlite3 /var/lib/docker/volumes/aeolus_backend_data/_data/aeolus.db \
 Create `~/scripts/backup-aeolus.sh`:
 
 ```bash
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
+
 BACKUP_DIR="$HOME/backups/aeolus"
-DB_PATH="/var/lib/docker/volumes/aeolus_backend_data/_data/aeolus.db"
 RETENTION_DAYS=14
+BACKEND_DATA_DIR=$(docker inspect aeolus-backend \
+  --format '{{range .Mounts}}{{if eq .Destination "/app/data"}}{{.Source}}{{end}}{{end}}')
+DB_PATH="$BACKEND_DATA_DIR/aeolus.db"
 
 mkdir -p "$BACKUP_DIR"
-sqlite3 "$DB_PATH" ".backup '$BACKUP_DIR/aeolus-$(date +%Y%m%d-%H%M%S).db'"
-
-# Remove backups older than the retention period
-find "$BACKUP_DIR" -name "aeolus-*.db" -mtime +$RETENTION_DAYS -delete
-
-echo "Backup complete. $(ls "$BACKUP_DIR" | wc -l) backups retained."
+sudo sqlite3 "$DB_PATH" \
+  ".backup '$BACKUP_DIR/aeolus-$(date +%Y%m%d-%H%M%S).db'"
+find "$BACKUP_DIR" -name 'aeolus-*.db' -mtime +"$RETENTION_DAYS" -delete
 ```
 
 ```bash
@@ -271,16 +288,19 @@ crontab -e
 ```
 
 ```cron
-# Daily backup at 3 AM
 0 3 * * * /home/pi/scripts/backup-aeolus.sh >> /home/pi/backups/backup.log 2>&1
 ```
 
 ### Restore
 
+Stop the stack before replacing the database:
+
 ```bash
+BACKEND_DATA_DIR=$(docker inspect aeolus-backend \
+  --format '{{range .Mounts}}{{if eq .Destination "/app/data"}}{{.Source}}{{end}}{{end}}')
 docker compose down
-sudo cp ~/backups/aeolus-20240115-030000.db \
-  /var/lib/docker/volumes/aeolus_backend_data/_data/aeolus.db
+sudo cp "$HOME/backups/aeolus/aeolus-20260717-030000.db" \
+  "$BACKEND_DATA_DIR/aeolus.db"
 docker compose up -d
 ```
 
@@ -312,7 +332,7 @@ If you set `METRICS_TOKEN`, the endpoint requires `Authorization: Bearer <token>
 
 ### Docker health checks
 
-The backend container declares a healthcheck (`wget --spider http://localhost:3001/api/health`, 30s interval, 3 retries). With `restart: unless-stopped`, Docker restarts unhealthy containers automatically.
+The backend container declares a healthcheck (`wget --spider http://localhost:3001/api/health`, 30s interval, 3 retries). Docker reports an unhealthy status, but Compose does not restart a running container solely because its healthcheck fails. Use an external monitor, systemd policy or another narrowly scoped supervisor if automatic recovery is required.
 
 ```bash
 docker ps --format "table {{.Names}}\t{{.Status}}"
@@ -341,13 +361,13 @@ Or run [Uptime Kuma](https://github.com/louislam/uptime-kuma) on the same Pi for
 
 ## 7. Environment Variables
 
-`docker-compose.yml` sets the core backend variables directly (`PORT`, `MQTT_BROKER_URL`, `DB_PATH`, `MQTT_TOPICS`, `NODE_ENV`, `LOG_LEVEL`). The remaining variables below are tuning knobs and secrets you can add to a `.env` file in the project root.
+`docker-compose.yml` sets the core backend variables. Compose-level values such as `API_PORT`, `FRONTEND_PORT` and `MQTT_PORT` can be placed in the project `.env` file. Backend variables that are hard-coded in the base Compose file require an override file, as shown in the MQTT example above.
 
 | Variable | Default | Production value | Description |
 |----------|---------|------------------|-------------|
 | `NODE_ENV` | `development` | `production` | Suppresses stack traces in error responses, enables optimizations |
 | `PORT` | `3001` | `3001` | Backend API port (set via `API_PORT` in compose) |
-| `MQTT_BROKER_URL` | `mqtt://localhost:1883` | `mqtt://localhost:1883` | MQTT broker URL (include credentials only for the manual MQTT-auth approach) |
+| `MQTT_BROKER_URL` | `mqtt://localhost:1883` | deployment-specific | Broker URL; override the base Compose environment when credentials are required |
 | `MQTT_TOPICS` | `#` | `#` | MQTT subscription filter |
 | `DB_PATH` | `./data/aeolus.db` | `/app/data/aeolus.db` | Database path (the Docker volume path) |
 | `LOG_LEVEL` | `debug` | `info` | Log verbosity (`debug`, `info`, `warn`, `error`) |
@@ -356,10 +376,12 @@ Or run [Uptime Kuma](https://github.com/louislam/uptime-kuma) on the same Pi for
 | `STATE_HISTORY_MAX` | `100` | `100` | Max state-history records kept per device |
 | `HISTORY_RECORD_INTERVAL` | `5000` | `5000` | Minimum ms between recorded state-history points (throttle) |
 | `JWT_SECRET` | _(auto-generated)_ | _(your 256-bit key)_ | JWT signing key; auto-generated and stored in the DB if unset |
-| `MQTT_PASSWORD_FILE` | `mosquitto/password_file` | `mosquitto/password_file` | Path Aeolus writes when managing MQTT credentials |
-| `AEOLUS_PROJECT_DIR` | _(process.cwd())_ | _(project root)_ | Directory used to locate `mosquitto/mosquitto.conf` for the provisioning service; defaults to the working directory |
+| `MQTT_PASSWORD_FILE` | `mosquitto/password_file` | deployment-specific | Password-file path used only by provisioning-enabled deployments |
+| `AEOLUS_PROJECT_DIR` | _(process.cwd())_ | deployment-specific | Project/config root used only by provisioning-enabled deployments |
 | `METRICS_TOKEN` | _(empty)_ | _(your token)_ | Bearer token to protect `/metrics`; open when unset |
 | `FRONTEND_PORT` | `3000` | `3000` | Frontend container host port |
+| `VITE_API_URL` | `http://<host>:3001` | site URL | Build-time frontend API URL, required for HTTPS deployments |
+| `VITE_WS_URL` | `ws://<host>:3001/ws` | site WebSocket URL | Build-time frontend WebSocket URL, required for HTTPS deployments |
 | `MQTT_PORT` | `1883` | `1883` | MQTT broker host port |
 
 Example production `.env`:
@@ -403,9 +425,10 @@ Or restore from a database backup if data was affected (Section 5).
 
 ## 9. Security Hardening
 
-Aeolus ships hardened for an internet-adjacent home/edge deployment:
+The default deployment removes several high-risk host-control paths, but it should still be treated as an edge service that needs ordinary network and host hardening:
 
 - **No Docker socket mount** — the backend container has no access to `/var/run/docker.sock`, so a compromised container cannot control the host's Docker daemon.
+  This also means the current dashboard MQTT provisioning service cannot reload the Mosquitto container in the default Compose deployment. Configure MQTT manually or provide a narrower external reload mechanism.
 - **Read-only system router** — `/api/system` is GET-only (diagnostics, logs, version check). There are no shutdown, reboot, update, or prune endpoints; host control is done via SSH/Docker, not the web app.
 - **No git or Docker CLI in the production image** — the build commit is baked into `dist/build-info.json` at build time, so no runtime git is needed.
 - **Authentication always on** — bcrypt (cost 12) password hashing, short-lived JWTs, httpOnly refresh cookies, and login rate-limiting (5 attempts/min per IP).

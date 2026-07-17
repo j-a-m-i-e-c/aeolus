@@ -1,54 +1,36 @@
-# Add a User
+# Add a user
 
-Create accounts for household members so they can access the dashboard with controlled permissions.
+Create a non-admin dashboard account and assign it to a group.
 
-## Prerequisites
+## Before you start
 
-- You must be logged in as the admin
-- You should have at least one group created (see [Set Up Groups & Permissions](./setup-groups-permissions.md))
+- Log in as the administrator.
+- Create at least one group first. See [Set up groups and permissions](setup-groups-permissions.md).
 
 ## Steps
 
-1. Go to the **System** tab (the dashboard/home page)
-2. Scroll down to the **Users** section
-3. Click **Add User**
-4. Fill in:
-   - **Username** — whatever they'll log in with
-   - **Password** — minimum 8 characters (they can change it later)
-   - **Group** — select which group they belong to (this controls what tabs they see)
-5. Click **Create**
+1. Open **Security**.
+2. Select **Users & Groups**.
+3. In the Users section, choose **Add User**.
+4. Enter:
+   - a username;
+   - a password of at least eight characters;
+   - the group the user should belong to.
+5. Choose **Create**.
 
-The user can now log in at the same URL with their credentials.
+The user can now sign in at the normal Aeolus URL.
 
-## What users can do
+## Change a user
 
-Users see only the tabs assigned to their group, with the permission level set for each tab:
+Use the edit control beside the user to:
 
-| Permission | What they can do |
-|-----------|-----------------|
-| Read | View the tab — all controls are disabled |
-| Interact | Toggle devices, fire automations, use buttons |
-| Write | Full control including editing automation code and managing panes |
+- assign a different group;
+- set a new password.
 
-## Changing a user's group
+A password reset revokes the user's refresh tokens. They must sign in again.
 
-1. In the Users section, click the **pencil icon** next to the user
-2. Change the **Group Assignment** dropdown
-3. Click **Save Changes**
+## Delete a user
 
-The change takes effect on their next token refresh (within 15 minutes, or immediately if they log out and back in).
+Use the delete control and confirm the action.
 
-## Resetting a user's password
-
-1. Click the **pencil icon** next to the user
-2. Enter a new password in the **Reset Password** field
-3. Click **Save Changes**
-
-This invalidates all their active sessions — they'll need to log in again with the new password.
-
-## Deleting a user
-
-1. Click the **trash icon** next to the user
-2. Confirm the deletion
-
-Note: You cannot delete the last admin account.
+The account created during first-run setup is the administrator. The normal user-creation flow creates `user` accounts, not additional administrators.

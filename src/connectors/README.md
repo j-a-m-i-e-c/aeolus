@@ -1,6 +1,6 @@
 # Connector Developer Guide
 
-Build connectors to integrate external device ecosystems into Aeolus. A connector bridges the gap between a third-party protocol (Hue, Kasa, Zigbee, Z-Wave, etc.) and the Aeolus device model — no backend core file changes required. Connector devices automatically appear in the Device Grid and can be targeted by automations. For connector-specific controls (colour pickers, energy stats, etc.), you can optionally add a frontend pane component — see the [Frontend Control Pane](#frontend-control-pane-optional-but-recommended) section.
+Build connectors to integrate external device ecosystems into Aeolus. A connector bridges a third-party protocol such as Hue, Kasa, Zigbee or Z-Wave into the Aeolus device model. Connector devices appear in the Device Grid and can be targeted by automations. A bundled connector must be imported and registered in `src/index.ts`; the connector contract itself does not require changes to the registry or manager. For connector-specific controls such as colour pickers or energy statistics, you can optionally add a frontend pane component.
 
 ## Quick Start
 
@@ -10,10 +10,11 @@ cp -r src/connectors/_template src/connectors/my-connector
 
 # 2. Edit the metadata and config schema in index.ts
 # 3. Implement the Connector interface in connector.ts
-# 4. Restart Aeolus — the registry auto-discovers your connector
+# 4. Import the module and call connectorRegistry.register(...) in src/index.ts
+# 5. Restart Aeolus
 ```
 
-That's it. The `ConnectorRegistry` scans `src/connectors/` at startup, finds your folder, validates the exports, and registers your connector. It appears in the dashboard and REST API automatically.
+Bundled production connectors are registered explicitly in the backend composition root. `ConnectorRegistry.discoverFromDirectory()` remains useful for development and tests, but adding a folder alone does not place it in the production bundle.
 
 ---
 
@@ -26,7 +27,7 @@ src/connectors/
 │   ├── index.ts                 ← Module exports (metadata, configSchema, createConnector)
 │   └── connector.ts             ← Connector class implementation
 ├── connector.interface.ts       ← Core TypeScript interfaces
-├── connector-registry.ts        ← Auto-discovery service
+├── connector-registry.ts        ← Module validation, registration and development discovery
 ├── connector-manager.ts         ← Lifecycle management
 ├── connector-store.ts           ← SQLite persistence
 ├── hue/                         ← Philips Hue (reference implementation with setup flow)
@@ -37,7 +38,7 @@ src/connectors/
     └── kasa-connector.ts
 ```
 
-Each connector lives in its own subdirectory. The registry skips `_template`, files starting with `connector`, and `README.md` during discovery.
+Each connector lives in its own subdirectory. Directory discovery skips `_template`, files starting with `connector`, and `README.md`; production registration is explicit.
 
 ---
 
@@ -442,6 +443,7 @@ Key points:
 Before shipping your connector:
 
 **Backend (required):**
+- [ ] The connector module is imported and registered in `src/index.ts`
 - [ ] `index.ts` exports `metadata`, `configSchema`, and `createConnector`
 - [ ] `index.ts` exports `snippets` array with logic snippets (device actions, conditions) and UI snippets (component controls, status displays)
 - [ ] `index.ts` exports `actionHandlers` with connector-specific action types (optional but recommended)

@@ -9,11 +9,11 @@ Thanks for your interest in contributing to Aeolus! This guide will help you get
 3. Install dependencies:
    ```bash
    cd aeolus
-   npm install
-   cd frontend && npm install && cd ..
+   npm ci
+   cd frontend && npm ci && cd ..
    ```
 4. Copy the environment file: `cp .env.example .env`
-5. Start with Docker Compose: `docker compose up`
+5. Start with Docker Compose: `docker compose up -d --build`
 
 The backend runs on port 3001, the frontend on port 3000, and Mosquitto on port 1883.
 
@@ -21,7 +21,7 @@ The backend runs on port 3001, the frontend on port 3000, and Mosquitto on port 
 
 1. Create a branch from `main`: `git checkout -b feat/your-feature`
 2. Make your changes
-3. Run tests: `npm test`
+3. Run the local verification gate: `make verify`
 4. Commit using [Conventional Commits](https://www.conventionalcommits.org/):
    ```
    feat(dashboard): add new pane type for weather data
@@ -71,10 +71,10 @@ See `src/connectors/README.md` for the full developer guide.
 ## Pull Request Checklist
 
 - [ ] Code builds without errors
-- [ ] Tests pass (`npm test`)
+- [ ] Typecheck, lint and tests pass (`make verify`)
 - [ ] Follows Conventional Commits format
-- [ ] New files added to project structure in `docs/COMPREHENSIVE_DOCUMENTATION.md` if applicable
-- [ ] New API endpoints documented
+- [ ] Behaviour changes documented in the narrow relevant file under `docs/reference/` or `docs/security/`
+- [ ] New API endpoints documented in `docs/reference/api.md`
 - [ ] No secrets or API keys committed
 
 ## Questions?

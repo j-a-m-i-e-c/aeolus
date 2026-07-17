@@ -1,52 +1,64 @@
-# Reset Admin Password
+# Reset the admin password
 
-Emergency recovery when you're locked out of the admin account.
+Aeolus does not currently provide a second-admin or email-recovery flow. If the first-run administrator is lost, recovery requires resetting the user records in SQLite.
 
-## Option 1: Use another admin account
+This deletes dashboard users, not devices, automations, connectors, layouts, groups or MQTT credentials.
 
-If you have multiple admin accounts, log in with the other one and reset the password via the Users section.
+## 1. Stop the backend
 
-## Option 2: Database reset (nuclear option)
+```bash
+docker compose stop backend
+```
 
-If you're completely locked out:
+For a direct development install, stop `npm run dev`.
 
-1. **Stop Aeolus**
-   ```bash
-   docker compose down
-   # or Ctrl+C if running directly
-   ```
+## 2. Back up the database
 
-2. **Open the SQLite database**
-   ```bash
-   sqlite3 data/aeolus.db
-   ```
+For Docker on Linux, find the host path mounted at `/app/data`:
 
-3. **Delete all users and tokens**
-   ```sql
-   DELETE FROM refresh_tokens;
-   DELETE FROM users;
-   .quit
-   ```
+```bash
+DB_DIR=$(docker inspect aeolus-backend \
+  --format '{{range .Mounts}}{{if eq .Destination "/app/data"}}{{.Source}}{{end}}{{end}}')
 
-4. **Restart Aeolus**
-   ```bash
-   docker compose up -d
-   # or npm run dev
-   ```
+sudo cp "$DB_DIR/aeolus.db" "$DB_DIR/aeolus.db.before-admin-reset"
+```
 
-5. **Open the dashboard** — you'll see the Setup Page again. Create a new admin account.
+For a direct install, copy the file configured by `DB_PATH`, normally `data/aeolus.db`.
 
-## What you lose
+## 3. Delete user sessions and accounts
 
-- All user accounts are deleted
-- All refresh tokens are invalidated
-- Groups and their tab assignments are **preserved**
-- Tabs, panes, automations, devices, connectors — all **preserved**
-- MQTT credentials — **preserved**
+Using the host `sqlite3` command:
 
-After creating the new admin, you'll need to recreate any non-admin user accounts and reassign them to groups.
+```bash
+sudo sqlite3 "$DB_DIR/aeolus.db" \
+  "DELETE FROM refresh_tokens; DELETE FROM users;"
+```
 
-## Prevention
+For a direct install:
 
-- Use a password manager
-- Consider setting the `JWT_SECRET` environment variable so you have a known value (though this doesn't help with forgotten passwords directly)
+```bash
+sqlite3 data/aeolus.db \
+  "DELETE FROM refresh_tokens; DELETE FROM users;"
+```
+
+## 4. Restart Aeolus
+
+```bash
+docker compose start backend
+```
+
+Open the dashboard. The first-run setup page appears again.
+
+## What is preserved
+
+- groups and tab assignments;
+- tabs and panes;
+- automations and automation state;
+- devices and history;
+- connectors;
+- Data Store content;
+- MQTT credentials.
+
+Normal user accounts must be recreated and assigned back to their groups.
+
+Do not perform this procedure without a database backup.

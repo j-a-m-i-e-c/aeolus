@@ -7,13 +7,12 @@
 <h3 align="center">Local-first edge automation platform</h3>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white" />
-  <img src="https://img.shields.io/badge/React-61DAFB?logo=react&logoColor=black" />
-  <img src="https://img.shields.io/badge/MQTT-660066?logo=eclipsemosquitto&logoColor=white" />
-  <img src="https://img.shields.io/badge/Docker-2496ED?logo=docker&logoColor=white" />
-  <img src="https://img.shields.io/badge/SQLite-003B57?logo=sqlite&logoColor=white" />
-  <img src="https://img.shields.io/badge/Raspberry_Pi-C51A4A?logo=raspberrypi&logoColor=white" />
-  <img src="https://img.shields.io/badge/License-MIT-22C55E" />
+  <img src="https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white" alt="TypeScript" />
+  <img src="https://img.shields.io/badge/React-61DAFB?logo=react&logoColor=black" alt="React" />
+  <img src="https://img.shields.io/badge/MQTT-660066?logo=eclipsemosquitto&logoColor=white" alt="MQTT" />
+  <img src="https://img.shields.io/badge/Docker-2496ED?logo=docker&logoColor=white" alt="Docker" />
+  <img src="https://img.shields.io/badge/SQLite-003B57?logo=sqlite&logoColor=white" alt="SQLite" />
+  <img src="https://img.shields.io/badge/Raspberry_Pi-C51A4A?logo=raspberrypi&logoColor=white" alt="Raspberry Pi" />
 </p>
 
 <p align="center">
@@ -31,633 +30,515 @@
 
 ---
 
+Aeolus is a self-hosted platform for developers who need to make a collection of physical devices behave like one system. It brings MQTT hardware, commercial integrations, automation code, local data and custom dashboards into one place.
 
-## What is Aeolus?
+An automation in Aeolus can be a small edge application of its own. It can contain backend logic, a purpose-built React interface and private state shared between the two.
 
-> **New here?** For a plain-English introduction with no technical jargon, read [**What Is Aeolus?**](docs/WHAT_IS_AEOLUS.md). For the deep technical rationale, see [**Why Aeolus?**](docs/WHY_AEOLUS.md).
+Aeolus started around real rural infrastructure, but it is not a farm product. The same runtime can drive a greenhouse panel, an escape-room console, a vessel instrument display, a stage cue system or any other site where the software needs to fit the job rather than the other way around.
 
-Aeolus is a local-first edge automation platform. It collects events from arbitrary hardware, executes sandboxed business logic, persists state, and exposes custom interfaces — all self-hosted on hardware you control. Home automation is the most familiar way to demonstrate it — most people can immediately picture controlling lights, sensors, and switches — but it's only one example; the architecture is domain-agnostic. It's an attempt to bring the developer experience of modern application development to edge automation.
+- **Local-first:** the important work stays on site and does not require a vendor cloud.
+- **Code-first:** write JavaScript or TypeScript with Monaco IntelliSense instead of squeezing complex behaviour into YAML or a large flow graph.
+- **Hardware-agnostic:** MQTT devices and connector-backed products enter the same event and device model.
+- **Full-stack automations:** pair isolated backend logic with sandboxed custom UI.
+- **Built to operate:** inspect devices, messages, state, history, logs, metrics and command results from the dashboard.
 
-Everything runs on your LAN by default — fast responses, full privacy, no vendor accounts. Any MQTT device appears automatically when it publishes a message. Commercial ecosystems plug in through a connector framework designed so that any developer with unusual hardware can write support for it in an afternoon. Everything feeds the same internal event bus, so an ESP32 sensor, a Hue bulb, and a weather API all look identical to your automation logic.
+Three core services. One local control plane. No required cloud account.
 
-Each automation is a paired backend script and frontend component that communicate through a reactive state store. The backend runs in a secure V8 sandbox (isolated-vm — 32MB memory cap, 5-second timeout, no filesystem access). The frontend is a live React component that renders the moment you save. The Monaco editor gives you full IntelliSense across both.
+> For a plain-English introduction, read [**What Is Aeolus?**](docs/WHAT_IS_AEOLUS.md). For the deeper technical argument, read [**Why Aeolus?**](docs/WHY_AEOLUS.md).
 
-Because nothing depends on external services, the system keeps running if your internet drops, a vendor shuts down, or a cloud API changes pricing. That same property makes it deployable anywhere — a home, a workshop, a farm, a boat, a research station. Optional remote access via Cloudflare Tunnel when you want it.
+<!--
+MEDIA TODO: README hero GIF
+File: docs/media/aeolus-overview.gif
+Length: 12 to 18 seconds, silent, cropped to the application window.
+Show:
+1. Open a coherent custom tab for one real site (preferably the Koonorigan farm/shed deployment).
+2. A live tank, solar or temperature value changes.
+3. Trigger one safe manual action.
+4. Open an automation pane and briefly reveal the Logic/UI tabs.
+5. Return to the live control view.
+Avoid: rapidly cycling through every demo domain. The first impression should be one believable operating environment, not a feature montage.
+-->
+<!-- ![Aeolus overview](docs/media/aeolus-overview.gif) -->
 
-Three Docker containers. One SQLite file. Zero subscriptions.
+## Project status
 
-<!-- TODO: Add hero screenshot of the dashboard here -->
-<!-- ![Dashboard Screenshot](docs/screenshots/dashboard.png) -->
+Aeolus is an **early-alpha platform under active development**. The core runtime, dashboard, MQTT integration, connector framework, data store, migrations, authentication and sandboxing are implemented; APIs and operating assumptions may still change.
 
----
+It is appropriate for development, supervised pilots and non-safety-critical automation with independent physical safeguards. It is not a replacement for certified control systems, hardwired interlocks, motor protection, dry-run protection, emergency stops or other safety equipment.
 
 ## Quick Start
+
+### Requirements
+
+- Linux host
+- Docker Engine with Docker Compose
+- Raspberry Pi 4/5 or another Linux machine
+
+Aeolus uses host networking for LAN discovery and direct communication with devices such as Kasa plugs and Hue bridges. Docker Desktop on Windows and macOS can be used for limited dashboard evaluation, but a Linux host is required for the intended deployment model.
+
+### Start Aeolus
 
 ```bash
 git clone https://github.com/j-a-m-i-e-c/aeolus.git
 cd aeolus
-docker compose up
+docker compose up --build
 ```
 
-Open **http://localhost:3000** — that's it.
+Open **http://localhost:3000** and create the first administrator account.
 
-> **Supported platform:** Aeolus targets a **Linux host** (Raspberry Pi or any Linux box). It relies on Docker host networking for LAN device discovery (Kasa UDP broadcast, Hue), which only works on Linux. **Windows and macOS are not supported** — Docker Desktop runs containers in a NAT'd VM, so the backend port isn't reachable and LAN discovery doesn't work. You can still evaluate the dashboard and demo on Windows/macOS, but a Linux host is required for real use.
+### Explore without hardware
 
-### Explore Without Hardware
-
-The seed script populates the platform with realistic demo scenarios so you can explore the full feature set immediately:
+After creating the administrator account, seed the platform with demo devices, dashboards and automations:
 
 ```bash
-make seed PASS=yourpass          # USER defaults to admin; override with USER=...
+make seed PASS=your-password
 ```
 
-The seeder runs inside a throwaway Docker container (via the `seed` compose profile), so **no Node install is needed** — only Docker. Create your admin account in the dashboard first; the `PASS` (and optional `USER`) must match it, and the password is 8+ characters. If you'd rather not use `make`, the equivalent is:
+`USER` defaults to `admin` and can be overridden:
 
 ```bash
-SEED_PASS=yourpass docker compose --profile seed run --rm seed
+make seed USER=jamie PASS=your-password
 ```
 
-Each tab demonstrates a different domain — a connected farm, ocean research vessel, underground mine, spacecraft operations, escape room, live stage/show control, an off-grid survival bunker, and a wildlife & conservation station (on-device camera AI, nest monitoring, predator deterrent) — plus a **Space** tab driven entirely by live public APIs (rocket launches, the ISS, space weather, moon phase). It shows how the same platform adapts to wildly different environments. No physical devices or API keys required.
+The seeder runs in a temporary Docker container, so it does not require Node.js on the host.
 
-<!-- TODO: Add screenshot of the welcome/onboarding screen here -->
-<!-- ![Welcome Screen](docs/screenshots/welcome.png) -->
+The seed demo is intentionally eclectic. It includes agriculture, a research vessel, an underground mine, a spacecraft, a stage show, an escape room, wildlife monitoring, an off-grid bunker and a small space-data dashboard.
 
-### Raspberry Pi (one-line install)
+The scenarios are simulated demonstrations of the platform model. They are there to show how the same Logic, UI, device, state and data primitives can be shaped into very different applications. They are not claims that Aeolus already ships every specialised hardware integration shown in the demo.
+
+<!--
+MEDIA TODO: First-run screenshot
+File: docs/media/first-run.png
+Show: the clean post-login dashboard with the System sidebar, one custom tab and enough seeded data to make the product understandable. Do not show an empty state.
+Recommended size: 1600×900 or larger.
+-->
+<!-- ![Aeolus first-run dashboard](docs/media/first-run.png) -->
+
+### Raspberry Pi installation
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/j-a-m-i-e-c/aeolus/main/scripts/setup-pi.sh | bash
 ```
 
-Installs Docker, clones Aeolus, builds containers, and starts everything. Auto-starts on boot. Sets the Pi's hostname to `aeolus` so you can access the dashboard at **http://aeolus.local:3000** from any device on your network.
-
----
+The setup script installs Docker, clones the repository, starts the services, enables restart-on-boot and sets the hostname to `aeolus`. The dashboard is then available at **http://aeolus.local:3000** on supported local networks.
 
 ## Features
 
-| | Feature | Description |
-|---|---|---|
-| 🌐 | **MQTT-first** | Bidirectional communication with any MQTT device — ingest sensor data and publish commands back to actuators |
-| ⚡ | **Code-driven automations** | Write scripts in a Monaco editor with full IntelliSense, flow diagrams, and a code snippet library |
-| 🎨 | **Custom UI components** | Write React/TSX dashboard widgets for your automations — save and they render instantly, no rebuild needed |
-| 🎛️ | **Modular dashboard** | Create custom tabs with drag-and-drop panes |
-| 🧩 | **Connector framework** | Add new device integrations without touching core code — [developer guide included](src/connectors/README.md) |
-| 💡 | **Philips Hue (Connector)** | Toggle, brightness, colour picker with guided bridge pairing wizard |
-| 🔌 | **TP-Link Kasa (Connector)** | Smart plugs with auto-discovery and energy monitoring |
-| 🎯 | **Structured action results** | Every device action returns `ActionResult { success, data?, error? }` — pre-flight validation, MQTT command publishing, and bulk execution via `devices.actionAll()` |
-| 📡 | **MQTT command support** | Publish commands to MQTT device command topics directly from automations — topic auto-derived from device state |
-| 🔗 | **Automation state store** | Per-rule key-value store for backend↔frontend communication via WebSocket |
-| 📡 | **Internal event bus** | Typed pub/sub bus decouples MQTT ingestion, device state changes, automation triggers, and WebSocket pushes |
-| 🍓 | **Raspberry Pi ready** | One-line install, auto-start on boot, runs on a Pi 4/5 |
-| 💾 | **Data Store** | Persistent time-series collections and key-value buckets — accumulate sensor data, query with aggregation, share state across automations |
-| 📊 | **State history & charts** | Per-device state history with SVG trend charts, time range filtering, and data cleanup |
-| 🔒 | **100% local** | Everything stays on your network — no cloud dependency |
-| 🔐 | **Authentication & RBAC** | JWT-based auth with admin setup, user groups, per-tab read/interact/write permissions, rate-limited login |
-| 🛡️ | **Security hardened** | Read-only system router, no Docker socket mount, no dangerous CLI tools in production image, version auto-detected at build time |
-| 🛡️ | **MQTT Security** | Three configurable levels — Open, Shared Password, or Per-Device credentials — managed from the dashboard |
-| 📈 | **Prometheus Metrics** | `/metrics` endpoint with MQTT throughput, device counts, automation execution, HTTP stats, and system resources |
-| 📉 | **Metrics History** | Two-tier system — 30s live sparklines (10min retention) + 5min aggregates (permanent) with trend charts |
-
----
+| Area | What Aeolus provides |
+|---|---|
+| **Automation runtime** | JavaScript/TypeScript logic executed in isolated V8 contexts with memory and execution limits |
+| **Custom application UI** | React/TSX components rendered in sandboxed iframes with opaque origins and connected to the host through a capability-scoped RPC bridge |
+| **MQTT** | Wildcard ingestion, automatic device discovery, raw message inspection and command publishing through Eclipse Mosquitto |
+| **Connectors** | A TypeScript framework for integrating commercial ecosystems; Hue and TP-Link Kasa are included |
+| **Unified event model** | MQTT and connector events flow through the same internal event bus and device registry |
+| **Command outcomes** | Structured action results, with dispatch, acknowledgement and observed-state confirmation available where the integration and automation support them |
+| **Dashboard** | Custom tabs, drag-and-drop panes, device controls, automation editors and monitoring tools |
+| **State and data** | Automation-local state, device history, time series collections and shared key/value buckets |
+| **Security** | Local authentication, user groups, dashboard permissions, MQTT credential modes and isolated user-authored code |
+| **Operations** | Structured logs, Prometheus metrics, built-in metric history, health checks and versioned database migrations |
+| **Deployment** | Docker Compose on Linux, with Raspberry Pi installation and no mandatory hosted service |
 
 ## Dashboard
 
-The dashboard has four pinned sidebar tabs — **System** (device grid, health, diagnostics, version display with update-available badge, user management), **Connectors** (manage integrations), **Data** (time-series explorer, key-value buckets, and metrics history charts), and **Security** (MQTT security levels, per-device credentials) — plus as many custom tabs as you want. Admins can create tabs and assign them to user groups with read/interact/write permissions.
+Aeolus provides four pinned operational areas: **System**, **Connectors**, **Data** and **Security**. You can then add custom tabs for a site, workflow or operating context.
 
-Custom tabs are where the real work happens. Each tab has two buttons in the header:
+Custom tabs are composed from draggable and resizable panes. Built-in panes include:
 
-- **New Automation** — the primary action. Drops a fresh automation pane straight into setup mode with a Monaco editor, no extra clicks. Automations are the core of Aeolus so they get their own entry point.
-- **Browse Panes** — everything else. Opens a picker with device grids, MQTT inspectors, sensor panels, system stats, and more.
+- device grids and connector-specific controls
+- automation editors and automation lists
+- sensor panels and state-history charts
+- MQTT inspector and topic tree
+- event logs, schedules and trigger controls
+- live system and metrics views.
 
-<!-- TODO: Add screenshot of a custom tab with automation panes here -->
-<!-- ![Custom Tab](docs/screenshots/custom-tab.png) -->
+The dashboard is intended to support both development and daily operation. A technical user can edit automation logic in the same environment where another user sees a focused operational interface.
 
-<!-- TODO: Add screenshot of the MQTT inspector here -->
-<!-- ![MQTT Inspector](docs/screenshots/mqtt-inspector.png) -->
+<!--
+MEDIA TODO: Primary dashboard screenshot
+File: docs/media/site-dashboard.png
+Show one polished, coherent dashboard rather than every pane at once. The real farm or shed deployment is the best primary image. A second screenshot could use one of the seeded applications, such as the research vessel CTD profiler, escape-room game master console or stage cue stack, to show that the layout is not tied to one domain.
+-->
+<!-- ![Aeolus site dashboard](docs/media/site-dashboard.png) -->
 
-<!-- TODO: Add screenshot of the connector management page here -->
-<!-- ![Connectors](docs/screenshots/connectors.png) -->
-
----
+<!--
+MEDIA TODO: Responsive dashboard GIF
+File: docs/media/responsive-dashboard.gif
+Length: 6 to 10 seconds.
+Show: the same custom tab resizing from desktop width to tablet/mobile width, demonstrating that panes reflow rather than merely shrinking.
+-->
+<!-- ![Responsive Aeolus dashboard](docs/media/responsive-dashboard.gif) -->
 
 ## Automations
 
-Each automation has two tabs: **Logic** (code that runs on the backend in a secure V8 sandbox) and **UI** (React/TSX that renders in the dashboard). They communicate through a shared per-rule state store.
+An Aeolus automation can contain two user-authored parts:
 
-Both sides are user-authored code running in sandboxes — the Logic tab in isolated-vm on the backend, the UI tab as a dynamically-loaded React module on the frontend. The platform provides the communication channel and the runtime, but you write both halves. It's a full-stack framework where the "backend" is a 50-line script and the "frontend" is a 30-line component, and they talk to each other through a reactive state bus with zero boilerplate.
+1. **Logic**: free-form backend JavaScript/TypeScript that responds to MQTT topics, connector events, schedules, or manual/UI events.
+2. **UI**: an optional React/TSX component that becomes the automation’s live control and status surface.
+
+Together they behave like a small edge application. Each automation has its own persistent state namespace, giving its Logic and UI a simple shared channel without exposing the UI directly to the backend process.
 
 ### How data flows between Logic and UI
 
-```
-┌─────────────────────────┐         ┌─────────────────────────┐
-│   Logic tab (backend)   │         │   UI tab (React)        │
-│                         │         │                         │
-│  state.set("mode", "…") ├────────►│  aeolus.read("mode")    │
-│                         │   WS    │                         │
-│  // reads on next run   │◄────────┤  aeolus.save("…", 25)   │
-│  state.get("target")    │  SQLite │                         │
-│                         │         │                         │
-│  // fires immediately   │◄────────┤  aeolus.fire("changed", │
-│  context.state.value    │  HTTP   │    { value: 25 })       │
-└─────────────────────────┘         └─────────────────────────┘
+```text
+┌──────────────────────────────┐        ┌──────────────────────────────┐
+│ Logic tab: backend           │        │ UI tab: React                │
+│                              │        │                              │
+│ state.set("mode", "auto")   ├───────►│ aeolus.read("mode")          │
+│                              │ SQLite │                              │
+│                              │  + WS  │                              │
+│ state.get("target")          │◄───────┤ aeolus.save("target", 70)    │
+│                              │ HTTP + │                              │
+│                              │ SQLite │                              │
+│ context.topic / state        │◄───────┤ aeolus.fire("apply", {...})  │
+│                              │  HTTP  │                              │
+└──────────────────────────────┘        └──────────────────────────────┘
 ```
 
-- **Logic → UI** (real-time): `state.set()` persists to SQLite and pushes via WebSocket. The UI re-renders immediately.
-- **UI → Logic** (passive): `aeolus.save()` writes to SQLite. The Logic tab reads it on its next trigger.
-- **UI → Logic** (immediate): `aeolus.fire(eventName, payload)` fires the Logic tab now with `context.topic = "ui/{ruleId}/{eventName}"` and `context.state = payload`.
+- **Logic → UI, live:** `state.set(key, value)` persists the value to SQLite and broadcasts it over WebSocket. Components using `aeolus.read(key)` update when the new value arrives.
+- **UI → Logic, persistent:** `aeolus.save(key, value)` writes to the same state store. Logic can read it with `state.get(key)` the next time it runs.
+- **UI → Logic, immediate:** `aeolus.fire(eventName, payload)` runs the associated Logic now with `context.topic = "ui/{ruleId}/{eventName}"` and `context.state = payload`.
+- **Save and run:** `aeolus.saveAndFire(key, value)` requests both persistence and an immediate `state-set` Logic event carrying `{ key, value }`. The immediate run can use `context.state`; later runs can read the stored value.
 
-### Logic Tab — `automation()` helper
+### Logic tab: free-form code
 
 ```javascript
-// Runs in a secure V8 sandbox with access to devices, mqtt, http, state, and more
-// Monaco provides full IntelliSense — autocomplete, parameter hints, and hover docs
-// TypeScript annotations are optional but supported (stripped at save time)
-automation({
-  conditions: [
-    function isLowLight(ctx) {
-      const lux = ctx.state.value as number;
-      return typeof lux === "number" && lux < 200;
-    },
-    function isEvening(ctx) {
-      const hour = new Date(ctx.timestamp).getHours();
-      return hour >= 16 && hour < 23;
-    },
-  ],
-  actions: [
-    function dimLights(ctx) {
-      const lights = devices.filter(d => d.integration === "hue");
-      for (const light of lights) {
-        devices.action(light.id, "brightness", { brightness: 60 });
-      }
-      state.set("mode", "evening");
-      log.info("Evening mode activated");
-    },
-  ],
-});
-```
+const puzzleId = context.deviceId ?? context.topic.split("/").at(-1);
+const solved = Boolean(context.state.solved);
+const completed = new Set(state.get("completedPuzzles") ?? []);
 
-Named functions become labeled nodes in the flow diagram. The `state.set()` call in the action is what pushes `"mode"` to the UI tab.
-
-### Logic Tab — Free-form code
-
-The `automation()` helper is optional. You can write completely free-form code using the sandbox globals directly — no structure imposed:
-
-```javascript
-// React to a temperature sensor event
-const temp = context.state.value;
-const room = context.topic.split("/")[1];
-
-// Fetch weather data from an external API
-const weather = await http.get("https://api.weather.com/current");
-const forecast = JSON.parse(weather.body);
-
-// Control devices based on conditions
-if (temp > 28 && forecast.willRain === false) {
-  const fans = devices.filter(d => d.type === "plug" && d.name.includes("fan"));
-  for (const fan of fans) {
-    devices.action(fan.id, "on");
-  }
-  mqtt.publish("alerts/heat", JSON.stringify({ room, temp }));
-  log.warn(`High temp in ${room}: ${temp}°C — fans activated`);
+if (context.topic.endsWith("/send-hint")) {
+  const hint = String(context.state.text ?? "");
+  mqtt.publish("escape-room/display/hint", JSON.stringify({ text: hint }));
+  state.set("lastHint", hint);
 }
 
-// Push data to the UI component via the state store
-state.set("currentTemp", temp);
-state.set("room", room);
-state.set("fansActive", temp > 28);
-state.set("lastUpdate", Date.now());
+if (solved && puzzleId && !completed.has(puzzleId)) {
+  completed.add(puzzleId);
+  state.set("completedPuzzles", [...completed]);
+  state.set("lastEvent", `${puzzleId} solved`);
+  mqtt.publish(`escape-room/locks/${puzzleId}/command`, "unlock");
+}
 ```
 
-Free-form scripts have full access to the same globals (`devices`, `mqtt`, `http`, `state`, `log`, `context`) — you just don't get the visual flow diagram. Use whichever style fits: the structured helper for simple condition→action flows, free-form for complex logic with API calls, loops, and data aggregation.
+Free-form code is the main authoring model. Use the sandbox APIs directly, structure the program in the way that suits the workflow, and keep its state close to the automation. The same script can request device actions, publish MQTT messages, call HTTP services and write longer-term data when needed.
 
-### UI Tab — Custom React Components
+Aeolus also includes an optional `automation()` helper for straightforward condition/action rules. It uses the same APIs and can generate a simple flow view, but it is there as a convenience rather than the main way to write Aeolus applications.
+
+### UI tab: purpose-built React
 
 ```tsx
-// Renders in the automation pane instantly after saving
-export default function EveningMode(aeolus: CustomComponentProps) {
-  const mode = aeolus.read("mode") as string;
+export default function GameMaster(aeolus: CustomComponentProps) {
+  const completed = (aeolus.read("completedPuzzles") ?? []) as string[];
+  const lastEvent = String(aeolus.read("lastEvent") ?? "Game ready");
+
   return (
-    <div className="p-4 space-y-2">
-      <div className="text-lg font-bold text-[#E6EDF3]">
-        {mode === "evening" ? "🌙 Evening Mode" : "☀️ Day Mode"}
-      </div>
+    <section className="p-4 space-y-3">
+      <h3 className="font-semibold">Game master</h3>
+      <p>{completed.length} puzzles complete</p>
+      <p>{lastEvent}</p>
+
       <button
-        onClick={() => aeolus.control("hue-light-1", "toggle")}
-        className="px-3 py-1.5 rounded-lg bg-[#3BA4FF]/20 text-[#3BA4FF]"
+        onClick={() =>
+          aeolus.fire("send-hint", { text: "Look beneath the clock." })
+        }
       >
-        Toggle Light
+        Send hint
       </button>
-      <input
-        type="range" min={16} max={28} defaultValue={22}
-        onChange={e => {
-          const target = Number(e.target.value);
-          aeolus.save("target", target);
-          aeolus.fire("target-changed", { value: target });
-        }}
-      />
-    </div>
+    </section>
   );
 }
 ```
 
-`aeolus.read("mode")` reads the value the Logic tab wrote. `aeolus.control` lets the UI control devices directly. `aeolus.fire("target-changed", { value })` fires the Logic tab immediately with the new value in `context.state` — use it when the UI needs to delegate a decision to the backend rather than issuing a direct command. Write TSX, save, and your component renders live in the pane — no rebuild or refresh needed.
+The Logic editor runs on Monaco and receives Aeolus-specific definitions for autocomplete, parameter hints and inline documentation. UI components are transpiled on save and loaded into an `allow-scripts` iframe with an opaque origin. Privileged operations go through a broker in the host, so the frame never receives the user’s authentication token or general access to the host application.
 
-**How it works under the hood:** When you save, the backend transpiles your TSX into an ES module using esbuild with the React JSX transform (`jsx: "automatic"`). The compiled JavaScript is stored in the database and served via a dedicated API endpoint. The frontend fetches it, rewrites the React imports to reference the host app's shared React instance, loads it as a module via a blob URL and dynamic `import()`, and renders it inside an error boundary. The whole round-trip happens in milliseconds — no Docker rebuild, no Vite recompilation, no page refresh.
+### Sandbox APIs
 
-<!-- TODO: Add screenshot of the automation editor (Monaco + flow diagram) here -->
-<!-- ![Automation Editor](docs/screenshots/automation-editor.png) -->
+| Global | Purpose |
+|---|---|
+| `context` | The event that triggered the execution |
+| `devices` | Query the registry and request device actions |
+| `mqtt` | Publish MQTT messages |
+| `state` | Read and write the automation’s private persistent state |
+| `db` | Write/query time series collections and key/value buckets when enabled |
+| `http` | Make bounded HTTP requests to external or local services |
+| `log` | Emit structured application logs |
+| `automation()` | Optional conditions/actions helper used for flow visualisation |
 
-<!-- TODO: Add screenshot of a custom UI component rendering in a pane here -->
-<!-- ![Custom UI Component](docs/screenshots/custom-ui.png) -->
+### Command outcomes
 
-### Sandbox API
+Physical control has more uncertainty than a normal database write. Depending on the device, connector, and confirmation options, Aeolus can distinguish:
 
-Scripts run in an isolated V8 sandbox (32 MB memory limit, 5-second timeout) with access to:
+- **requested**: the platform accepted the intent
+- **dispatched**: the command was handed to the relevant transport or integration
+- **acknowledged**: a capable device or integration confirmed receipt
+- **observed**: a device or independent sensor reported the expected effect
+- **failed, timed out, or mismatched**: the requested outcome was not established.
 
-The Monaco editor provides full IntelliSense for all globals — autocomplete, parameter hints, hover documentation, and error squiggles. TypeScript annotations are supported but optional; the transpiler strips them at save time.
+This is a capability model, not a claim that every device can provide every level of confirmation. Simple devices may only support dispatch; richer integrations can provide acknowledgement or observed-state verification.
 
-| Global | Description |
-|--------|-------------|
-| `devices` | Query, filter, and send actions to any device — `devices.action()` returns `ActionResult`, `devices.actionAll()` executes bulk actions |
-| `mqtt` | Publish messages to MQTT topics |
-| `log` | Structured logging (info, warn, error) |
-| `context` | Triggering event data (topic, deviceId, state, timestamp) |
-| `state` | Per-rule key-value store (persisted, synced to frontend via WebSocket) |
-| `http` | GET/POST requests to external APIs (10s timeout, HTTPS recommended for non-local URLs) |
-| `automation()` | Structured helper with conditions + actions for flow diagram visualization |
-| `db` | Time-series write/query and key-value get/set/delete (available when Data Store is enabled) |
+<!--
+MEDIA TODO: Logic/UI state flow GIF
+File: docs/media/logic-ui-state-flow.gif
+Length: 12 to 18 seconds.
+Show:
+1. The Logic tab calls state.set() for a visible value.
+2. Switch to status mode and show the custom UI update without a page refresh.
+3. Change a target in the UI using aeolus.save().
+4. Trigger aeolus.fire() and show the Logic execution/event topic.
+Keep the example to one coherent automation so the relationship between Logic, state, and UI is obvious.
+-->
+<!-- ![Logic and UI state flow](docs/media/logic-ui-state-flow.gif) -->
 
----
+<!--
+MEDIA TODO: Full-stack automation screenshot
+File: docs/media/full-stack-automation.png
+Show: the Logic and UI editors for the same automation, either side-by-side or as two clearly labelled captures. Use readable code from one coherent application. The escape-room sequencer, CTD profiler or a real site workflow would all work well.
+-->
+<!-- ![A full-stack Aeolus automation](docs/media/full-stack-automation.png) -->
+
+<!--
+MEDIA TODO: Command lifecycle screenshot
+File: docs/media/command-lifecycle.png
+Show: one execution/audit view for a command with its lifecycle clearly visible. Use any command where the difference between sent and confirmed is easy to understand. A pump plus flow sensor is still the clearest real-world example. Include correlation/timestamps only if they remain legible.
+-->
+<!-- ![Verified command lifecycle](docs/media/command-lifecycle.png) -->
+
 
 ## Microcontrollers
 
-Aeolus communicates with custom hardware (ESP32, Arduino, etc.) over MQTT. Your microcontroller connects to the Mosquitto broker on the Pi (`aeolus.local:1883`), publishes sensor data, and optionally subscribes to command topics. Devices appear in the dashboard automatically when messages arrive.
-
-**MQTT authentication** is configurable from the dashboard — choose Open (no auth), Shared Password, or Per-Device credentials. See the [Security](#security) section for details. When credentials are enabled, you'll configure them in your firmware's MQTT connect call.
-
-**Full guide with templates: [`docs/MICROCONTROLLERS.md`](docs/MICROCONTROLLERS.md)**
-
-### Publish a sensor reading
+Custom hardware connects through MQTT. An ESP32, Arduino-class board or other client can publish state and subscribe to commands through the local broker.
 
 ```cpp
-mqtt.publish("sensor/kitchen/temp", "{\"value\":23.5,\"unit\":\"°C\"}");
+mqtt.publish("sensor/shed/temperature", "{\"value\":23.5,\"unit\":\"C\"}");
 ```
-
-### Receive a command
 
 ```cpp
-mqtt.subscribe("valve/irrigation/command");
-// In your callback:
-if (msg == "{\"action\":\"open\"}") digitalWrite(RELAY_PIN, HIGH);
+mqtt.subscribe("pump/transfer/command");
 ```
 
-The guide includes a minimal publish example, a minimal subscribe example, and a full production-style combined template with reconnection handling.
+Devices are derived from incoming topic/state data and appear in the registry without a separate platform-specific provisioning format.
 
-> **Note:** Aeolus doesn't handle compiling or uploading firmware to your boards — you'll need the [Arduino IDE](https://www.arduino.cc/en/software) or [PlatformIO](https://platformio.org/) for that. OTA firmware management from the dashboard is on the [roadmap](docs/ROADMAP.md).
+See [**Microcontroller integration guide**](docs/MICROCONTROLLERS.md) for publish-only sensors, actuators, authentication and reconnection examples.
 
----
+> Aeolus does not compile or flash firmware. Device firmware remains responsible for local electrical safety, watchdogs and fail-safe behaviour.
 
 ## Connectors
 
-Aeolus uses a pluggable connector framework. Each connector is a self-contained backend module that handles discovery, authentication, and device communication for a specific ecosystem.
+MQTT is the simplest path for custom devices. The connector framework handles hardware and services that use another API or discovery protocol.
 
-| Connector | Devices | Features |
-|-----------|---------|----------|
-| **Philips Hue** | Lights | Toggle, brightness, colour picker, guided bridge pairing wizard |
-| **TP-Link Kasa** | Smart plugs, switches | Auto-discovery via UDP broadcast, energy monitoring |
+Built-in connectors currently include:
 
-### Backend — zero core changes
+- **Philips Hue**: guided bridge pairing, light controls and Hue-specific editor snippets
+- **TP-Link Kasa**: LAN discovery, plug controls and energy data where supported.
 
-```bash
-cp -r src/connectors/_template src/connectors/my-connector
-# Implement the Connector interface, restart Aeolus — done.
+A connector supplies metadata, configuration fields and an implementation of the connector lifecycle:
+
+```typescript
+interface Connector {
+  connect(): Promise<void>;
+  disconnect(): Promise<void>;
+  discoverDevices(): Promise<Device[]>;
+  execute(action: DeviceAction): Promise<ActionResult>;
+  getHealthStatus(): ConnectorHealth;
+}
 ```
 
-A connector exports `metadata`, `configSchema`, `createConnector`, and optionally `snippets` (code templates for the automation editor). The framework handles the REST API, lifecycle management, setup wizard, and device registry integration. Full guide: [`src/connectors/README.md`](src/connectors/README.md)
+The framework handles connector registration, persistence, setup flows, health reporting, discovery and device-registry integration. Connectors can also contribute action handlers, reusable conditions and editor snippets.
 
-### Frontend — optional but recommended
+Start with the [**connector developer guide**](src/connectors/README.md) and [`src/connectors/_template`](src/connectors/_template/).
 
-Connector devices automatically appear in the Device Grid pane. But for connector-specific controls (like the Hue colour picker or Kasa energy stats), you'll want a dedicated pane component. This means adding a React component in `frontend/src/components/panes/` and registering it in the pane registry. The built-in Hue and Kasa panes are good reference implementations.
-
----
-
-## Security
-
-Aeolus ships with a complete authentication and authorization system — no external auth provider needed.
-
-### System Hardening
-- **Read-only system router** — no shutdown, reboot, update, or Docker prune endpoints; system control is via SSH/Docker externally
-- **No Docker socket mount** — the backend container has no access to the host Docker daemon
-- **Minimal production image** — no git, docker-cli, or build tools in the final image
-- **Version auto-detected at build time** — git commit hash baked into the image, no runtime git needed
-
-### Authentication
-- **First-run setup** — guided admin account creation on first launch
-- **JWT-based** — short-lived access tokens (15min) + httpOnly refresh cookies (7 days)
-- **Rate-limited login** — 5 attempts/min per IP to prevent brute-force
-- **bcrypt password hashing** — cost factor 12
-- **WebSocket auth** — token required for real-time connections
-
-### Authorization (RBAC)
-- **Admin** — full platform control, manages users/groups/tabs
-- **User Groups** — each group gets a set of tab assignments
-- **Three permission levels per tab:**
-  - `read` — view only, all controls disabled
-  - `interact` — control devices, fire automations
-  - `write` — full control including editing automation code
-
-### MQTT Security
-Three configurable levels managed from the dashboard:
-
-| Level | Description |
-|-------|-------------|
-| **Open** | No authentication (development/trusted networks) |
-| **Shared Password** | Single credential for all devices |
-| **Per-Device** | Unique username/password per device |
-
-Switching levels regenerates the Mosquitto password file and reloads the broker config automatically. The backend maintains its own dedicated credential across all modes.
-
----
-
-## Observability
-
-### Prometheus Metrics (`/metrics`)
-
-Exposes 19+ metrics in Prometheus text exposition format, covering:
-
-| Category | Metrics |
-|----------|---------|
-| MQTT | Messages received/published, connection state, processing duration |
-| Devices | Active count by type, state changes per second |
-| Automations | Execution count, duration, error rate |
-| Connectors | Health status, action latency |
-| HTTP | Request rate, duration histogram, status codes |
-| WebSocket | Active connections, messages sent |
-| System | Node.js memory, event loop lag, CPU usage |
-
-Optional bearer token protection via `METRICS_TOKEN` env var. Bypasses JWT auth so Prometheus can scrape without a user account.
-
-### Metrics History (built-in, no Grafana required)
-
-Two-tier system for historical metrics without external tooling:
-
-- **Tier 1 (Live)** — samples every 30s, 10-minute retention, powers 1-hour sparkline charts
-- **Tier 2 (Permanent)** — 5-minute aggregates (avg, peak, spike detection), kept forever, powers 6h/24h/7d/30d trend charts
-
-Storage footprint: ~70 MB/year for the permanent tier. The frontend renders SVG sparklines and trend charts with time-range selection directly in the metrics dashboard pane.
-
----
+<!--
+MEDIA TODO: Connector setup GIF
+File: docs/media/connector-setup.gif
+Length: 10 to 15 seconds.
+Show: enable a connector, complete a short setup/pairing step, then show discovered devices appearing in the dashboard. Hue is visually clear; Kasa is useful for power data.
+-->
+<!-- ![Adding a connector](docs/media/connector-setup.gif) -->
 
 ## Data Store
 
-Persistent time-series collections and key-value buckets built on the existing SQLite infrastructure. Accumulate sensor data over time, query with aggregation, and share computed state across automations.
+Aeolus includes SQLite-backed storage for data that must outlive one event or one automation execution.
 
-- **Disabled by default** — a setup wizard on first visit guides you through storage limits to prevent accidental SD card fill on Raspberry Pi
-- **Accessible from automations** via the `db` sandbox global (undefined when disabled)
-- **REST API** at `/api/data-store` for the frontend and external consumers
-- **Data Explorer UI** in the "Data" pinned sidebar tab with collection browsing, charts, and bucket management
-- **Configurable safeguards** — `maxStorageMb`, `maxRecordsPerCollection`, `maxCollections`, FIFO eviction, and retention policies
+### Time-series collections
 
-### Quick example — using `db` in an automation
+Use collections for measurements and events such as temperatures, CTD casts, game sessions, equipment readings, power data or command outcomes. Queries support time ranges, tags and basic aggregation.
 
 ```javascript
-// Write a temperature reading to a time-series collection
-db.write("temperatures", { value: context.state.value, room: "kitchen" }, {
-  tags: { sensor: context.deviceId }
+db.write("ctd-casts", {
+  depth: Number(context.state.depth),
+  temperature: Number(context.state.temperature),
+  salinity: Number(context.state.salinity),
+}, {
+  tags: { cast: state.get("castId") },
 });
 
-// Query the last hour of readings with aggregation
-const avg = db.query("temperatures", {
-  from: "1h",
+const average = db.query("ctd-casts", {
+  from: "6h",
   aggregate: "avg",
-  field: "value"
+  field: "temperature",
 });
-log.info(`Average temperature (1h): ${avg.value}°C`);
-
-// Key-value bucket for sharing state across automations
-db.set("config", "heating-target", 22);
-const target = db.get("config", "heating-target"); // 22
 ```
 
----
+### Key-value buckets
+
+Buckets store configuration or computed values shared across automations:
+
+```javascript
+db.set("show-config", "defaultFadeMs", 1200);
+const fadeMs = db.get("show-config", "defaultFadeMs");
+```
+
+The Data Store is disabled by default until storage limits are configured. Safeguards include collection limits, record limits, retention policies and FIFO eviction.
+
+<!--
+MEDIA TODO: Data explorer screenshot
+File: docs/media/data-explorer.png
+Show: one collection with a meaningful chart and filters, plus the collection/bucket navigation. Use a signal with a story behind it, such as a CTD depth cast, mine gas reading, game session timeline or real site sensor history.
+-->
+<!-- ![Aeolus Data Store explorer](docs/media/data-explorer.png) -->
+
+## Security
+
+Aeolus is intended to run trusted local infrastructure while still treating user-authored code and network access as explicit boundaries.
+
+### Application authentication
+
+- initial administrator creation
+- bcrypt password hashing
+- short-lived access tokens and HTTP-only refresh cookies
+- rate-limited login
+- authenticated WebSocket connections
+- user groups and dashboard-level read/interact/write permissions.
+
+### Code isolation
+
+- backend automation logic executes in a fresh `isolated-vm` context
+- each execution has a 32 MB isolate limit and a 5-second timeout
+- filesystem, process and module access are not exposed
+- custom UI runs in an opaque origin sandboxed iframe
+- UI privileges are mediated through a schema-validated `MessageChannel` RPC broker.
+
+### MQTT access
+
+Aeolus includes dashboard controls and APIs for three broker security modes:
+
+| Mode | Intended use |
+|---|---|
+| **Open** | Development or tightly trusted networks |
+| **Shared password** | One credential for all external MQTT clients |
+| **Per-device** | Separate credentials for individual devices |
+
+Applying those settings automatically requires a provisioning-enabled deployment with scoped access to the Mosquitto files and reload mechanism. The default Docker Compose setup keeps those privileges out of the backend, so broker security is configured manually there. See [MQTT security](docs/security/mqtt.md).
+
+Aeolus should still be deployed on a segmented or otherwise trusted network when it controls meaningful physical equipment.
+
+## Observability
+
+Operational visibility is built into the platform rather than requiring a separate monitoring stack for basic diagnosis.
+
+- live system health and logs
+- MQTT message inspector and topic tree
+- connector health and action latency
+- device state history and charts
+- automation execution history
+- Prometheus-compatible `/metrics` endpoint
+- built-in short-term and aggregated metric history.
+
+The Prometheus endpoint can be protected with `METRICS_TOKEN`.
+
+<!--
+MEDIA TODO: Operations screenshot
+File: docs/media/operations.png
+Show: metrics/history and logs in one coherent view, preferably while a real sensor is publishing. The image should communicate that Aeolus can be operated and debugged, not merely configured.
+-->
+<!-- ![Aeolus operations and observability](docs/media/operations.png) -->
 
 ## Architecture
 
-```
-                    ┌──── Event Sources ────┐
-                    │                       │
-  [ MQTT Devices ]  │    [ Connectors ]     │
-   ESP32 / Arduino  │     Hue / Kasa / ...  │
-        ↕           │         ↕             │
-  [ Mosquitto :1883 ]    [ Connector Mgr ]  │
-        │           │         │             │
-        └───────────┴─────────┴─────────────┘
-                          │
-              ┌───────────▼───────────┐
-              │   Internal Event Bus  │
-              └───┬──────────────┬────┘
-                  │              │
-                  ▼              ▼
-        ┌─────────────┐  ┌───────────────┐
-        │   Device    │  │  Automation    │
-        │  Registry   │  │   Engine       │
-        │  (SQLite)   │  │  (V8 Sandbox)  │
-        └──────┬──────┘  └───────┬────────┘
-               │                 │
-               │          ┌──────▼──────┐
-               │          │   Actions   │
-               │          │ MQTT · HTTP  │
-               │          │ Devices · Log│
-               │          └─────────────┘
-               │
-        ┌──────▼──────┐  ┌──────────────┐
-        │  WebSocket  │  │  Data Store   │
-        │   Server    │  │  (SQLite)     │
-        └──────┬──────┘  └──────┬────────┘
-               │                 │
-               │    ┌────────────┘
-               │    │  db global in Sandbox
-               │    │  + REST API
-        ┌──────▼────▼─┐      ┌──────────────┐
-        │  REST API   │◄────►│    React     │
-        │  (Express)  │      │  Dashboard   │
-        └─────────────┘      └──────────────┘
+At README level, the architecture is simple: equipment talks to one local Aeolus backend, the backend keeps local state and data, and people use the dashboard to build and operate the system.
+
+```mermaid
+flowchart LR
+    Devices[Devices and services<br/>MQTT · Hue · Kasa · local APIs] <--> Core[Aeolus backend<br/>device model · automations · commands]
+    Core <--> Storage[(SQLite<br/>state · history · data)]
+    Core <--> Interface[Dashboard and custom UI<br/>REST · WebSocket]
 ```
 
-Two event source layers feed the internal bus: MQTT devices (bidirectional via Mosquitto) and commercial devices (via the pluggable connector framework). The automation engine evaluates rules against every event and dispatches actions back out. The device registry persists state to SQLite and pushes updates to the React dashboard over WebSocket.
+The backend normalises incoming device events, maintains the device registry, runs isolated automation Logic, persists state and data, and routes commands back to devices. The React dashboard provides both the development environment and the finished operational interfaces.
 
-### Tech Stack
+For the component-level view and a walkthrough of the internal event flow, sandbox boundaries, connector lifecycle and command path, see the [**detailed architecture**](docs/WHY_AEOLUS.md#detailed-architecture) in **Why Aeolus?**
 
-| Layer | Tech |
-|-------|------|
-| Backend | Express · TypeScript · SQLite (better-sqlite3) · MQTT (mqtt.js) · WebSocket (ws) · isolated-vm · pino · prom-client |
-| Frontend | React 19 · Vite · Zustand · Tailwind CSS · Monaco Editor · Lucide · Framer Motion |
-| Infra | Docker Compose · Eclipse Mosquitto 2 · Node.js 22 |
+### Core services
 
-### Three Docker Services
+| Service | Default port | Responsibility |
+|---|---:|---|
+| `aeolus-mosquitto` | `1883` | Local MQTT broker |
+| `aeolus-backend` | `3001` | API, WebSocket, connectors, registry, automation runtime and storage |
+| `aeolus-frontend` | `3000` | React dashboard served through nginx |
 
-| Service | Port | Description |
-|---------|------|-------------|
-| `aeolus-mosquitto` | 1883 | Eclipse Mosquitto MQTT broker |
-| `aeolus-backend` | 3001 | Express.js API + automation engine + WebSocket |
-| `aeolus-frontend` | 3000 | React + Vite dashboard (nginx) |
+### Technology
 
+| Layer | Stack |
+|---|---|
+| Backend | Node.js 22, TypeScript, Express, SQLite, mqtt.js, `ws`, `isolated-vm`, pino, prom-client |
+| Frontend | React 19, Vite, Zustand, Tailwind CSS, Monaco Editor, react-grid-layout |
+| Infrastructure | Docker Compose, Eclipse Mosquitto, Linux host networking |
 
-<details>
-<summary>📡 API Endpoints (click to expand)</summary>
+Versioned migrations run at backend startup. Aeolus records applied schema versions, creates a pre-migration backup before upgrades and refuses to run an older binary against a newer database schema.
 
-#### Devices
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/devices` | List all devices |
-| GET | `/api/devices/:id` | Get single device |
-| POST | `/api/devices/:id/action` | Execute action on device |
-| GET | `/api/devices/:id/history` | Device state history (limit, from, to) |
-| DELETE | `/api/devices/:id/history` | Clear history for a device |
-| DELETE | `/api/devices/history/all` | Clear all device history |
-| GET | `/api/state` | All devices keyed by ID |
-| GET | `/api/health` | System health status |
+## Configuration
 
-#### Automations
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/automations` | List automation rules (form, script) |
-| POST | `/api/automations` | Create a UI automation rule |
-| PUT | `/api/automations/:id` | Update an existing automation rule |
-| DELETE | `/api/automations/:id` | Delete a UI automation rule |
-| PATCH | `/api/automations/:id/toggle` | Enable/disable a rule |
-| POST | `/api/automations/:id/fire` | Manually fire an automation |
-| GET | `/api/automations/:id/state` | Get automation state key-value pairs |
-| PUT | `/api/automations/:id/state` | Set automation state key-value pair |
-| DELETE | `/api/automations/:id/state/:key` | Delete a state key |
-| GET | `/api/automations/snippets` | Code snippet catalog |
-| GET | `/api/automations/types` | Sandbox type definitions (for IntelliSense) |
-| GET | `/api/automations/ui-types` | Custom UI component type definitions |
-| GET | `/api/automations/history` | Execution log entries |
-| GET | `/api/automations/:id/ui-module` | Compiled UI module (JavaScript) |
+Defaults work with Docker Compose. Common environment variables include:
 
-#### MQTT
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/api/mqtt/publish` | Publish MQTT message |
+| Variable | Default | Purpose |
+|---|---|---|
+| `MQTT_BROKER_URL` | `mqtt://localhost:1883` | Broker used by the backend |
+| `MQTT_TOPICS` | `#` | MQTT subscription filter |
+| `PORT` / `API_PORT` | `3001` | Backend API port |
+| `DB_PATH` | `./data/aeolus.db` | SQLite path outside Docker |
+| `LOG_LEVEL` | `info` | Application logging level |
+| `NODE_ENV` | `development` | Runtime environment |
+| `JWT_SECRET` | generated if absent | Access-token signing secret |
+| `METRICS_TOKEN` | unset | Optional bearer token for `/metrics` |
 
-#### Connectors
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/connectors/available` | List discovered connector types |
-| GET | `/api/connectors` | List enabled connector instances |
-| POST | `/api/connectors` | Enable a connector |
-| PATCH | `/api/connectors/:id` | Update connector config |
-| DELETE | `/api/connectors/:id` | Disable a connector |
-| GET | `/api/connectors/:id/status` | Connector health status |
-| GET | `/api/connectors/:id/setup-steps` | Get setup wizard step descriptors |
-| POST | `/api/connectors/:id/setup/:stepId` | Execute a setup wizard step |
-| POST | `/api/connectors/:id/retry` | Retry connector connection |
-
-#### Data Store
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/data-store/collections` | List all collections |
-| POST | `/api/data-store/collections` | Create a collection |
-| PATCH | `/api/data-store/collections/:name` | Update collection |
-| DELETE | `/api/data-store/collections/:name` | Delete collection |
-| POST | `/api/data-store/collections/:name/records` | Write a record |
-| GET | `/api/data-store/collections/:name/records` | Query records |
-| GET | `/api/data-store/collections/:name/export` | Export as CSV |
-| GET | `/api/data-store/buckets` | List buckets |
-| GET | `/api/data-store/buckets/:bucket` | List bucket entries |
-| PUT | `/api/data-store/buckets/:bucket/:key` | Set a key |
-| DELETE | `/api/data-store/buckets/:bucket/:key` | Delete a key |
-| GET | `/api/data-store/config` | Get config |
-| PUT | `/api/data-store/config` | Update config |
-| GET | `/api/data-store/stats` | Storage statistics |
-| POST | `/api/data-store/enable` | Enable Data Store |
-| POST | `/api/data-store/disable` | Disable Data Store |
-
-#### System & Layout
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/layout` | Get dashboard layout |
-| PUT | `/api/layout` | Save dashboard layout |
-| GET | `/api/system` | Host system diagnostics |
-| GET | `/api/system/logs` | Application log entries |
-| GET | `/api/system/version` | Build version info + update availability |
-| GET | `/api/devices/:id/actions` | Action catalog for a device |
-| WS | `/ws` | Real-time state updates |
-
-</details>
-
----
-
-## Environment Variables
-
-All configuration is via environment variables. Defaults work out of the box with Docker Compose.
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `MQTT_BROKER_URL` | `mqtt://localhost:1883` | MQTT broker connection URL |
-| `MQTT_TOPICS` | `#` | MQTT topic subscription pattern |
-| `PORT` | `3001` | Backend API port |
-| `DB_PATH` | `./data/aeolus.db` | SQLite database path |
-| `LOG_LEVEL` | `info` | Log level (debug, info, warn, error) |
-| `NODE_ENV` | `development` | Environment mode |
-| `JWT_SECRET` | *(auto-generated)* | JWT signing key (auto-generated on first run if not set) |
-| `METRICS_TOKEN` | *(unset)* | Bearer token for `/metrics` endpoint (optional — unset = open access) |
-
----
-
-## Screenshots
-
-> Screenshots coming soon — the sections below are placeholders for dashboard captures.
-
-<!-- TODO: Replace these placeholders with actual screenshots -->
-
-| Screenshot | Description |
-|------------|-------------|
-| <!-- ![Dashboard](docs/screenshots/dashboard.png) --> `dashboard.png` | Main dashboard with device grid and live sensor data |
-| <!-- ![Automations](docs/screenshots/automations.png) --> `automations.png` | Automation editor with Monaco, flow diagram, and snippet picker |
-| <!-- ![Custom UI](docs/screenshots/custom-ui.png) --> `custom-ui.png` | Custom React component rendering in an automation pane |
-| <!-- ![MQTT Inspector](docs/screenshots/mqtt-inspector.png) --> `mqtt-inspector.png` | Real-time MQTT message feed with topic tree |
-| <!-- ![Connectors](docs/screenshots/connectors.png) --> `connectors.png` | Connector management page with Hue pairing wizard |
-| <!-- ![System](docs/screenshots/system.png) --> `system.png` | System diagnostics and log viewer |
-| <!-- ![Mobile](docs/screenshots/mobile.png) --> `mobile.png` | Responsive mobile view (if applicable) |
-
-> **Tip:** Save screenshots to `docs/screenshots/` and uncomment the image tags above.
-
----
+See [`.env.example`](.env.example), [`frontend/.env.example`](frontend/.env.example) and [`docker-compose.yml`](docker-compose.yml) for deployment starting points. Runtime defaults live in [`src/config.ts`](src/config.ts).
 
 ## Documentation
 
-| Document | Description |
-|----------|-------------|
-| [`docs/COMPREHENSIVE_DOCUMENTATION.md`](docs/COMPREHENSIVE_DOCUMENTATION.md) | Full technical docs — architecture, data models, WebSocket protocol, every component explained |
-| [`docs/MICROCONTROLLERS.md`](docs/MICROCONTROLLERS.md) | Microcontroller guide — ESP32/Arduino MQTT templates for sensors, actuators, and combined devices |
-| [`docs/BRANDING.md`](docs/BRANDING.md) | Design system — colour palette, typography, component styles, motion guidelines |
-| [`docs/ROADMAP.md`](docs/ROADMAP.md) | Future plans — visual flow editor, energy analytics, BLE, LoRa, AI assistant, and more |
-| [`src/connectors/README.md`](src/connectors/README.md) | Connector developer guide — build new integrations with a template and checklist |
-| [`CONTRIBUTING.md`](CONTRIBUTING.md) | Contribution guide — setup, workflow, commit conventions, PR checklist |
+| Document | Audience |
+|---|---|
+| [**Documentation map**](docs/README.md) | All guides and references, organised by task and audience |
+| [**What Is Aeolus?**](docs/WHAT_IS_AEOLUS.md) | Grant reviewers, designers, employers and non-software stakeholders |
+| [**Why Aeolus?**](docs/WHY_AEOLUS.md) | Developers and technical reviewers evaluating the product and architecture |
+| [**Technical reference**](docs/reference/README.md) | Architecture, runtime, API, storage, dashboard and operations |
+| [**Security reference**](docs/security/README.md) | Authentication, permissions, tokens and MQTT security |
+| [**Microcontrollers**](docs/MICROCONTROLLERS.md) | ESP32 and Arduino MQTT integration |
+| [**Production deployment**](docs/production-deployment.md) | Operational deployment guidance |
+| [**Testing**](docs/TESTING.md) | Test strategy, coverage and CI |
+| [**Connector guide**](src/connectors/README.md) | Building a new integration |
+| [**Roadmap**](docs/ROADMAP.md) | Current priorities and longer-term directions |
+| [**Contributing**](CONTRIBUTING.md) | Development workflow and pull requests |
 
----
+## Roadmap
 
-## Roadmap Highlights
+The immediate priority is to make the common platform experience solid: reliable execution, clear device state, repeatable upgrades, good documentation and a few convincing real deployments.
 
-The full roadmap lives in [`docs/ROADMAP.md`](docs/ROADMAP.md). Some highlights:
+Longer-term opportunities include:
 
-- 🖼️ **Visual flow editor** — drag-and-drop automation builder as an alternative to code
-- 📡 **More connectors** — Zigbee (via zigbee2mqtt), Z-Wave, Tasmota, Shelly
-- 🌍 **Cloudflare Tunnel** — secure remote access without port forwarding
-- ⚡ **Energy analytics** — track power consumption across Kasa plugs with cost estimates
-- 📱 **Mobile companion** — React Native app for quick control and push notifications
-- 🤖 **Local AI assistant** — on-device LLM for natural language device control
----
+- Modbus and energy-system integrations
+- more local device ecosystems
+- better provisioning and offline queues
+- exportable Aeolus applications
+- multi-node and fleet tooling
+- visual helpers that sit alongside code
+- local AI and on-device inference as ordinary event sources
+
+See the complete [roadmap](docs/ROADMAP.md).
 
 ## Contributing
 
-Contributions are welcome! See [`CONTRIBUTING.md`](CONTRIBUTING.md) for setup instructions, commit conventions, and the PR checklist.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for repository setup, development workflow and pull request expectations. Connector contributions should begin with the [connector template](src/connectors/_template/) and [developer guide](src/connectors/README.md).
 
-The connector framework is designed to be community-extensible — if you have a device ecosystem you'd like to integrate, the [`_template` connector](src/connectors/_template/) and [developer guide](src/connectors/README.md) will get you started.
+## Licence
 
----
-
-## License
-
-[MIT](LICENSE)
+The applicable licence is defined in [LICENSE](LICENSE).

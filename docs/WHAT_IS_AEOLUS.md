@@ -1,69 +1,259 @@
-# What Is Aeolus? (Plain-English Version)
+# What Is Aeolus?
 
-*A one-page explainer for anyone — no technical background needed. For the deep technical version, see [WHY_AEOLUS.md](./WHY_AEOLUS.md).*
+> A plain English introduction for grant reviewers, designers, potential employers and anyone else who wants to understand the idea without reading code. For the technical version, see [Why Aeolus?](./WHY_AEOLUS.md).
 
 ## In one sentence
 
-Aeolus is a private "control room" for the physical things around you — sensors, pumps, lights, motors, cameras, switches — that runs on a small computer you own and keep on-site, with no cloud account and no internet required.
+**Aeolus is a private, on-site platform that brings different devices, data and automated tasks into one system. It can keep working without the internet or a vendor’s cloud.**
 
-## A concrete example
+<!--
+MEDIA TODO: WHAT hero screenshot
+File: media/what-is-aeolus-hero.png
+Show: one polished and believable operating dashboard, preferably the real rural property/shed deployment. Include 3 to 5 connected concerns such as tank level, pump status, solar/battery state, temperature and recent history.
+Avoid: source code, novelty demo tabs or a collage of unrelated industries. This image is for non-technical reviewers deciding whether the product makes sense.
+-->
+<!-- ![Aeolus operating a real site](media/what-is-aeolus-hero.png) -->
 
-Picture a farm. You've got a dam, a couple of water tanks, pumps, 20 cattle troughs, and GPS collars on the herd. On their own, they're disconnected gadgets you check by walking around.
+## The problem it addresses
 
-With Aeolus, they all show up on one screen. Then you set up instructions in plain terms: *"When the header tank drops below 60%, run the dam pump until it's full,"* or *"If a collar leaves the paddock, flag it as a stray."* Aeolus watches everything around the clock and acts on its own. You open a dashboard on your phone or laptop to see live levels, check history, or take manual control — from the house, the shed, or the far side of the property.
+Physical places increasingly contain “smart” equipment, but the equipment rarely behaves like one system.
 
-That farm setup is one of the demo dashboards Aeolus ships with. Swap it for any other world and the idea is identical.
+A rural property might have solar equipment from one manufacturer, pumps controlled by relays, home-built tank sensors, a weather station with its own app and lights managed through another platform. A research vessel, theatre, workshop or greenhouse faces the same problem in a different costume.
 
-## The same tool, wildly different jobs
+Each product may work well on its own. The difficulty appears when the owner wants them to work together:
 
-Aeolus isn't a farm gadget, or a smart-home gadget. It's a general tool for running *any* physical space. The built-in demos show the range — every one of these is a real, connectable setup:
+- show everything on one useful screen
+- keep history in one place
+- make decisions using several sources of information
+- operate when the internet is unavailable
+- avoid sending sensitive site data through several companies’ clouds
+- create controls that match the actual job rather than a generic device menu
+- understand whether a command was merely sent or the expected result actually occurred.
 
-- **Agriculture** — farm water management, cattle troughs, and GPS herd tracking.
-- **Research vessel** — ocean instruments, ship positioning, and underwater-drone dive telemetry.
-- **Underground mine** — gas-safety monitoring, ventilation on demand, and tracking who's underground.
-- **Spacecraft / satellite** — life support, power, and ground-station communication passes.
-- **Escape room** — puzzles, props, and effects fired on cue.
-- **Stage & show** — a theatre lighting board, cue stack, haze machines, and safety-locked pyro.
-- **Space tracker** — live rocket launches and the position of the space station overhead.
-- **Off-grid bunker** — generator fuel, air filtration, supply levels, and a motion-triggered perimeter.
-- **Wildlife & conservation** — an on-device AI trail camera, a nest-box monitor, a humane predator deterrent, and a biodiversity log (more on this below).
+At that point the problem is no longer “buy a smart switch”. The place needs a small software system of its own.
 
-Same underlying system, nine completely different worlds. That's the whole point.
+Aeolus provides the shared foundation for that system.
 
-## A cause worth pointing it at: wildlife & conservation
+## A practical example
 
-This is the demo I'm most excited about, so it now ships as its own tab you can open and play with. Modern Raspberry Pis can take a small add-on "AI chip" — roughly the size of a stick of gum — that recognises what's in a camera feed *right there on the device*, no internet involved. Point a camera at a nest or a trail, and that on-site brain can tell a possum from a quoll, or spot a predator approaching.
+Imagine a rural property with:
 
-Aeolus takes it from there. A detection becomes just another event it can act on: log which animals come and go, watch a nest's temperature and movement, sound an alert or trigger a deterrent the instant a predator appears, and keep a quiet, timestamped record for researchers. Add solar and a battery and the whole thing lives happily on a fence post for months.
+- a lower water tank and a header tank
+- a transfer pump
+- solar panels and a battery
+- a flow meter
+- weather and temperature sensors
+- shed lighting and power monitoring.
 
-The offline, private nature matters more here than anywhere. The analysis happens on the device, so you're not streaming footage of an endangered species' nesting site to someone's cloud, and you don't need a phone signal in the middle of nowhere. For remote or protected sites, "runs entirely on-site and keeps your data" isn't a nice-to-have — it's the whole reason it's possible at all.
+Aeolus can collect the readings and present them in one local dashboard. It can then coordinate a workflow such as:
 
-The demo tab simulates the whole loop — detections rolling in from the camera, a nest warming and cooling, the deterrent arming itself — so you can see how it feels without any hardware. The AI chip itself is real, off-the-shelf kit; wiring a physical camera to it is on the [roadmap](ROADMAP.md).
+> When the header tank is low and there is enough stored energy, start a transfer cycle. Stop at the upper limit, keep a record and let the operator know if something does not behave as expected.
 
-## What problem does it solve?
+The operator does not need to study raw sensor messages. They see the information and controls made for this job: tank levels, available energy, pump state, recent flow and anything that needs attention.
 
-Most "smart" systems have one of two problems:
+The same system can still provide technical views for the person who built or maintains it.
 
-- **They live in someone else's cloud.** They need constant internet, route your data through a company's servers, often charge a subscription, and if that company pivots or shuts down, your setup stops working.
-- **They're rigid.** You can only do what their menus allow. The moment you want something a little unusual, you hit a wall.
+<!--
+MEDIA TODO: Water/energy workflow GIF
+File: media/water-energy-workflow.gif
+Length: 12 to 18 seconds, no narration required.
+Show:
+1. Header tank level crosses a low threshold.
+2. Aeolus records an automatic decision.
+3. Pump state changes.
+4. Flow rises and the result is shown as confirmed.
+5. The dashboard/history updates.
+Use simulation if necessary, but label it clearly as a demonstration.
+-->
+<!-- ![A water and energy workflow in Aeolus](media/water-energy-workflow.gif) -->
 
-Aeolus flips both. Everything runs on your own hardware, on your local network. It keeps working with the internet unplugged. Your data stays with you. And instead of a fixed menu, it lets you express *exactly* what you want your space to do.
+## What Aeolus actually does
 
-## What's genuinely cool about it
+Aeolus sits between the equipment and the people operating the site.
 
-- **It's yours.** Runs on a cheap on-site computer (about an $80 Raspberry Pi). No accounts, no subscriptions, nothing phoning home.
-- **It works offline.** Ideal for places with patchy or no internet — a remote farm, a boat, a mine, a research station, a bunker.
-- **It's private.** Nothing about your property leaves it unless you specifically choose to send it somewhere.
-- **Your whole setup is one file.** Every device, automation, dashboard, and all your history live in a single database file. Back it up by copying it; to move to a new machine, install Aeolus there and drop that one file in. No lock-in, no export wizard.
-- **Every automation gets its own custom screen.** You don't just get raw numbers; you can design a tidy control panel for each thing — a dial, a slider, a status light — and it updates live.
-- **It grows with you.** Built like real software, so there's effectively no ceiling on what it can do, and support for new gadgets can be added over time.
+```text
+Sensors, devices and services
+            ↓
+          Aeolus
+  collects · decides · records
+            ↓
+Dashboards, controls and alerts
+```
 
-## Is it for me?
+It provides several functions in one platform.
 
-Honest answer: Aeolus is aimed at people comfortable writing a little logic — or who have a technical friend to help set it up. It trades "anyone can use it out of the box" for "you can make it do anything." If you just want to plug in off-the-shelf smart-home gadgets with zero setup, something like Home Assistant is a better fit. If you want real, private, offline control that you fully own — and the freedom to build precisely what your space needs — that's exactly what Aeolus is for.
+### It connects different equipment
+
+Custom sensors and controllers can communicate through MQTT, a common lightweight messaging standard. Commercial products can be added through connectors that translate their own APIs into the same Aeolus device model.
+
+Hue lighting and TP-Link Kasa devices are included today. The connector framework is designed so more equipment can be added without redesigning the platform.
+
+### It runs automated decisions locally
+
+Rules and workflows run on the computer installed at the site. An internet outage does not need to stop a water cycle, a stage cue, a local alarm or an instrument display.
+
+External information can still be useful, such as a weather forecast or launch schedule. The difference is that the site does not hand control of its basic operation to that service.
+
+### It presents information in a form suited to the task
+
+Aeolus is not limited to a standard list of device cards. A technical author can build a specific panel for a water system, greenhouse zone, CTD profiler, game-master console or stage cue stack.
+
+That means the everyday user can see a clear operating screen without being exposed to the underlying complexity.
+
+### It stores useful local history
+
+Aeolus can retain device history, measurements, calculated values and automation results. This supports questions such as:
+
+- How quickly is the tank falling?
+- What did the CTD sonde measure at 80 metres?
+- Which puzzle held up the last escape-room session?
+- Did the gas reading rise before the ventilation fans changed speed?
+- Which stage cue was active when an effect failed?
+
+### It keeps useful evidence
+
+Aeolus records state, events and automation activity so the operator can see what the system believed and what it did. Some devices can also report whether they received a command or whether another sensor observed the expected result.
+
+That extra confirmation is useful when available, but it is one feature of a much larger platform. The main goal is to make the whole site easier to understand, operate and change.
+
+## What makes it different
+
+### Local-first ownership
+
+Aeolus is intended to run on a small Linux computer at the site, such as a Raspberry Pi or other compact machine.
+
+The site keeps its operating logic and central application data locally. There is no mandatory Aeolus cloud account or subscription required for core operation.
+
+This is valuable when:
+
+- connectivity is unreliable
+- privacy matters
+- response time should not depend on the internet
+- a vendor service may change, close or become expensive
+- the system needs to remain useful for years.
+
+### Built for custom requirements
+
+Many automation products are designed to make common tasks easy. Aeolus is designed for the point where the requirement is unusual enough that someone needs to build the exact behaviour.
+
+It trades mass-market simplicity for flexibility. The author is expected to be a software developer, technical integrator or capable enthusiast. The person who uses the finished dashboard each day does not need to be a programmer.
+
+### One platform for behaviour and interface
+
+An Aeolus workflow can contain both the behaviour and the screen used to operate it.
+
+A research-vessel CTD profiler might collect depth, temperature and salinity while presenting the cast as a purpose-built scientific display. An escape-room sequencer might track puzzle progress, release locks and give the game master a timer and hint controls. A solar pump manager might combine levels, energy and manual overrides in one panel.
+
+These are different applications, but they use the same platform underneath. The interface stays close to the behaviour it represents instead of living in a separate dashboard product.
+
+### Designed as a platform, not one fixed appliance
+
+Aeolus began with real rural infrastructure, but its building blocks are general. Devices produce events, automated applications make decisions, data is stored and operators use tailored interfaces.
+
+Those same building blocks can serve many environments.
+
+<!--
+MEDIA TODO: Simple concept diagram
+File: media/aeolus-concept.png
+Create a clean designed diagram with three columns:
+LEFT: MQTT sensors, commercial devices, local APIs, external services.
+CENTRE: Aeolus: device model, automation, local data, command tracking.
+RIGHT: operator dashboard, custom control panels, history/alerts.
+Keep labels understandable to a non-engineer; do not use internal class names.
+-->
+<!-- ![How Aeolus connects equipment, decisions and people](media/aeolus-concept.png) -->
+
+## Where it could be used
+
+Aeolus is not tied to one industry. The included seed demo deliberately jumps between very different settings:
+
+- **rural property and agriculture:** tanks, troughs, pumps, fencing, weather and energy
+- **research vessel:** CTD casts, ROV telemetry, seawater instruments and station keeping
+- **underground mine:** gas monitoring, ventilation demand, personnel muster and dewatering
+- **stage and show control:** lighting scenes, cue stacks, haze and operator controls
+- **escape room:** puzzles, locks, hints, timers and game-master tools
+- **spacecraft or remote station:** power, communications windows, environmental data and local autonomy
+- **off-grid bunker:** generator fuel, air filtration, supplies and perimeter events
+- **wildlife projects:** nest sensors, local camera detections and biodiversity records
+
+The demos are there to show the range of the platform, not to claim that Aeolus already ships certified hardware support for every one of those fields.
+
+## Who it is for
+
+Aeolus has two kinds of user.
+
+### The builder
+
+The builder is likely to be:
+
+- a software developer
+- an IoT or automation integrator
+- an engineer comfortable with software
+- a technically capable owner building a system for their own site.
+
+They connect devices, write the site-specific logic and design the interface.
+
+### The operator
+
+The operator may simply need to:
+
+- check the site
+- respond to an alert
+- change a target
+- start or stop a process
+- understand why an automatic decision occurred.
+
+The operator can use a focused dashboard without seeing or editing code.
+
+## What Aeolus is not
+
+Aeolus is not a plug-and-play consumer appliance or a replacement for certified safety systems. It is a developer-built platform for custom projects, and it still expects the real equipment to have the electrical, mechanical and emergency protection appropriate to the job.
+
+It is also still an early project. The core is working, but it has not yet earned the kind of field history that comes from hundreds of installations.
+
+## What exists today
+
+The current platform includes:
+
+- a local dashboard with custom tabs and movable panes
+- MQTT device ingestion and command publishing
+- a connector system with Philips Hue and TP-Link Kasa support
+- code-driven automation with a built-in editor
+- optional custom interfaces for individual automations
+- persistent state and local time series storage
+- device history and operational metrics
+- authentication, user groups and MQTT credential controls
+- isolated execution for backend logic and custom frontend components
+- versioned database upgrades and pre-upgrade backups
+- Docker and Raspberry Pi deployment.
+
+
+## Why it may matter
+
+Many physical sites are too specialised for a mass-market product but too small to justify commissioning a completely new software platform.
+
+Today, a capable integrator may assemble MQTT, scripts, a dashboard, a database and several vendor APIs for each project. That can work, but the shared platform work is repeated and the result may be difficult to maintain.
+
+Aeolus tries to make that middle ground reusable:
+
+> Build the part that is unique to the place on top of a common local platform.
+
+If that model proves useful to people beyond its original author, Aeolus could become:
+
+- a strong open or source-available developer project
+- the foundation for bespoke integration work
+- a platform used by small IoT integrators
+- technology underneath a more focused rural, energy or automation product
+- or simply a substantial demonstration of modern edge-platform engineering.
+
+The right direction should come from real users and deployments, not from guessing in a README.
 
 ## The takeaway
 
-Think of it as the difference between renting and owning. Most smart systems rent you convenience on their terms. Aeolus hands you the keys: your hardware, your data, your rules, running quietly on-site whether the internet is up or not.
+Aeolus gives a physical place something closer to its own small software platform.
 
-And when the zombie apocalypse finally arrives and the internet goes dark, every cloud-tethered smart home on the street becomes a very expensive light switch that no longer switches. Meanwhile, down in the bunker, Aeolus is still tracking the generator fuel, cycling the air filter, counting the tins of beans, and lighting up the perimeter when something shuffles past. It doesn't need the cloud. It never did.
+It connects equipment that was never designed to work together, keeps the important runtime on site, lets a developer build the exact behaviour the place needs and gives the operator an interface that makes sense for the job.
+
+It began with pumps, tanks, solar and sensors on one rural property. The same building blocks can become a research instrument, a game-master console, a mine ventilation view or a stage cue system. That is the larger idea: one local foundation that can be shaped around many different parts of the physical world.
+
+And when the zombie apocalypse finally arrives and the internet goes dark, every cloud-tethered smart home on the street becomes a very expensive collection of switches that no longer switch. Meanwhile, down in the bunker, Aeolus is still tracking the generator fuel, cycling the air filter, counting the tins of beans and lighting the perimeter when something shuffles past. It does not need the cloud. It never did.

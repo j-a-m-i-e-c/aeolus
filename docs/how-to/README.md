@@ -1,11 +1,11 @@
-# How-To Guides
+# How-to guides
 
-Step-by-step instructions for common Aeolus tasks.
+Short instructions for common Aeolus administration tasks.
 
-## Guides
+- [First-run setup](first-run-setup.md)
+- [Set up groups and permissions](setup-groups-permissions.md)
+- [Add a user](add-a-user.md)
+- [Add an MQTT device](add-mqtt-device.md)
+- [Reset the admin password](reset-admin-password.md)
 
-- [First-Run Setup](./first-run-setup.md) — Create your admin account after a fresh deploy
-- [Add a User](./add-a-user.md) — Create accounts for household members
-- [Set Up Groups & Permissions](./setup-groups-permissions.md) — Control who sees what
-- [Add an MQTT Device](./add-mqtt-device.md) — Provision credentials for a new microcontroller
-- [Reset Admin Password](./reset-admin-password.md) — Emergency recovery when locked out
+For the underlying model and API, see the [security reference](../security/README.md).

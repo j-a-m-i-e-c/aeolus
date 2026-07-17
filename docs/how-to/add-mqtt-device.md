@@ -1,67 +1,64 @@
-# Add an MQTT Device
+# Add an MQTT device
 
-Provision credentials for a new microcontroller (ESP32, Arduino, etc.) so it can authenticate with the Mosquitto broker and publish/subscribe to topics.
+Create a broker credential for an ESP32, Arduino or other MQTT client.
 
-## How MQTT auth works
+## Before you start
 
-Aeolus manages a Mosquitto password file. When you create a credential in the dashboard, Aeolus:
-1. Generates a username and random password
-2. Stores the hashed password in the database
-3. Regenerates the Mosquitto password file
-4. Mosquitto picks up the new file and allows the device to connect
+The steps below assume MQTT provisioning has been wired into your deployment. In the default Docker Compose setup, configure Mosquitto manually as described in [Production deployment](../production-deployment.md#2-mqtt-broker-security), then enter the same credentials in the device firmware.
 
-Devices authenticate directly with Mosquitto using username/password — they never touch the HTTP API or need JWTs.
+1. Log in as the administrator.
+2. Open **Security**.
+3. Select **MQTT Security**.
+4. Set the broker to **Per-Device** mode.
 
-## Steps
+Open mode does not require credentials. Shared mode uses one credential for all devices.
 
-1. Log in as admin
-2. Go to the **System** tab
-3. Scroll to the **MQTT Credentials** section (or access via API)
-4. Click **Add Credential** (or POST to `/api/auth/mqtt-credentials`)
-5. Enter a **device name** (e.g., "living-room-esp32")
-6. Click **Create**
-7. **Copy the password immediately** — it's only shown once
+## Create the credential
 
-## What you get
+1. In the Per-Device credential list, choose **Add Device**.
+2. Enter a recognisable device name, such as `living-room-esp32`.
+3. Create the credential.
+4. Copy the generated password immediately. It is shown once.
 
-| Field | Example |
-|-------|---------|
+Example:
+
+| Field | Value |
+|---|---|
 | Username | `mqtt-living-room-esp32` |
-| Password | `dGhpcyBpcyBhIHJhbmRvbSBwYXNzd29yZA` |
+| Password | generated value shown by Aeolus |
 
-The username is auto-generated from the device name (lowercase, hyphens, prefixed with `mqtt-`).
-
-## Flash your device
-
-In your microcontroller firmware, configure the MQTT connection:
+## Configure the device
 
 ```cpp
-// Arduino / ESP32 example
-const char* mqtt_server = "192.168.1.100";  // Your Aeolus host
+const char* mqtt_server = "192.168.1.100";
 const int mqtt_port = 1883;
 const char* mqtt_user = "mqtt-living-room-esp32";
-const char* mqtt_pass = "dGhpcyBpcyBhIHJhbmRvbSBwYXNzd29yZA";
+const char* mqtt_pass = "copy-the-generated-password";
 
 client.setServer(mqtt_server, mqtt_port);
-client.connect("esp32-client-id", mqtt_user, mqtt_pass);
+client.connect("living-room-esp32", mqtt_user, mqtt_pass);
 ```
 
-## Verify connection
+Use a unique MQTT client ID as well as a unique credential.
 
-Once flashed and powered on, the device should connect to Mosquitto. You can verify by:
-- Checking the MQTT status indicator in the Aeolus sidebar
-- Looking at Mosquitto logs: `docker logs aeolus-mosquitto`
-- Publishing a test message and seeing it appear in the dashboard
+## Verify it
 
-## Revoking a credential
+- Check the MQTT status in Aeolus.
+- Watch the MQTT inspector for its messages.
+- Check broker logs:
 
-1. In the MQTT Credentials section, click the **trash icon** next to the device
-2. The credential is removed and the password file is regenerated
-3. The device will be disconnected on its next reconnect attempt
+```bash
+docker logs aeolus-mosquitto
+```
 
-## Notes
+## Revoke it
 
-- The backend has its own credential (`aeolus-backend`) created automatically on startup — don't delete it
-- Each device needs its own credential — don't share credentials between devices
-- If a device can't connect, try deleting and recreating the credential
-- The password file is at `mosquitto/password_file` (configurable via `MQTT_PASSWORD_FILE` env var)
+In a provisioning-enabled deployment, delete the credential from **Security → MQTT Security**. In a manually managed deployment, also remove it from the Mosquitto password file and reload the broker.
+
+The current provisioning API is under:
+
+```text
+/api/mqtt/provisioning
+```
+
+See [MQTT security](../security/mqtt.md) for the endpoint list and security modes.
