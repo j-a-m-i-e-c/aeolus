@@ -66,18 +66,6 @@ export type ActionHandler = (
   deps: CommandServiceDeps,
 ) => void | ActionResult | Promise<void | ActionResult>;
 
-/** Numeric rank for confirmation tiers so an over-request can be detected. */
-function tierRank(tier: ConfirmationTier): number {
-  switch (tier) {
-    case "dispatch":
-      return 0;
-    case "acknowledged":
-      return 1;
-    case "observed":
-      return 2;
-  }
-}
-
 /**
  * The single physical-command boundary through which every Command_Source
  * (script rule, form rule, REST device-action, dashboard control, custom-UI
