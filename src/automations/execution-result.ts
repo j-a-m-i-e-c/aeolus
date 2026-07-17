@@ -48,16 +48,14 @@ export function assembleExecutionResult(
     if (problem === null || problem === undefined) {
       failureReason = `Missing command result at index ${firstProblemIndex}`;
     } else {
-      failureReason =
-        problem.error && problem.error.trim().length > 0
-          ? `Command ${firstProblemIndex} failed: ${problem.error}`
-          : `Command ${firstProblemIndex} failed`;
+      failureReason = problem.error != null && problem.error.length > 0
+        ? `Command ${firstProblemIndex} failed: ${problem.error}`
+        : `Command ${firstProblemIndex} failed`;
     }
   } else {
-    failureReason =
-      logic.error && logic.error.trim().length > 0
-        ? logic.error
-        : "Automation execution logic failed";
+    failureReason = logic.error != null && logic.error.length > 0
+      ? logic.error
+      : "Automation execution logic failed";
   }
 
   return { executionId, success: false, commandResults: results, failureReason };
