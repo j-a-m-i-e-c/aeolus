@@ -268,11 +268,88 @@ Add `-u` and `-P` when broker authentication is enabled.
 - Use independent electrical and mechanical protection for physical equipment.
 - Keep credentials out of public repositories.
 
-## Command acknowledgement
+## Command acknowledgement (optional)
 
-The Aeolus runtime has command correlation and lifecycle primitives. Firmware-level correlated acknowledgement should be implemented against the command contract used by the current release.
+For most devices, publishing state after handling a command is all you need. Aeolus can observe the state change and confirm the action worked — no extra firmware logic required.
 
-Until that contract is finalised, always publish an ordinary device state after applying a command and use observed-state confirmation where a physical result matters.
+If you need stronger guarantees for critical equipment (pumps, valves, access control), your firmware can acknowledge commands directly. This tells Aeolus the device received and acted on a specific command, rather than inferring it from state.
+
+### How it works
+
+When Aeolus sends a command to an ack-capable device, the payload includes a correlation envelope:
+
+```json
+{
+  "action": "on",
+  "params": { "speed": 100 },
+  "correlationId": "abc-123-def",
+  "responseTopic": "aeolus/acks/pump-01"
+}
+```
+
+Your firmware reads `correlationId` and `responseTopic`, does its work, then publishes the result:
+
+```json
+{
+  "correlationId": "abc-123-def",
+  "success": true
+}
+```
+
+Or on failure:
+
+```json
+{
+  "correlationId": "abc-123-def",
+  "success": false,
+  "error": "relay stuck"
+}
+```
+
+That's the entire protocol. Aeolus matches the correlation ID back to the pending command and advances it to the `ACKNOWLEDGED` lifecycle state.
+
+### ESP32 example
+
+```cpp
+#include <ArduinoJson.h>
+
+void onCommand(char* topic, byte* payload, unsigned int length) {
+  JsonDocument doc;
+  deserializeJson(doc, payload, length);
+
+  const char* action = doc["action"];
+  const char* correlationId = doc["correlationId"];
+  const char* responseTopic = doc["responseTopic"];
+
+  // Do the work
+  bool ok = executeAction(action, doc["params"]);
+
+  // Ack back (only if correlation was requested)
+  if (correlationId && responseTopic) {
+    JsonDocument ack;
+    ack["correlationId"] = correlationId;
+    ack["success"] = ok;
+    if (!ok) ack["error"] = "action failed";
+
+    char buffer[256];
+    serializeJson(ack, buffer);
+    mqtt.publish(responseTopic, buffer);
+  }
+
+  // Still publish state normally
+  publishState();
+}
+```
+
+If `correlationId` is absent, the command came without requesting an ack — just handle it normally.
+
+### When to use this
+
+- Fire-and-forget (`dispatch` tier) is fine for lights, notifications, non-critical switches
+- State observation (`observed` tier) works when a sensor can confirm the effect — no firmware changes needed
+- Direct acknowledgement (`acknowledged` tier) is for when you need the device itself to confirm, and no external sensor can observe the result
+
+Most setups won't need ack. Start with state observation for anything critical, and add ack only where observation isn't practical.
 
 ## Further reading
 
