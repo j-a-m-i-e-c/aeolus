@@ -14,8 +14,8 @@ Tasks build incrementally with no orphaned code: (1) the pure helpers module `co
 
 ## Tasks
 
-- [ ] 1. Pure completion-tier helpers module
-  - [ ] 1.1 Implement `completion-tier.ts`
+- [x] 1. Pure completion-tier helpers module
+  - [x] 1.1 Implement `completion-tier.ts`
     - Create `src/automations/completion-tier.ts` importing `ConfirmationTier` from `./command-lifecycle.js`
     - Implement `isConfirmationTier(value): value is ConfirmationTier` (exactly `"dispatch" | "acknowledged" | "observed"`)
     - Implement `tierRank(tier)` using the ordinal map `dispatch:0 < acknowledged:1 < observed:2`
@@ -23,29 +23,29 @@ Tasks build incrementally with no orphaned code: (1) the pure helpers module `co
     - Implement `validateAgainstCeiling(submitted, ceiling): TierValidation` — `{ ok:true, tier:null }` for `null`/`undefined`; `{ ok:false, code:"invalid" }` for non-tier values; `{ ok:false, code:"ceiling_unresolvable" }` when ceiling is `null`; `{ ok:false, code:"over_ceiling" }` when `rank(submitted) > rank(ceiling)`; else `{ ok:true, tier:submitted }`
     - Implement `resolveEffectiveTier(stored, actionSpecified, ceiling): ConfirmationTier | undefined` — action-specified overrides stored; return `undefined` on absent/invalid/over-ceiling (omit-on-doubt), else the chosen tier verbatim
     - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 3.2, 3.3, 3.4, 3.5, 3.6, 4.5, 4.6, 5.3, 5.4, 7.4_
-  - [ ]* 1.2 Write property test for capability-ceiling computation
+  - [x]* 1.2 Write property test for capability-ceiling computation
     - New `src/automations/completion-tier.property.test.ts`; arbitrary `fc.record` of booleans for `{ dispatchable, ackSupported, observationAvailable }`
     - **Property 1: Capability ceiling reflects exactly the provable tiers**
     - **Validates: Requirements 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7**
-  - [ ]* 1.3 Write property test for authoring validation
+  - [x]* 1.3 Write property test for authoring validation
     - Extend `src/automations/completion-tier.property.test.ts`; arbitraries mixing tier strings, non-tier strings, `null`/`undefined`, and ceilings including `null`
     - **Property 2: Authoring validation classifies every submission against the ceiling**
     - **Validates: Requirements 3.2, 3.3, 3.4, 3.5, 3.6, 7.4**
-  - [ ]* 1.4 Write property test for effective-tier pass-through and precedence
+  - [x]* 1.4 Write property test for effective-tier pass-through and precedence
     - Extend `src/automations/completion-tier.property.test.ts`
     - **Property 3: Effective-tier resolution honors precedence and passes through in-ceiling tiers**
     - **Validates: Requirements 1.8, 4.1, 4.3, 5.1, 5.2, 6.7**
-  - [ ]* 1.5 Write property test for effective-tier omit-on-doubt
+  - [x]* 1.5 Write property test for effective-tier omit-on-doubt
     - Extend `src/automations/completion-tier.property.test.ts`
     - **Property 4: Effective-tier resolution omits on absence, invalidity, or over-ceiling, and never returns an out-of-vocabulary value**
     - **Validates: Requirements 4.2, 4.5, 4.6, 5.3, 5.4, 7.1, 7.5**
 
 - [ ] 2. Persistence — migration, types, and (de)serialization
-  - [ ] 2.1 Add migration `004` and register it
+  - [x] 2.1 Add migration `004` and register it
     - Create `src/db/migrations/004-automation-rules-completion-tier.ts` following the guarded `PRAGMA table_info` pattern of `002-automation-rules-columns.ts`; `up()` checks for the `completion_tier` column and, if absent, runs `ALTER TABLE automation_rules ADD COLUMN completion_tier TEXT DEFAULT NULL;` (no `NOT NULL`/`CHECK`, so legacy rows read as `null` without rewrite)
     - Register it as migration id `4` in `src/db/migrations/index.ts` after `devicesRemoveCheck`
     - _Requirements: 1.1, 1.5_
-  - [ ] 2.2 Thread `completion_tier` through `StoredRule`, `Rule`, and (de)serialization
+  - [x] 2.2 Thread `completion_tier` through `StoredRule`, `Rule`, and (de)serialization
     - In `src/api/routes/automation.routes.ts` add `completion_tier: string | null` to the `StoredRule` row shape; add `completion_tier` to the create `INSERT` (form and script) binding the validated value or `null`, add `completion_tier = ?` to the `UPDATE` (value fully replaces prior), and read `row.completion_tier` where rules are loaded
     - In `src/core/types.ts` add optional `completionTier?: ConfirmationTier` to `Rule` (import `ConfirmationTier` from `../automations/command-lifecycle.js`)
     - In the list/read handlers add an **additive** `completionTier` field (normalized `ConfirmationTier | null`) without changing any existing field (Req 7.6)
@@ -97,15 +97,15 @@ Tasks build incrementally with no orphaned code: (1) the pure helpers module `co
     - Stored in-ceiling tier is supplied verbatim; absent/invalid/over-ceiling tier omits `requiredTier`; a re-registered rule with a changed tier supplies the new value
     - _Requirements: 4.1, 4.2, 4.4, 4.5, 4.6_
 
-- [ ] 7. Script-rule dispatch wiring
-  - [ ] 7.1 Thread rule-level default and per-call tier through the sandbox
+- [x] 7. Script-rule dispatch wiring
+  - [x] 7.1 Thread rule-level default and per-call tier through the sandbox
     - In `src/automations/sandbox.ts` add a per-call `perCallTier` argument to the `__actionRef` host callback and construct the closure with the rule-level default (`ruleTierDefault`) in scope (passed alongside `ruleId` via the existing per-rule ref setup); the script branch of `registerUiRule` supplies the rule's normalized `completion_tier` as that default
     - **Fail-on-invalid before dispatch (Req 5.5, 5.6):** if `perCallTier` is defined and not a valid tier, or (when no per-call tier) `ruleTierDefault` is defined and not a valid tier, return `{ success:false, error:<names the invalid tier>, lifecycleState:"FAILED" }` without calling `execute`
     - Otherwise compute `chosen = resolveEffectiveTier(ruleTierDefault, perCallTier, null)` (per-call overrides default; ceiling `null` because the inherited boundary clamps against live capability) and call `execute(descriptor, ruleId, confirm?, chosen)`
     - Extend the `BOOTSTRAP_SCRIPT` `devices.action(deviceId, actionType, params, opts)` wrapper to read an optional `opts.tier` and forward it as the new trailing argument, preserving the existing 3-arg / confirm-object call shapes byte-for-byte
     - In `src/automations/sandbox-types.d.ts` add an optional `tier` field to the `devices.action()` options/confirm surface
     - _Requirements: 5.1, 5.2, 5.3, 5.4, 5.5, 5.6_
-  - [ ]* 7.2 Write property test for the invalid-script-tier failure gate
+  - [x]* 7.2 Write property test for the invalid-script-tier failure gate
     - New `src/automations/sandbox.property.test.ts` (addition) with a spy `CommandService.execute`; generate non-tier values across per-call and rule-level-default source combinations
     - **Property 5: An invalid script tier fails validation without dispatching**
     - **Validates: Requirements 5.5, 5.6**

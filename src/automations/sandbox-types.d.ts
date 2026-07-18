@@ -72,10 +72,16 @@ declare const devices: {
   action(deviceId: string, actionType: string, params?: Record<string, unknown>, confirm?: {
     /** Device to observe (defaults to target device). */
     deviceId?: string;
-    /** Predicate evaluated against the observed device state. */
-    condition: (state: Record<string, unknown>) => boolean;
+    /** Predicate evaluated against the observed device state. Omit for a tier-only options bag. */
+    condition?: (state: Record<string, unknown>) => boolean;
     /** Timeout in ms before TIMED_OUT (default 5000). */
     timeoutMs?: number;
+    /**
+     * Completion tier that counts as success for this call, overriding the
+     * rule-level default. One of `dispatch`, `acknowledged`, or `observed`.
+     * Omit to use the rule's default (or the highest tier the device can prove).
+     */
+    tier?: "dispatch" | "acknowledged" | "observed";
   }): Promise<ActionResult>;
 };
 

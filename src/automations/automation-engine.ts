@@ -219,7 +219,7 @@ export class AutomationEngine {
 
     // Sandbox.execute() resolves for every outcome and never rejects.
     const sandboxResult = await this.collector.context.run(executionId, () =>
-      this.sandbox!.execute(compiledJs, sandboxContext, rule.id),
+      this.sandbox!.execute(compiledJs, sandboxContext, rule.id, rule.completionTier),
     );
 
     const logic: LogicOutcome =

@@ -1,6 +1,8 @@
 // src/automations/sandbox.ts — Secure isolated-vm sandbox for user-authored automation scripts
 
-import type { CommandService } from "./command-service.js";
+import type { CommandService, ActionDescriptor } from "./command-service.js";
+import type { ConfirmationTier } from "./command-lifecycle.js";
+import { isConfirmationTier, resolveEffectiveTier } from "./completion-tier.js";
 import type { CommandResultCollector } from "./command-result-collector.js";
 import type { AutomationStateStore } from "./automation-state-store.js";
 import type { DeviceRegistry } from "../core/device-registry.js";
@@ -110,6 +112,80 @@ function isIvmReference(value: unknown): value is IvmCallableReference {
   );
 }
 
+/**
+ * Outcome of the script-path completion-tier gate for a single command, computed
+ * before any dispatch. Exported so the gate can be property-tested without a
+ * native isolated-vm build (Windows dev has no isolate).
+ */
+export type ScriptTierResolution =
+  | { ok: true; chosen: ConfirmationTier | undefined }
+  | { ok: false; error: string };
+
+/**
+ * Apply the script-rule completion-tier gate for one command (Req 5.1–5.6):
+ *
+ * - a per-call tier that is defined but not a valid `ConfirmationTier` fails
+ *   validation (Req 5.5);
+ * - with no per-call tier, a rule-level default that is defined but invalid
+ *   fails validation (Req 5.6);
+ * - otherwise the effective tier is `resolveEffectiveTier(default, perCall, null)`
+ *   — a per-call tier overrides the rule-level default, and `undefined` means
+ *   "omit `requiredTier`" so the boundary selects highest-available (Req 5.1–5.3).
+ *
+ * The ceiling is deliberately `null`: the inherited `CommandService` boundary
+ * clamps the supplied tier against the device's live capability and never reports
+ * an unreached tier, so the script path only hard-fails on a *malformed* value
+ * and never pre-omits on a ceiling it cannot see here.
+ */
+/**
+ * Safely render an arbitrary (possibly malformed) tier value for an error
+ * message. Plain `String(value)` throws for objects whose `toString`/`valueOf`
+ * do not yield a primitive, so fall back to the object tag in that case.
+ */
+export function describeTierValue(value: unknown): string {
+  try {
+    return String(value);
+  } catch {
+    return Object.prototype.toString.call(value);
+  }
+}
+
+export function resolveScriptTier(
+  ruleTierDefault: unknown,
+  perCallTier: unknown,
+): ScriptTierResolution {
+  if (perCallTier !== undefined && !isConfirmationTier(perCallTier)) {
+    return { ok: false, error: `Invalid completion tier '${describeTierValue(perCallTier)}'` };
+  }
+  if (perCallTier === undefined && ruleTierDefault !== undefined && !isConfirmationTier(ruleTierDefault)) {
+    return { ok: false, error: `Invalid rule-level completion tier '${describeTierValue(ruleTierDefault)}'` };
+  }
+  return { ok: true, chosen: resolveEffectiveTier(ruleTierDefault, perCallTier, null) };
+}
+
+/**
+ * Body of the `devices.action()` host callback, extracted so the completion-tier
+ * gate can be property-tested without a live isolate. Validates the tier and,
+ * on an invalid value, returns a failing {@link ActionResult} WITHOUT calling
+ * `execute` (Req 5.5, 5.6); otherwise dispatches through the
+ * {@link CommandService} with the resolved tier (per-call overrides the
+ * rule-level default; `undefined` ⇒ highest-available).
+ */
+export async function dispatchScriptAction(
+  actionExecutor: Pick<CommandService, "execute">,
+  descriptor: ActionDescriptor,
+  ruleId: string,
+  confirm: ConfirmOptions | undefined,
+  ruleTierDefault: unknown,
+  perCallTier: unknown,
+): Promise<ActionResult> {
+  const tier = resolveScriptTier(ruleTierDefault, perCallTier);
+  if (!tier.ok) {
+    return { success: false, error: tier.error, lifecycleState: "FAILED" };
+  }
+  return actionExecutor.execute(descriptor, ruleId, confirm, tier.chosen);
+}
+
 /** Dependencies injected into the Sandbox. */
 export interface SandboxDeps {
   actionExecutor: CommandService;
@@ -169,24 +245,30 @@ const BOOTSTRAP_SCRIPT = `
     list: function() { return data; },
     get: function(id) { return map[id]; },
     filter: function(predicate) { return data.filter(predicate); },
-    action: function(deviceId, actionType, params, confirm) {
-      // 3-arg form is preserved byte-for-byte. When a 4th confirm object is
-      // supplied, its predicate is forwarded like the actionAll filter, with
-      // deviceId/timeoutMs passed as copyable primitives.
-      if (confirm && typeof confirm.condition === 'function') {
+    action: function(deviceId, actionType, params, opts) {
+      // 3-arg form is preserved byte-for-byte. The 4th options bag may carry a
+      // confirm predicate (condition/deviceId/timeoutMs) and/or an optional
+      // per-call completion tier, forwarded as the trailing host-callback arg.
+      var tier = opts ? opts.tier : undefined;
+      if (opts && typeof opts.condition === 'function') {
         return actionRef.apply(undefined,
-          [deviceId, actionType, params, confirm.condition, confirm.deviceId, confirm.timeoutMs],
+          [deviceId, actionType, params, opts.condition, opts.deviceId, opts.timeoutMs, tier],
           { result: { promise: true } });
       }
-      return actionRef.apply(undefined, [deviceId, actionType, params], { result: { promise: true } });
+      return actionRef.apply(undefined,
+        [deviceId, actionType, params, undefined, undefined, undefined, tier],
+        { result: { promise: true } });
     },
-    actionAll: function(filter, actionType, params, confirm) {
-      if (confirm && typeof confirm.condition === 'function') {
+    actionAll: function(filter, actionType, params, opts) {
+      var tier = opts ? opts.tier : undefined;
+      if (opts && typeof opts.condition === 'function') {
         return actionAllRef.apply(undefined,
-          [filter, actionType, params, confirm.condition, confirm.deviceId, confirm.timeoutMs],
+          [filter, actionType, params, opts.condition, opts.deviceId, opts.timeoutMs, tier],
           { result: { promise: true } });
       }
-      return actionAllRef.apply(undefined, [filter, actionType, params], { result: { promise: true } });
+      return actionAllRef.apply(undefined,
+        [filter, actionType, params, undefined, undefined, undefined, tier],
+        { result: { promise: true } });
     }
   };
 
@@ -330,6 +412,7 @@ export class Sandbox {
     compiledJs: string,
     context: SandboxContext,
     ruleId: string,
+    ruleTierDefault?: ConfirmationTier,
   ): Promise<SandboxExecutionResult> {
     if (!ivm) {
       logger.error({ ruleId }, "Sandbox execution skipped — isolated-vm not available");
@@ -351,7 +434,7 @@ export class Sandbox {
       await this.blockForbiddenGlobals(jail);
 
       // Set raw data and references on the global scope
-      await this.setDevicesRefs(jail, ruleId);
+      await this.setDevicesRefs(jail, ruleId, ruleTierDefault);
       await this.setMqttRefs(jail, ruleId);
       await this.setLogRefs(jail, ruleId);
       await this.setContextData(jail, context);
@@ -403,7 +486,11 @@ export class Sandbox {
   /**
    * Set device data and action reference on the jail for the bootstrap script.
    */
-  private async setDevicesRefs(jail: IvmGlobal, ruleId: string): Promise<void> {
+  private async setDevicesRefs(
+    jail: IvmGlobal,
+    ruleId: string,
+    ruleTierDefault?: ConfirmationTier,
+  ): Promise<void> {
     if (!ivm) return;
 
     const allDevices = this.deviceRegistry.getAll();
@@ -432,13 +519,20 @@ export class Sandbox {
         condition?: unknown,
         confirmDeviceId?: string,
         confirmTimeoutMs?: number,
+        perCallTier?: unknown,
       ): Promise<ActionResult> {
         try {
           const confirm = buildConfirmOptions(condition, confirmDeviceId, confirmTimeoutMs);
-          const result = await actionExecutor.execute(
+          // Completion-tier gate (Req 5.1–5.6): fail-on-invalid before dispatch,
+          // otherwise dispatch with the resolved tier (per-call overrides the
+          // rule-level default; undefined ⇒ highest-available).
+          const result = await dispatchScriptAction(
+            actionExecutor,
             { type: "device_action", target: deviceId, params: { actionType, ...(params ?? {}) } },
             ruleId,
             confirm,
+            ruleTierDefault,
+            perCallTier,
           );
           // Push the Command_Result into the collector for the running executionId
           // (Req 2.4, 4.3, 5.3 — script-path commands aggregated via AsyncLocalStorage)
@@ -463,7 +557,21 @@ export class Sandbox {
         condition?: unknown,
         confirmDeviceId?: string,
         confirmTimeoutMs?: number,
+        perCallTier?: unknown,
       ): Promise<BulkActionResult> {
+        // Completion-tier gate (Req 5.1–5.6): an invalid per-call or rule-level
+        // tier fails validation for the whole call WITHOUT dispatching to any
+        // device. Runs before the predicate so no command is issued on failure.
+        const tier = resolveScriptTier(ruleTierDefault, perCallTier);
+        if (!tier.ok) {
+          return {
+            total: 0,
+            succeeded: 0,
+            failed: 0,
+            results: [{ deviceId: "", success: false, error: tier.error }],
+          };
+        }
+
         // Catch predicate throws
         let matched: Device[];
         try {
@@ -483,7 +591,8 @@ export class Sandbox {
         }
 
         // Each matched device gets its own confirmation (and its own correlationId
-        // assigned inside execute()), observing the target device by default.
+        // assigned inside execute()), observing the target device by default. The
+        // resolved completion tier applies to every per-device command (Req 5.1–5.4).
         const confirm = buildConfirmOptions(condition, confirmDeviceId, confirmTimeoutMs);
 
         const settled = await Promise.allSettled(
@@ -492,6 +601,7 @@ export class Sandbox {
               { type: "device_action", target: device.id, params: { actionType, ...(params ?? {}) } },
               ruleId,
               confirm,
+              tier.chosen,
             ).then((result): { deviceId: string } & ActionResult => {
               // Push each per-device Command_Result into the collector
               // (Req 2.4, 4.3, 5.3 — script-path commands aggregated via AsyncLocalStorage)

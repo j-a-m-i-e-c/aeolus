@@ -41,9 +41,11 @@ export function assertUniqueIds(migrations: Migration[]): void {
 import { baseline } from "./001-baseline.js";
 import { automationRulesColumns } from "./002-automation-rules-columns.js";
 import { devicesRemoveCheck } from "./003-devices-remove-check.js";
+import { automationRulesCompletionTier } from "./004-automation-rules-completion-tier.js";
 
 export const migrations: Migration[] = [
-  baseline,               // id 1
-  automationRulesColumns, // id 2
-  devicesRemoveCheck,     // id 3
+  baseline,                      // id 1
+  automationRulesColumns,        // id 2
+  devicesRemoveCheck,            // id 3
+  automationRulesCompletionTier, // id 4
 ];

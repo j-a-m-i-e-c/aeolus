@@ -306,3 +306,163 @@ describe("Property 2: Sandbox execution always resolves", () => {
     );
   });
 });
+
+// ─── Feature: command-completion-tier ────────────────────────────────────────
+
+import { dispatchScriptAction, describeTierValue } from "./sandbox.js";
+import type { ActionDescriptor } from "./command-service.js";
+import type { ConfirmationTier } from "./command-lifecycle.js";
+
+/** The three valid completion tiers. */
+const VALID_TIERS: ConfirmationTier[] = ["dispatch", "acknowledged", "observed"];
+
+/** A minimal stand-in for CommandService.execute that records its calls. */
+interface ExecuteCall {
+  descriptor: ActionDescriptor;
+  ruleId: string;
+  requiredTier: ConfirmationTier | undefined;
+}
+function makeExecuteSpy() {
+  const calls: ExecuteCall[] = [];
+  const execute = async (
+    descriptor: ActionDescriptor,
+    ruleId: string,
+    _confirm?: unknown,
+    requiredTier?: ConfirmationTier,
+  ): Promise<ActionResult> => {
+    calls.push({ descriptor, ruleId, requiredTier });
+    return { success: true, lifecycleState: "DISPATCHED" };
+  };
+  return { calls, execute: execute as never };
+}
+
+const descriptor: ActionDescriptor = { type: "device_action", target: "d1", params: { actionType: "toggle" } };
+
+/**
+ * Non-tier values (never one of dispatch/acknowledged/observed). `undefined` is
+ * excluded because it means "no tier supplied", not an invalid tier.
+ */
+const nonTierArb: fc.Arbitrary<unknown> = fc
+  .oneof(
+    fc.string(),
+    fc.integer(),
+    fc.boolean(),
+    fc.constant(null),
+    fc.constantFrom("DISPATCH", "Observed", "ack", "verified", ""),
+    fc.object(),
+  )
+  .filter((v) => !VALID_TIERS.includes(v as ConfirmationTier));
+
+// Feature: command-completion-tier, Property 5: An invalid script tier fails validation without dispatching
+describe("Property 5: An invalid script tier fails validation without dispatching", () => {
+  it("an invalid per-call tier fails without invoking execute, naming the invalid value", async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        nonTierArb,
+        // rule-level default: valid tier, undefined, or itself invalid — must not matter
+        fc.oneof(fc.constantFrom<unknown>(...VALID_TIERS), fc.constant(undefined), nonTierArb),
+        async (perCallTier, ruleTierDefault) => {
+          const spy = makeExecuteSpy();
+          const result = await dispatchScriptAction(
+            { execute: spy.execute },
+            descriptor,
+            "rule-1",
+            undefined,
+            ruleTierDefault,
+            perCallTier,
+          );
+
+          expect(result.success).toBe(false);
+          expect(spy.calls).toHaveLength(0); // never dispatched
+          expect(result.lifecycleState).toBe("FAILED");
+          expect(result.error).toContain(describeTierValue(perCallTier));
+        },
+      ),
+      { numRuns: 200 },
+    );
+  });
+
+  it("an invalid rule-level default (no per-call tier) fails without invoking execute", async () => {
+    await fc.assert(
+      fc.asyncProperty(nonTierArb, async (ruleTierDefault) => {
+        const spy = makeExecuteSpy();
+        const result = await dispatchScriptAction(
+          { execute: spy.execute },
+          descriptor,
+          "rule-1",
+          undefined,
+          ruleTierDefault,
+          undefined, // no per-call tier
+        );
+
+        expect(result.success).toBe(false);
+        expect(spy.calls).toHaveLength(0);
+        expect(result.lifecycleState).toBe("FAILED");
+        expect(result.error).toContain(describeTierValue(ruleTierDefault));
+      }),
+      { numRuns: 200 },
+    );
+  });
+
+  it("a valid per-call tier overrides a valid rule-level default and is passed to execute", async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.constantFrom<ConfirmationTier>(...VALID_TIERS),
+        fc.constantFrom<ConfirmationTier>(...VALID_TIERS),
+        async (perCallTier, ruleTierDefault) => {
+          const spy = makeExecuteSpy();
+          const result = await dispatchScriptAction(
+            { execute: spy.execute },
+            descriptor,
+            "rule-1",
+            undefined,
+            ruleTierDefault,
+            perCallTier,
+          );
+
+          expect(result.success).toBe(true);
+          expect(spy.calls).toHaveLength(1);
+          // Per-call overrides the rule-level default (Req 5.2).
+          expect(spy.calls[0].requiredTier).toBe(perCallTier);
+        },
+      ),
+      { numRuns: 200 },
+    );
+  });
+
+  it("a valid rule-level default (no per-call tier) is passed to execute", async () => {
+    await fc.assert(
+      fc.asyncProperty(fc.constantFrom<ConfirmationTier>(...VALID_TIERS), async (ruleTierDefault) => {
+        const spy = makeExecuteSpy();
+        const result = await dispatchScriptAction(
+          { execute: spy.execute },
+          descriptor,
+          "rule-1",
+          undefined,
+          ruleTierDefault,
+          undefined,
+        );
+
+        expect(result.success).toBe(true);
+        expect(spy.calls).toHaveLength(1);
+        expect(spy.calls[0].requiredTier).toBe(ruleTierDefault); // Req 5.1
+      }),
+      { numRuns: 100 },
+    );
+  });
+
+  it("no tier anywhere omits requiredTier so the boundary picks highest-available", async () => {
+    const spy = makeExecuteSpy();
+    const result = await dispatchScriptAction(
+      { execute: spy.execute },
+      descriptor,
+      "rule-1",
+      undefined,
+      undefined,
+      undefined,
+    );
+    expect(result.success).toBe(true);
+    expect(spy.calls).toHaveLength(1);
+    expect(spy.calls[0].requiredTier).toBeUndefined(); // Req 5.3
+  });
+});

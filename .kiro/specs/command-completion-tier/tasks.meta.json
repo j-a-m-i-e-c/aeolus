@@ -1,0 +1,25 @@
+{
+  "pbtResults": {
+    "1.2 Write property test for capability-ceiling computation": {
+      "status": "passed",
+      "lastRunTimestamp": 1784335361556
+    },
+    "1.3 Write property test for authoring validation": {
+      "status": "passed",
+      "lastRunTimestamp": 1784335362299
+    },
+    "1.4 Write property test for effective-tier pass-through and precedence": {
+      "status": "passed",
+      "lastRunTimestamp": 1784335364272
+    },
+    "1.5 Write property test for effective-tier omit-on-doubt": {
+      "status": "passed",
+      "lastRunTimestamp": 1784335364566
+    },
+    "7.2 Write property test for the invalid-script-tier failure gate": {
+      "status": "passed",
+      "lastRunTimestamp": 1784336529283
+    }
+  },
+  "executionHistory": {}
+}

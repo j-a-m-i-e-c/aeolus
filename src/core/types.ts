@@ -1,5 +1,7 @@
 // src/core/types.ts — Shared TypeScript interfaces for Aeolus
 
+import type { ConfirmationTier } from "../automations/command-lifecycle.js";
+
 /** Device type — open string, not restricted to a fixed set */
 export type DeviceType = string;
 
@@ -44,6 +46,8 @@ export interface Rule {
   cronExpression?: string;
   /** Compiled JavaScript for script rules; when present the engine dispatches through the sandbox. */
   compiled_js?: string;
+  /** Author-chosen completion tier, when stored and valid. Absent ⇒ highest-available. */
+  completionTier?: ConfirmationTier;
 }
 
 /** Context passed to rule condition and action functions */
