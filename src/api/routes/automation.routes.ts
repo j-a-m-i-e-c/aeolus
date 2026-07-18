@@ -14,7 +14,7 @@ import { transpile, transpileUi } from "../../automations/transpiler.js";
 import { extractStructuredMetadata } from "../../automations/structured-metadata-extractor.js";
 import { buildSnippetCatalog } from "../../automations/snippet-catalog.js";
 import { isValidCron } from "../../automations/cron-utils.js";
-import { isConfirmationTier, resolveEffectiveTier, validateAgainstCeiling } from "../../automations/completion-tier.js";
+import { isConfirmationTier } from "../../automations/completion-tier.js";
 import type { ConfirmationTier } from "../../automations/command-lifecycle.js";
 import type { ConnectorRegistry } from "../../connectors/connector-registry.js";
 import { BadRequestError, NotFoundError } from "../middleware/error-handler.js";
@@ -257,19 +257,13 @@ export function createAutomationRoutes(
         throw new BadRequestError("actionType and actionTarget are required for form rules");
       }
 
-      // Validate completionTier against the target device's capability ceiling (Req 3.1, 3.4, 3.5, 3.6, 3.7).
-      // The actionTarget identifies the target device for ceiling lookup.
+      // Validate completionTier format only — any valid tier is allowed regardless of device ceiling.
       let completionTierValue: ConfirmationTier | null = null;
       if (completionTier !== undefined && completionTier !== null) {
-        const ceiling = getCompletionTierCapability
-          ? getCompletionTierCapability(actionTarget).ceiling
-          : null;
-        const v = validateAgainstCeiling(completionTier, ceiling);
-        if (!v.ok) {
-          // Nothing is written; stored state unchanged (Req 3.4, 3.5, 3.6, 3.7).
-          throw new BadRequestError(v.message);
+        if (!isConfirmationTier(completionTier)) {
+          throw new BadRequestError("completionTier must be one of: dispatch, acknowledged, observed");
         }
-        completionTierValue = v.tier;
+        completionTierValue = completionTier;
       }
 
       db.prepare(
@@ -342,21 +336,16 @@ export function createAutomationRoutes(
       res.json({ success: true, id });
     } else {
       // Form rule update
-      // Resolve the effective action target for ceiling lookup (use submitted or existing).
+      // Resolve the effective action target (use submitted or existing).
       const effectiveActionTarget = actionTarget || existing.action_target;
 
-      // Validate completionTier against the target device's capability ceiling (Req 3.1, 3.4, 3.5, 3.6, 3.7).
+      // Validate completionTier format only — any valid tier is allowed regardless of device ceiling.
       let completionTierValue: ConfirmationTier | null = null;
       if (completionTier !== undefined && completionTier !== null) {
-        const ceiling = getCompletionTierCapability
-          ? getCompletionTierCapability(effectiveActionTarget).ceiling
-          : null;
-        const v = validateAgainstCeiling(completionTier, ceiling);
-        if (!v.ok) {
-          // Nothing is written; stored state and registration unchanged (Req 3.4, 3.5, 3.6, 3.7).
-          throw new BadRequestError(v.message);
+        if (!isConfirmationTier(completionTier)) {
+          throw new BadRequestError("completionTier must be one of: dispatch, acknowledged, observed");
         }
-        completionTierValue = v.tier;
+        completionTierValue = completionTier;
       }
 
       db.prepare(
@@ -640,7 +629,7 @@ function registerUiRule(
   actionExecutor: CommandService,
   stored: StoredRule,
   conditionRegistry?: ConditionRegistry,
-  getCompletionTierCapability?: (deviceId: string) => { ceiling: ConfirmationTier | null },
+  _getCompletionTierCapability?: (deviceId: string) => { ceiling: ConfirmationTier | null },
 ): void {
   // If trigger_topic is empty, the rule is manual-only — still register it
   // so it's accessible via getRule() for the /fire endpoint, but it will
@@ -693,7 +682,8 @@ function registerUiRule(
     };
     engine.register(rule);
   } else {
-    // Form rule — dispatch through CommandService with resolved completion tier
+    // Form rule — dispatch through CommandService with stored completion tier directly.
+    // No dispatch-time ceiling check; CommandService's own clamping handles impossible tiers.
     const params = JSON.parse(stored.action_params);
     const storedTier = completionTier; // already normalized above
     const action = async (_context: EventContext) => {
@@ -702,12 +692,7 @@ function registerUiRule(
         target: stored.action_target,
         params,
       };
-      // Form rules supply no ConfirmOptions ⇒ dispatch-time ceiling max is "acknowledged".
-      const ceiling = getCompletionTierCapability
-        ? getCompletionTierCapability(stored.action_target).ceiling
-        : null;
-      const effective = resolveEffectiveTier(storedTier, undefined, ceiling);
-      return actionExecutor.execute(descriptor, stored.id, undefined, effective);
+      return actionExecutor.execute(descriptor, stored.id, undefined, storedTier);
     };
 
     engine.register({
