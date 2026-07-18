@@ -25,7 +25,8 @@ export function initSchema(database: DatabaseType): void {
       capabilities TEXT NOT NULL DEFAULT '[]',
       state TEXT NOT NULL DEFAULT '{}',
       integration TEXT NOT NULL DEFAULT 'mqtt',
-      last_seen INTEGER NOT NULL
+      last_seen INTEGER NOT NULL,
+      ack_capable INTEGER NOT NULL DEFAULT 0
     );
   `);
   database.exec(`
@@ -215,7 +216,8 @@ function migrateRemoveTypeCheck(database: DatabaseType): void {
         capabilities TEXT NOT NULL DEFAULT '[]',
         state TEXT NOT NULL DEFAULT '{}',
         integration TEXT NOT NULL DEFAULT 'mqtt',
-        last_seen INTEGER NOT NULL
+        last_seen INTEGER NOT NULL,
+        ack_capable INTEGER NOT NULL DEFAULT 0
       );
     `);
     database.exec(`

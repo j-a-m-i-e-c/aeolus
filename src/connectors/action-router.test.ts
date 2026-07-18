@@ -516,6 +516,49 @@ describe("ActionRouter", () => {
     });
   });
 
+  describe("getAcknowledgementCapability", () => {
+    it("returns undefined for unknown device", () => {
+      deviceRegistry.getById.mockReturnValue(undefined);
+      expect(router.getAcknowledgementCapability("nonexistent")).toBeUndefined();
+    });
+
+    it("returns connector-declared capability when connector matches", () => {
+      const device = createMockDevice({ integration: "test-connector" });
+      deviceRegistry.getById.mockReturnValue(device);
+      const connector = createMockConnector({
+        getAcknowledgementCapability: vi.fn().mockReturnValue({ supported: true }),
+      });
+      instances.set("inst-1", createMockInstance("test-connector", connector));
+
+      expect(router.getAcknowledgementCapability("test-device-1")).toEqual({ supported: true });
+    });
+
+    it("returns undefined when connector declares no capability and device has no ackCapable", () => {
+      const device = createMockDevice({ integration: "mqtt" });
+      deviceRegistry.getById.mockReturnValue(device);
+
+      expect(router.getAcknowledgementCapability("test-device-1")).toBeUndefined();
+    });
+
+    it("returns { supported: true } when device has ackCapable flag and no connector match", () => {
+      const device = createMockDevice({ integration: "mqtt", ackCapable: true });
+      deviceRegistry.getById.mockReturnValue(device);
+
+      expect(router.getAcknowledgementCapability("test-device-1")).toEqual({ supported: true });
+    });
+
+    it("does not use ackCapable fallback when connector provides a result", () => {
+      const device = createMockDevice({ integration: "test-connector", ackCapable: true });
+      deviceRegistry.getById.mockReturnValue(device);
+      const connector = createMockConnector({
+        getAcknowledgementCapability: vi.fn().mockReturnValue({ supported: false }),
+      });
+      instances.set("inst-1", createMockInstance("test-connector", connector));
+
+      expect(router.getAcknowledgementCapability("test-device-1")).toEqual({ supported: false });
+    });
+  });
+
   describe("validateParams — edge cases", () => {
     it("passes when descriptor has no params schema", async () => {
       const device = createMockDevice();

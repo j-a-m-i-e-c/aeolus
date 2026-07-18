@@ -26,6 +26,7 @@ export function serializeDevice(device: Device): Record<string, unknown> {
     state: JSON.stringify(device.state),
     integration: device.integration,
     last_seen: device.lastSeen,
+    ack_capable: device.ackCapable ? 1 : 0,
   };
 }
 
@@ -43,6 +44,7 @@ export function deserializeDevice(row: Record<string, unknown>): Device | null {
       state: JSON.parse(row.state as string),
       integration: (row.integration as string) || "mqtt",
       lastSeen: row.last_seen as number,
+      ...(row.ack_capable ? { ackCapable: true } : {}),
     };
   } catch (err) {
     logger.warn({ row, error: (err as Error).message }, "Malformed device row, skipping");
@@ -133,17 +135,27 @@ export class DeviceRegistry {
     this.persistDevice(device, false);
   }
 
+  /** Update a device's configuration fields in place. Returns the updated device, or undefined if not found. */
+  updateConfig(id: string, config: Partial<Pick<Device, "ackCapable">>): Device | undefined {
+    const device = this.devices.get(id);
+    if (!device) return undefined;
+    const updated: Device = { ...device, ...config };
+    this.devices.set(id, updated);
+    this.persistDevice(updated, true);
+    return updated;
+  }
+
   private persistDevice(device: Device, isUpdate: boolean): void {
     try {
       const s = serializeDevice(device);
       if (isUpdate) {
         this.db.prepare(
-          "UPDATE devices SET name=?, type=?, capabilities=?, state=?, integration=?, last_seen=? WHERE id=?"
-        ).run(s.name, s.type, s.capabilities, s.state, s.integration, s.last_seen, s.id);
+          "UPDATE devices SET name=?, type=?, capabilities=?, state=?, integration=?, last_seen=?, ack_capable=? WHERE id=?"
+        ).run(s.name, s.type, s.capabilities, s.state, s.integration, s.last_seen, s.ack_capable, s.id);
       } else {
         this.db.prepare(
-          "INSERT OR REPLACE INTO devices (id, name, type, capabilities, state, integration, last_seen) VALUES (?, ?, ?, ?, ?, ?, ?)"
-        ).run(s.id, s.name, s.type, s.capabilities, s.state, s.integration, s.last_seen);
+          "INSERT OR REPLACE INTO devices (id, name, type, capabilities, state, integration, last_seen, ack_capable) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+        ).run(s.id, s.name, s.type, s.capabilities, s.state, s.integration, s.last_seen, s.ack_capable);
       }
     } catch (err) {
       logger.error({ deviceId: device.id, error: (err as Error).message }, "Failed to persist device");
