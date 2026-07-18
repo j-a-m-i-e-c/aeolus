@@ -317,6 +317,64 @@ describe("device.routes", () => {
     });
   });
 
+  describe("GET /api/devices/:id/completion-tiers", () => {
+    it("should return 501 when getCompletionTierCapability is not provided", async () => {
+      // Default app setup does not pass getCompletionTierCapability
+      const res = await request(app, "GET", "/api/devices/dev-1/completion-tiers");
+      expect(res.status).toBe(501);
+      expect((res.body as any).error).toContain("not available");
+    });
+
+    it("should return 404 with resolved:false when device is not found", async () => {
+      const mockGetTierCap = vi.fn().mockReturnValue({ resolved: false, tiers: [], ceiling: null });
+      const appWithTiers = express();
+      appWithTiers.use(express.json());
+      appWithTiers.use(
+        "/api/devices",
+        createDeviceRoutes(
+          mockRegistry as unknown as DeviceRegistry,
+          mockCommandService as unknown as CommandService,
+          mockGetActionCatalog as unknown as (id: string) => CapabilityDescriptor[],
+          mockStateHistory as unknown as StateHistory,
+          mockGetTierCap,
+        ),
+      );
+      appWithTiers.use(errorHandler);
+
+      const res = await request(appWithTiers, "GET", "/api/devices/nonexistent/completion-tiers");
+      expect(res.status).toBe(404);
+      expect((res.body as any).resolved).toBe(false);
+    });
+
+    it("should return available tiers and ceiling for a valid device", async () => {
+      const mockGetTierCap = vi.fn().mockReturnValue({
+        resolved: true,
+        tiers: ["dispatch", "acknowledged"],
+        ceiling: "acknowledged",
+      });
+      const appWithTiers = express();
+      appWithTiers.use(express.json());
+      appWithTiers.use(
+        "/api/devices",
+        createDeviceRoutes(
+          mockRegistry as unknown as DeviceRegistry,
+          mockCommandService as unknown as CommandService,
+          mockGetActionCatalog as unknown as (id: string) => CapabilityDescriptor[],
+          mockStateHistory as unknown as StateHistory,
+          mockGetTierCap,
+        ),
+      );
+      appWithTiers.use(errorHandler);
+
+      const res = await request(appWithTiers, "GET", "/api/devices/dev-1/completion-tiers");
+      expect(res.status).toBe(200);
+      expect((res.body as any).deviceId).toBe("dev-1");
+      expect((res.body as any).resolved).toBe(true);
+      expect((res.body as any).availableTiers).toEqual(["dispatch", "acknowledged"]);
+      expect((res.body as any).ceiling).toBe("acknowledged");
+    });
+  });
+
   describe("POST /api/devices/:id/action", () => {
     it("should return HTTP 200 with success:false when the command fails (e.g. device not found)", async () => {
       // The CommandService owns validation and returns a terminal Command_Result.

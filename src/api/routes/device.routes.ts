@@ -21,6 +21,8 @@ import { validateAction } from "../middleware/validators.js";
 import { requireTabPermission } from "../../auth/auth-middleware.js";
 import logger from "../../logger.js";
 
+import type { ConfirmationTier } from "../../automations/command-lifecycle.js";
+
 /**
  * Race a promise against a timeout, resolving with `onTimeout()` if the promise
  * has not settled within `timeoutMs`. Never rejects on timeout; the in-flight
@@ -51,6 +53,7 @@ export function createDeviceRoutes(
   commandService: CommandService,
   getActionCatalog: (id: string) => CapabilityDescriptor[],
   stateHistory?: StateHistory,
+  getCompletionTierCapability?: (deviceId: string, observationAvailable?: boolean) => { resolved: boolean; tiers: ConfirmationTier[]; ceiling: ConfirmationTier | null },
 ): Router {
   const router = Router();
 
@@ -82,6 +85,21 @@ export function createDeviceRoutes(
     // a Command_Source and never holds a full ConnectorManager reference.
     const catalog = getActionCatalog(id);
     res.json(catalog);
+  });
+
+  /** GET /api/devices/:id/completion-tiers — report the device's Capability_Ceiling (Req 2.6, 2.8, 7.6) */
+  router.get("/:id/completion-tiers", (req, res) => {
+    if (!getCompletionTierCapability) {
+      res.status(501).json({ error: "Completion tier capability not available" });
+      return;
+    }
+    const id = req.params.id as string;
+    const cap = getCompletionTierCapability(id);
+    if (!cap.resolved) {
+      res.status(404).json({ deviceId: id, resolved: false, availableTiers: [], ceiling: null, error: `Device not found: ${id}` });
+      return;
+    }
+    res.json({ deviceId: id, resolved: true, availableTiers: cap.tiers, ceiling: cap.ceiling });
   });
 
   /** GET /api/devices/:id/history — get state history for a device */

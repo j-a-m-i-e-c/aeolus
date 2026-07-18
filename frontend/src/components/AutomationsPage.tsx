@@ -33,6 +33,15 @@ interface AutomationRule {
   conditionType?: string | null;
   conditionValue?: string | null;
   scriptSource?: string;
+  completionTier?: string | null;
+}
+
+interface CompletionTierCapability {
+  deviceId: string;
+  resolved: boolean;
+  availableTiers: string[];
+  ceiling: string | null;
+  error?: string;
 }
 
 export function AutomationsPage() {
@@ -61,7 +70,14 @@ export function AutomationsPage() {
     // publish fields
     publishTopic: "",
     publishPayload: "",
+    // completion tier
+    completionTier: "",
   });
+
+  // Completion tier capability state
+  const [tierCapability, setTierCapability] = useState<CompletionTierCapability | null>(null);
+  const [tierCapabilityLoading, setTierCapabilityLoading] = useState(false);
+  const [tierCeilingWarning, setTierCeilingWarning] = useState("");
 
   // Script rule state
   const [scriptName, setScriptName] = useState("");
@@ -83,6 +99,54 @@ export function AutomationsPage() {
     fetchRules();
   }, [fetchRules]);
 
+  // Fetch completion tiers when actionTarget changes (for device-targeting actions)
+  useEffect(() => {
+    const deviceId = form.actionTarget.trim();
+    const isDeviceAction = form.actionType === "device_action" || form.actionType === "toggle";
+
+    if (!deviceId || !isDeviceAction) {
+      setTierCapability(null);
+      setTierCeilingWarning("");
+      return;
+    }
+
+    let cancelled = false;
+    setTierCapabilityLoading(true);
+    setTierCeilingWarning("");
+
+    authFetch(`${API_URL}/api/devices/${encodeURIComponent(deviceId)}/completion-tiers`)
+      .then(async (res) => {
+        if (cancelled) return;
+        if (res.ok) {
+          const data: CompletionTierCapability = await res.json();
+          setTierCapability(data);
+          // If editing and stored tier is now above ceiling, warn
+          if (
+            form.completionTier &&
+            data.ceiling &&
+            data.availableTiers.length > 0 &&
+            !data.availableTiers.includes(form.completionTier)
+          ) {
+            setTierCeilingWarning(
+              `Previously selected tier "${form.completionTier}" is no longer available for this device (ceiling: ${data.ceiling}).`
+            );
+          }
+        } else {
+          setTierCapability(null);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setTierCapability(null);
+      })
+      .finally(() => {
+        if (!cancelled) setTierCapabilityLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [form.actionTarget, form.actionType]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const resetForm = () => {
     setForm({
       name: "",
@@ -100,7 +164,10 @@ export function AutomationsPage() {
       webhookBody: "",
       publishTopic: "",
       publishPayload: "",
+      completionTier: "",
     });
+    setTierCapability(null);
+    setTierCeilingWarning("");
   };
 
   const resetScript = () => {
@@ -180,6 +247,7 @@ export function AutomationsPage() {
           actionType: form.actionType,
           actionTarget,
           actionParams,
+          ...(form.completionTier ? { completionTier: form.completionTier } : {}),
         }),
       });
       resetForm();
@@ -631,6 +699,61 @@ export function AutomationsPage() {
                     </div>
                   </div>
                 )}
+
+                {/* Completion tier selector — shown for device-targeting actions */}
+                {(form.actionType === "device_action" || form.actionType === "toggle") &&
+                  form.actionTarget.trim() && (
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-[10px] text-[#6B7785] uppercase tracking-wider block mb-1">
+                          Completion Tier
+                        </label>
+                        {tierCapabilityLoading ? (
+                          <div className="text-xs text-[#6B7785] py-1.5">
+                            Loading device capabilities…
+                          </div>
+                        ) : (
+                          <select
+                            value={form.completionTier}
+                            onChange={(e) => {
+                              setForm({ ...form, completionTier: e.target.value });
+                              setTierCeilingWarning("");
+                            }}
+                            className="w-full text-xs bg-background border border-[#2A3441] rounded px-2 py-1.5 text-[#E6EDF3] focus:outline-none focus:border-primary"
+                          >
+                            <option value="">Highest available (auto)</option>
+                            {tierCapability?.availableTiers.map((tier) => {
+                              const isAboveCeiling =
+                                tierCapability.ceiling !== null &&
+                                tierCapability.availableTiers.indexOf(tier) >
+                                  tierCapability.availableTiers.indexOf(tierCapability.ceiling);
+                              return (
+                                <option key={tier} value={tier} disabled={isAboveCeiling}>
+                                  {tier === "dispatch"
+                                    ? "Dispatch only"
+                                    : tier === "acknowledged"
+                                      ? "Acknowledged"
+                                      : tier === "observed"
+                                        ? "Observed"
+                                        : tier}
+                                </option>
+                              );
+                            })}
+                          </select>
+                        )}
+                        {tierCeilingWarning && (
+                          <p className="text-[10px] text-[#F59E0B] mt-1">
+                            ⚠ {tierCeilingWarning}
+                          </p>
+                        )}
+                        {tierCapability && !tierCapability.resolved && (
+                          <p className="text-[10px] text-[#6B7785] mt-1">
+                            Device not found — tier selection unavailable.
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  )}
 
                 <div className="flex gap-2">
                   <button

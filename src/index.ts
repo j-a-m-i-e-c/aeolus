@@ -159,7 +159,7 @@ async function main(): Promise<void> {
     executionRecorder,
     collector,
   });
-  loadUiRules(engine, db, registry, actionExecutor, conditionRegistry);
+  loadUiRules(engine, db, registry, actionExecutor, conditionRegistry, (id) => connectorManager.getCompletionTierCapability(id));
 
 
   // 7b. Initialize MetricsService
@@ -224,6 +224,7 @@ async function main(): Promise<void> {
       actionExecutor,
       (id) => connectorManager.getActionCatalog(id),
       stateHistory,
+      (id, observationAvailable) => connectorManager.getCompletionTierCapability(id, observationAvailable),
     ),
   );
   app.use("/api/state", createStateRoutes(registry));
@@ -231,7 +232,7 @@ async function main(): Promise<void> {
   app.use("/api/mqtt", createMqttRoutes(mqttService));
   app.use("/api/mqtt/provisioning", createProvisioningRoutes(provisioningService));
   const sandboxTypesPath = path.resolve(import.meta.dirname, "automations/sandbox-types.d.ts");
-  app.use("/api/automations", createAutomationRoutes(engine, db, registry, actionExecutor, executionLog, sandboxTypesPath, connectorRegistry, stateStore, conditionRegistry));
+  app.use("/api/automations", createAutomationRoutes(engine, db, registry, actionExecutor, executionLog, sandboxTypesPath, connectorRegistry, stateStore, conditionRegistry, (deviceId) => connectorManager.getCompletionTierCapability(deviceId)));
   app.use("/api/connectors", createConnectorRoutes(connectorManager, connectorRegistry));
   app.use("/api/metrics", createMetricsSummaryRoute(metricsService));
   app.use("/api/system", createSystemRoutes());

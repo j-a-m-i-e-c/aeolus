@@ -14,6 +14,8 @@ import type {
   CapabilityDescriptor,
   AcknowledgementCapability,
 } from "./connector.interface.js";
+import type { ConfirmationTier } from "../automations/command-lifecycle.js";
+import { computeCapabilityCeiling } from "../automations/completion-tier.js";
 import type { ConnectorRegistry } from "./connector-registry.js";
 import type { ConnectorStore } from "./connector-store.js";
 import { ActionRouter } from "./action-router.js";
@@ -350,6 +352,29 @@ export class ConnectorManager {
    */
   getAcknowledgementCapability(deviceId: string): AcknowledgementCapability | undefined {
     return this.actionRouter.getAcknowledgementCapability(deviceId);
+  }
+
+  /**
+   * Report the completion-tier capability ceiling for a device. Pure composition of
+   * existing capability reads; performs no dispatch. `observationAvailable` reflects
+   * a known observation source supplied by the caller (default false, matching the
+   * form-rule reality of no ConfirmOptions).
+   *
+   * Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8
+   */
+  getCompletionTierCapability(
+    deviceId: string,
+    observationAvailable = false,
+  ): { resolved: boolean; tiers: ConfirmationTier[]; ceiling: ConfirmationTier | null } {
+    const device = this.deviceRegistry.getById(deviceId);
+    if (!device) return { resolved: false, tiers: [], ceiling: null }; // Req 2.8
+    const ackSupported = this.getAcknowledgementCapability(deviceId)?.supported === true;
+    const result = computeCapabilityCeiling({
+      dispatchable: true, // a resolvable registered device can dispatch (Req 2.1)
+      ackSupported,
+      observationAvailable,
+    });
+    return { resolved: true, ...result };
   }
 
   /**

@@ -59,15 +59,15 @@ Tasks build incrementally with no orphaned code: (1) the pure helpers module `co
     - Applies on a fresh DB; guarded no-op when the column already exists; a legacy row created before the column reads `completion_tier` as `null` without rewrite
     - _Requirements: 1.5, 7.5_
 
-- [ ] 3. Checkpoint - helpers and persistence
+- [x] 3. Checkpoint - helpers and persistence
   - Ensure all tests pass, ask the user if questions arise.
 
-- [ ] 4. Capability query and REST endpoint
-  - [ ] 4.1 Add `ConnectorManager.getCompletionTierCapability`
+- [x] 4. Capability query and REST endpoint
+  - [x] 4.1 Add `ConnectorManager.getCompletionTierCapability`
     - In `src/connectors/connector-manager.ts` add a read-only `getCompletionTierCapability(deviceId, observationAvailable = false)` returning `{ resolved, tiers, ceiling }`: `{ resolved:false, tiers:[], ceiling:null }` when the device is not in the registry; otherwise compose `getAcknowledgementCapability(deviceId)?.supported === true` and `observationAvailable` through `computeCapabilityCeiling({ dispatchable:true, ackSupported, observationAvailable })`
     - Performs no dispatch; pure composition of existing capability reads
     - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8_
-  - [ ] 4.2 Add `GET /api/devices/:id/completion-tiers` endpoint
+  - [x] 4.2 Add `GET /api/devices/:id/completion-tiers` endpoint
     - In `src/api/routes/device.routes.ts` add the route calling `getCompletionTierCapability(id)`; on unresolved device return `404` with `{ deviceId, resolved:false, availableTiers:[], ceiling:null, error }`; otherwise `200` with `{ deviceId, resolved:true, availableTiers, ceiling }` (tiers ordered low→high, using the `dispatch`/`acknowledged`/`observed` vocabulary)
     - Additive endpoint only; the existing `GET /api/devices/:id/actions` is untouched
     - _Requirements: 2.6, 2.8, 7.6_
@@ -75,11 +75,11 @@ Tasks build incrementally with no orphaned code: (1) the pure helpers module `co
     - A dispatchable+ack device reports `["dispatch","acknowledged"]` with ceiling `acknowledged`; a missing device returns `404` with `resolved:false`
     - _Requirements: 2.2, 2.3, 2.8_
 
-- [ ] 5. Authoring validation wiring
-  - [ ] 5.1 Add the optional `completionTier` schema field
+- [x] 5. Authoring validation wiring
+  - [x] 5.1 Add the optional `completionTier` schema field
     - In `src/api/schemas/automation.schemas.ts` add `completionTier: z.enum(["dispatch","acknowledged","observed"]).optional().nullable()` to the create and update schemas (additive, optional)
     - _Requirements: 7.3, 7.4_
-  - [ ] 5.2 Validate `completionTier` against the ceiling before persisting
+  - [x] 5.2 Validate `completionTier` against the ceiling before persisting
     - In the `POST` and `PUT` form branches of `src/api/routes/automation.routes.ts`, before any `INSERT`/`UPDATE` and before `registerUiRule`, resolve the target device ceiling via `connectorManager.getCompletionTierCapability(target).ceiling` (or `null` when the device is unresolvable) and call `validateAgainstCeiling(req.body.completionTier, ceiling)`
     - On `!ok` throw `BadRequestError` with the code-specific message (`invalid` lists accepted values; `over_ceiling` names requested tier and ceiling; `ceiling_unresolvable` indicates the ceiling cannot be determined); on failure nothing is written and the rule is not (re-)registered; on success bind `v.tier` (`ConfirmationTier | null`) into the persistence path from task 2.2
     - Inject the `ConnectorManager` (or a narrow capability-query dependency) from the composition root in `src/index.ts` (both already constructed there)
@@ -88,8 +88,8 @@ Tasks build incrementally with no orphaned code: (1) the pure helpers module `co
     - Omitted `completionTier` persists `null` and returns success; over-ceiling `PUT` leaves the stored tier and registration unchanged; unresolvable-device create is rejected with the ceiling-undeterminable error
     - _Requirements: 3.1, 3.6, 3.7, 7.3, 7.4_
 
-- [ ] 6. Form-rule dispatch wiring
-  - [ ] 6.1 Supply the resolved tier from the form-rule closure
+- [x] 6. Form-rule dispatch wiring
+  - [x] 6.1 Supply the resolved tier from the form-rule closure
     - In the form branch of `registerUiRule()` (`src/api/routes/automation.routes.ts`), normalize the stored tier via `isConfirmationTier`, compute the dispatch-time ceiling via `connectorManager.getCompletionTierCapability(stored.action_target).ceiling` (form rules supply no `ConfirmOptions`, so the ceiling max is `acknowledged`), compute `effective = resolveEffectiveTier(storedTier, undefined, ceiling)`, and call `commandService.execute(descriptor, stored.id, undefined, effective)`
     - `effective === undefined` ⇒ omit `requiredTier` (behaviorally identical to today's highest-available); a re-registered rule with a changed stored tier supplies the new value on subsequent dispatches
     - _Requirements: 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 7.1, 7.5_
@@ -110,17 +110,17 @@ Tasks build incrementally with no orphaned code: (1) the pure helpers module `co
     - **Property 5: An invalid script tier fails validation without dispatching**
     - **Validates: Requirements 5.5, 5.6**
 
-- [ ] 8. Checkpoint - capability query, authoring, and dispatch wiring
+- [x] 8. Checkpoint - capability query, authoring, and dispatch wiring
   - Ensure all tests pass, ask the user if questions arise.
 
-- [ ] 9. Frontend capability-aware tier selector
-  - [ ] 9.1 Add the completion-tier selector to the form-rule editor
+- [x] 9. Frontend capability-aware tier selector
+  - [x] 9.1 Add the completion-tier selector to the form-rule editor
     - In `frontend/src/components/AutomationsPage.tsx` add a `completionTier` field to form state and a selector next to the action target; when the target device changes, fetch `GET /api/devices/:id/completion-tiers` and render one option per `availableTiers` entry plus a default "Highest available (auto)" option that omits `completionTier`
     - Block/disable tiers above `ceiling` (over-ceiling not selectable) and surface a short warning when a previously-stored tier is now over-ceiling; include `completionTier` in the create/update body only when the author picks an explicit tier (otherwise omit it)
     - _Requirements: 2.6, 3.4_
 
-- [ ] 10. Final verification
-  - [ ] 10.1 Run the full build/typecheck and test suite and fix any failures
+- [x] 10. Final verification
+  - [x] 10.1 Run the full build/typecheck and test suite and fix any failures
     - Run the project build/typecheck and the full `vitest` suite single-run (not watch); resolve any type or test failures introduced by the feature
     - _Requirements: 1.1, 2.1, 3.1, 4.1, 5.1, 7.6_
 

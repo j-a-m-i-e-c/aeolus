@@ -14,7 +14,7 @@ import { transpile, transpileUi } from "../../automations/transpiler.js";
 import { extractStructuredMetadata } from "../../automations/structured-metadata-extractor.js";
 import { buildSnippetCatalog } from "../../automations/snippet-catalog.js";
 import { isValidCron } from "../../automations/cron-utils.js";
-import { isConfirmationTier } from "../../automations/completion-tier.js";
+import { isConfirmationTier, resolveEffectiveTier, validateAgainstCeiling } from "../../automations/completion-tier.js";
 import type { ConfirmationTier } from "../../automations/command-lifecycle.js";
 import type { ConnectorRegistry } from "../../connectors/connector-registry.js";
 import { BadRequestError, NotFoundError } from "../middleware/error-handler.js";
@@ -63,6 +63,7 @@ export function createAutomationRoutes(
   connectorRegistry?: ConnectorRegistry,
   stateStore?: AutomationStateStore,
   conditionRegistry?: ConditionRegistry,
+  getCompletionTierCapability?: (deviceId: string) => { ceiling: ConfirmationTier | null },
 ): Router {
   const router = Router();
 
@@ -209,11 +210,6 @@ export function createAutomationRoutes(
       throw new BadRequestError("name is required");
     }
 
-    // Persist the author-chosen completion tier (or null). Authoring-time
-    // validation against the capability ceiling lands in a later task; here we
-    // only thread persistence, normalizing to a valid tier or null.
-    const completionTierValue = normalizeTier(completionTier);
-
     const { triggerType, effectiveTriggerTopic, effectiveCronExpression } =
       resolveTriggerConfig({ rawTriggerType, triggerTopic, cronExpression });
 
@@ -227,6 +223,14 @@ export function createAutomationRoutes(
       if (!scriptSource) {
         throw new BadRequestError("scriptSource is required for script rules");
       }
+
+      // Script rules may target multiple devices; validate format only at authoring time.
+      // Per-device ceiling validation happens at dispatch time (sandbox tier gate).
+      if (completionTier !== undefined && completionTier !== null && !isConfirmationTier(completionTier)) {
+        throw new BadRequestError("completionTier must be one of: dispatch, acknowledged, observed");
+      }
+      const completionTierValue = normalizeTier(completionTier);
+
       const { compiledJs, structuredJson } = compileScriptSource(scriptSource, effectiveTriggerTopic);
 
       db.prepare(
@@ -243,7 +247,7 @@ export function createAutomationRoutes(
         trigger_type: triggerType, cron_expression: effectiveCronExpression,
         completion_tier: completionTierValue,
         enabled: 1, created_at: now,
-      }, conditionRegistry);
+      }, conditionRegistry, getCompletionTierCapability);
 
       logger.info({ ruleId: id, name, triggerTopic: effectiveTriggerTopic, ruleType: "script" }, "Script automation rule created");
       res.json({ success: true, id });
@@ -251,6 +255,21 @@ export function createAutomationRoutes(
       // Form rule (default)
       if (!actionType || !actionTarget) {
         throw new BadRequestError("actionType and actionTarget are required for form rules");
+      }
+
+      // Validate completionTier against the target device's capability ceiling (Req 3.1, 3.4, 3.5, 3.6, 3.7).
+      // The actionTarget identifies the target device for ceiling lookup.
+      let completionTierValue: ConfirmationTier | null = null;
+      if (completionTier !== undefined && completionTier !== null) {
+        const ceiling = getCompletionTierCapability
+          ? getCompletionTierCapability(actionTarget).ceiling
+          : null;
+        const v = validateAgainstCeiling(completionTier, ceiling);
+        if (!v.ok) {
+          // Nothing is written; stored state unchanged (Req 3.4, 3.5, 3.6, 3.7).
+          throw new BadRequestError(v.message);
+        }
+        completionTierValue = v.tier;
       }
 
       db.prepare(
@@ -268,7 +287,7 @@ export function createAutomationRoutes(
         trigger_type: triggerType, cron_expression: effectiveCronExpression,
         completion_tier: completionTierValue,
         enabled: 1, created_at: now,
-      }, conditionRegistry);
+      }, conditionRegistry, getCompletionTierCapability);
 
       logger.info({ ruleId: id, name, triggerTopic: effectiveTriggerTopic }, "Form automation rule created");
       res.json({ success: true, id });
@@ -287,11 +306,6 @@ export function createAutomationRoutes(
 
     const { name, triggerTopic, conditionType, conditionValue, actionType, actionTarget, actionParams, scriptSource, uiSource, triggerType: rawTriggerType, cronExpression, completionTier } = req.body;
 
-    // The updated completion tier fully replaces the prior value (Req 1.4),
-    // normalized to a valid tier or null. Authoring-time ceiling validation
-    // lands in a later task.
-    const completionTierValue = normalizeTier(completionTier);
-
     const { triggerType, effectiveTriggerTopic, effectiveCronExpression } =
       resolveTriggerConfig({ rawTriggerType, triggerTopic, cronExpression }, existing);
 
@@ -303,6 +317,14 @@ export function createAutomationRoutes(
       if (!updatedSource) {
         throw new BadRequestError("scriptSource is required for script rules");
       }
+
+      // Script rules may target multiple devices; validate format only at authoring time.
+      // Per-device ceiling validation happens at dispatch time (sandbox tier gate).
+      if (completionTier !== undefined && completionTier !== null && !isConfirmationTier(completionTier)) {
+        throw new BadRequestError("completionTier must be one of: dispatch, acknowledged, observed");
+      }
+      const completionTierValue = normalizeTier(completionTier);
+
       const { compiledJs, structuredJson } = compileScriptSource(updatedSource, effectiveTriggerTopic);
 
       db.prepare(
@@ -313,13 +335,30 @@ export function createAutomationRoutes(
       engine.unregister(id);
       const updated = queryRuleById(db, id)!;
       if (updated.enabled) {
-        registerUiRule(engine, registry, actionExecutor, updated, conditionRegistry);
+        registerUiRule(engine, registry, actionExecutor, updated, conditionRegistry, getCompletionTierCapability);
       }
 
       logger.info({ ruleId: id, name: updated.name }, "Script automation rule updated");
       res.json({ success: true, id });
     } else {
       // Form rule update
+      // Resolve the effective action target for ceiling lookup (use submitted or existing).
+      const effectiveActionTarget = actionTarget || existing.action_target;
+
+      // Validate completionTier against the target device's capability ceiling (Req 3.1, 3.4, 3.5, 3.6, 3.7).
+      let completionTierValue: ConfirmationTier | null = null;
+      if (completionTier !== undefined && completionTier !== null) {
+        const ceiling = getCompletionTierCapability
+          ? getCompletionTierCapability(effectiveActionTarget).ceiling
+          : null;
+        const v = validateAgainstCeiling(completionTier, ceiling);
+        if (!v.ok) {
+          // Nothing is written; stored state and registration unchanged (Req 3.4, 3.5, 3.6, 3.7).
+          throw new BadRequestError(v.message);
+        }
+        completionTierValue = v.tier;
+      }
+
       db.prepare(
         `UPDATE automation_rules SET name = ?, trigger_topic = ?, condition_type = ?, condition_value = ?, action_type = ?, action_target = ?, action_params = ?, ui_source = ?, compiled_ui = ?, trigger_type = ?, cron_expression = ?, completion_tier = ? WHERE id = ?`
       ).run(
@@ -328,7 +367,7 @@ export function createAutomationRoutes(
         conditionType ?? existing.condition_type,
         conditionValue ?? existing.condition_value,
         actionType || existing.action_type,
-        actionTarget || existing.action_target,
+        effectiveActionTarget,
         JSON.stringify(actionParams || JSON.parse(existing.action_params)),
         uiSourceValue,
         compiledUiValue,
@@ -342,7 +381,7 @@ export function createAutomationRoutes(
       engine.unregister(id);
       const updated = queryRuleById(db, id)!;
       if (updated.enabled) {
-        registerUiRule(engine, registry, actionExecutor, updated, conditionRegistry);
+        registerUiRule(engine, registry, actionExecutor, updated, conditionRegistry, getCompletionTierCapability);
       }
 
       logger.info({ ruleId: id, name: updated.name }, "Form automation rule updated");
@@ -381,7 +420,7 @@ export function createAutomationRoutes(
     if (enabled) {
       // Re-register — reload from DB to get latest state
       const updated = queryRuleById(db, id)!;
-      registerUiRule(engine, registry, actionExecutor, updated, conditionRegistry);
+      registerUiRule(engine, registry, actionExecutor, updated, conditionRegistry, getCompletionTierCapability);
     } else {
       engine.unregister(id);
     }
@@ -601,6 +640,7 @@ function registerUiRule(
   actionExecutor: CommandService,
   stored: StoredRule,
   conditionRegistry?: ConditionRegistry,
+  getCompletionTierCapability?: (deviceId: string) => { ceiling: ConfirmationTier | null },
 ): void {
   // If trigger_topic is empty, the rule is manual-only — still register it
   // so it's accessible via getRule() for the /fire endpoint, but it will
@@ -653,15 +693,21 @@ function registerUiRule(
     };
     engine.register(rule);
   } else {
-    // Form rule — dispatch through ActionExecutor
+    // Form rule — dispatch through CommandService with resolved completion tier
     const params = JSON.parse(stored.action_params);
+    const storedTier = completionTier; // already normalized above
     const action = async (_context: EventContext) => {
       const descriptor: ActionDescriptor = {
         type: stored.action_type,
         target: stored.action_target,
         params,
       };
-      return actionExecutor.execute(descriptor, stored.id);
+      // Form rules supply no ConfirmOptions ⇒ dispatch-time ceiling max is "acknowledged".
+      const ceiling = getCompletionTierCapability
+        ? getCompletionTierCapability(stored.action_target).ceiling
+        : null;
+      const effective = resolveEffectiveTier(storedTier, undefined, ceiling);
+      return actionExecutor.execute(descriptor, stored.id, undefined, effective);
     };
 
     engine.register({
@@ -684,13 +730,14 @@ export function loadUiRules(
   registry: DeviceRegistry,
   actionExecutor: CommandService,
   conditionRegistry?: ConditionRegistry,
+  getCompletionTierCapability?: (deviceId: string) => { ceiling: ConfirmationTier | null },
 ): void {
   const rows = db.prepare("SELECT * FROM automation_rules WHERE enabled = 1").all() as StoredRule[];
   if (rows.length === 0) return;
 
   let loaded = 0;
   for (const row of rows) {
-    registerUiRule(engine, registry, actionExecutor, row, conditionRegistry);
+    registerUiRule(engine, registry, actionExecutor, row, conditionRegistry, getCompletionTierCapability);
     loaded++;
   }
   logger.info({ loaded }, "Loaded UI automation rules from database");
