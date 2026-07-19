@@ -245,8 +245,7 @@ export class ActionRouter {
 
   /**
    * Return the acknowledgement capability declared for a device by its
-   * connector, or undefined when none is declared. MQTT devices without a
-   * connector-declared capability fall back to the device-level ackCapable flag.
+   * connector, or undefined when none is declared.
    * Requirements: 9.1, 9.2
    */
   getAcknowledgementCapability(deviceId: string): AcknowledgementCapability | undefined {
@@ -257,12 +256,6 @@ export class ActionRouter {
         return instance.connector.getAcknowledgementCapability?.(deviceId);
       }
     }
-
-    // Fallback: device-level flag for MQTT devices without a connector
-    if (device.ackCapable) {
-      return { supported: true };
-    }
-
     return undefined;
   }
 

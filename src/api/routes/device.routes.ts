@@ -72,24 +72,6 @@ export function createDeviceRoutes(
     return res.json(device);
   });
 
-  /** PATCH /api/devices/:id/config — update device configuration flags */
-  router.patch("/:id/config", (req, res, next) => {
-    const id = req.params.id as string;
-    const { ackCapable } = req.body as { ackCapable?: boolean };
-
-    if (typeof ackCapable !== "boolean") {
-      res.status(400).json({ error: "Body must contain ackCapable as a boolean" });
-      return;
-    }
-
-    const updated = registry.updateConfig(id, { ackCapable });
-    if (!updated) {
-      next(new NotFoundError(`Device not found: ${id}`));
-      return;
-    }
-    res.json(updated);
-  });
-
   /** GET /api/devices/:id/actions — return the action catalog for a device */
   router.get("/:id/actions", (req, res) => {
     const id = req.params.id as string;

@@ -18,8 +18,6 @@ export interface Device {
   topic?: string;
   /** MQTT command topic used to send commands to the device. */
   commandTopic?: string;
-  /** Whether this device supports the command acknowledgement protocol. */
-  ackCapable?: boolean;
 }
 
 /** Internal event emitted after MQTT message normalization */

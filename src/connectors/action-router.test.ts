@@ -533,29 +533,11 @@ describe("ActionRouter", () => {
       expect(router.getAcknowledgementCapability("test-device-1")).toEqual({ supported: true });
     });
 
-    it("returns undefined when connector declares no capability and device has no ackCapable", () => {
+    it("returns undefined when no connector matches and device is plain MQTT", () => {
       const device = createMockDevice({ integration: "mqtt" });
       deviceRegistry.getById.mockReturnValue(device);
 
       expect(router.getAcknowledgementCapability("test-device-1")).toBeUndefined();
-    });
-
-    it("returns { supported: true } when device has ackCapable flag and no connector match", () => {
-      const device = createMockDevice({ integration: "mqtt", ackCapable: true });
-      deviceRegistry.getById.mockReturnValue(device);
-
-      expect(router.getAcknowledgementCapability("test-device-1")).toEqual({ supported: true });
-    });
-
-    it("does not use ackCapable fallback when connector provides a result", () => {
-      const device = createMockDevice({ integration: "test-connector", ackCapable: true });
-      deviceRegistry.getById.mockReturnValue(device);
-      const connector = createMockConnector({
-        getAcknowledgementCapability: vi.fn().mockReturnValue({ supported: false }),
-      });
-      instances.set("inst-1", createMockInstance("test-connector", connector));
-
-      expect(router.getAcknowledgementCapability("test-device-1")).toEqual({ supported: false });
     });
   });
 
