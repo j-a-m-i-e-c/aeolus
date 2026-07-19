@@ -191,11 +191,11 @@ export class AutomationEngine {
    * collected Command_Results into a single {@link AutomationExecutionResult}
    * (Req 5.3, 5.4).
    *
-   * NOTE (cross-spec seam): the sandbox host callbacks pushing each Command_Result
-   * into the collector is task 6.4; until it lands the collected list is empty for
-   * the script path, so a script rule's result reflects the sandbox outcome only.
-   * Full script-path truthfulness additionally depends on the async-await-in-scripts
-   * companion fix (out of scope here).
+   * The sandbox host callbacks push each Command_Result into the collector, and
+   * Sandbox.execute() now drains every in-flight device-action promise (within
+   * this AsyncLocalStorage context) before it resolves, so all pushCurrent() calls
+   * land before the collector is closed below — the async-completion await gap is
+   * closed (Req 11.1, 11.2).
    */
   private async executeScriptRule(
     rule: Rule,

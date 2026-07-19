@@ -186,6 +186,62 @@ export async function dispatchScriptAction(
   return actionExecutor.execute(descriptor, ruleId, confirm, tier.chosen);
 }
 
+/** The plan produced by {@link planAutomationBody}: which action indices the
+ *  in-isolate `automation()` loop invokes, and the aggregate success. */
+export interface AutomationBodyPlan {
+  /** Indices of the actions the runner invokes, in invocation order. */
+  invokedIndices: number[];
+  /** `true` iff every invoked action succeeded. */
+  aggregateSuccess: boolean;
+}
+
+/**
+ * Pure fail-fast predicate mirrored by the in-isolate `automation()` loop
+ * (Req 11.3): after awaiting an action, stop invoking further actions when that
+ * action failed and the automation did not opt into continue-on-failure.
+ *
+ * Exported so Property 16 can be tested without a live isolate.
+ */
+export function shouldStopAfter(
+  outcome: { success: boolean },
+  continueOnFailure: boolean,
+): boolean {
+  return !continueOnFailure && !outcome.success;
+}
+
+/**
+ * Pure model of the in-isolate `automation()` action loop (Req 11.3, 11.5).
+ *
+ * Given the ordered per-action outcomes and the `continueOnFailure` flag, it
+ * returns which action indices the runner invokes (in order) and the aggregate
+ * success. Actions are always invoked in order; when `continueOnFailure` is
+ * `false` the loop stops immediately after the first failing action; when
+ * `true` every action is invoked regardless of individual failures.
+ *
+ * The in-isolate loop in {@link BOOTSTRAP_SCRIPT} is written to match this
+ * function exactly, so this host-side helper is the testable unit for Property
+ * 16 (isolated-vm is unavailable on the Windows dev box).
+ */
+export function planAutomationBody(
+  outcomes: ReadonlyArray<{ success: boolean }>,
+  continueOnFailure: boolean,
+): AutomationBodyPlan {
+  const invokedIndices: number[] = [];
+  let aggregateSuccess = true;
+  let index = 0;
+  for (const outcome of outcomes) {
+    invokedIndices.push(index);
+    if (!outcome.success) {
+      aggregateSuccess = false;
+    }
+    if (shouldStopAfter(outcome, continueOnFailure)) {
+      break;
+    }
+    index += 1;
+  }
+  return { invokedIndices, aggregateSuccess };
+}
+
 /** Dependencies injected into the Sandbox. */
 export interface SandboxDeps {
   actionExecutor: CommandService;
@@ -207,8 +263,90 @@ export interface SandboxContext {
 /** Memory limit in MB for each V8 isolate. */
 const ISOLATE_MEMORY_MB = 32;
 
-/** Execution timeout in milliseconds. */
+/** Execution timeout in milliseconds — guards synchronous CPU work in the isolate. */
 const EXECUTION_TIMEOUT_MS = 5000;
+
+/**
+ * Completion budget (ms) for draining in-flight device-action promises after the
+ * script body returns (Req 11.7). This is deliberately SEPARATE from
+ * {@link EXECUTION_TIMEOUT_MS} — that timeout bounds synchronous CPU work inside
+ * the isolate, whereas this budget bounds the asynchronous settling of dispatched
+ * commands (which wait on connectors/MQTT and, when confirmation is requested,
+ * on device acknowledgement/observation).
+ *
+ * Sized at 6× the per-action confirmation default (DEFAULT_CONFIRM_TIMEOUT_MS =
+ * 5000 ms) so a script that dispatches several sequentially-awaited confirmed
+ * actions can complete, while still guaranteeing that an action which never
+ * settles cannot make `execute()` hang indefinitely.
+ */
+const ACTION_DRAIN_BUDGET_MS = 30_000;
+
+/**
+ * Await the settling of every in-flight device-action promise, bounded by
+ * `budgetMs` (Req 11.1, 11.2, 11.7).
+ *
+ * The set is drained in a loop rather than a single `Promise.allSettled`
+ * snapshot because the async `automation()` body registers further action
+ * promises as it progresses (each awaited action can dispatch the next); every
+ * settled promise removes itself from the set, so the loop terminates once the
+ * body has issued and settled all of its actions. On budget expiry the drain
+ * returns without throwing — the still-pending actions' results are simply not
+ * counted (they were not yet confirmed).
+ */
+async function drainInFlight(
+  inFlight: Set<Promise<unknown>>,
+  budgetMs: number,
+): Promise<void> {
+  const deadline = Date.now() + budgetMs;
+  while (inFlight.size > 0) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const budget = new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, remaining);
+    });
+    await Promise.race([Promise.allSettled([...inFlight]), budget]);
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+/**
+ * Await `promise`, but give up once the shared completion `deadline`
+ * (a `Date.now()`-relative timestamp) passes. Used for the first stage of the
+ * two-stage completion wait in {@link Sandbox.execute} — deterministically
+ * awaiting the `automation()` body promise bridged out of the isolate.
+ *
+ * `promise` is expected to never reject (the caller attaches a `.catch`), so this
+ * never rejects either; on deadline expiry it simply returns while the underlying
+ * work may still be settling (mirrors {@link drainInFlight}'s truthful, non-throwing
+ * budget-expiry behaviour, Req 11.7).
+ */
+async function awaitUntilDeadline(promise: Promise<unknown>, deadline: number): Promise<void> {
+  const remaining = deadline - Date.now();
+  if (remaining <= 0) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const budget = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, remaining);
+  });
+  try {
+    await Promise.race([promise.then(() => undefined), budget]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+/**
+ * Register an in-flight action promise so {@link drainInFlight} can await it,
+ * removing it from the set once it settles. The promise bodies (see
+ * {@link Sandbox.setDevicesRefs}) never reject, so no rejection handling is
+ * required here.
+ */
+function registerInFlight(inFlight: Set<Promise<unknown>>, promise: Promise<unknown>): void {
+  inFlight.add(promise);
+  void promise.finally(() => {
+    inFlight.delete(promise);
+  });
+}
 
 /**
  * Bootstrap script that runs inside the isolate to wire up the sandbox API
@@ -250,25 +388,42 @@ const BOOTSTRAP_SCRIPT = `
       // confirm predicate (condition/deviceId/timeoutMs) and/or an optional
       // per-call completion tier, forwarded as the trailing host-callback arg.
       var tier = opts ? opts.tier : undefined;
+      var p;
       if (opts && typeof opts.condition === 'function') {
-        return actionRef.apply(undefined,
+        p = actionRef.apply(undefined,
           [deviceId, actionType, params, opts.condition, opts.deviceId, opts.timeoutMs, tier],
           { result: { promise: true } });
+      } else {
+        p = actionRef.apply(undefined,
+          [deviceId, actionType, params, undefined, undefined, undefined, tier],
+          { result: { promise: true } });
       }
-      return actionRef.apply(undefined,
-        [deviceId, actionType, params, undefined, undefined, undefined, tier],
-        { result: { promise: true } });
+      // Record a logical (non-throwing) command failure on an isolate-global flag
+      // so automation() can fail-fast without depending on the user action
+      // callback returning the ActionResult (Req 11.3, 11.4).
+      return p.then(function(result) {
+        if (result && result.success === false) { globalThis.__commandFailed = true; }
+        return result;
+      });
     },
     actionAll: function(filter, actionType, params, opts) {
       var tier = opts ? opts.tier : undefined;
+      var p;
       if (opts && typeof opts.condition === 'function') {
-        return actionAllRef.apply(undefined,
+        p = actionAllRef.apply(undefined,
           [filter, actionType, params, opts.condition, opts.deviceId, opts.timeoutMs, tier],
           { result: { promise: true } });
+      } else {
+        p = actionAllRef.apply(undefined,
+          [filter, actionType, params, undefined, undefined, undefined, tier],
+          { result: { promise: true } });
       }
-      return actionAllRef.apply(undefined,
-        [filter, actionType, params, undefined, undefined, undefined, tier],
-        { result: { promise: true } });
+      // A bulk action is a logical failure when any per-device command failed
+      // (Req 11.3, 11.4).
+      return p.then(function(result) {
+        if (result && result.failed > 0) { globalThis.__commandFailed = true; }
+        return result;
+      });
     }
   };
 
@@ -331,7 +486,21 @@ const BOOTSTRAP_SCRIPT = `
     };
   }
 
-  globalThis.automation = function(config) {
+  // Collector for every automation() invocation's completion promise. Kept in the
+  // bootstrap closure (NOT a user-visible global) so user code cannot tamper with
+  // it. Sandbox.execute() awaits these deterministically via __awaitAutomations
+  // once the synchronous script body has returned (see the two-stage completion
+  // wait in Sandbox.execute()). This closes a scheduling race that the size-based
+  // in-flight drain cannot: between two SEQUENTIAL actions the in-flight set is
+  // momentarily empty (action N settles and leaves the set before the awaited
+  // continuation resumes the loop and registers action N+1), so a size-based loop
+  // can exit early. Awaiting the body promise itself is race-free.
+  var __automationRuns = [];
+
+  // The real async automation body — unchanged fail-fast semantics (Req 11.3–11.5).
+  var __runAutomation = async function(config) {
+    // Reset the per-invocation logical-failure flag (Req 11.3).
+    globalThis.__commandFailed = false;
     // Normalize conditions: accept single function, array, or undefined
     var conditions = config.conditions || config.condition;
     if (conditions) {
@@ -344,9 +513,36 @@ const BOOTSTRAP_SCRIPT = `
     }
     // Normalize actions: accept single function or array
     var actions = Array.isArray(config.actions) ? config.actions : [config.actions];
+    // continueOnFailure opts every action in regardless of failures (Req 11.5).
+    var continueOnFailure = config.continueOnFailure === true;
+    // Await each action in order so a dispatched command settles before the next
+    // action runs, then fail-fast unless continue-on-failure is set (Req 11.3–11.5).
+    // This mirrors the host-side pure helper planAutomationBody/shouldStopAfter.
     for (var j = 0; j < actions.length; j++) {
-      actions[j](globalThis.context);
+      await actions[j](globalThis.context);
+      if (!continueOnFailure && globalThis.__commandFailed) {
+        break;
+      }
     }
+  };
+
+  // User-visible entry point. Invokes the async body, records its completion
+  // promise so the host can await the WHOLE body (all sequential actions), and
+  // returns that promise so user code that does \`await automation(...)\` still works.
+  globalThis.automation = function(config) {
+    var run = __runAutomation(config);
+    __automationRuns.push(run);
+    return run;
+  };
+
+  // Host-callable entry that resolves once every automation() body has fully
+  // completed (all sequential actions awaited, each collector.pushCurrent() done).
+  // Resolves immediately when no automation() call was made. This global is
+  // intentionally NOT deleted in the cleanup block below — Sandbox.execute() reads
+  // it AFTER the user script has run. It only awaits the user's own automation
+  // promises and exposes no host references or security-sensitive surface.
+  globalThis.__awaitAutomations = function() {
+    return Promise.all(__automationRuns);
   };
 
   // Clean up temporary globals
@@ -407,6 +603,16 @@ export class Sandbox {
    * rejects (Req 1.7). Success maps to `{ success: true }`; runtime throws,
    * the 5 s timeout, and the 32 MB memory limit map to a classified failure;
    * an unavailable isolated-vm runtime maps to `reason: "unavailable"`.
+   *
+   * After the synchronous script body returns, a TWO-STAGE, budget-bounded
+   * completion wait closes the await gap (Req 11.1, 11.2, 11.7): stage 1 awaits
+   * the `automation()` body promise deterministically (bridged via
+   * `__awaitAutomations`), then stage 2 drains any imperative device-action
+   * stragglers. A single shared deadline bounds the total async wait to
+   * {@link ACTION_DRAIN_BUDGET_MS}. The deterministic body await is necessary
+   * because the size-based in-flight drain alone can exit early: between two
+   * sequential automation actions the in-flight set is momentarily empty (the
+   * action-N+1 registration race).
    */
   async execute(
     compiledJs: string,
@@ -425,6 +631,11 @@ export class Sandbox {
 
     let isolate: InstanceType<(typeof ivm)["Isolate"]> | null = null;
 
+    // Tracks every device-action promise dispatched during this execution so the
+    // await gap can be closed before resolving (Req 11.1, 11.2). Held locally so
+    // it is scoped to this single execution/isolate.
+    const inFlight = new Set<Promise<unknown>>();
+
     try {
       isolate = new ivm.Isolate({ memoryLimit: ISOLATE_MEMORY_MB });
       const ivmContext = await isolate.createContext();
@@ -434,7 +645,7 @@ export class Sandbox {
       await this.blockForbiddenGlobals(jail);
 
       // Set raw data and references on the global scope
-      await this.setDevicesRefs(jail, ruleId, ruleTierDefault);
+      await this.setDevicesRefs(jail, ruleId, inFlight, ruleTierDefault);
       await this.setMqttRefs(jail, ruleId);
       await this.setLogRefs(jail, ruleId);
       await this.setContextData(jail, context);
@@ -449,6 +660,56 @@ export class Sandbox {
       // Compile and run user script with timeout
       const script = await isolate.compileScript(compiledJs);
       await script.run(ivmContext, { timeout: EXECUTION_TIMEOUT_MS });
+
+      // Close the await gap with a TWO-STAGE, budget-bounded completion wait
+      // (Req 11.1, 11.2, 11.7). isolated-vm runs a classic script with no top-level
+      // await, so `script.run()` resolves as soon as the synchronous body returns —
+      // before the async work it kicked off has settled. Both stages run inside the
+      // collector's AsyncLocalStorage context established by
+      // AutomationEngine.executeScriptRule(), so every collector.pushCurrent() lands
+      // before the engine closes the collector.
+      //
+      // Stage 1 — automation() bodies: await the bridged `__awaitAutomations`
+      // promise, which resolves only once every automation() body has run to
+      // completion (all SEQUENTIAL actions awaited in order). This is deterministic,
+      // unlike the size-based `drainInFlight` loop: between two sequential actions
+      // the in-flight set is momentarily empty — action N settles and removes itself
+      // before isolated-vm bridges the awaited continuation back into the isolate and
+      // the automation() loop resumes to register action N+1 — so a size-based loop
+      // alone can exit early and re-introduce the await gap for multi-action scripts.
+      //
+      // Stage 2 — imperative stragglers: `drainInFlight` then covers scripts that call
+      // devices.action()/devices.actionAll() directly WITHOUT automation() (and any
+      // promises still settling). registerInFlight tracks those.
+      //
+      // Both stages share ONE budget: a single deadline bounds the total async
+      // completion wait to ACTION_DRAIN_BUDGET_MS, so a never-settling action cannot
+      // make execute() hang. On budget expiry each stage returns truthfully without
+      // throwing (execute() never rejects — Req 1.7/11.6).
+      const completionDeadline = Date.now() + ACTION_DRAIN_BUDGET_MS;
+
+      // Stage 1: deterministic automation()-body completion.
+      const awaitAutomationsRef = await ivmContext.global.get("__awaitAutomations", {
+        reference: true,
+      });
+      // The bridged promise may reject if a user action callback throws (rather than
+      // returning success:false); swallow it here so execute() preserves its
+      // never-reject contract (Req 11.6) — logical failures are already surfaced via
+      // the __commandFailed flag and each ActionResult pushed into the collector.
+      const automationBodies = (
+        awaitAutomationsRef.apply(undefined, [], { result: { promise: true } }) as Promise<unknown>
+      ).catch((err: unknown) => {
+        logger.debug(
+          { ruleId, error: (err as Error)?.message },
+          "automation() body rejected during completion wait",
+        );
+      });
+      await awaitUntilDeadline(automationBodies, completionDeadline);
+      awaitAutomationsRef.release();
+
+      // Stage 2: imperative straggler drain with the REMAINING shared budget.
+      const remainingBudget = Math.max(0, completionDeadline - Date.now());
+      await drainInFlight(inFlight, remainingBudget);
       return { success: true };
     } catch (err) {
       const wasDisposed = isolate?.isDisposed ?? false;
@@ -489,6 +750,7 @@ export class Sandbox {
   private async setDevicesRefs(
     jail: IvmGlobal,
     ruleId: string,
+    inFlight: Set<Promise<unknown>>,
     ruleTierDefault?: ConfirmationTier,
   ): Promise<void> {
     if (!ivm) return;
@@ -512,7 +774,7 @@ export class Sandbox {
     const collector = this.collector;
     await jail.set(
       "__actionRef",
-      new ivm.Reference(async function (
+      new ivm.Reference(function (
         deviceId: string,
         actionType: string,
         params?: Record<string, unknown>,
@@ -521,27 +783,33 @@ export class Sandbox {
         confirmTimeoutMs?: number,
         perCallTier?: unknown,
       ): Promise<ActionResult> {
-        try {
-          const confirm = buildConfirmOptions(condition, confirmDeviceId, confirmTimeoutMs);
-          // Completion-tier gate (Req 5.1–5.6): fail-on-invalid before dispatch,
-          // otherwise dispatch with the resolved tier (per-call overrides the
-          // rule-level default; undefined ⇒ highest-available).
-          const result = await dispatchScriptAction(
-            actionExecutor,
-            { type: "device_action", target: deviceId, params: { actionType, ...(params ?? {}) } },
-            ruleId,
-            confirm,
-            ruleTierDefault,
-            perCallTier,
-          );
-          // Push the Command_Result into the collector for the running executionId
-          // (Req 2.4, 4.3, 5.3 — script-path commands aggregated via AsyncLocalStorage)
-          collector?.pushCurrent(result);
-          return result;
-        } catch {
-          // Should never reach here since execute() never throws, but guard anyway
-          return { success: false, error: "Unexpected error in devices.action()" };
-        }
+        const run = (async (): Promise<ActionResult> => {
+          try {
+            const confirm = buildConfirmOptions(condition, confirmDeviceId, confirmTimeoutMs);
+            // Completion-tier gate (Req 5.1–5.6): fail-on-invalid before dispatch,
+            // otherwise dispatch with the resolved tier (per-call overrides the
+            // rule-level default; undefined ⇒ highest-available).
+            const result = await dispatchScriptAction(
+              actionExecutor,
+              { type: "device_action", target: deviceId, params: { actionType, ...(params ?? {}) } },
+              ruleId,
+              confirm,
+              ruleTierDefault,
+              perCallTier,
+            );
+            // Push the Command_Result into the collector for the running executionId
+            // (Req 2.4, 4.3, 5.3 — script-path commands aggregated via AsyncLocalStorage)
+            collector?.pushCurrent(result);
+            return result;
+          } catch {
+            // Should never reach here since execute() never throws, but guard anyway
+            return { success: false, error: "Unexpected error in devices.action()" };
+          }
+        })();
+        // Track the promise so Sandbox.execute() can drain it before resolving,
+        // closing the await gap (Req 11.1, 11.2).
+        registerInFlight(inFlight, run);
+        return run;
       }),
     );
 
@@ -550,7 +818,7 @@ export class Sandbox {
     const deviceRegistry = this.deviceRegistry;
     await jail.set(
       "__actionAllRef",
-      new ivm.Reference(async function (
+      new ivm.Reference(function (
         filter: (device: Device) => boolean,
         actionType: string,
         params?: Record<string, unknown>,
@@ -559,73 +827,79 @@ export class Sandbox {
         confirmTimeoutMs?: number,
         perCallTier?: unknown,
       ): Promise<BulkActionResult> {
-        // Completion-tier gate (Req 5.1–5.6): an invalid per-call or rule-level
-        // tier fails validation for the whole call WITHOUT dispatching to any
-        // device. Runs before the predicate so no command is issued on failure.
-        const tier = resolveScriptTier(ruleTierDefault, perCallTier);
-        if (!tier.ok) {
-          return {
-            total: 0,
-            succeeded: 0,
-            failed: 0,
-            results: [{ deviceId: "", success: false, error: tier.error }],
-          };
-        }
+        const run = (async (): Promise<BulkActionResult> => {
+          // Completion-tier gate (Req 5.1–5.6): an invalid per-call or rule-level
+          // tier fails validation for the whole call WITHOUT dispatching to any
+          // device. Runs before the predicate so no command is issued on failure.
+          const tier = resolveScriptTier(ruleTierDefault, perCallTier);
+          if (!tier.ok) {
+            return {
+              total: 0,
+              succeeded: 0,
+              failed: 0,
+              results: [{ deviceId: "", success: false, error: tier.error }],
+            };
+          }
 
-        // Catch predicate throws
-        let matched: Device[];
-        try {
-          const all = deviceRegistry.getAll();
-          matched = all.filter(filter);
-        } catch (err) {
-          return {
-            total: 0,
-            succeeded: 0,
-            failed: 0,
-            results: [{ deviceId: "", success: false, error: (err as Error).message }],
-          };
-        }
+          // Catch predicate throws
+          let matched: Device[];
+          try {
+            const all = deviceRegistry.getAll();
+            matched = all.filter(filter);
+          } catch (err) {
+            return {
+              total: 0,
+              succeeded: 0,
+              failed: 0,
+              results: [{ deviceId: "", success: false, error: (err as Error).message }],
+            };
+          }
 
-        if (matched.length === 0) {
-          return { total: 0, succeeded: 0, failed: 0, results: [] };
-        }
+          if (matched.length === 0) {
+            return { total: 0, succeeded: 0, failed: 0, results: [] };
+          }
 
-        // Each matched device gets its own confirmation (and its own correlationId
-        // assigned inside execute()), observing the target device by default. The
-        // resolved completion tier applies to every per-device command (Req 5.1–5.4).
-        const confirm = buildConfirmOptions(condition, confirmDeviceId, confirmTimeoutMs);
+          // Each matched device gets its own confirmation (and its own correlationId
+          // assigned inside execute()), observing the target device by default. The
+          // resolved completion tier applies to every per-device command (Req 5.1–5.4).
+          const confirm = buildConfirmOptions(condition, confirmDeviceId, confirmTimeoutMs);
 
-        const settled = await Promise.allSettled(
-          matched.map((device) =>
-            actionExecutor.execute(
-              { type: "device_action", target: device.id, params: { actionType, ...(params ?? {}) } },
-              ruleId,
-              confirm,
-              tier.chosen,
-            ).then((result): { deviceId: string } & ActionResult => {
-              // Push each per-device Command_Result into the collector
-              // (Req 2.4, 4.3, 5.3 — script-path commands aggregated via AsyncLocalStorage)
-              collector?.pushCurrent(result);
-              return { deviceId: device.id, ...result };
-            })
-             .catch((err): { deviceId: string } & ActionResult => ({
-               deviceId: device.id,
-               success: false,
-               error: (err as Error).message,
-             })),
-          ),
-        );
+          const settled = await Promise.allSettled(
+            matched.map((device) =>
+              actionExecutor.execute(
+                { type: "device_action", target: device.id, params: { actionType, ...(params ?? {}) } },
+                ruleId,
+                confirm,
+                tier.chosen,
+              ).then((result): { deviceId: string } & ActionResult => {
+                // Push each per-device Command_Result into the collector
+                // (Req 2.4, 4.3, 5.3 — script-path commands aggregated via AsyncLocalStorage)
+                collector?.pushCurrent(result);
+                return { deviceId: device.id, ...result };
+              })
+               .catch((err): { deviceId: string } & ActionResult => ({
+                 deviceId: device.id,
+                 success: false,
+                 error: (err as Error).message,
+               })),
+            ),
+          );
 
-        const results = settled.map((s) =>
-          s.status === "fulfilled"
-            ? s.value
-            : { deviceId: "", success: false as const, error: String(s.reason) },
-        );
+          const results = settled.map((s) =>
+            s.status === "fulfilled"
+              ? s.value
+              : { deviceId: "", success: false as const, error: String(s.reason) },
+          );
 
-        const succeeded = results.filter((r) => r.success).length;
-        const failed = results.length - succeeded;
+          const succeeded = results.filter((r) => r.success).length;
+          const failed = results.length - succeeded;
 
-        return { total: results.length, succeeded, failed, results };
+          return { total: results.length, succeeded, failed, results };
+        })();
+        // Track the bulk promise so Sandbox.execute() can drain it before
+        // resolving, closing the await gap (Req 11.1, 11.2).
+        registerInFlight(inFlight, run);
+        return run;
       }),
     );
   }
