@@ -166,6 +166,60 @@ describe("WsServer — branch coverage", () => {
     expect(code).toBe(4003);
   }, 10000);
 
+  it("rejects with 4001 when first message is invalid JSON", async () => {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+    await waitForOpen(ws);
+    ws.send("not valid json {{{");
+    const { code, reason } = await waitForClose(ws);
+    expect(code).toBe(4001);
+    expect(reason).toBe("Invalid auth message");
+  });
+
+  it("times out after AUTH_TIMEOUT_MS when no message is sent", async () => {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+    await waitForOpen(ws);
+    // Don't send anything — server should close after 5s timeout
+    const { code, reason } = await waitForClose(ws);
+    expect(code).toBe(4001);
+    expect(reason).toBe("Authentication timeout");
+  }, 10000);
+
+  it("authenticates successfully via first-message auth", async () => {
+    const token = generateAccessToken({
+      userId: "admin-1",
+      username: "admin",
+      role: "admin",
+      groupId: null,
+    });
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+    const collector = collectMessages(ws);
+    await waitForOpen(ws);
+    ws.send(JSON.stringify({ type: "auth", token }));
+    const msgs = await collector.waitForCount(1);
+    expect(msgs[0]).toEqual({ type: "snapshot", data: {} });
+    expect(wsServer.clientCount).toBe(1);
+    ws.close();
+  });
+
+  it("rejects first-message auth with invalid token", async () => {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+    await waitForOpen(ws);
+    ws.send(JSON.stringify({ type: "auth", token: "bad-token" }));
+    const { code, reason } = await waitForClose(ws);
+    expect(code).toBe(4001);
+    expect(reason).toBe("Invalid token");
+  });
+
+  it("cleans up auth listener when client disconnects before authenticating", async () => {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+    await waitForOpen(ws);
+    // Close immediately without sending anything — tests the ws.on("close") cleanup in the auth phase
+    ws.close();
+    await waitForClose(ws);
+    // Just verify no crash; the auth timer should be cleared
+    expect(wsServer.clientCount).toBe(0);
+  });
+
   it("emits WS_CLIENT_CONNECT and WS_CLIENT_DISCONNECT events", async () => {
     const connectEvents: unknown[] = [];
     const disconnectEvents: unknown[] = [];

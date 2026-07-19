@@ -31,6 +31,7 @@ class MockWebSocket {
   onclose: (() => void) | null = null;
   onerror: (() => void) | null = null;
   close = vi.fn(() => { this.readyState = 3; });
+  send = vi.fn();
 
   constructor(url: string) {
     this.url = url;
@@ -52,7 +53,7 @@ function device(id: string): Device {
 describe("ws-client", () => {
   beforeEach(() => {
     vi.useFakeTimers();
-    authMock.token = null;
+    authMock.token = "test-token";
     MockWebSocket.instances = [];
     dsMocks.addRealtimeRecord.mockReset();
     dsMocks.removeCollection.mockReset();
@@ -67,15 +68,23 @@ describe("ws-client", () => {
     vi.useRealTimers();
   });
 
-  it("connects to WS_URL without a token by default", () => {
+  it("does not connect when no token is present", () => {
+    authMock.token = null;
+    connectWebSocket();
+    expect(MockWebSocket.instances).toHaveLength(0);
+  });
+
+  it("connects to WS_URL without a query-string token", () => {
     connectWebSocket();
     expect(latest().url).toBe("ws://test.local:3001/ws");
   });
 
-  it("appends the access token as a query param when present", () => {
-    authMock.token = "ab/cd";
+  it("sends auth as first message on open", () => {
+    const sendSpy = vi.fn();
     connectWebSocket();
-    expect(latest().url).toBe("ws://test.local:3001/ws?token=ab%2Fcd");
+    latest().send = sendSpy;
+    latest().open();
+    expect(sendSpy).toHaveBeenCalledWith(JSON.stringify({ type: "auth", token: "test-token" }));
   });
 
   it("marks the device store connected on open", () => {

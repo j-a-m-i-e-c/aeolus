@@ -15,11 +15,14 @@ export function connectWebSocket(): void {
   if (ws?.readyState === WebSocket.OPEN) return;
 
   const { accessToken } = useAuthStore.getState();
-  const url = accessToken ? `${WS_URL}?token=${encodeURIComponent(accessToken)}` : WS_URL;
+  if (!accessToken) return;
 
-  ws = new WebSocket(url);
+  // Connect without token in URL (prevents capture in reverse-proxy logs)
+  ws = new WebSocket(WS_URL);
 
   ws.onopen = () => {
+    // Send auth as first message instead of query parameter
+    ws!.send(JSON.stringify({ type: "auth", token: accessToken }));
     useDeviceStore.getState().setWsConnected(true);
   };
 

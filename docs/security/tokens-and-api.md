@@ -62,9 +62,15 @@ The authentication middleware allows these routes without a dashboard access tok
 
 ## WebSocket authentication
 
-The frontend connects with a current access token. The server verifies the token and its expiry, then closes the connection when the token expires so the client can refresh and reconnect.
+The frontend connects to the WebSocket endpoint without including the token in the URL. Instead, the client sends the access token as its first message using the format:
 
-Because the current connection flow carries the token in the WebSocket URL, reverse proxies should avoid logging query strings.
+```json
+{ "type": "auth", "token": "<access-token>" }
+```
+
+The server holds the connection in a pending-auth state for up to five seconds. If no valid auth message arrives within that window, the connection is closed with code 4001. Once authenticated, the server verifies the token and its expiry, then closes the connection when the token expires so the client can refresh and reconnect.
+
+For backward compatibility during rolling deploys, the server also accepts a `?token=` query parameter if present. This path is deprecated and will be removed once all clients use first-message auth.
 
 ## CORS and rate limits
 

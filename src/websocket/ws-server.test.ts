@@ -124,7 +124,11 @@ describe("WsServer Authentication", () => {
 
   describe("Connection Authentication", () => {
     it("should reject connection with no token (close code 4001)", async () => {
+      // Without a query-string token, the server waits for a first-message auth.
+      // Sending a non-auth message triggers immediate rejection.
       const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+      await waitForOpen(ws);
+      ws.send(JSON.stringify({ type: "not-auth" }));
       const { code, reason } = await waitForClose(ws);
       expect(code).toBe(4001);
       expect(reason).toBe("Authentication required");
