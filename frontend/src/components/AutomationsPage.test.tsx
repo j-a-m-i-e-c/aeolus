@@ -161,7 +161,7 @@ describe("AutomationsPage", () => {
     await openForm();
 
     fireEvent.click(screen.getByRole("button", { name: /Script/ }));
-    expect(screen.getByTestId("script-editor")).toBeInTheDocument();
+    expect(await screen.findByTestId("script-editor")).toBeInTheDocument();
 
     fireEvent.change(screen.getByPlaceholderText("e.g. Smart heating logic"), { target: { value: "My Script" } });
     fireEvent.change(screen.getByPlaceholderText("e.g. sensor/+/temperature"), { target: { value: "sensor/temp" } });

@@ -98,10 +98,10 @@ describe("AutomationPane — setup mode", () => {
     updatePaneConfig.mockClear();
   });
 
-  it("renders the setup form with the logic editor and a disabled Save", () => {
+  it("renders the setup form with the logic editor and a disabled Save", async () => {
     render(<AutomationPane config={{} as PaneConfig} paneId="p1" />);
     expect(screen.getByPlaceholderText("Automation name")).toBeInTheDocument();
-    expect(screen.getByTestId("script-editor")).toBeInTheDocument();
+    expect(await screen.findByTestId("script-editor")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
   });
 
@@ -123,10 +123,10 @@ describe("AutomationPane — setup mode", () => {
     );
   });
 
-  it("switches to the UI tab and toggles the snippets/docs panels", () => {
+  it("switches to the UI tab and toggles the snippets/docs panels", async () => {
     render(<AutomationPane config={{} as PaneConfig} paneId="p1" />);
     fireEvent.click(screen.getByRole("button", { name: "UI" }));
-    expect(screen.getByTestId("ui-editor")).toBeInTheDocument();
+    expect(await screen.findByTestId("ui-editor")).toBeInTheDocument();
 
     // Snippets panel is open by default; close it via its own control.
     expect(screen.getByTestId("snippet-picker")).toBeInTheDocument();
