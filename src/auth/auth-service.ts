@@ -90,12 +90,26 @@ export async function setupAdmin(
   const createdAt = Date.now();
   const db = getDatabase();
 
-  try {
+  // Atomic insert: re-check no admin exists within the same transaction to
+  // prevent the first-admin race (two concurrent setup requests both passing
+  // the initial needsSetup() check). better-sqlite3 transactions are serialised.
+  const insertIfNoAdmin = db.transaction(() => {
+    const existing = db
+      .prepare("SELECT COUNT(*) as count FROM users WHERE role = 'admin'")
+      .get() as { count: number };
+    if (existing.count > 0) {
+      throw new ConflictError("Setup already completed");
+    }
     db.prepare(
       `INSERT INTO users (id, username, password_hash, role, group_id, created_at)
        VALUES (?, ?, ?, 'admin', NULL, ?)`,
     ).run(id, username.trim(), passwordHash, createdAt);
+  });
+
+  try {
+    insertIfNoAdmin();
   } catch (err: unknown) {
+    if (err instanceof ConflictError) throw err;
     if (
       err instanceof Error &&
       err.message.includes("UNIQUE constraint failed")
