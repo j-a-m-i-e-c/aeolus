@@ -637,28 +637,36 @@ export function AutomationsPage() {
                   </div>
                 )}
 
-                {/* Completion tier selector — shown for device-targeting actions */}
+                {/* Advanced options — collapsed by default */}
                 {(form.actionType === "device_action" || form.actionType === "toggle") &&
                   form.actionTarget.trim() && (
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="text-[10px] text-[#6B7785] uppercase tracking-wider block mb-1">
-                          Completion Tier
-                        </label>
-                        <select
-                          value={form.completionTier}
-                          onChange={(e) => {
-                            setForm({ ...form, completionTier: e.target.value });
-                          }}
-                          className="w-full text-xs bg-background border border-[#2A3441] rounded px-2 py-1.5 text-[#E6EDF3] focus:outline-none focus:border-primary"
-                        >
-                          <option value="">Highest available (auto)</option>
-                          <option value="dispatch">Dispatch only</option>
-                          <option value="acknowledged">Acknowledged</option>
-                          <option value="observed">Observed</option>
-                        </select>
+                    <details className="group">
+                      <summary className="text-[10px] text-[#6B7785] uppercase tracking-wider cursor-pointer select-none hover:text-[#9AA6B2] transition-colors">
+                        ▸ Advanced options
+                      </summary>
+                      <div className="mt-3 pl-3 border-l border-[#2A3441]">
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <label className="text-[10px] text-[#6B7785] uppercase tracking-wider block mb-1">
+                              Completion Tier
+                            </label>
+                            <select
+                              value={form.completionTier}
+                              onChange={(e) => setForm({ ...form, completionTier: e.target.value })}
+                              className="w-full text-xs bg-background border border-[#2A3441] rounded px-2 py-1.5 text-[#E6EDF3] focus:outline-none focus:border-primary"
+                            >
+                              <option value="">Highest available (auto)</option>
+                              <option value="dispatch">Dispatch only</option>
+                              <option value="acknowledged">Acknowledged</option>
+                              <option value="observed">Observed</option>
+                            </select>
+                            <p className="text-[10px] text-[#6B7785] mt-1">
+                              Controls when this automation considers a command successful.
+                            </p>
+                          </div>
+                        </div>
                       </div>
-                    </div>
+                    </details>
                   )}
 
                 <div className="flex gap-2">
