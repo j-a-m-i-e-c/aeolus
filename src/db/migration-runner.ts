@@ -239,6 +239,12 @@ export function runMigrations(
     try {
       const tx = db.transaction(() => {
         m.up(db);
+        // R9.5: verify referential integrity INSIDE the transaction so FK violations
+        // prevent the migration record from being committed.
+        const violations = db.pragma("foreign_key_check") as unknown[];
+        if (Array.isArray(violations) && violations.length > 0) {
+          throw new IntegrityError(m.id, violations);
+        }
         db.prepare("INSERT INTO schema_migrations (id, name, applied_at) VALUES (?, ?, ?)").run(
           m.id,
           m.name,
@@ -249,15 +255,10 @@ export function runMigrations(
     } catch (err) {
       db.pragma("foreign_keys = ON"); // R9.3: restore on rollback
       logger.error({ id: m.id, error: (err as Error).message }, "Migration failed; halting");
+      if (err instanceof IntegrityError) throw err;
       throw new MigrationError(m.id, err);
     }
     db.pragma("foreign_keys = ON"); // R9.2: restore after commit
-
-    // R9.5: verify referential integrity after each migration
-    const violations = db.pragma("foreign_key_check") as unknown[];
-    if (Array.isArray(violations) && violations.length > 0) {
-      throw new IntegrityError(m.id, violations);
-    }
 
     applied.push(m.id);
     logger.info({ id: m.id, name: m.name }, "Migration applied");

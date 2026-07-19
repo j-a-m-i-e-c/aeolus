@@ -248,15 +248,17 @@ export function getDatabase(): DatabaseType {
   const dir = path.dirname(config.dbPath);
   fs.mkdirSync(dir, { recursive: true });
 
-  db = new Database(config.dbPath);
+  const instance = new Database(config.dbPath);
 
   // Enable WAL mode for better concurrent read performance
-  db.pragma("journal_mode = WAL");
-  db.pragma("foreign_keys = ON");
+  instance.pragma("journal_mode = WAL");
+  instance.pragma("foreign_keys = ON");
 
-  // Apply versioned migrations (replaces ad-hoc initSchema)
-  runMigrations(db, migrations, { dbPath: config.dbPath });
+  // Apply versioned migrations. If any fails, the instance is NOT assigned to
+  // the module singleton — no half-migrated database is exposed to the app.
+  runMigrations(instance, migrations, { dbPath: config.dbPath });
 
+  db = instance;
   logger.info({ dbPath: config.dbPath }, "Database initialized (migrations applied, WAL mode)");
   return db;
 }
