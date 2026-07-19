@@ -466,3 +466,122 @@ describe("Property 5: An invalid script tier fails validation without dispatchin
     expect(spy.calls[0].requiredTier).toBeUndefined(); // Req 5.3
   });
 });
+
+
+// ─── Task 15.4: Example tests for planAutomationBody and shouldStopAfter ─────
+// Validates: Requirements 11.2, 11.5, 11.6
+
+import { planAutomationBody, shouldStopAfter } from "./sandbox.js";
+
+describe("planAutomationBody — example tests", () => {
+  it("with all-success outcomes includes all indices and aggregateSuccess is true", () => {
+    const outcomes = [
+      { success: true },
+      { success: true },
+      { success: true },
+      { success: true },
+      { success: true },
+    ];
+    const plan = planAutomationBody(outcomes, false);
+    expect(plan.invokedIndices).toEqual([0, 1, 2, 3, 4]);
+    expect(plan.aggregateSuccess).toBe(true);
+  });
+
+  it("with a failure at index 2 of 5 stops at index 2 when continueOnFailure=false", () => {
+    const outcomes = [
+      { success: true },
+      { success: true },
+      { success: false },
+      { success: true },
+      { success: true },
+    ];
+    const plan = planAutomationBody(outcomes, false);
+    expect(plan.invokedIndices).toEqual([0, 1, 2]);
+    expect(plan.aggregateSuccess).toBe(false);
+  });
+
+  it("with a failure at index 2 of 5 includes all 5 when continueOnFailure=true and aggregateSuccess is false", () => {
+    const outcomes = [
+      { success: true },
+      { success: true },
+      { success: false },
+      { success: true },
+      { success: true },
+    ];
+    const plan = planAutomationBody(outcomes, true);
+    expect(plan.invokedIndices).toEqual([0, 1, 2, 3, 4]);
+    expect(plan.aggregateSuccess).toBe(false);
+  });
+
+  it("with empty outcomes returns empty invokedIndices and aggregateSuccess=true", () => {
+    const plan = planAutomationBody([], false);
+    expect(plan.invokedIndices).toEqual([]);
+    expect(plan.aggregateSuccess).toBe(true);
+  });
+});
+
+describe("shouldStopAfter — example tests", () => {
+  it("returns true for failed outcome with continueOnFailure=false", () => {
+    expect(shouldStopAfter({ success: false }, false)).toBe(true);
+  });
+
+  it("returns false for failed outcome with continueOnFailure=true", () => {
+    expect(shouldStopAfter({ success: false }, true)).toBe(false);
+  });
+
+  it("returns false for success outcome regardless of continueOnFailure", () => {
+    expect(shouldStopAfter({ success: true }, false)).toBe(false);
+    expect(shouldStopAfter({ success: true }, true)).toBe(false);
+  });
+});
+
+
+// ─── Property 16: Fail-fast action ordering ──────────────────────────────────
+
+// Feature: verified-command-execution, Property 16: Fail-fast action ordering
+describe("Property 16: Fail-fast action ordering", () => {
+  it("runner invokes actions in order and respects fail-fast / continueOnFailure semantics", () => {
+    fc.assert(
+      fc.property(
+        fc.array(fc.record({ success: fc.boolean() }), { minLength: 1 }),
+        fc.boolean(),
+        (outcomes, continueOnFailure) => {
+          const plan = planAutomationBody(outcomes, continueOnFailure);
+
+          // invokedIndices are sequential starting from 0
+          for (let i = 0; i < plan.invokedIndices.length; i++) {
+            expect(plan.invokedIndices[i]).toBe(i);
+          }
+
+          const firstFailureIndex = outcomes.findIndex((o) => !o.success);
+
+          if (!continueOnFailure) {
+            // When continueOnFailure=false: if any outcome is false, no index
+            // after the first failure is included; the last invokedIndex is the
+            // index of the first failure.
+            if (firstFailureIndex !== -1) {
+              expect(plan.invokedIndices[plan.invokedIndices.length - 1]).toBe(firstFailureIndex);
+              expect(plan.invokedIndices.length).toBe(firstFailureIndex + 1);
+            } else {
+              // All succeeded — all indices invoked
+              expect(plan.invokedIndices.length).toBe(outcomes.length);
+            }
+          } else {
+            // When continueOnFailure=true: invokedIndices covers ALL indices (0..length-1)
+            expect(plan.invokedIndices.length).toBe(outcomes.length);
+            for (let i = 0; i < outcomes.length; i++) {
+              expect(plan.invokedIndices[i]).toBe(i);
+            }
+          }
+
+          // aggregateSuccess is true only when all invoked outcomes have success=true
+          const allInvokedSucceeded = plan.invokedIndices.every(
+            (idx) => outcomes[idx].success,
+          );
+          expect(plan.aggregateSuccess).toBe(allInvokedSucceeded);
+        },
+      ),
+      { numRuns: 200 },
+    );
+  });
+});
