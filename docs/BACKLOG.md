@@ -31,18 +31,18 @@ and when to use each tier in `docs/MICROCONTROLLERS.md`.
 
 ## P0 — core truthful execution
 
-### Sandbox async execution 📋
-The generated `automation()` helper doesn't await device actions. Sandbox
-"success" only means the sync body didn't throw. The unified-command-boundary
-script-path truthfulness (Req 5.3) depends on this fix.
+### Sandbox async execution ✅
+The `automation()` helper now awaits each action in order with fail-fast
+semantics (stops on first failure unless `continueOnFailure` is set).
+`Sandbox.execute()` drains all in-flight action promises via a two-stage
+bounded completion wait before resolving, ensuring command results are no
+longer lost. Implemented in the verified-command-execution spec (Task 15).
 
-Scope: make the helper async/await actions, decide fail-fast vs
-continueOnFailure, resolve top-level-await vs isolated-vm compilation.
-
-### Register-before-dispatch race 🔁
-Update to `verified-command-execution`. Correct ordering: create correlationId
-→ register pending command → dispatch → cancel on dispatch failure → await.
-Prevents fast device replies being discarded as unknown.
+### Register-before-dispatch race ✅
+`CommandService.execute()` now registers the pending command BEFORE dispatch;
+`PendingCommandTracker.cancel()` settles the promise on dispatch failure.
+Fast device acks are no longer dropped. Implemented in the
+verified-command-execution spec (Task 16).
 
 ### End-to-end ack integration test 📋
 The machinery is wired and the docs exist, but no integration test proves the

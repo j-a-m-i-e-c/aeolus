@@ -5,8 +5,8 @@ Aeolus uses several test layers because no single style catches the full range o
 ## Test tools
 
 - **Vitest** for backend and frontend tests
-- **fast-check** through `@fast-check/vitest` for property-based testing
-- **supertest** for HTTP integration tests
+- **fast-check** for property-based testing (randomised inputs proving invariants)
+- **supertest** for in-process HTTP integration tests (real Express middleware chain without a listening port)
 - **Testing Library** and jsdom for React behaviour
 - **Playwright** for browser and full-stack end-to-end tests
 
@@ -27,7 +27,7 @@ src/connectors/connector-manager.test.ts
 
 ### Backend integration tests
 
-`src/__integration__/` runs real Express routes and SQLite-backed services. Current coverage includes API routes, Data Store behaviour, metrics history and the MQTT-to-automation pipeline.
+`src/__integration__/` runs real Express routes and SQLite-backed services. Current coverage includes API routes, Data Store behaviour, metrics history, the MQTT-to-automation pipeline, and the command acknowledgement flow.
 
 ### Frontend tests
 
@@ -36,6 +36,55 @@ Frontend Vitest tests cover stores, utilities and practical component behaviour.
 ### End-to-end tests
 
 Playwright starts against the Docker Compose stack and exercises first-run setup, authentication and user-visible workflows in a real browser.
+
+## Test pyramid
+
+```text
+            ╱╲
+           ╱  ╲
+          ╱ E2E╲         Playwright, Docker Compose, real browser
+         ╱──────╲
+        ╱Integra-╲
+       ╱  tion    ╲      Real Express + SQLite + wiring, no Docker
+      ╱────────────╲
+     ╱  Property +  ╲
+    ╱     Unit       ╲   Randomised + focused module tests
+   ╱──────────────────╲
+```
+
+Each layer catches different classes of problems. Move up only when the
+lower layers cannot exercise the boundary (e.g. WebSocket delivery needs a
+browser; auth cookie rotation needs real HTTP).
+
+## What is tested where
+
+| Boundary / concern | Unit | Property | Integration | E2E |
+|---|:---:|:---:|:---:|:---:|
+| Sandbox error classification | ✓ | ✓ | | |
+| Command lifecycle transitions | ✓ | ✓ | | |
+| Pending-command tracker (ack/timeout/cancel) | ✓ | ✓ | ✓ | |
+| Completion-tier resolution | ✓ | ✓ | | |
+| Command envelope (MQTT 5 correlation) | | ✓ | | |
+| Fail-fast automation body ordering | ✓ | ✓ | | |
+| Bulk action arithmetic | | ✓ | | |
+| MQTT topic parsing | ✓ | ✓ | ✓ | |
+| MQTT ack routing (correlationId resolution) | ✓ | | ✓ | |
+| MQTT ingestion → device registry | | | ✓ | |
+| MQTT → automation engine → action dispatch | | | ✓ | |
+| Command → ack → ACKNOWLEDGED / TIMED_OUT | | | ✓ | |
+| HTTP API → auth → Zod → SQLite | | | ✓ | |
+| Data Store (write/query/retention/KV) | ✓ | | ✓ | |
+| Metrics sampling and aggregation | | | ✓ | |
+| Connector lifecycle (register/restore/discovery) | ✓ | | | ✓ |
+| WebSocket real-time delivery | | | | ✓ |
+| Auth token refresh / cookie rotation | | | | ✓ |
+| First-run setup and dashboard workflows | | | | ✓ |
+| Custom UI sandbox (iframe isolation) | | | | ✓ |
+
+Blank cells mean the concern is not tested at that layer. This is
+intentional — each layer covers what it is best suited for, minimising
+expensive E2E runs while keeping confidence high at the boundaries that
+matter.
 
 ## Coverage thresholds
 

@@ -61,6 +61,8 @@ The exposed API includes:
 
 The sandbox returns an explicit result for success, runtime failure, timeout, memory failure or runtime unavailability.
 
+The `automation()` helper awaits each action callback in order. If a device action fails (including TIMED_OUT, STATE_MISMATCH, or FAILED lifecycle states), subsequent actions are not invoked — fail-fast. To override this, pass `continueOnFailure: true` in the automation config. After the script body returns, the sandbox drains every in-flight device-action promise before resolving, bounded by a 30-second completion budget separate from the 5-second CPU timeout. This ensures command results are never lost to a premature resolution.
+
 ## Logic and UI state
 
 Each script automation has private persistent state.
@@ -161,7 +163,7 @@ A command only uses the tiers supported by its path:
 The command framework lives in:
 
 ```text
-src/automations/action-executor.ts
+src/automations/command-service.ts
 src/automations/command-lifecycle.ts
 src/automations/pending-command-tracker.ts
 src/mqtt/command-envelope.ts
@@ -187,7 +189,8 @@ src/automations/automation-engine.ts
 src/automations/sandbox.ts
 src/automations/transpiler.ts
 src/automations/automation-state-store.ts
-src/automations/action-executor.ts
+src/automations/command-service.ts
+src/automations/command-result-collector.ts
 src/automations/command-lifecycle.ts
 src/automations/pending-command-tracker.ts
 frontend/src/components/ScriptEditor.tsx
