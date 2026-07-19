@@ -185,11 +185,65 @@ export class CommandService {
       }
     }
 
-    // Dispatch — REQUESTED → DISPATCHED | FAILED.
+    // Dispatch-only path (no tracker involvement) — dispatch, then DISPATCHED
+    // terminal success. This path is unchanged by the register-before-dispatch
+    // reordering (Req 12.6).
+    if (tier === "dispatch" || !this.deps.pendingCommandTracker) {
+      let dispatchResult: ActionResult | void;
+      try {
+        dispatchResult = await handler(dispatchAction, ruleId, this.deps);
+      } catch (err) {
+        const message = (err as Error).message;
+        this.deps.logger.error(
+          { ruleId, actionType: action.type, target: action.target, error: message },
+          `Action execution failed for rule ${ruleId}`,
+        );
+        this.logTerminal(ruleId, action.target, "FAILED", message);
+        return { success: false, error: message, lifecycleState: "FAILED" };
+      }
+
+      // A handler that reports an explicit dispatch failure → FAILED.
+      if (dispatchResult && dispatchResult.success === false) {
+        this.logTerminal(ruleId, action.target, "FAILED", dispatchResult.error);
+        return { ...dispatchResult, lifecycleState: "FAILED" };
+      }
+
+      const dispatchData = dispatchResult && dispatchResult.success ? dispatchResult.data : undefined;
+
+      // Dispatch-only tier → DISPATCHED is the truthful terminal success (Req 4.8, 9.3, 9.5).
+      this.logTerminal(ruleId, action.target, "DISPATCHED");
+      return {
+        success: true,
+        ...(dispatchData ? { data: dispatchData } : {}),
+        lifecycleState: "DISPATCHED",
+        ...(correlationId ? { correlationId } : {}),
+      };
+    }
+
+    // Tracked path — register BEFORE dispatch so a fast device reply arriving
+    // during the connector publish/await is matched to its command rather than
+    // dropped as an unknown correlation id (Req 12.1, 12.3). register()
+    // synchronously inserts the pending entry and arms the timeout timer.
+    const timeoutMs = confirm?.timeoutMs ?? DEFAULT_CONFIRM_TIMEOUT_MS;
+    const resolutionPromise = this.deps.pendingCommandTracker.register({
+      correlationId: correlationId as string,
+      targetDeviceId,
+      observedDeviceId,
+      requiredTier: tier === "acknowledged" ? "acknowledged" : "observed",
+      ...(confirm ? { condition: confirm.condition } : {}),
+      timeoutMs,
+      ...(ackCapability?.ackIndicatorValues ? { ackIndicatorValues: ackCapability.ackIndicatorValues } : {}),
+    });
+
+    // Dispatch — REQUESTED → DISPATCHED | FAILED. On any dispatch failure we
+    // cancel the pending command (which settles resolutionPromise) and return
+    // FAILED without awaiting it (Req 12.2). The tracker's register() promise
+    // never rejects, so the un-awaited resolved promise cannot leak.
     let dispatchResult: ActionResult | void;
     try {
       dispatchResult = await handler(dispatchAction, ruleId, this.deps);
     } catch (err) {
+      this.deps.pendingCommandTracker.cancel(correlationId as string);
       const message = (err as Error).message;
       this.deps.logger.error(
         { ruleId, actionType: action.type, target: action.target, error: message },
@@ -201,34 +255,16 @@ export class CommandService {
 
     // A handler that reports an explicit dispatch failure → FAILED.
     if (dispatchResult && dispatchResult.success === false) {
+      this.deps.pendingCommandTracker.cancel(correlationId as string);
       this.logTerminal(ruleId, action.target, "FAILED", dispatchResult.error);
       return { ...dispatchResult, lifecycleState: "FAILED" };
     }
 
     const dispatchData = dispatchResult && dispatchResult.success ? dispatchResult.data : undefined;
 
-    // Dispatch-only tier → DISPATCHED is the truthful terminal success (Req 4.8, 9.3, 9.5).
-    if (tier === "dispatch" || !this.deps.pendingCommandTracker) {
-      this.logTerminal(ruleId, action.target, "DISPATCHED");
-      return {
-        success: true,
-        ...(dispatchData ? { data: dispatchData } : {}),
-        lifecycleState: "DISPATCHED",
-        ...(correlationId ? { correlationId } : {}),
-      };
-    }
-
-    // Register with the tracker and await confirmation (ack and/or observe).
-    const timeoutMs = confirm?.timeoutMs ?? DEFAULT_CONFIRM_TIMEOUT_MS;
-    const resolution = await this.deps.pendingCommandTracker.register({
-      correlationId: correlationId as string,
-      targetDeviceId,
-      observedDeviceId,
-      requiredTier: tier === "acknowledged" ? "acknowledged" : "observed",
-      ...(confirm ? { condition: confirm.condition } : {}),
-      timeoutMs,
-      ...(ackCapability?.ackIndicatorValues ? { ackIndicatorValues: ackCapability.ackIndicatorValues } : {}),
-    });
+    // Dispatch accepted — await the terminal resolution (ack and/or observe).
+    // A fast ack may have already resolved this promise during dispatch above.
+    const resolution = await resolutionPromise;
 
     this.logTerminal(
       ruleId,

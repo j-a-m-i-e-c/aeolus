@@ -150,6 +150,26 @@ export class PendingCommandTracker {
     }
   }
 
+  /**
+   * Cancel an outstanding command because its dispatch failed to complete.
+   *
+   * Clears the timeout timer, removes the entry from the pending map, and
+   * settles the `register()` promise by RESOLVING it with a terminal FAILED
+   * resolution so any awaiter unblocks (Req 12.4, 12.5). This is a dispatch
+   * unwind, not a confirmation outcome, so `deps.onResolve` is intentionally
+   * NOT invoked — the CommandService owns the returned FAILED result and its
+   * logging. Idempotent: a second cancel (or any late routed message) finds no
+   * entry and does nothing.
+   */
+  cancel(correlationId: string): void {
+    const entry = this.pending.get(correlationId);
+    if (!entry) return;
+
+    clearTimeout(entry.timer);
+    this.pending.delete(correlationId);
+    entry.resolve({ lifecycleState: "FAILED", success: false });
+  }
+
   /** True when a correlation id is currently outstanding. */
   has(correlationId: string): boolean {
     return this.pending.has(correlationId);
