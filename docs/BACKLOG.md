@@ -60,10 +60,12 @@ State provenance: origin = device | optimistic | synthetic. Only device-origin
 satisfies physical confirmation. Prevents dangerous chained automations from
 optimistic predictions.
 
-### Execution concurrency policy 📋
-Per-rule policy (drop | queue | restart | parallel), per-device command
-serialization, global max active executions, queue depth limits, duplicate
-suppression. Reliability + resource protection on Raspberry Pi.
+### Execution concurrency policy ✅
+ExecutionGate enforces a global max active executions cap (default 10),
+per-rule FIFO queues with configurable depth (default 3), drop-on-overflow
+with warn logging, and duplicate suppression (same rule + deviceId + topic).
+Exposed on /api/health. Implemented as a pure module integrated into
+AutomationEngine.
 
 ### Migration integrity 🔁
 Update to `versioned-db-migrations`. Run FK/schema postcondition checks INSIDE
