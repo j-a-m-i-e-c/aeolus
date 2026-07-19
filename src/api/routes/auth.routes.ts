@@ -52,6 +52,7 @@ const loginRateLimiter = rateLimit({
 function setRefreshCookie(res: import("express").Response, token: string): void {
   res.cookie(REFRESH_COOKIE_NAME, token, {
     httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
     sameSite: "strict",
     path: "/api/auth",
     maxAge: REFRESH_COOKIE_MAX_AGE * 1000, // Express expects milliseconds
@@ -64,6 +65,7 @@ function setRefreshCookie(res: import("express").Response, token: string): void 
 function clearRefreshCookie(res: import("express").Response): void {
   res.clearCookie(REFRESH_COOKIE_NAME, {
     httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
     sameSite: "strict",
     path: "/api/auth",
   });
