@@ -391,6 +391,24 @@ globalThis.devices = {
 
 The host-side `__actionRef` / `__actionAllRef` receive `confirm` as an isolated-vm `Reference` to the predicate (or `undefined`). When present, the host wraps the reference in a plain function `(state) => predicateRef.applySync(undefined, [new ivm.ExternalCopy(state).copyInto()])` and passes it as `ConfirmOptions.condition` to `ActionExecutor.execute()`. When `confirm` is `undefined`, behaviour is byte-for-byte the current dispatch-only path (Req 6.1, 6.3).
 
+### J. Asynchronous script completion and fail-fast (Req 11)
+
+The `automation()` bootstrap helper becomes `async` and awaits each action callback in order. To detect a *logical* (non-throwing) command failure without depending on user callbacks returning the result, the in-isolate `devices.action` / `devices.actionAll` wrappers set an isolate-global failure flag whenever a returned `ActionResult` / `BulkActionResult` has `success === false`. After each action, `automation()` checks that flag and, unless `config.continueOnFailure === true`, stops the loop — fail-fast (Req 11.3, 11.4). When `continueOnFailure` is `true`, every action is invoked regardless of individual failures and the aggregate outcome is reported (Req 11.5).
+
+Independently of `automation()`, the **await gap** is closed generally. The host-side `__actionRef` / `__actionAllRef` register each in-flight action promise in a per-execution set, and `Sandbox.execute()` awaits `Promise.allSettled` of that set (within the collector's `AsyncLocalStorage` context) AFTER `script.run()` returns and BEFORE resolving. This guarantees every `collector.pushCurrent()` lands before `AutomationEngine` calls `collector.close()` (Req 11.2). Because isolated-vm runs classic scripts with no top-level await, this host-side drain — not script-level await — is what guarantees completion, and it also covers imperative scripts that call `devices.action()` directly without `automation()` (Req 11.1).
+
+The drain is bounded by a completion budget that is separate from the isolate CPU `EXECUTION_TIMEOUT_MS` (which still guards synchronous CPU work), so an action that never settles cannot hang `execute()` (Req 11.7). Note the current code comment in `automation-engine.ts` `executeScriptRule()` flagging this exact dependency (the "cross-spec seam" / async-await-in-scripts note); remove or update it once implemented.
+
+### K. Register-before-dispatch ordering (Req 12)
+
+`CommandService.execute()` currently computes tier + `correlationId` + envelope, then dispatches via `handler(...)`, then (for tracked tiers) calls `pendingCommandTracker.register(...)` and awaits. The corrected sequence computes tier + `correlationId` + envelope as today, then for a tracked tier calls `pendingCommandTracker.register(...)` to obtain the resolution promise (this synchronously inserts the map entry and arms the timer) BEFORE calling `handler(...)` to dispatch. If the handler throws or returns `success:false`, it calls the new `pendingCommandTracker.cancel(correlationId)` and returns a `FAILED` result (Req 12.2); otherwise it `await`s the registration promise as today.
+
+Add a new method to `PendingCommandTracker`: `cancel(correlationId: string): void` that clears the entry's timer, deletes it from the map, and resolves its promise with a terminal failure resolution (`{ lifecycleState: "FAILED", success: false }`) so any awaiter settles (Req 12.4, 12.5). This eliminates the window where a fast device reply arrives during the connector publish/await (before `register`) and is dropped as an unknown/late correlation id, after which the command wrongly `TIMED_OUT` (Req 12.1, 12.3). The dispatch-only path (no tracker involvement) is unchanged, so its terminal `ActionResult` is unaffected (Req 12.6).
+
+### L. End-to-end ack integration harness (Req 13)
+
+An integration test uses the existing mock MQTT client pattern (see `src/mqtt/*.integration.test.ts` and `src/__integration__/mqtt-automation-pipeline.integration.test.ts`, plus the `__test-helpers__`): wire a real `MqttService` with `setAckRouter(tracker)`, a `CommandService` with the tracker and a `connectorManager` stub whose `getAcknowledgementCapability` returns `{ supported: true, responseTopic: "aeolus/acks/<device>" }`. It dispatches a command, simulates the device publishing an ack to the response topic with the matching correlation id (driven through the real routing path — `resolveCorrelationId` and the ack-topic match calling `PendingCommandTracker.route`), and asserts `ACKNOWLEDGED` (Req 13.1, 13.2, 13.3). A no-reply case asserts `TIMED_OUT` using fake timers (Req 13.4).
+
 ## Data Models
 
 ### Sandbox execution result
@@ -518,6 +536,18 @@ The properties below were derived from the acceptance criteria via the prework a
 
 **Validates: Requirements 10.13, 10.14**
 
+### Property 16: Fail-fast action ordering
+
+*For any* ordered sequence of automation-body actions with individual success/failure outcomes, the runner invokes actions in order and, when `continueOnFailure` is false, invokes no action after the first failing one; when `continueOnFailure` is true, it invokes every action regardless of failures.
+
+**Validates: Requirements 11.3, 11.5**
+
+### Property 17: Pending-command cancellation is idempotent and settles the awaiter
+
+*For any* registered Pending_Command, calling `cancel()` clears its timer, removes it from the tracker, and settles its `register()` promise with a `FAILED`/`success:false` resolution; a subsequent `cancel()` or any late routed message for that correlation id causes no further transition and does not re-settle.
+
+**Validates: Requirements 12.4, 12.5**
+
 ## Error Handling
 
 - **Sandbox never rejects.** `execute()` wraps all isolate work in try/catch and returns a `SandboxExecutionResult`. The `unavailable` case is handled before any isolate is created. This preserves the existing "never propagate" contract while making the outcome inspectable (Req 1.6, 1.7).
@@ -568,3 +598,9 @@ Suggested test files:
 - `ExecutionLogEntry.actions[]` additions (`reason`, `lifecycleState`) are optional; assert existing consumers (execution-log API serialization) tolerate their presence and absence. No persisted-schema migration is needed (in-memory ring buffer).
 - `ActionResult` additions (`lifecycleState`, `correlationId`) are optional; assert current readers of `success`/`data`/`error` are unaffected.
 - `MqttService.publish()` third-argument extension is additive; assert all existing callers (which pass no options or only `messageExpiryInterval`) behave identically.
+
+### Tests for the P0 deltas (Req 11–13)
+
+- Extract the automation-body runner as a pure helper so Property 16 is testable without a live isolate. P16 goes in a new `src/automations/sandbox-automation-runner.property.test.ts` (or extend `sandbox.property.test.ts`).
+- P17 (cancellation idempotence / awaiter settlement) extends `src/automations/pending-command-tracker.property.test.ts`.
+- Req 13 is the new integration test `src/__integration__/command-ack-flow.integration.test.ts`, driving the real MqttService ack-routing path (per section L).

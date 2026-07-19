@@ -192,3 +192,41 @@ The two confirmation tiers above dispatch (acknowledged and observed) are opt-in
 12. IF no correlated Ack_Message satisfying the required Confirmation_Tier arrives before a Pending_Command's timeout elapses, THEN THE Action_Executor SHALL transition that command to the `TIMED_OUT` state.
 13. IF a correlated Ack_Message arrives after its command has reached a terminal Command_Lifecycle state, THEN THE Action_Executor SHALL ignore the message for state-transition purposes and MAY log the late arrival.
 14. WHEN more than one correlated Ack_Message satisfying the same tier arrives for one Correlation_Id, THE Action_Executor SHALL apply the corresponding lifecycle transition at most once.
+
+### Requirement 11: Truthful asynchronous script execution with fail-fast ordering
+
+**User Story:** As an automation platform operator, I want a script rule's reported outcome to reflect the completion of the device actions it dispatched, so that "success" means the awaited actions actually settled rather than merely that the synchronous script body returned.
+
+#### Acceptance Criteria
+
+1. WHEN a Script_Rule's automation body dispatches one or more device actions, THE Sandbox SHALL await the completion of every dispatched action before resolving its Sandbox_Execution_Result.
+2. WHEN the Automation_Engine records a Script_Rule execution, THE collected Command_Results SHALL include every action the automation body dispatched, with none lost to a premature collector close.
+3. IF an action dispatched by the automation body resolves with `success` equal to `false` (including the `TIMED_OUT`, `STATE_MISMATCH`, and `FAILED` lifecycle states), THEN THE Sandbox SHALL NOT invoke any subsequent action in that automation body's ordered action sequence (fail-fast).
+4. WHEN the automation body halts early because of a failed action, THE Sandbox SHALL resolve a Sandbox_Execution_Result that reflects the failure.
+5. WHERE an automation explicitly opts into continue-on-failure, THE Sandbox SHALL invoke every action in the sequence regardless of individual failures and SHALL report the aggregate outcome.
+6. THE Sandbox SHALL preserve the existing three-argument `devices.action()` / `devices.actionAll()` behavior and SHALL continue to never reject its `execute()` promise (retains Requirement 1.7).
+7. WHILE awaiting the automation body's asynchronous completion, THE Sandbox SHALL bound the wait so that an action that never settles cannot cause `execute()` to hang indefinitely.
+
+### Requirement 12: Acknowledgement registration precedes dispatch
+
+**User Story:** As an integrator whose MQTT devices reply quickly, I want a command registered for correlation before it is dispatched, so that a fast device acknowledgement is matched to its command instead of being discarded as unknown.
+
+#### Acceptance Criteria
+
+1. WHEN the CommandService executes a command that will be tracked (the target declares an Acknowledgement_Capability and/or Confirmation_Options are supplied), THE CommandService SHALL register the Pending_Command with the PendingCommandTracker BEFORE dispatching the command to the connector or MQTT layer.
+2. IF dispatch fails after a Pending_Command has been registered, THEN THE CommandService SHALL cancel that Pending_Command and return an Action_Result with `success` equal to `false` and lifecycle state `FAILED`.
+3. WHEN a correlated Ack_Message arrives after registration but before dispatch has fully completed, THE PendingCommandTracker SHALL match it to the registered Pending_Command rather than discarding it as an unknown correlation id.
+4. THE PendingCommandTracker SHALL provide a cancellation operation that clears the Pending_Command's timeout timer and removes it WITHOUT resolving it as a successful confirmation.
+5. WHEN a Pending_Command is cancelled because of a dispatch failure, THE PendingCommandTracker SHALL ensure the `register()` promise settles so that no awaiter hangs.
+6. THE reordering SHALL NOT change the terminal Action_Result for dispatch-only commands (those with no tracker involvement).
+
+### Requirement 13: End-to-end acknowledgement integration verification
+
+**User Story:** As an operator relying on acknowledged commands, I want an automated integration test proving the full command → device acknowledgement → ACKNOWLEDGED flow, so that the wired machinery is verified end-to-end rather than only in isolated unit tests.
+
+#### Acceptance Criteria
+
+1. THE test suite SHALL include an integration test that dispatches a command to a simulated MQTT device declaring an Acknowledgement_Capability and asserts the command reaches the `ACKNOWLEDGED` terminal state.
+2. THE integration test SHALL drive a simulated device that publishes an Ack_Message to the response-topic space carrying the matching Correlation_Id.
+3. THE integration test SHALL exercise the real MqttService ack-routing path (`resolveCorrelationId` plus the ack-topic match routing to `PendingCommandTracker.route`) rather than calling the tracker directly.
+4. THE integration test SHALL assert that a tracked command whose simulated device never replies resolves as `TIMED_OUT` within its configured timeout.
