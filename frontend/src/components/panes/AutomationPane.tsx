@@ -1,6 +1,6 @@
 // frontend/src/components/panes/AutomationPane.tsx — Self-contained automation pane (setup / status / editing)
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, lazy, Suspense } from "react";
 import {
   Power,
   PowerOff,
@@ -15,8 +15,9 @@ import {
   BookOpen,
 } from "lucide-react";
 import { authFetch } from "../../lib/auth-fetch";
-import { ScriptEditor, type TranspileError } from "../ScriptEditor";
-import { UiEditor } from "../UiEditor";
+import type { TranspileError } from "../ScriptEditor";
+const ScriptEditor = lazy(() => import("../ScriptEditor").then(m => ({ default: m.ScriptEditor })));
+const UiEditor = lazy(() => import("../UiEditor").then(m => ({ default: m.UiEditor })));
 import { FlowDiagram } from "../FlowDiagram";
 import { ActivityFeed } from "../ActivityFeed";
 import { SnippetPicker } from "../SnippetPicker";
@@ -622,6 +623,7 @@ export function AutomationPane({ config, paneId }: Props) {
         {/* Editor + state keys bar */}
         <div className="flex-1 min-w-0 flex flex-col">
           <div className="flex-1 min-h-0">
+            <Suspense fallback={<div className="flex items-center justify-center h-64 text-neutral-500">Loading editor...</div>}>
             {editingTab === "logic" ? (
               <ScriptEditor
                 initialValue={scriptSource}
@@ -638,6 +640,7 @@ export function AutomationPane({ config, paneId }: Props) {
                 onEditorReady={(api) => { uiEditorApiRef.current = api; }}
               />
             )}
+            </Suspense>
           </div>
 
           {/* Live state keys — shown in UI tab when there's state data */}

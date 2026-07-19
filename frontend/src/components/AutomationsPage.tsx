@@ -1,6 +1,6 @@
 // frontend/src/components/AutomationsPage.tsx — Dual-mode automation rule editor
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, lazy, Suspense } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Plus,
@@ -12,7 +12,8 @@ import {
   FormInput,
   Pencil,
 } from "lucide-react";
-import { ScriptEditor, type TranspileError } from "./ScriptEditor";
+import type { TranspileError } from "./ScriptEditor";
+const ScriptEditor = lazy(() => import("./ScriptEditor").then(m => ({ default: m.ScriptEditor })));
 import { authFetch } from "../lib/auth-fetch";
 
 import { API_URL } from "../lib/env";
@@ -349,12 +350,14 @@ export function AutomationsPage() {
                   </div>
                 </div>
 
+                <Suspense fallback={<div className="flex items-center justify-center h-64 text-neutral-500">Loading editor...</div>}>
                 <ScriptEditor
                   initialValue={scriptSource || undefined}
                   onChange={(val) => setScriptSource(val)}
                   onSave={saveScript}
                   errors={transpileErrors}
                 />
+                </Suspense>
 
                 {transpileErrors.length > 0 && (
                   <div className="bg-[#EF4444]/10 border border-[#EF4444]/30 rounded-lg p-3 space-y-1">
