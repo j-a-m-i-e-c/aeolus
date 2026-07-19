@@ -1,6 +1,6 @@
 # What Is Aeolus?
 
-> A plain English introduction for grant reviewers, designers, potential employers and anyone else who wants to understand the idea without reading code. For the technical version, see [Why Aeolus?](./WHY_AEOLUS.md).
+> A plain English introduction for grant reviewers, designers and anyone else who wants to understand the idea without reading code. For the technical version, see [Why Aeolus?](./WHY_AEOLUS.md).
 
 ## In one sentence
 
