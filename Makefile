@@ -10,7 +10,9 @@ endif
 # ─── Production (Pi) ──────────────────────────────────────────────────────────
 
 deploy: ## Pull latest, rebuild, and deploy (run on Pi)
-	git pull && docker compose down && docker compose up -d --build && docker builder prune -f && docker image prune -f
+	git pull && \
+	BUILD_COMMIT=$$(git rev-parse --short HEAD) BUILD_DATE=$$(git log -1 --format=%cI HEAD) \
+	docker compose down && docker compose up -d --build && docker builder prune -f && docker image prune -f
 
 up: ## Start all services
 	docker compose up -d

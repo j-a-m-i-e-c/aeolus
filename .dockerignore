@@ -1,0 +1,14 @@
+node_modules
+.git
+dist
+data
+*.db
+.env
+.husky
+.kiro
+e2e
+docs
+*.md
+!README.md
+frontend/node_modules
+frontend/dist

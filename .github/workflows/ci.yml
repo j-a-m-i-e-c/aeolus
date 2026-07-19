@@ -77,7 +77,11 @@ jobs:
           fetch-depth: 0
 
       - name: Build backend image
-        run: docker build -t aeolus-backend:${{ github.sha }} .
+        run: |
+          docker build \
+            --build-arg BUILD_COMMIT=$(git rev-parse --short HEAD) \
+            --build-arg BUILD_DATE=$(git log -1 --format=%cI HEAD) \
+            -t aeolus-backend:${{ github.sha }} .
 
       - name: Build frontend image
         run: docker build -t aeolus-frontend:${{ github.sha }} ./frontend

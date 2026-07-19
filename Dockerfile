@@ -1,29 +1,43 @@
-FROM node:22-slim AS builder
+FROM node:22.16-slim AS builder
 WORKDIR /app
-RUN apt-get update && apt-get install -y python3 make g++ git && rm -rf /var/lib/apt/lists/*
-COPY .git ./.git
-RUN echo "{\"commit\":\"$(git rev-parse --short HEAD)\",\"buildDate\":\"$(git log -1 --format=%cI HEAD)\"}" > /tmp/build-info.json
-COPY package.json package-lock.json* ./
-RUN npm install
+
+# Build info passed as build args instead of copying .git
+ARG BUILD_COMMIT=unknown
+ARG BUILD_DATE=unknown
+
+RUN apt-get update && apt-get install -y python3 make g++ && rm -rf /var/lib/apt/lists/*
+
+COPY package.json package-lock.json ./
+RUN npm ci
+
 COPY tsconfig.json ./
 COPY src/ ./src/
-# Build via the npm script so the Dockerfile and local `npm run build` stay in
-# lockstep (single source of truth for tsup flags).
+
+RUN echo "{\"commit\":\"${BUILD_COMMIT}\",\"buildDate\":\"${BUILD_DATE}\"}" > /tmp/build-info.json
 RUN npm run build
 
 # Production stage
-FROM node:22-slim AS production
+FROM node:22.16-slim AS production
 WORKDIR /app
+
 RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ wget curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-COPY package.json package-lock.json* ./
-RUN npm pkg delete scripts.prepare && npm install --omit=dev && npm cache clean --force
+# Non-root user
+RUN groupadd -r aeolus && useradd -r -g aeolus -d /app -s /sbin/nologin aeolus
+
+COPY package.json package-lock.json ./
+RUN npm pkg delete scripts.prepare && npm ci --omit=dev && npm cache clean --force
+
 COPY --from=builder /app/dist ./dist/
 COPY --from=builder /tmp/build-info.json ./dist/build-info.json
 COPY src/automations/sandbox-types.d.ts ./dist/automations/sandbox-types.d.ts
 COPY src/automations/ui-types.d.ts ./dist/automations/ui-types.d.ts
-RUN mkdir -p /app/data
+
+RUN mkdir -p /app/data && chown -R aeolus:aeolus /app
+
+USER aeolus
+
 EXPOSE 3001
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD wget --no-verbose --tries=1 -O /dev/null http://localhost:3001/api/health || exit 1
