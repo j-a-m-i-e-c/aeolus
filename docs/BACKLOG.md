@@ -44,10 +44,11 @@ longer lost. Implemented in the verified-command-execution spec (Task 15).
 Fast device acks are no longer dropped. Implemented in the
 verified-command-execution spec (Task 16).
 
-### End-to-end ack integration test 📋
-The machinery is wired and the docs exist, but no integration test proves the
-full flow: command → firmware ack → ACKNOWLEDGED state. Build one with a
-simulated MQTT device that publishes the ack response.
+### End-to-end ack integration test ✅
+Integration test (`src/__integration__/command-ack-flow.integration.test.ts`)
+proves the full command → firmware ack → ACKNOWLEDGED flow through the real
+MqttService ack-routing path with a simulated device, plus TIMED_OUT on no
+reply. Implemented in the verified-command-execution spec (Task 17).
 
 ---
 
