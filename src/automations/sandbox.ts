@@ -242,6 +242,25 @@ export function planAutomationBody(
   return { invokedIndices, aggregateSuccess };
 }
 
+/**
+ * Private/internal network patterns that sandbox HTTP requests are blocked from
+ * reaching. Prevents SSRF against LAN services and cloud metadata endpoints.
+ *
+ * Blocked ranges: localhost, 127.x, 10.x, 172.16-31.x, 192.168.x, 169.254.x
+ * (link-local/cloud metadata), [::1], and any hostname resolving to "localhost".
+ *
+ * Exported for unit testing.
+ */
+export const BLOCKED_HOSTS = /^https?:\/\/(localhost|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|192\.168\.\d+\.\d+|169\.254\.\d+\.\d+|\[::1\]|0\.0\.0\.0)(:\d+)?(\/|$)/i;
+
+/**
+ * Returns true if the URL targets a private/internal address that sandbox
+ * scripts should not be allowed to reach. Pure helper for SSRF prevention.
+ */
+export function isBlockedUrl(url: string): boolean {
+  return BLOCKED_HOSTS.test(url);
+}
+
 /** Dependencies injected into the Sandbox. */
 export interface SandboxDeps {
   actionExecutor: CommandService;
@@ -960,7 +979,11 @@ export class Sandbox {
   /** HTTP request timeout in milliseconds. */
   private static readonly HTTP_TIMEOUT_MS = 10_000;
 
-  /** Local/private network patterns where plain HTTP is expected. */
+  /**
+   * Identifies local addresses where plain HTTP is expected (not blocked — these
+   * are warnings only for external URLs). See {@link BLOCKED_HOSTS} for the SSRF
+   * blocklist.
+   */
   private static readonly LOCAL_HOSTS = /^https?:\/\/(localhost|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|192\.168\.\d+\.\d+|\[::1\])(:\d+)?(\/|$)/i;
 
   /**
@@ -988,6 +1011,10 @@ export class Sandbox {
       "__httpGetRef",
       new ivm.Reference(async function (url: string, headersJson: string) {
         try {
+          if (isBlockedUrl(url)) {
+            logger.warn({ ruleId, method: "GET", url }, "[sandbox] HTTP request blocked: private/internal network address");
+            return new ivm.ExternalCopy({ status: 0, body: "Request blocked: private/internal network address" }).copyInto();
+          }
           Sandbox.warnInsecureUrl(ruleId, "GET", url);
           const headers = JSON.parse(headersJson) as Record<string, string>;
           const controller = new AbortController();
@@ -1012,6 +1039,10 @@ export class Sandbox {
       "__httpPostRef",
       new ivm.Reference(async function (url: string, headersJson: string, body: string) {
         try {
+          if (isBlockedUrl(url)) {
+            logger.warn({ ruleId, method: "POST", url }, "[sandbox] HTTP request blocked: private/internal network address");
+            return new ivm.ExternalCopy({ status: 0, body: "Request blocked: private/internal network address" }).copyInto();
+          }
           Sandbox.warnInsecureUrl(ruleId, "POST", url);
           const headers = JSON.parse(headersJson) as Record<string, string>;
           const controller = new AbortController();
