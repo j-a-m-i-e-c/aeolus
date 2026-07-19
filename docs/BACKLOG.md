@@ -80,7 +80,7 @@ commercial multi-user; not urgent for single trusted deployment.
 ## Lower priority
 
 - ~~First-admin race: two concurrent setup requests can both create initial admins~~ ✅
-- WebSocket token in query string: may be captured in reverse-proxy/access logs
+- ~~WebSocket token in query string: may be captured in reverse-proxy/access logs~~ ✅
 - ~~Refresh cookie hardening: make production secure-cookie behavior explicit~~ ✅
 - Execution history in memory: command + automation audit history lost on restart
 - Pending commands lost on restart: cannot reconcile commands interrupted by process restart
