@@ -67,11 +67,12 @@ with warn logging, and duplicate suppression (same rule + deviceId + topic).
 Exposed on /api/health. Implemented as a pure module integrated into
 AutomationEngine.
 
-### Migration integrity 🔁
-Update to `versioned-db-migrations`. Run FK/schema postcondition checks INSIDE
-the migration transaction before the record + commit. Also: validate full
-baseline on legacy adoption, don't assign DB singleton before migration
-completes, take checkpoint before mutation.
+### Migration integrity ✅
+FK postcondition checks now run INSIDE the migration transaction (before the
+record + commit), so FK violations cause a rollback rather than a stamped-but-broken
+state. DB singleton is not assigned until migrations succeed, preventing a
+half-migrated instance from being exposed. Checkpoint-before-mutation was
+already implemented.
 
 ### RBAC resource-level 📋
 Move toward site/resource-scoped permissions (devices, automations, datasets)
@@ -85,12 +86,12 @@ commercial multi-user; not urgent for single trusted deployment.
 - ~~First-admin race: two concurrent setup requests can both create initial admins~~ ✅
 - ~~WebSocket token in query string: may be captured in reverse-proxy/access logs~~ ✅
 - ~~Refresh cookie hardening: make production secure-cookie behavior explicit~~ ✅
-- Execution history in memory: command + automation audit history lost on restart
+- ~~Execution history in memory: command + automation audit history lost on restart~~ ✅
 - Pending commands lost on restart: cannot reconcile commands interrupted by process restart
 - Prometheus cardinality: user-defined rule/collection names as labels → unbounded series
 - ~~Docker reproducibility: floating Node 22, npm install vs npm ci, copying .git, root execution~~ ✅
-- Monaco lazy-loading: ~6MB worker should load only when editor opens
-- Script HTTP SSRF: arbitrary HTTP from scripts enables access to local network services
+- ~~Monaco lazy-loading: ~6MB worker should load only when editor opens~~ ✅
+- ~~Script HTTP SSRF: arbitrary HTTP from scripts enables access to local network services~~ ✅
 - Documentation truthfulness pass: update docs to match current implementation
 
 ---
