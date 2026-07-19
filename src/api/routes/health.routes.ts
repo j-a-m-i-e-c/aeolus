@@ -20,6 +20,7 @@ export function createHealthRoutes(
       mqtt: mqttService.isConnected() ? "connected" : "disconnected",
       deviceCount: registry.size,
       ruleCount: engine.ruleCount,
+      executionGate: engine.gateStats,
       uptime: Math.floor((Date.now() - startTime) / 1000),
       timestamp: new Date().toISOString(),
     };

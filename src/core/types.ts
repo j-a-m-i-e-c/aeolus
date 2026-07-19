@@ -146,6 +146,7 @@ export interface HealthStatus {
   mqtt: "connected" | "disconnected";
   deviceCount: number;
   ruleCount: number;
+  executionGate: { activeCount: number; queueDepths: Record<string, number> };
   uptime: number;
   timestamp: string;
 }

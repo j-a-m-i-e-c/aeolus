@@ -18,6 +18,7 @@ import { assembleExecutionResult, type LogicOutcome } from "./execution-result.j
 import type { AutomationExecutionResult, CommandResult } from "./execution-types.js";
 import { RuleRegistry } from "./rule-registry.js";
 import { CronTimerManager } from "./cron-timer-manager.js";
+import { ExecutionGate, type GateConfig } from "./execution-gate.js";
 import logger from "../logger.js";
 
 /** Optional dependencies for script/form rule execution (unified-command-boundary Req 4–8). */
@@ -36,6 +37,8 @@ export interface AutomationEngineDeps {
    * explicit `executionRecorder` instead.
    */
   executionLog?: ExecutionLog;
+  /** Concurrency gate configuration. Partial — omitted fields use defaults. */
+  gateConfig?: Partial<GateConfig>;
 }
 
 /** Runtime guard: is the value a Command_Result (has a boolean `success`)? */
@@ -55,6 +58,7 @@ export class AutomationEngine {
   private executionRecorder?: ExecutionRecorder;
   private collector: CommandResultCollector;
   private cronTimerManager: CronTimerManager;
+  private gate: ExecutionGate;
 
   constructor(eventBus: EventEmitter, deps?: AutomationEngineDeps) {
     this.registry = new RuleRegistry();
@@ -73,6 +77,15 @@ export class AutomationEngine {
         logger,
       });
     }
+
+    this.gate = new ExecutionGate(deps?.gateConfig, {
+      onDrop: (ruleId, deviceId, topic) => {
+        logger.warn({ ruleId, deviceId, topic }, "Execution gate: request dropped (queue full)");
+      },
+      onSuppress: (ruleId, deviceId, topic) => {
+        logger.debug({ ruleId, deviceId, topic }, "Execution gate: request suppressed (duplicate)");
+      },
+    });
 
     this.cronTimerManager = new CronTimerManager();
     this.eventBus.on(DEVICE_STATE_CHANGE, (event: NormalizedEvent) => {
@@ -96,7 +109,15 @@ export class AutomationEngine {
           state: { ruleId: rule.id, cronExpression: rule.cronExpression, firedAt: Date.now() },
           timestamp: Date.now(),
         };
-        void this.executeRule(rule, context);
+        const result = this.gate.submit({
+          ruleId: rule.id,
+          deviceId: context.deviceId,
+          topic: context.topic,
+          execute: () => this.executeRule(rule, context),
+        });
+        if (result.status === "dropped" || result.status === "suppressed") {
+          logger.debug({ ruleId: rule.id, status: result.status }, "Execution gate: rule not admitted");
+        }
       });
       if (started) {
         logger.debug({ ruleId: rule.id, cronExpression: rule.cronExpression }, "Cron timer started for rule");
@@ -127,16 +148,53 @@ export class AutomationEngine {
    * Manually fire a rule by ID, resolving with the eventual
    * {@link AutomationExecutionResult} once the execution reaches an outcome
    * (Req 7.1). Routes script rules through the sandbox.
+   *
+   * The request still goes through the execution gate for resource protection.
+   * If the gate drops or suppresses the request, a failure result is returned
+   * immediately rather than throwing.
    */
   async fire(ruleId: string, context: EventContext): Promise<AutomationExecutionResult> {
     const rule = this.registry.getRule(ruleId);
     if (!rule) throw new Error(`Rule ${ruleId} not found`);
-    return this.executeRule(rule, context);
+
+    // Use a deferred so we can await the thunk's result regardless of whether
+    // the gate admits immediately or promotes from queue later.
+    let resolve!: (result: AutomationExecutionResult) => void;
+    const resultPromise = new Promise<AutomationExecutionResult>((r) => { resolve = r; });
+
+    const gateResult = this.gate.submit({
+      ruleId: rule.id,
+      deviceId: context.deviceId,
+      topic: context.topic,
+      execute: async () => {
+        const result = await this.executeRule(rule, context);
+        resolve(result);
+      },
+    });
+
+    if (gateResult.status === "admitted" || gateResult.status === "queued") {
+      return resultPromise;
+    }
+
+    // Dropped or suppressed — return a failure result immediately.
+    return {
+      executionId: "",
+      success: false,
+      commandResults: [],
+      failureReason: gateResult.status === "dropped"
+        ? "Execution gate: dropped (queue full)"
+        : "Execution gate: suppressed (duplicate)",
+    };
   }
 
   /** Get rule count */
   get ruleCount(): number {
     return this.registry.size;
+  }
+
+  /** Current execution gate utilization for health/metrics (Req 4.1). */
+  get gateStats() {
+    return this.gate.stats();
   }
 
   /** Stop all cron timers and clean up resources */
@@ -171,7 +229,15 @@ export class AutomationEngine {
       // Each matching rule runs as its own Automation_Execution. Executions are
       // not awaited here so concurrent rules interleave; each is correlated by
       // its own executionId (Req 6.7).
-      void this.executeRule(rule, context);
+      const result = this.gate.submit({
+        ruleId: rule.id,
+        deviceId: context.deviceId,
+        topic: context.topic,
+        execute: () => this.executeRule(rule, context),
+      });
+      if (result.status === "dropped" || result.status === "suppressed") {
+        logger.debug({ ruleId: rule.id, status: result.status }, "Execution gate: rule not admitted");
+      }
     }
   }
 
