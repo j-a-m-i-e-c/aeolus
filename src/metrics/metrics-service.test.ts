@@ -172,6 +172,89 @@ describe("MetricsService", () => {
     });
   });
 
+  describe("additional event handling", () => {
+    it("handles MQTT_MESSAGE_PUBLISHED events", async () => {
+      const service = await createFreshService();
+      service.initialize({ eventBus, getDeviceCount: () => 0, getRuleCount: () => 0 });
+
+      const { MQTT_MESSAGE_PUBLISHED } = await import("../core/event-bus.js");
+      eventBus.emit(MQTT_MESSAGE_PUBLISHED, {});
+    });
+
+    it("handles MQTT_MESSAGE_PROCESSED with empty topic prefix (unknown branch)", async () => {
+      const service = await createFreshService();
+      service.initialize({ eventBus, getDeviceCount: () => 0, getRuleCount: () => 0 });
+
+      const { MQTT_MESSAGE_PROCESSED } = await import("../core/event-bus.js");
+      // Empty string split produces [""], which is falsy-ish — but actually "" is falsy so || "unknown" fires
+      eventBus.emit(MQTT_MESSAGE_PROCESSED, { topic: "", durationMs: 2 });
+    });
+
+    it("handles AUTOMATION_RULE_REGISTERED events", async () => {
+      const service = await createFreshService();
+      service.initialize({ eventBus, getDeviceCount: () => 0, getRuleCount: () => 4 });
+
+      const { AUTOMATION_RULE_REGISTERED } = await import("../core/event-bus.js");
+      eventBus.emit(AUTOMATION_RULE_REGISTERED, { ruleId: "r1" });
+    });
+
+    it("handles AUTOMATION_RULE_UNREGISTERED events", async () => {
+      const service = await createFreshService();
+      service.initialize({ eventBus, getDeviceCount: () => 0, getRuleCount: () => 1 });
+
+      const { AUTOMATION_RULE_UNREGISTERED } = await import("../core/event-bus.js");
+      eventBus.emit(AUTOMATION_RULE_UNREGISTERED, { ruleId: "r1" });
+    });
+
+    it("handles CONNECTOR_POLL events", async () => {
+      const service = await createFreshService();
+      service.initialize({ eventBus, getDeviceCount: () => 0, getRuleCount: () => 0 });
+
+      const { CONNECTOR_POLL } = await import("../core/event-bus.js");
+      eventBus.emit(CONNECTOR_POLL, { connectorType: "zigbee", instanceId: "z1", devicesDiscovered: 3 });
+    });
+
+    it("handles CONNECTOR_ERROR events", async () => {
+      const service = await createFreshService();
+      service.initialize({ eventBus, getDeviceCount: () => 0, getRuleCount: () => 0 });
+
+      const { CONNECTOR_ERROR } = await import("../core/event-bus.js");
+      eventBus.emit(CONNECTOR_ERROR, { connectorType: "zigbee", instanceId: "z1", error: "timeout" });
+    });
+
+    it("handles WS_BROADCAST events", async () => {
+      const service = await createFreshService();
+      service.initialize({ eventBus, getDeviceCount: () => 0, getRuleCount: () => 0 });
+
+      const { WS_BROADCAST } = await import("../core/event-bus.js");
+      eventBus.emit(WS_BROADCAST, { messageType: "state-update", clientCount: 2 });
+    });
+
+    it("handles DATA_STORE_WRITE events", async () => {
+      const service = await createFreshService();
+      service.initialize({ eventBus, getDeviceCount: () => 0, getRuleCount: () => 0 });
+
+      const { DATA_STORE_WRITE } = await import("../core/event-bus.js");
+      eventBus.emit(DATA_STORE_WRITE, { collection: "devices", record: { id: "d1" } });
+    });
+
+    it("handles DATA_STORE_QUERY events", async () => {
+      const service = await createFreshService();
+      service.initialize({ eventBus, getDeviceCount: () => 0, getRuleCount: () => 0 });
+
+      const { DATA_STORE_QUERY } = await import("../core/event-bus.js");
+      eventBus.emit(DATA_STORE_QUERY, { collection: "devices", durationMs: 15 });
+    });
+
+    it("handles MQTT_CONNECTION_STATE disconnected", async () => {
+      const service = await createFreshService();
+      service.initialize({ eventBus, getDeviceCount: () => 0, getRuleCount: () => 0 });
+
+      const { MQTT_CONNECTION_STATE } = await import("../core/event-bus.js");
+      eventBus.emit(MQTT_CONNECTION_STATE, { previous: "connected", current: "disconnected" });
+    });
+  });
+
   describe("dispose", () => {
     it("removes all event listeners and clears registry", async () => {
       const service = await createFreshService();

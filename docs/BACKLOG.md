@@ -79,13 +79,13 @@ commercial multi-user; not urgent for single trusted deployment.
 
 ## Lower priority
 
-- First-admin race: two concurrent setup requests can both create initial admins
+- ~~First-admin race: two concurrent setup requests can both create initial admins~~ ✅
 - WebSocket token in query string: may be captured in reverse-proxy/access logs
-- Refresh cookie hardening: make production secure-cookie behavior explicit
+- ~~Refresh cookie hardening: make production secure-cookie behavior explicit~~ ✅
 - Execution history in memory: command + automation audit history lost on restart
 - Pending commands lost on restart: cannot reconcile commands interrupted by process restart
 - Prometheus cardinality: user-defined rule/collection names as labels → unbounded series
-- Docker reproducibility: floating Node 22, npm install vs npm ci, copying .git, root execution
+- ~~Docker reproducibility: floating Node 22, npm install vs npm ci, copying .git, root execution~~ ✅
 - Monaco lazy-loading: ~6MB worker should load only when editor opens
 - Script HTTP SSRF: arbitrary HTTP from scripts enables access to local network services
 - Documentation truthfulness pass: update docs to match current implementation
