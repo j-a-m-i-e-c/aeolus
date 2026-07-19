@@ -134,7 +134,21 @@ async function main(): Promise<void> {
   connectorManager.setRegistries(actionExecutor, conditionRegistry);
   await connectorManager.restoreFromStore();
 
-  const executionLog = new ExecutionLog();
+  const executionLog = new ExecutionLog(200, db);
+
+  // Retention timer: prune execution history entries older than 7 days, once daily
+  const executionRetentionTimer = setInterval(() => {
+    try {
+      executionLog.enforceRetention(7);
+    } catch (err) {
+      logger.error(
+        { error: err instanceof Error ? err.message : String(err) },
+        "Execution history retention enforcement failed",
+      );
+    }
+  }, 24 * 60 * 60 * 1000);
+  executionRetentionTimer.unref();
+
   const stateStore = new AutomationStateStore(db);
   stateStore.loadFromDb();
 
