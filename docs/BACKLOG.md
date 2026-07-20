@@ -1,10 +1,4 @@
-# Aeolus — Remediation Backlog
-
-Tracks findings from third-party technical reviews. The most recent review
-scored the project ~8/10 as a portfolio project and flagged the system-boundary
-authorization model as the main thing to harden before presenting Aeolus as
-multi-user/secure.
-
+# Aeolus — In Progress Backlog
 ## Threat model
 
 Aeolus targets small, local-first deployments — a household, farm, or single
@@ -106,24 +100,6 @@ Device ownership must include `connectorInstanceId`, not just the type. Add a
 lifecycle integration test: two instances, discover + operate both, disable one,
 verify the other still works and keeps its devices.
 
-### Remove the auto-loaded Docker Compose override 🟠
-`docker-compose.override.yml` (bridge networking) is auto-loaded by
-`docker compose up` and overrides the host-networking the Pi deployment needs
-for LAN discovery — yet it is present in the repo despite comments implying it
-is gitignored. Anyone cloning the repo silently runs the wrong network mode.
-
-Fix: rename to `docker-compose.desktop.yml`, document explicit
-`-f docker-compose.yml -f docker-compose.desktop.yml up`, and keep the default
-Linux/Pi deployment deterministic.
-
-### Destructive / global route authorization audit 🟠
-Some destructive endpoints (e.g. `DELETE /api/devices/:id/history`,
-`DELETE /api/devices/history/all`) lack resource/admin middleware at the route.
-Audit every endpoint against a permissions matrix: read state → read; execute
-action → interact; edit metadata → write; delete history → write/admin; delete
-all history → admin; raw MQTT → admin; manage connectors/users/groups → admin;
-read operational logs → admin.
-
 ### Frontend/backend permission alignment 🟠
 Ordinary non-admin UI device/automation calls are not consistently designed
 around supplying a tabId, so legitimate actions can 403 while hand-crafted
@@ -133,13 +109,6 @@ moving the permission boundary onto resources (see the critical item).
 ---
 
 ## 🟡 Medium — clarity & reproducibility
-
-### Pin one exact Node version everywhere 🟡
-Declarations are mixed: `package.json` `">=22 <23"`, `.nvmrc` `22`, Dockerfile
-`22.16-slim`. Some dev deps expect a later 22 patch, so clean installs can warn.
-Pin one tested version across `package.json` engines, `.nvmrc`, and the
-Dockerfile (e.g. `22.x.y`). (Dockerfile was pinned to a minor during the Docker
-reproducibility work; finish the job across all three.)
 
 ### Expressive HTTP status codes for command outcomes 🟡
 The device action route returns 200 for all outcomes (including failure,
@@ -187,4 +156,6 @@ sandbox async execution (fail-fast) · register-before-dispatch race · e2e ack
 integration test · execution concurrency policy · migration integrity ·
 Docker reproducibility · first-admin race · refresh cookie hardening ·
 WebSocket token first-message auth · script HTTP SSRF blocking ·
-Monaco lazy-loading · execution history persistence
+Monaco lazy-loading · execution history persistence ·
+Docker Compose override rename · exact Node version pin (22.20.0) ·
+destructive-route admin authorization
