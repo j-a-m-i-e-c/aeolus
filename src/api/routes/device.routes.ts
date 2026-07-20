@@ -18,7 +18,7 @@ import { config } from "../../config.js";
 import { NotFoundError } from "../middleware/error-handler.js";
 import { asyncHandler } from "../middleware/async-handler.js";
 import { validateAction } from "../middleware/validators.js";
-import { requireTabPermission } from "../../auth/auth-middleware.js";
+import { requireAdmin, requireTabPermission } from "../../auth/auth-middleware.js";
 import logger from "../../logger.js";
 
 import type { ConfirmationTier } from "../../automations/command-lifecycle.js";
@@ -125,8 +125,12 @@ export function createDeviceRoutes(
     return res.json(stateHistory.getHistory(id, limit));
   });
 
-  /** DELETE /api/devices/:id/history — clear history for a specific device */
-  router.delete("/:id/history", (req, res, next) => {
+  /**
+   * DELETE /api/devices/:id/history — clear history for a specific device.
+   * Destructive: gated behind `requireAdmin`. Finer-grained per-resource
+   * authorization will arrive with the resource-authorization rework.
+   */
+  router.delete("/:id/history", requireAdmin, (req, res, next) => {
     if (!stateHistory) {
       return res.json({ success: true, deleted: 0 });
     }
@@ -142,8 +146,8 @@ export function createDeviceRoutes(
     return res.json({ success: true, deleted });
   });
 
-  /** DELETE /api/devices/history/all — clear all device history */
-  router.delete("/history/all", (_req, res) => {
+  /** DELETE /api/devices/history/all — clear ALL device history (destructive, admin-only) */
+  router.delete("/history/all", requireAdmin, (_req, res) => {
     if (!stateHistory) {
       return res.json({ success: true, deleted: 0 });
     }
