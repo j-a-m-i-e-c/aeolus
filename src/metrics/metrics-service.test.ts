@@ -255,6 +255,84 @@ describe("MetricsService", () => {
     });
   });
 
+  describe("rule_name label cardinality bounding", () => {
+    it("bounds distinct rule_name label values to at most the cap plus the overflow bucket", async () => {
+      const service = await createFreshService();
+      const { MAX_RULE_LABEL_CARDINALITY, RULE_LABEL_OTHER } = await import("./metrics-service.js");
+      service.initialize({ eventBus, getDeviceCount: () => 0, getRuleCount: () => 0 });
+
+      const { AUTOMATION_EXECUTION_COMPLETE } = await import("../core/event-bus.js");
+
+      // Emit executions for far more distinct rule names than the cap allows.
+      const distinctNames = MAX_RULE_LABEL_CARDINALITY + 50;
+      for (let i = 0; i < distinctNames; i++) {
+        eventBus.emit(AUTOMATION_EXECUTION_COMPLETE, {
+          ruleId: `rule-${i}`,
+          ruleName: `rule-name-${i}`,
+          status: "success",
+          durationMs: 1,
+        });
+      }
+
+      const metrics = await service.getRegistry().getMetricsAsJSON();
+      const executionsMetric = metrics.find((m) => m.name === "aeolus_automations_executions_total");
+      expect(executionsMetric).toBeDefined();
+
+      const ruleLabelValues = new Set(
+        (executionsMetric!.values as Array<{ labels: Record<string, string> }>).map((v) => v.labels.rule_name),
+      );
+
+      // At most cap distinct real names + 1 overflow bucket.
+      expect(ruleLabelValues.size).toBeLessThanOrEqual(MAX_RULE_LABEL_CARDINALITY + 1);
+      // Overflow bucket must be present since we exceeded the cap.
+      expect(ruleLabelValues.has(RULE_LABEL_OTHER)).toBe(true);
+    });
+
+    it("keeps an already-seen rule name under its own label even after the cap is reached", async () => {
+      const service = await createFreshService();
+      const { MAX_RULE_LABEL_CARDINALITY } = await import("./metrics-service.js");
+      service.initialize({ eventBus, getDeviceCount: () => 0, getRuleCount: () => 0 });
+
+      const { AUTOMATION_EXECUTION_COMPLETE } = await import("../core/event-bus.js");
+
+      // Record an early, distinct rule name first.
+      const earlyName = "rule-name-0";
+      eventBus.emit(AUTOMATION_EXECUTION_COMPLETE, {
+        ruleId: "rule-0",
+        ruleName: earlyName,
+        status: "success",
+        durationMs: 1,
+      });
+
+      // Now push far past the cap with new names.
+      for (let i = 1; i < MAX_RULE_LABEL_CARDINALITY + 50; i++) {
+        eventBus.emit(AUTOMATION_EXECUTION_COMPLETE, {
+          ruleId: `rule-${i}`,
+          ruleName: `rule-name-${i}`,
+          status: "success",
+          durationMs: 1,
+        });
+      }
+
+      // Emit the early name again — it should still land under its own label.
+      eventBus.emit(AUTOMATION_EXECUTION_COMPLETE, {
+        ruleId: "rule-0",
+        ruleName: earlyName,
+        status: "success",
+        durationMs: 1,
+      });
+
+      const metrics = await service.getRegistry().getMetricsAsJSON();
+      const executionsMetric = metrics.find((m) => m.name === "aeolus_automations_executions_total");
+      const early = (executionsMetric!.values as Array<{ labels: Record<string, string>; value: number }>).find(
+        (v) => v.labels.rule_name === earlyName,
+      );
+      expect(early).toBeDefined();
+      // Two executions were recorded under the early name.
+      expect(early!.value).toBe(2);
+    });
+  });
+
   describe("dispose", () => {
     it("removes all event listeners and clears registry", async () => {
       const service = await createFreshService();

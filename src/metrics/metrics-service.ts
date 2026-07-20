@@ -41,6 +41,16 @@ export interface MetricsServiceDeps {
   getRuleCount: () => number;
 }
 
+/**
+ * Maximum number of distinct `rule_name` label values tracked before new names
+ * collapse into the overflow bucket. Bounds Prometheus series cardinality for
+ * the user-controlled rule_name label.
+ */
+export const MAX_RULE_LABEL_CARDINALITY = 100;
+
+/** Overflow sentinel used once MAX_RULE_LABEL_CARDINALITY distinct names are seen. */
+export const RULE_LABEL_OTHER = "__other__";
+
 /** Default histogram bucket configurations */
 const DEFAULT_BUCKETS = {
   mqtt: [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5],
@@ -114,6 +124,7 @@ class MetricsService {
   private config: MetricsServiceConfig;
   private listeners: Array<{ event: string; handler: (...args: unknown[]) => void }> = [];
   private processStartTime: number = Date.now();
+  private readonly seenRuleLabels = new Set<string>();
 
   // --- Counters ---
   private mqttMessagesReceived!: Counter;
@@ -328,7 +339,7 @@ class MetricsService {
 
     this.addListener(eventBus, AUTOMATION_EXECUTION_COMPLETE, (payload: unknown) => {
       const event = payload as AutomationExecutionCompletePayload;
-      this.automationExecutions.inc({ rule_name: event.ruleName, status: event.status });
+      this.automationExecutions.inc({ rule_name: this.boundRuleLabel(event.ruleName), status: event.status });
       this.automationExecutionDuration.observe(event.durationMs / 1000);
     });
 
@@ -389,6 +400,22 @@ class MetricsService {
 
     eventBus.on(event, wrappedHandler);
     this.listeners.push({ event, handler: wrappedHandler });
+  }
+
+  /**
+   * Bound the cardinality of the user-controlled rule_name label. Distinct
+   * names are used as-is until MAX_RULE_LABEL_CARDINALITY is reached; further
+   * new names collapse into RULE_LABEL_OTHER so the Prometheus series count
+   * cannot grow without bound. Already-seen names continue under their own label.
+   */
+  private boundRuleLabel(ruleName: string): string {
+    const name = ruleName && ruleName.trim().length > 0 ? ruleName : "unnamed";
+    if (this.seenRuleLabels.has(name)) return name;
+    if (this.seenRuleLabels.size < MAX_RULE_LABEL_CARDINALITY) {
+      this.seenRuleLabels.add(name);
+      return name;
+    }
+    return RULE_LABEL_OTHER;
   }
 
   /**
