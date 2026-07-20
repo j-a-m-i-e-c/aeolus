@@ -135,8 +135,6 @@ in-scope actions succeed. Blocked on the resource-authorization work above.
   device-origin satisfies physical confirmation.
 - Pending commands lost on restart — cannot reconcile commands interrupted by a
   process restart (in-memory tracker; documented limitation).
-- Prometheus cardinality — user-defined rule/collection names as labels →
-  unbounded series.
 - Documentation truthfulness pass — keep reference docs matching implementation.
 
 ---
@@ -158,4 +156,4 @@ Docker reproducibility · first-admin race · refresh cookie hardening ·
 WebSocket token first-message auth · script HTTP SSRF blocking ·
 Monaco lazy-loading · execution history persistence ·
 Docker Compose override rename · exact Node version pin (22.20.0) ·
-destructive-route admin authorization
+destructive-route admin authorization · Prometheus label cardinality bound
