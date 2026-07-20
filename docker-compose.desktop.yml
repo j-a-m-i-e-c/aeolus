@@ -1,0 +1,27 @@
+# docker-compose.desktop.yml — OPT-IN desktop/dev override (Docker Desktop).
+#
+# On Linux (CI, Raspberry Pi), network_mode: host works and exposes all ports,
+# which the Pi deployment needs for LAN discovery. That is the default and
+# deterministic path — plain `docker compose up` uses host networking.
+#
+# On Docker Desktop (Windows/Mac), host networking runs inside the VM, so
+# containers aren't reachable on localhost. This override switches to bridge
+# networking with explicit port mappings for local development and e2e testing.
+#
+# This file is NOT auto-loaded. Load it explicitly, only when you want bridge
+# networking on a desktop/dev machine:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.desktop.yml up
+#
+# It is named `docker-compose.desktop.yml` (not `docker-compose.override.yml`)
+# precisely so that cloning the repo never silently switches network modes.
+
+services:
+  backend:
+    network_mode: bridge
+    ports:
+      - "${API_PORT:-3001}:3001"
+    # Override MQTT broker URL to use the container name instead of localhost
+    environment:
+      MQTT_BROKER_URL: mqtt://mosquitto:1883
+      RATE_LIMIT_RPM: "10000"

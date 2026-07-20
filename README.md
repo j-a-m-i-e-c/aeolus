@@ -86,6 +86,18 @@ docker compose up --build
 
 Open **http://localhost:3000** and create the first administrator account.
 
+This default path uses host networking, which is what the Pi/Linux deployment needs for LAN discovery.
+
+### Desktop / dev (Docker Desktop)
+
+On Docker Desktop (Windows/macOS), host networking runs inside a VM, so the containers are not reachable on `localhost`. For local evaluation, opt in to bridge networking by loading the desktop override explicitly:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.desktop.yml up --build
+```
+
+The override is not loaded automatically, so cloning the repo never silently switches network mode away from the deterministic host-networking default.
+
 ### Explore without hardware
 
 After creating the administrator account, seed the platform with demo devices, dashboards and automations:

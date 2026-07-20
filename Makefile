@@ -1,4 +1,4 @@
-.PHONY: deploy up down restart logs logs-backend status clean dev seed reset test e2e e2e-fresh lint check verify help
+.PHONY: deploy up up-desktop down restart logs logs-backend status clean dev seed reset test e2e e2e-fresh lint check verify help
 
 # `USER` is normally set by the shell (your login name), which would leak into
 # the seed command. Ignore the environment value and default to "admin" unless
@@ -36,6 +36,9 @@ clean: ## Remove unused Docker images and build cache (does NOT touch volumes/da
 	docker builder prune -f && docker image prune -a -f
 
 # ─── Development ──────────────────────────────────────────────────────────────
+
+up-desktop: ## Start all services with the opt-in desktop/dev bridge override (Docker Desktop)
+	docker compose -f docker-compose.yml -f docker-compose.desktop.yml up -d --build
 
 dev: ## Start backend in dev mode (hot reload)
 	npm run dev

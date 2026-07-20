@@ -87,7 +87,7 @@ persistence_location /mosquitto/data/
 log_dest stdout
 ```
 
-3. Create `docker-compose.override.yml` so the broker can read the file and the backend uses its own broker credential:
+3. Create a named override file — for example `docker-compose.broker.yml` — so the broker can read the file and the backend uses its own broker credential. Use an explicitly named override (loaded with `-f`) rather than `docker-compose.override.yml`, which Compose would auto-load and apply silently:
 
 ```yaml
 services:
@@ -106,10 +106,10 @@ services:
 MQTT_BROKER_URL=mqtt://aeolus:replace-this-password@localhost:1883
 ```
 
-5. Recreate the services and inspect the logs:
+5. Recreate the services with the broker override loaded explicitly and inspect the logs:
 
 ```bash
-docker compose up -d --force-recreate
+docker compose -f docker-compose.yml -f docker-compose.broker.yml up -d --force-recreate
 docker logs aeolus-mosquitto --tail 50
 docker logs aeolus-backend --tail 50
 ```

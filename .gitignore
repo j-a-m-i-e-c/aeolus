@@ -21,3 +21,7 @@ docs/temp-chatgpt-convo
 
 # Site-specific frontend build endpoints
 frontend/.env.production.local
+
+# Docker Compose auto-override — never commit a locally-created override that
+# would silently change network mode. Use docker-compose.desktop.yml explicitly.
+docker-compose.override.yml

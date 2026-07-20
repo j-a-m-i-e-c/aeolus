@@ -15,6 +15,14 @@ Thanks for your interest in contributing to Aeolus! This guide will help you get
 4. Copy the environment file: `cp .env.example .env`
 5. Start with Docker Compose: `docker compose up -d --build`
 
+   On Docker Desktop (Windows/macOS), host networking is not reachable on `localhost`. Opt in to bridge networking by loading the desktop override explicitly:
+
+   ```bash
+   docker compose -f docker-compose.yml -f docker-compose.desktop.yml up -d --build
+   ```
+
+   The override is never auto-loaded, so the default `docker compose up` keeps the deterministic host-networking path used on the Pi/Linux deployment.
+
 The backend runs on port 3001, the frontend on port 3000, and Mosquitto on port 1883.
 
 ## Development Workflow
