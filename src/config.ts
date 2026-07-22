@@ -28,6 +28,18 @@ export interface Config {
    * acknowledgement or observation (asserted at startup).
    */
   restActionTimeoutMs: number;
+  /**
+   * Raw MQTT publish endpoint confinement (mqtt-publish-confinement spec).
+   * The reserved system prefixes are NOT configured here; they are derived at
+   * the composition root from the same ack topic filter the ingestion path
+   * consumes, so the denied namespace cannot drift from the forged-ack surface.
+   */
+  mqttPublish: {
+    /** Prefix non-admin publishes are confined to. Default "aeolus/pub/". */
+    userNamespacePrefix: string;
+    /** Maximum serialized publish payload size in bytes. Default 262144 (256 KiB). */
+    maxPayloadBytes: number;
+  };
 }
 
 export const config: Config = {
@@ -48,6 +60,10 @@ export const config: Config = {
     10,
   ),
   restActionTimeoutMs: parseInt(process.env.REST_ACTION_TIMEOUT_MS || "7000", 10),
+  mqttPublish: {
+    userNamespacePrefix: process.env.MQTT_PUBLISH_USER_NAMESPACE || "aeolus/pub/",
+    maxPayloadBytes: parseInt(process.env.MQTT_PUBLISH_MAX_BYTES || "262144", 10),
+  },
 };
 
 // Startup assertion: the REST outer timeout must never preempt a command still

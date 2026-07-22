@@ -440,6 +440,28 @@ describe("MqttService", () => {
       );
     });
 
+    it("sets the broker retain option only when requested", async () => {
+      const connectPromise = service.connect();
+      mockClient.emit("connect");
+      await connectPromise;
+
+      service.publish("test/topic", "hello", { retain: true });
+      expect(mockClient.publish).toHaveBeenLastCalledWith(
+        "test/topic",
+        "hello",
+        expect.objectContaining({ retain: true }),
+        expect.any(Function),
+      );
+
+      service.publish("test/topic", "hello");
+      expect(mockClient.publish).toHaveBeenLastCalledWith(
+        "test/topic",
+        "hello",
+        expect.objectContaining({ retain: false }),
+        expect.any(Function),
+      );
+    });
+
     it("logs error when publish callback receives error", async () => {
       const connectPromise = service.connect();
       mockClient.emit("connect");

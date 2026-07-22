@@ -81,8 +81,12 @@ async function main(): Promise<void> {
   await ensureBackendCredential();
 
   // 3. MQTT Service
+  // Single source for the acknowledgement response-topic space. The raw-publish
+  // policy derives its reserved system prefix from this same value so the denied
+  // namespace cannot drift from the forged-ack surface the ingestion path trusts.
+  const ackTopicFilter = "aeolus/acks/#";
   const mqttService = new MqttService(
-    { brokerUrl: config.mqttBrokerUrl, topics: config.mqttTopics, ackTopicFilter: "aeolus/acks/#" },
+    { brokerUrl: config.mqttBrokerUrl, topics: config.mqttTopics, ackTopicFilter },
     eventBus
   );
 
@@ -269,7 +273,13 @@ async function main(): Promise<void> {
   );
   app.use("/api/state", createStateRoutes(registry));
   app.use("/api/health", createHealthRoutes(mqttService, registry, engine, startTime));
-  app.use("/api/mqtt", createMqttRoutes(mqttService));
+  const mqttPublishPolicy = {
+    userNamespacePrefix: config.mqttPublish.userNamespacePrefix,
+    // Derive the reserved prefix from the ack filter (strip the trailing "/#").
+    reservedSystemPrefixes: [ackTopicFilter.replace(/\/#$/, "/")],
+    maxPayloadBytes: config.mqttPublish.maxPayloadBytes,
+  };
+  app.use("/api/mqtt", createMqttRoutes(mqttService, mqttPublishPolicy));
   app.use("/api/mqtt/provisioning", createProvisioningRoutes(provisioningService));
   const sandboxTypesPath = path.resolve(import.meta.dirname, "automations/sandbox-types.d.ts");
   app.use("/api/automations", createAutomationRoutes(engine, db, registry, actionExecutor, executionLog, sandboxTypesPath, requireAutomation, permissionResolver, connectorRegistry, stateStore, conditionRegistry, (deviceId) => connectorManager.getCompletionTierCapability(deviceId)));

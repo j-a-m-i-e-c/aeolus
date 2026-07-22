@@ -397,6 +397,7 @@ export class MqttService {
       messageExpiryInterval?: number;
       correlationData?: Buffer;
       responseTopic?: string;
+      retain?: boolean;
     },
   ): void {
     if (!this.client || this.connectionState !== "connected") {
@@ -411,7 +412,7 @@ export class MqttService {
     if (options?.responseTopic !== undefined) {
       properties.responseTopic = options.responseTopic;
     }
-    this.client.publish(topic, payload, { properties }, (err) => {
+    this.client.publish(topic, payload, { retain: options?.retain ?? false, properties }, (err) => {
       if (err) {
         logger.error({ topic, error: err.message }, "Failed to publish MQTT message");
       } else {
