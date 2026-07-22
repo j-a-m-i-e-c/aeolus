@@ -4,10 +4,13 @@
 import type { Request, Response, NextFunction, RequestHandler } from "express";
 import { verifyAccessToken } from "./token-service.js";
 import { hasPermission, type PermissionLevel } from "./permission-service.js";
+import type { PermissionResolver, ResourceKind } from "./permission-resolver.js";
 import {
   UnauthorizedError,
   ForbiddenError,
+  NotFoundError,
 } from "../api/middleware/error-handler.js";
+import logger from "../logger.js";
 
 // ─── Express Request Type Augmentation ───────────────────────────────────────
 
@@ -180,4 +183,101 @@ export function createSetupGuard(
     // Setup is complete — require authentication
     authenticate(req, res, next);
   };
+}
+
+// ─── Resource-Level Authorization Middleware ─────────────────────────────────
+
+/**
+ * Dependencies injected into the resource-permission middleware factories so
+ * existence checks and permission resolution share a single source of truth.
+ */
+export interface ResourceGuardDeps {
+  /** Resolves effective permission for a (user, resource) pair, server-side. */
+  resolver: PermissionResolver;
+  /** Existence predicate: `registry.getById` for devices, rule lookup for automations. */
+  exists: (resourceId: string) => boolean;
+}
+
+/**
+ * Shared control flow for the resource-permission guards. Differs between kinds
+ * only in the resource kind, the injected existence predicate, and log labels.
+ *
+ * Order of checks:
+ *  1. 401 if unauthenticated.
+ *  2. Admins proceed immediately — no existence check, no store/resolver call.
+ *  3. Resource id is read from the request PATH only (never body/query), which
+ *     structurally eliminates the caller-supplied-tab bypass.
+ *  4. 404 if the resource does not exist, before any permission evaluation.
+ *  5. 403 when the user's effective permission is below the required level
+ *     (including the fail-closed no-exposing-tabs case), else proceed.
+ */
+function createResourceGuard(
+  kind: ResourceKind,
+  level: PermissionLevel,
+  deps: ResourceGuardDeps,
+): RequestHandler {
+  return (req: Request, _res: Response, next: NextFunction): void => {
+    if (!req.user) {
+      throw new UnauthorizedError();
+    }
+
+    // Admin bypass: unconditional, store-free, and resolver-free.
+    if (req.user.role === "admin") {
+      next();
+      return;
+    }
+
+    const resourceId = req.params.id;
+    if (!resourceId || typeof resourceId !== "string") {
+      throw new NotFoundError(`${kind} not found`);
+    }
+
+    // Existence before permission (404 before 403).
+    if (!deps.exists(resourceId)) {
+      throw new NotFoundError(`${kind} not found: ${resourceId}`);
+    }
+
+    const allowed = deps.resolver.hasResourcePermission(
+      req.user.userId,
+      kind,
+      resourceId,
+      level,
+    );
+
+    if (!allowed) {
+      // Covers both insufficient permission and the fail-closed
+      // no-exposing-tabs case. Log for auditability without secrets.
+      logger.warn(
+        { userId: req.user.userId, kind, resourceId, requiredLevel: level },
+        "Resource authorization denied",
+      );
+      throw new ForbiddenError();
+    }
+
+    next();
+  };
+}
+
+/**
+ * Require at least `level` permission on the target DEVICE identified by
+ * `req.params.id`. Device exposure is resolved live by the
+ * Device_Exposure_Resolver via the injected resolver.
+ */
+export function requireDevicePermission(
+  level: PermissionLevel,
+  deps: ResourceGuardDeps,
+): RequestHandler {
+  return createResourceGuard("device", level, deps);
+}
+
+/**
+ * Require at least `level` permission on the target AUTOMATION identified by
+ * `req.params.id`. Automation exposure is resolved via the
+ * Resource_Ownership_Store through the injected resolver.
+ */
+export function requireAutomationPermission(
+  level: PermissionLevel,
+  deps: ResourceGuardDeps,
+): RequestHandler {
+  return createResourceGuard("automation", level, deps);
 }

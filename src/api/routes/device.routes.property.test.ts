@@ -86,6 +86,14 @@ function buildApp(result: ActionResult): { app: express.Express; execute: Return
       registry as unknown as DeviceRegistry,
       commandService as unknown as CommandService,
       getActionCatalog as unknown as (id: string) => CapabilityDescriptor[],
+      // Passthrough resource guard + permissive resolver: this property focuses
+      // on the Command_Result contract, not resource authorization.
+      (() => (_req: any, _res: any, next: any) => next()) as unknown as never,
+      {
+        hasResourcePermission: () => true,
+        filterByPermission: (_u: string, _k: string, ids: string[]) => ids,
+        effectivePermission: () => "write",
+      } as never,
     ),
   );
   app.use(errorHandler);

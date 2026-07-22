@@ -43,6 +43,7 @@ import { automationRulesColumns } from "./002-automation-rules-columns.js";
 import { devicesRemoveCheck } from "./003-devices-remove-check.js";
 import { automationRulesCompletionTier } from "./004-automation-rules-completion-tier.js";
 import { executionHistory } from "./005-execution-history.js";
+import { automationTabAssignments } from "./006-automation-tab-assignments.js";
 
 export const migrations: Migration[] = [
   baseline,                      // id 1
@@ -50,4 +51,5 @@ export const migrations: Migration[] = [
   devicesRemoveCheck,            // id 3
   automationRulesCompletionTier, // id 4
   executionHistory,              // id 5
+  automationTabAssignments,      // id 6
 ];

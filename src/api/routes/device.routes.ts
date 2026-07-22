@@ -9,16 +9,19 @@
 // 2.8, 3.1–3.6).
 
 import { Router } from "express";
+import type { RequestHandler } from "express";
 import type { DeviceRegistry } from "../../core/device-registry.js";
 import type { CommandService } from "../../automations/command-service.js";
 import type { CapabilityDescriptor } from "../../connectors/connector.interface.js";
 import type { StateHistory } from "../../core/state-history.js";
 import type { ActionResult } from "../../core/types.js";
 import { config } from "../../config.js";
-import { NotFoundError } from "../middleware/error-handler.js";
+import { NotFoundError, ForbiddenError } from "../middleware/error-handler.js";
 import { asyncHandler } from "../middleware/async-handler.js";
 import { validateAction } from "../middleware/validators.js";
-import { requireAdmin, requireTabPermission } from "../../auth/auth-middleware.js";
+import { requireAdmin } from "../../auth/auth-middleware.js";
+import type { PermissionLevel } from "../../auth/permission-service.js";
+import type { PermissionResolver } from "../../auth/permission-resolver.js";
 import logger from "../../logger.js";
 
 import type { ConfirmationTier } from "../../automations/command-lifecycle.js";
@@ -52,22 +55,47 @@ export function createDeviceRoutes(
   registry: DeviceRegistry,
   commandService: CommandService,
   getActionCatalog: (id: string) => CapabilityDescriptor[],
+  requireDevice: (level: PermissionLevel) => RequestHandler,
+  resolver: PermissionResolver,
   stateHistory?: StateHistory,
   getCompletionTierCapability?: (deviceId: string, observationAvailable?: boolean) => { resolved: boolean; tiers: ConfirmationTier[]; ceiling: ConfirmationTier | null },
 ): Router {
   const router = Router();
 
-  /** GET /api/devices — list all devices */
-  router.get("/", (_req, res) => {
-    res.json(registry.getAll());
+  /**
+   * GET /api/devices — list devices. Admins see all; non-admins see only
+   * devices exposed by a tab their group can reach at >= `read`, with exposure
+   * resolved live by the Device_Exposure_Resolver.
+   */
+  router.get("/", (req, res) => {
+    const all = registry.getAll();
+    if (req.user?.role === "admin") {
+      res.json(all);
+      return;
+    }
+    const userId = req.user?.userId ?? "";
+    const readable = new Set(
+      resolver.filterByPermission(userId, "device", all.map((d) => d.id), "read"),
+    );
+    res.json(all.filter((d) => readable.has(d.id)));
   });
 
-  /** GET /api/devices/:id — get single device */
+  /**
+   * GET /api/devices/:id — get single device. Existence is checked before
+   * permission (404 before 403). Non-admins require >= `read` on a tab that
+   * exposes the device.
+   */
   router.get("/:id", (req, res, next) => {
     const id = req.params.id as string;
     const device = registry.getById(id);
     if (!device) {
       return next(new NotFoundError(`Device not found: ${id}`));
+    }
+    if (
+      req.user?.role !== "admin" &&
+      !resolver.hasResourcePermission(req.user?.userId ?? "", "device", id, "read")
+    ) {
+      return next(new ForbiddenError());
     }
     return res.json(device);
   });
@@ -158,7 +186,7 @@ export function createDeviceRoutes(
   });
 
   /** POST /api/devices/:id/action — execute action on device via the CommandService */
-  router.post("/:id/action", requireTabPermission("interact"), validateAction, asyncHandler(async (req, res) => {
+  router.post("/:id/action", requireDevice("interact"), validateAction, asyncHandler(async (req, res) => {
     const id = req.params.id as string;
 
     // Route through the single physical-command boundary. Bound by an outer

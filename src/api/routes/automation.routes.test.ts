@@ -29,6 +29,15 @@ vi.mock("../../auth/auth-middleware.js", () => ({
   requireTabPermission: () => (_req: any, _res: any, next: any) => next(),
 }));
 
+// Passthrough resource guard and a permissive resolver stub — these tests focus
+// on route logic, not resource-level authorization (covered separately).
+const passthroughGuard = () => (_req: any, _res: any, next: any) => next();
+const stubResolver = {
+  hasResourcePermission: () => true,
+  filterByPermission: (_userId: string, _kind: string, ids: string[]) => ids,
+  effectivePermission: () => "write",
+} as any;
+
 // Mock transpiler to avoid real TypeScript compilation
 vi.mock("../../automations/transpiler.js", () => ({
   transpile: vi.fn((source: string) => ({ success: true, js: `compiled:${source}` })),
@@ -211,6 +220,8 @@ describe("automation.routes", () => {
         mockActionExecutor as unknown as ActionExecutor,
         mockExecutionLog as unknown as ExecutionLog,
         "", // sandboxTypesPath
+        passthroughGuard,
+        stubResolver,
         undefined, // connectorRegistry
         mockStateStore as unknown as AutomationStateStore,
         mockConditionRegistry as unknown as ConditionRegistry,
@@ -626,12 +637,14 @@ describe("automation.routes", () => {
 
   describe("GET /api/automations/:id/state", () => {
     it("should return empty object when no state exists", async () => {
+      mockDb._rows.push({ id: "rule-1", name: "Rule 1", trigger_topic: "t", enabled: 1, created_at: 1000 });
       const res = await request(app, "GET", "/api/automations/rule-1/state");
       expect(res.status).toBe(200);
       expect(res.body).toEqual({});
     });
 
     it("should return state key-value pairs for a rule", async () => {
+      mockDb._rows.push({ id: "rule-1", name: "Rule 1", trigger_topic: "t", enabled: 1, created_at: 1000 });
       mockStateStore.getAll.mockReturnValue({ counter: 5, lastRun: "2024-01-01" });
 
       const res = await request(app, "GET", "/api/automations/rule-1/state");

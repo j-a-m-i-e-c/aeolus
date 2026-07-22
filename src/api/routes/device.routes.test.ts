@@ -27,6 +27,15 @@ vi.mock("../../auth/auth-middleware.js", () => ({
   requireTabPermission: () => (_req: any, _res: any, next: any) => next(),
 }));
 
+// Passthrough resource guard and a permissive resolver stub — these tests focus
+// on device route logic, not resource-level authorization (covered elsewhere).
+const passthroughGuard = () => (_req: any, _res: any, next: any) => next();
+const stubResolver = {
+  hasResourcePermission: () => true,
+  filterByPermission: (_userId: string, _kind: string, ids: string[]) => ids,
+  effectivePermission: () => "write",
+} as any;
+
 /** Minimal HTTP helper — sends a request to an Express app and returns status + body */
 async function request(
   app: express.Express,
@@ -111,6 +120,8 @@ describe("device.routes", () => {
         mockRegistry as unknown as DeviceRegistry,
         mockCommandService as unknown as CommandService,
         mockGetActionCatalog as unknown as (id: string) => CapabilityDescriptor[],
+        passthroughGuard,
+        stubResolver,
         mockStateHistory as unknown as StateHistory,
       ),
     );
@@ -191,6 +202,8 @@ describe("device.routes", () => {
           mockRegistry as unknown as DeviceRegistry,
           mockCommandService as unknown as CommandService,
           mockGetActionCatalog as unknown as (id: string) => CapabilityDescriptor[],
+          passthroughGuard,
+          stubResolver,
           undefined,
         ),
       );
@@ -259,6 +272,8 @@ describe("device.routes", () => {
           mockRegistry as unknown as DeviceRegistry,
           mockCommandService as unknown as CommandService,
           mockGetActionCatalog as unknown as (id: string) => CapabilityDescriptor[],
+          passthroughGuard,
+          stubResolver,
           undefined,
         ),
       );
@@ -297,6 +312,8 @@ describe("device.routes", () => {
           mockRegistry as unknown as DeviceRegistry,
           mockCommandService as unknown as CommandService,
           mockGetActionCatalog as unknown as (id: string) => CapabilityDescriptor[],
+          passthroughGuard,
+          stubResolver,
           undefined,
         ),
       );
@@ -335,6 +352,8 @@ describe("device.routes", () => {
           mockRegistry as unknown as DeviceRegistry,
           mockCommandService as unknown as CommandService,
           mockGetActionCatalog as unknown as (id: string) => CapabilityDescriptor[],
+          passthroughGuard,
+          stubResolver,
           mockStateHistory as unknown as StateHistory,
           mockGetTierCap,
         ),
@@ -360,6 +379,8 @@ describe("device.routes", () => {
           mockRegistry as unknown as DeviceRegistry,
           mockCommandService as unknown as CommandService,
           mockGetActionCatalog as unknown as (id: string) => CapabilityDescriptor[],
+          passthroughGuard,
+          stubResolver,
           mockStateHistory as unknown as StateHistory,
           mockGetTierCap,
         ),

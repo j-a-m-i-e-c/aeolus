@@ -176,6 +176,20 @@ export function initSchema(database: DatabaseType): void {
     );
   `);
 
+  // Resource-level authorization: server-side automation→tab ownership.
+  // Mirrors migration 006 so legacy/test databases built via initSchema have it.
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS automation_tab_assignments (
+      automation_id TEXT NOT NULL REFERENCES automation_rules(id) ON DELETE CASCADE,
+      tab_id        TEXT NOT NULL REFERENCES tabs(id)             ON DELETE CASCADE,
+      PRIMARY KEY (automation_id, tab_id)
+    );
+  `);
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS idx_automation_tab_assignments_tab
+    ON automation_tab_assignments(tab_id);
+  `);
+
   migrateRemoveTypeCheck(database);
 }
 

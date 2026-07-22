@@ -6,6 +6,7 @@ import { BadRequestError } from "../middleware/error-handler.js";
 import { asyncHandler } from "../middleware/async-handler.js";
 import { requireAdmin } from "../../auth/auth-middleware.js";
 import { safeJsonParse } from "../../core/safe-json.js";
+import { extractAutomationAssignments, type PaneRef } from "../../auth/pane-reference-extractor.js";
 import logger from "../../logger.js";
 
 interface TabRow {
@@ -91,6 +92,34 @@ export function createLayoutRoutes(db: DatabaseType): Router {
       );
       for (const pane of panesData) {
         insertPane.run(pane.id, pane.tabId, pane.paneType, JSON.stringify(pane.config ?? {}), pane.x, pane.y, pane.w, pane.h, pane.createdAt);
+      }
+
+      // Reconcile automation→tab ownership to match the new layout, in the same
+      // transaction so a partial failure rolls back both. Because PUT /api/layout
+      // replaces the entire layout, the desired set derived from the new panes
+      // is authoritative: clear all assignments and rebuild from the new panes'
+      // explicit `config.ruleId` references (dropping references to automations
+      // that no longer exist). No device assignment work — device exposure is
+      // computed live and needs no maintenance.
+      db.prepare("DELETE FROM automation_tab_assignments").run();
+
+      const existingAutomationIds = new Set(
+        (db.prepare("SELECT id FROM automation_rules").all() as { id: string }[]).map((r) => r.id),
+      );
+      const paneRefs: PaneRef[] = panesData.map((pane) => ({
+        tabId: pane.tabId,
+        paneType: pane.paneType,
+        config: (pane.config ?? {}) as Record<string, unknown>,
+      }));
+      const desiredByTab = extractAutomationAssignments(paneRefs, existingAutomationIds);
+
+      const insertAssignment = db.prepare(
+        "INSERT OR IGNORE INTO automation_tab_assignments (automation_id, tab_id) VALUES (?, ?)",
+      );
+      for (const [tabId, automationIds] of desiredByTab) {
+        for (const automationId of automationIds) {
+          insertAssignment.run(automationId, tabId);
+        }
       }
     });
 

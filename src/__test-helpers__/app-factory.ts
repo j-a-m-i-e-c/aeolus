@@ -16,6 +16,12 @@ import { createAutomationRoutes } from "../api/routes/automation.routes.js";
 import { createDataStoreRoutes } from "../api/routes/data-store.routes.js";
 import { createLayoutRoutes } from "../api/routes/layout.routes.js";
 import { createSystemRoutes } from "../api/routes/system.routes.js";
+import { automationExists } from "../api/routes/automation.routes.js";
+import { createResourceOwnershipStore } from "../auth/resource-ownership-store.js";
+import { createDeviceExposureResolver } from "../auth/device-exposure-resolver.js";
+import { createPermissionResolver } from "../auth/permission-resolver.js";
+import { requireDevicePermission, requireAutomationPermission } from "../auth/auth-middleware.js";
+import type { PermissionLevel } from "../auth/permission-service.js";
 import { DeviceRegistry } from "../core/device-registry.js";
 import { AutomationEngine } from "../automations/automation-engine.js";
 import { CommandService, handlePublish, handleToggle, handleDeviceAction, handleLog, handleDelay, handleWebhook, type CommandServiceDeps } from "../automations/command-service.js";
@@ -95,10 +101,27 @@ export function createTestApp(
   const stubMqttService = createStubMqttService();
   const startTime = Date.now();
 
+  // ─── Resource-level authorization ──────────────────────────────────────────
+  // Constructed against the injected test `db` so authorization reads the same
+  // database as the rest of the app.
+  const ownershipStore = createResourceOwnershipStore(db);
+  const deviceExposureResolver = createDeviceExposureResolver(registry, db);
+  const permissionResolver = createPermissionResolver(ownershipStore, deviceExposureResolver, db);
+  const requireDevice = (level: PermissionLevel) =>
+    requireDevicePermission(level, {
+      resolver: permissionResolver,
+      exists: (id) => registry.getById(id) !== undefined,
+    });
+  const requireAutomation = (level: PermissionLevel) =>
+    requireAutomationPermission(level, {
+      resolver: permissionResolver,
+      exists: (id) => automationExists(db, id),
+    });
+
   // ─── Routes ──────────────────────────────────────────────────────────────
 
   app.use("/api/auth", createAuthRoutes());
-  app.use("/api/devices", createDeviceRoutes(registry, actionExecutor, () => []));
+  app.use("/api/devices", createDeviceRoutes(registry, actionExecutor, () => [], requireDevice, permissionResolver));
   app.use("/api/state", createStateRoutes(registry));
   app.use("/api/health", createHealthRoutes(stubMqttService as never, registry, engine, startTime));
   app.use("/api/automations", createAutomationRoutes(
@@ -108,6 +131,8 @@ export function createTestApp(
     actionExecutor,
     executionLog,
     "", // sandboxTypesPath — not needed for tests
+    requireAutomation,
+    permissionResolver,
     undefined, // connectorRegistry
     stateStore,
     conditionRegistry,

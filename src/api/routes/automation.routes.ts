@@ -17,11 +17,14 @@ import { isValidCron } from "../../automations/cron-utils.js";
 import { isConfirmationTier } from "../../automations/completion-tier.js";
 import type { ConfirmationTier } from "../../automations/command-lifecycle.js";
 import type { ConnectorRegistry } from "../../connectors/connector-registry.js";
-import { BadRequestError, NotFoundError } from "../middleware/error-handler.js";
+import { BadRequestError, NotFoundError, ForbiddenError } from "../middleware/error-handler.js";
 import { validate } from "../middleware/validate.js";
 import { asyncHandler } from "../middleware/async-handler.js";
 import { createAutomationBodySchema, updateAutomationBodySchema, automationIdParamsSchema, toggleAutomationBodySchema, automationStateBodySchema } from "../schemas/automation.schemas.js";
 import { requireTabPermission } from "../../auth/auth-middleware.js";
+import type { RequestHandler } from "express";
+import type { PermissionLevel } from "../../auth/permission-service.js";
+import type { PermissionResolver } from "../../auth/permission-resolver.js";
 import { eventBus, AUTOMATION_STATE_CHANGE, DEVICE_STATE_CHANGE } from "../../core/event-bus.js";
 import type { AutomationStateStore } from "../../automations/automation-state-store.js";
 import logger from "../../logger.js";
@@ -60,12 +63,22 @@ export function createAutomationRoutes(
   actionExecutor: CommandService,
   executionLog: ExecutionLog,
   sandboxTypesPath: string,
+  requireAutomation: (level: PermissionLevel) => RequestHandler,
+  resolver: PermissionResolver,
   connectorRegistry?: ConnectorRegistry,
   stateStore?: AutomationStateStore,
   conditionRegistry?: ConditionRegistry,
   getCompletionTierCapability?: (deviceId: string) => { ceiling: ConfirmationTier | null },
 ): Router {
   const router = Router();
+
+  /** True when the requesting user may read the automation without a resource check. */
+  function canReadAutomation(req: import("express").Request, id: string): boolean {
+    if (req.user?.role === "admin") {
+      return true;
+    }
+    return resolver.hasResourcePermission(req.user?.userId ?? "", "automation", id, "read");
+  }
 
   /** GET /api/automations/snippets — return the snippet catalog */
   router.get("/snippets", (req, res) => {
@@ -149,6 +162,11 @@ export function createAutomationRoutes(
       res.status(404).json({ error: "Automation rule not found" });
       return;
     }
+    // Existence checked above (404); resource read permission checked here (403).
+    if (!canReadAutomation(req, id)) {
+      res.status(403).json({ error: "Forbidden" });
+      return;
+    }
     if (!rule.compiled_ui) {
       res.status(404).json({ error: "No compiled UI module" });
       return;
@@ -159,7 +177,7 @@ export function createAutomationRoutes(
   });
 
   /** GET /api/automations — list all UI rules (form + script) */
-  router.get("/", (_req, res) => {
+  router.get("/", (req, res) => {
     // UI-created rules from DB
     const rows = db.prepare("SELECT * FROM automation_rules ORDER BY created_at DESC").all() as StoredRule[];
     const dbRules: Record<string, unknown>[] = [];
@@ -199,7 +217,21 @@ export function createAutomationRoutes(
       dbRules.push(entry);
     }
 
-    res.json(dbRules);
+    // Admins see every rule; non-admins see only rules exposed by a tab their
+    // group can reach at >= read.
+    if (req.user?.role === "admin") {
+      res.json(dbRules);
+      return;
+    }
+    const readable = new Set(
+      resolver.filterByPermission(
+        req.user?.userId ?? "",
+        "automation",
+        dbRules.map((r) => r.id as string),
+        "read",
+      ),
+    );
+    res.json(dbRules.filter((r) => readable.has(r.id as string)));
   });
 
   /** POST /api/automations — create a new UI rule (form or script) */
@@ -395,7 +427,7 @@ export function createAutomationRoutes(
   }));
 
   /** PATCH /api/automations/:id/toggle — enable/disable a UI rule */
-  router.patch("/:id/toggle", requireTabPermission("write"), validate({ body: toggleAutomationBodySchema, params: automationIdParamsSchema }), asyncHandler((req, res) => {
+  router.patch("/:id/toggle", requireAutomation("write"), validate({ body: toggleAutomationBodySchema, params: automationIdParamsSchema }), asyncHandler((req, res) => {
     const id = req.params.id as string;
     const { enabled } = req.body;
 
@@ -418,7 +450,7 @@ export function createAutomationRoutes(
   }));
 
   /** POST /api/automations/:id/fire — manually fire a specific automation rule */
-  router.post("/:id/fire", requireTabPermission("interact"), asyncHandler(async (req, res) => {
+  router.post("/:id/fire", requireAutomation("interact"), asyncHandler(async (req, res) => {
     const id = req.params.id as string;
     const rule = engine.getRule(id);
     if (!rule) {
@@ -467,14 +499,21 @@ export function createAutomationRoutes(
   }));
 
   /** GET /api/automations/:id/state — return all state key-value pairs for a rule */
-  router.get("/:id/state", (req, res) => {
+  router.get("/:id/state", (req, res, next) => {
     const id = req.params.id as string;
+    // Existence before permission (404 before 403).
+    if (!queryRuleById(db, id)) {
+      return next(new NotFoundError(`Automation rule ${id} not found`));
+    }
+    if (!canReadAutomation(req, id)) {
+      return next(new ForbiddenError());
+    }
     const state = stateStore ? stateStore.getAll(id) : {};
-    res.json(state);
+    return res.json(state);
   });
 
   /** PUT /api/automations/:id/state — upsert a key-value pair, persist + broadcast */
-  router.put("/:id/state", requireTabPermission("interact"), validate({ body: automationStateBodySchema, params: automationIdParamsSchema }), asyncHandler((req, res) => {
+  router.put("/:id/state", requireAutomation("interact"), validate({ body: automationStateBodySchema, params: automationIdParamsSchema }), asyncHandler((req, res) => {
     const id = req.params.id as string;
     const { key, value } = req.body;
     if (!key || typeof key !== "string") {
@@ -489,7 +528,7 @@ export function createAutomationRoutes(
   }));
 
   /** DELETE /api/automations/:id/state/:key — remove a single key-value pair */
-  router.delete("/:id/state/:key", requireTabPermission("interact"), asyncHandler((req, res) => {
+  router.delete("/:id/state/:key", requireAutomation("interact"), asyncHandler((req, res) => {
     const id = req.params.id as string;
     const key = req.params.key as string;
     if (stateStore) {
@@ -505,6 +544,15 @@ export function createAutomationRoutes(
 function queryRuleById(db: DatabaseType, id: string): StoredRule | null {
   const row = db.prepare("SELECT * FROM automation_rules WHERE id = ?").get(id) as StoredRule | undefined;
   return row ?? null;
+}
+
+/**
+ * Existence predicate for the automation authorization middleware. Kept in this
+ * module so the middleware's 404 check and the handlers agree on whether a rule
+ * exists.
+ */
+export function automationExists(db: DatabaseType, id: string): boolean {
+  return queryRuleById(db, id) !== null;
 }
 
 /** Build a BadRequestError that carries transpiler diagnostics in `details`. */

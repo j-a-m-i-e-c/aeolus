@@ -21,21 +21,6 @@ authorization model first, hardening against determined insiders second.
 
 ## 🔴 Critical — authorization & security boundary
 
-### Resource-level authorization (replace caller-supplied tabId) 🔴
-The permission middleware authorizes against a `tabId` taken from the request
-(`req.params.tabId || req.body?.tabId || req.query.tabId`), not against the
-target resource. A user with `interact` on any tab can supply that tab's ID
-while targeting a device/automation belonging to a different protected tab.
-Affects device actions, manual automation firing, automation state changes,
-and raw MQTT publish.
-
-Fix: stop trusting caller-supplied tabId. Add explicit resource ownership
-(`device_tab_assignments`, `automation_tab_assignments`). Introduce
-`requireDevicePermission()` / `requireAutomationPermission()` middleware that
-loads the resource server-side, resolves which tabs expose it, computes the
-user's effective permission, and rejects otherwise. (Supersedes the older
-"RBAC resource-level" backlog item.)
-
 ### WebSocket visibility fails open 🔴
 Broadcast filtering sends any event lacking a `tabId` to every authenticated
 client, so security depends on every producer decorating every sensitive
@@ -104,7 +89,8 @@ verify the other still works and keeps its devices.
 Ordinary non-admin UI device/automation calls are not consistently designed
 around supplying a tabId, so legitimate actions can 403 while hand-crafted
 requests pass with an unrelated permitted tab. Resolved as a side effect of
-moving the permission boundary onto resources (see the critical item).
+moving the permission boundary onto resources (addressed by the
+resource-level-authorization spec, now in progress).
 
 ---
 
@@ -117,14 +103,55 @@ timeout, rejection). Map: 200 success / 202 accepted-async / 409|422 rejected /
 the authoritative detail. Not a blocker, but reviewers question why timeouts
 look like successful HTTP calls.
 
+### Remove the all-devices grid pane from the operator UI 🟡
+The `device-grid` ("all devices") pane dumps every device onto one surface.
+Operators should get purpose-built views, not a raw device list, and the
+resource-authorization work already treats `device-grid` as non-exposing for
+non-admins (only `hue-control` / `kasa-control` / `sensor-panel` grant access).
+Remove the pane from the product: delete the component, drop it from the pane
+registry and config panel, and add a layout migration so existing layouts
+containing a `device-grid` pane don't render a broken/empty tile. Backend
+authorization does not depend on this (device-grid is already non-exposing), so
+this is UI cleanup + defense-in-depth, not a security fix.
+
+### Remove the dead "Room Filter" pane config 🟡
+`PaneConfigPanel.tsx` offers a "Room Filter" input that writes `config.room` for
+`device-grid` / `sensor-panel` panes, but the backend `Device` model has no room
+attribute, so the filter matches nothing. "Room" also doesn't fit the platform's
+general (non-home-automation) positioning. Remove the Room Filter input and the
+`config.room` field (and any references) so users can't configure a filter that
+does nothing.
+
 ---
 
+## 📋 Planned — authoring safety & portability
+
+### Automation deletion is unrecoverable 📋
+Deleting an automation is an immediate hard delete (`DELETE FROM automation_rules`)
+that also wipes its stored state and unregisters it from the engine. There is no
+confirmation, soft-delete, or undo, so a single misclick permanently destroys
+hand-written script and paired UI. Add a safety margin: soft-delete or
+archive-on-delete so a removed automation can be restored; a confirmation before
+destroying authored logic/UI; and retention of the rule's state until deletion is
+finalised.
+
+### Export and import individual automations 📋
+Allow a single automation — its logic, paired UI, trigger configuration and
+metadata — to be exported to a portable file and imported into another
+installation or kept as an off-system backup. This is the lightweight,
+per-automation companion to the roadmap's "Reusable Aeolus applications" (which
+packages a curated Logic/UI pair for distribution), and it gives authored work a
+durable home outside the database, complementing the deletion-recoverability item
+above.
+
+---
 ## Testing
 
 ### Adversarial end-to-end tests with a real non-admin user 📋
 Prove the resource-authorization model holds: a non-admin attempts to act on a
 device/automation outside their tab scope and is rejected (403); legitimate
-in-scope actions succeed. Blocked on the resource-authorization work above.
+in-scope actions succeed. Blocked on the resource-level-authorization spec (now
+in progress).
 
 ---
 

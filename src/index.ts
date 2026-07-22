@@ -31,8 +31,13 @@ import { createDeviceRoutes } from "./api/routes/device.routes.js";
 import { createStateRoutes } from "./api/routes/state.routes.js";
 import { createHealthRoutes } from "./api/routes/health.routes.js";
 import { createMqttRoutes } from "./api/routes/mqtt.routes.js";
-import { createAutomationRoutes, loadUiRules } from "./api/routes/automation.routes.js";
+import { createAutomationRoutes, loadUiRules, automationExists } from "./api/routes/automation.routes.js";
 import { createConnectorRoutes } from "./api/routes/connector.routes.js";
+import { createResourceOwnershipStore } from "./auth/resource-ownership-store.js";
+import { createDeviceExposureResolver } from "./auth/device-exposure-resolver.js";
+import { createPermissionResolver } from "./auth/permission-resolver.js";
+import { requireDevicePermission, requireAutomationPermission } from "./auth/auth-middleware.js";
+import type { PermissionLevel } from "./auth/permission-service.js";
 
 import { requestLogger } from "./api/middleware/request-logger.js";
 import { errorHandler } from "./api/middleware/error-handler.js";
@@ -224,6 +229,25 @@ async function main(): Promise<void> {
 
   app.use(authenticate);
 
+  // Resource-level authorization wiring. A single ownership store (automations),
+  // a live device-exposure resolver, and a permission resolver that routes
+  // exposing-tab resolution by resource kind. The middleware factories are built
+  // once with the shared resolver and the appropriate server-side existence
+  // predicate so route files stay declarative.
+  const ownershipStore = createResourceOwnershipStore();
+  const deviceExposureResolver = createDeviceExposureResolver(registry);
+  const permissionResolver = createPermissionResolver(ownershipStore, deviceExposureResolver);
+  const requireDevice = (level: PermissionLevel) =>
+    requireDevicePermission(level, {
+      resolver: permissionResolver,
+      exists: (id) => registry.getById(id) !== undefined,
+    });
+  const requireAutomation = (level: PermissionLevel) =>
+    requireAutomationPermission(level, {
+      resolver: permissionResolver,
+      exists: (id) => automationExists(db, id),
+    });
+
   app.use("/api/auth", createAuthRoutes());
   // The device-action route is a Command_Source: it routes commands through the
   // CommandService (the single physical-command boundary) and is NOT handed a
@@ -237,6 +261,8 @@ async function main(): Promise<void> {
       registry,
       actionExecutor,
       (id) => connectorManager.getActionCatalog(id),
+      requireDevice,
+      permissionResolver,
       stateHistory,
       (id, observationAvailable) => connectorManager.getCompletionTierCapability(id, observationAvailable),
     ),
@@ -246,7 +272,7 @@ async function main(): Promise<void> {
   app.use("/api/mqtt", createMqttRoutes(mqttService));
   app.use("/api/mqtt/provisioning", createProvisioningRoutes(provisioningService));
   const sandboxTypesPath = path.resolve(import.meta.dirname, "automations/sandbox-types.d.ts");
-  app.use("/api/automations", createAutomationRoutes(engine, db, registry, actionExecutor, executionLog, sandboxTypesPath, connectorRegistry, stateStore, conditionRegistry, (deviceId) => connectorManager.getCompletionTierCapability(deviceId)));
+  app.use("/api/automations", createAutomationRoutes(engine, db, registry, actionExecutor, executionLog, sandboxTypesPath, requireAutomation, permissionResolver, connectorRegistry, stateStore, conditionRegistry, (deviceId) => connectorManager.getCompletionTierCapability(deviceId)));
   app.use("/api/connectors", createConnectorRoutes(connectorManager, connectorRegistry));
   app.use("/api/metrics", createMetricsSummaryRoute(metricsService));
   app.use("/api/system", createSystemRoutes());

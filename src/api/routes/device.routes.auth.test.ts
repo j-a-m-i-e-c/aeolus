@@ -120,6 +120,14 @@ describe("device.routes — destructive history routes require admin", () => {
         mockRegistry as unknown as DeviceRegistry,
         mockCommandService as unknown as CommandService,
         mockGetActionCatalog as unknown as (id: string) => CapabilityDescriptor[],
+        // Destructive history routes use requireAdmin, so a passthrough resource
+        // guard and a permissive resolver stub suffice here.
+        (() => (_req: any, _res: any, next: any) => next()) as unknown as never,
+        {
+          hasResourcePermission: () => true,
+          filterByPermission: (_u: string, _k: string, ids: string[]) => ids,
+          effectivePermission: () => "write",
+        } as never,
         mockStateHistory as unknown as StateHistory,
       ),
     );

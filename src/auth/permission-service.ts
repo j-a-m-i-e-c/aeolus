@@ -25,7 +25,7 @@ interface UserRow {
  * Permission hierarchy: write > interact > read
  * Higher numeric value = more permissive.
  */
-const PERMISSION_RANK: Record<PermissionLevel, number> = {
+export const PERMISSION_RANK: Record<PermissionLevel, number> = {
   read: 1,
   interact: 2,
   write: 3,
