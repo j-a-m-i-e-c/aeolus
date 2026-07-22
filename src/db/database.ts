@@ -248,6 +248,25 @@ export function getDatabase(): DatabaseType {
   const dir = path.dirname(config.dbPath);
   fs.mkdirSync(dir, { recursive: true });
 
+  // Fail fast with an actionable message if the data directory is not writable.
+  // SQLite's WAL mode (set below) must create -wal/-shm sidecar files in this
+  // directory; when the mounted volume is owned by another user the raw driver
+  // error is an opaque "SQLITE_READONLY_DIRECTORY" thrown from deep inside a
+  // pragma call. Surfacing the real cause here turns a cryptic crash loop into
+  // a clear operator instruction.
+  try {
+    fs.accessSync(dir, fs.constants.W_OK);
+  } catch {
+    const uid = typeof process.getuid === "function" ? process.getuid() : "unknown";
+    throw new Error(
+      `Data directory is not writable: "${dir}" (process uid=${uid}). ` +
+        `SQLite needs to create WAL files here, so this directory must be writable ` +
+        `by the backend user. This usually means the mounted data volume is owned ` +
+        `by a different user — fix the volume ownership and restart. ` +
+        `See docs/production-deployment.md (data volume ownership).`,
+    );
+  }
+
   const instance = new Database(config.dbPath);
 
   // Enable WAL mode for better concurrent read performance

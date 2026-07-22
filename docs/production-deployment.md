@@ -228,6 +228,13 @@ sudo ufw status verbose
 
 All persistent state lives in a single SQLite database (`better-sqlite3`, WAL mode) inside a Docker volume.
 
+> **Data volume ownership.** The backend runs as an unprivileged user and needs to write to the data directory (WAL mode creates `-wal`/`-shm` sidecar files there). The container entrypoint automatically fixes the volume's ownership on boot, so a fresh deployment just works. If you ever see the backend crash-loop with `SQLITE_READONLY_DIRECTORY` or a "Data directory is not writable" error (for example after restoring a backup with `sudo`, which can leave root-owned files), correct the ownership and restart:
+>
+> ```bash
+> docker compose run --rm --no-deps --user root --entrypoint sh backend -c "chown -R aeolus:aeolus /app/data"
+> docker compose restart backend
+> ```
+
 ### Locate the database
 
 Docker Compose volume names depend on the project directory or `-p` project name. Ask Docker for the mounted host path instead of assuming a fixed volume name:
@@ -431,6 +438,7 @@ The default deployment removes several high-risk host-control paths, but it shou
   This also means the current dashboard MQTT provisioning service cannot reload the Mosquitto container in the default Compose deployment. Configure MQTT manually or provide a narrower external reload mechanism.
 - **Read-only system router** — `/api/system` is GET-only (diagnostics, logs, version check). There are no shutdown, reboot, update, or prune endpoints; host control is done via SSH/Docker, not the web app.
 - **No git or Docker CLI in the production image** — the build commit is baked into `dist/build-info.json` at build time, so no runtime git is needed.
+- **Backend runs as a non-root user** — the container starts as root only long enough for the entrypoint to repair data-volume ownership, then drops to the unprivileged `aeolus` user via `gosu` before running Node. The application process never runs as root.
 - **Authentication always on** — bcrypt (cost 12) password hashing, short-lived JWTs, httpOnly refresh cookies, and login rate-limiting (5 attempts/min per IP).
 - **Sandboxed automations** — user scripts run in `isolated-vm` V8 isolates (32 MB cap, 5 s timeout, no filesystem, no module imports).
 - **LAN-only by default** — combine with the firewall rules (Section 4) and a TLS reverse proxy (Section 3) for a hardened deployment.

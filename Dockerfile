@@ -20,7 +20,7 @@ RUN npm run build
 FROM node:22.20.0-slim AS production
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ wget curl ca-certificates \
+RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ wget curl ca-certificates gosu \
     && rm -rf /var/lib/apt/lists/*
 
 # Non-root user
@@ -36,9 +36,14 @@ COPY src/automations/ui-types.d.ts ./dist/automations/ui-types.d.ts
 
 RUN mkdir -p /app/data && chown -R aeolus:aeolus /app
 
-USER aeolus
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
+# NOTE: the container starts as root so the entrypoint can repair the data
+# volume's ownership, then immediately drops to the unprivileged "aeolus" user
+# via gosu before exec'ing the app. The Node process never runs as root.
 EXPOSE 3001
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD wget --no-verbose --tries=1 -O /dev/null http://localhost:3001/api/health || exit 1
+ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["node", "--max-old-space-size=1024", "dist/index.js"]

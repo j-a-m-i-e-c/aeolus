@@ -1,0 +1,5 @@
+# Shell scripts must use LF line endings so they run correctly inside Linux
+# containers. A CRLF shebang line (e.g. "#!/bin/sh\r") makes the kernel fail to
+# find the interpreter and the container exits immediately.
+*.sh text eol=lf
+docker-entrypoint.sh text eol=lf

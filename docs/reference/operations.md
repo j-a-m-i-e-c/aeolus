@@ -33,6 +33,29 @@ Docker Compose also accepts deployment variables such as `API_PORT`, `FRONTEND_P
 
 Use `.env.example` and `docker-compose.yml` as deployment starting points. `src/config.ts` defines backend runtime defaults, while `frontend/.env.example` documents build-time browser endpoints.
 
+## Container startup and the data volume
+
+The backend image ships an entrypoint (`docker-entrypoint.sh`) that repairs the
+data directory before the application starts. The container begins as root, so
+the entrypoint can `chown` the data directory (`DB_PATH`'s parent, default
+`/app/data`) to the unprivileged `aeolus` user, then drops privileges with
+`gosu` and execs Node. The Node process itself never runs as root.
+
+This exists because the SQLite database runs in WAL mode and must create
+`-wal`/`-shm` sidecar files *in the data directory*. A named volume that was
+first created root-owned by an earlier image or run stays root-owned — Docker
+does not re-apply image ownership to an existing volume — which previously left
+the unprivileged backend unable to write and crash-looping on
+`SQLITE_READONLY_DIRECTORY`. The entrypoint self-heals that ownership on every
+boot; the chown is skipped when ownership is already correct.
+
+If the container is instead started as an explicit non-root user
+(`docker run --user …`), the entrypoint assumes the operator has arranged
+writable storage and execs directly. In that case `getDatabase()` still runs a
+writability preflight and, if the directory is not writable, fails fast with an
+actionable error naming the directory and process uid rather than an opaque
+driver error.
+
 ## MQTT provisioning deployment boundary
 
 The provisioning service needs writable access to the Mosquitto configuration and password file, plus a way to reload the broker. The default `docker-compose.yml` intentionally does not grant the backend those host/container privileges. Configure Mosquitto manually in that deployment, or provide a narrowly scoped external provisioning mechanism. See [MQTT security](../security/mqtt.md).
