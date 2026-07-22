@@ -13,26 +13,14 @@ export interface DeviceFilterPane {
 }
 
 /**
- * The allowlist of purposeful, scoped device panes. These are the ONLY pane
- * types that expose devices for authorization. Every other pane type — including
- * the `device-grid` ("all devices") pane, which is being removed from the
- * product, and any unknown or legacy pane type — is non-exposing by default.
- */
-const PURPOSEFUL_DEVICE_PANES = new Set([
-  "hue-control",
-  "kasa-control",
-  "sensor-panel",
-]);
-
-/**
  * Does this pane's device-selection filter include this device?
  *
- * This is an allowlist: it returns `true` only for the purposeful scoped device
- * panes and `false` by default for every other pane type, regardless of config.
- * Because it is default-`false`, a `device-grid` pane and any unknown or legacy
- * pane type never match a device, so they contribute no device exposure. This is
- * the device counterpart to the automation extractor, but its output is never
- * persisted — it is evaluated live against the current device inventory.
+ * This is an allowlist: only the purposeful, scoped device panes can match; every
+ * other pane type falls through to `default` and returns `false`, regardless of
+ * config. Because it is default-`false`, a `device-grid` pane and any unknown or
+ * legacy pane type never match a device, so they contribute no device exposure.
+ * This is the device counterpart to the automation extractor, but its output is
+ * never persisted — it is evaluated live against the current device inventory.
  *
  * Per-pane scope (mirrors the frontend pane components):
  * - `hue-control`  → Hue lights (`integration === "hue" && type === "light"`)
@@ -45,10 +33,6 @@ const PURPOSEFUL_DEVICE_PANES = new Set([
  * the pane's base scope).
  */
 export function matchesDeviceFilter(pane: DeviceFilterPane, device: Device): boolean {
-  if (!PURPOSEFUL_DEVICE_PANES.has(pane.paneType)) {
-    return false;
-  }
-
   let matches: boolean;
   switch (pane.paneType) {
     case "hue-control":
@@ -61,7 +45,8 @@ export function matchesDeviceFilter(pane: DeviceFilterPane, device: Device): boo
       matches = device.type === "sensor";
       break;
     default:
-      // Unreachable given the allowlist guard above; fail closed.
+      // Every non-purposeful pane type (device-grid, unknown/legacy, non-device)
+      // exposes nothing.
       return false;
   }
 
