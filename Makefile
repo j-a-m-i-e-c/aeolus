@@ -48,6 +48,24 @@ seed: ## Seed demo data via Docker, no host Node needed (usage: make seed PASS=y
 		echo "Error: PASS is required.  Usage: make seed PASS=<admin-password> [USER=admin]"; \
 		exit 1; \
 	fi
+	@if ! docker image inspect node:22-slim >/dev/null 2>&1; then \
+		echo "Fetching the node:22-slim image the seeder runs in..."; \
+		docker pull node:22-slim || { \
+			echo ""; \
+			echo "Error: could not pull node:22-slim, which the seeder runs in."; \
+			echo "This is almost always a host DNS/connectivity problem, not an Aeolus issue."; \
+			echo "Fix and retry:"; \
+			echo "  1. Test DNS:  docker run --rm busybox nslookup production.cloudfront.docker.com"; \
+			echo "  2. If that fails, set Docker DNS in /etc/docker/daemon.json:"; \
+			echo "         { \"dns\": [\"1.1.1.1\", \"8.8.8.8\"] }"; \
+			echo "     then restart Docker:  sudo systemctl restart docker"; \
+			echo "  3. Re-run:  make seed PASS=... [USER=...]"; \
+			echo ""; \
+			echo "Note: seeding only adds demo data. You can instead create your admin"; \
+			echo "at http://<host>:3000 (first-run Setup page) without seeding at all."; \
+			exit 1; \
+		}; \
+	fi
 	docker compose --profile seed run --rm -e SEED_USER="$(USER)" -e SEED_PASS="$(PASS)" seed
 
 reset: ## Wipe database and restart fresh (deletes all data!)
