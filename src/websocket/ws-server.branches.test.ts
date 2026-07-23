@@ -241,4 +241,27 @@ describe("WsServer — branch coverage", () => {
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(disconnectEvents.length).toBe(1);
   });
+
+  it("rejects with 4002 when getUserAccessibleTabs throws", async () => {
+    // To trigger the getUserAccessibleTabs error path, we need a user whose
+    // tab lookup fails. We can cause this by deleting the users table data
+    // after token generation but before connection.
+    //
+    // Actually, the simplest approach: create a token for a user that exists
+    // in a group pointing to a corrupted/missing table state.
+    // Let's drop the group_tab_assignments table to cause an error.
+    testDb.exec("DROP TABLE group_tab_assignments");
+
+    const token = generateAccessToken({
+      userId: "user-1",
+      username: "user1",
+      role: "user",
+      groupId: "group-1",
+    });
+
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${token}`);
+    const { code, reason } = await waitForClose(ws);
+    expect(code).toBe(4002);
+    expect(reason).toBe("Authentication error");
+  });
 });

@@ -101,4 +101,13 @@ describe("config", () => {
     const { config } = await import("./config.js");
     expect(config.corsOrigins).toEqual(["https://foo.com", "https://bar.com"]);
   });
+
+  it("throws when restActionTimeoutMs < maxConfirmTimeoutMs", async () => {
+    process.env.REST_ACTION_TIMEOUT_MS = "1000";
+    process.env.MAX_CONFIRM_TIMEOUT_MS = "5000";
+
+    await expect(() => import("./config.js")).rejects.toThrow(
+      "Configuration error: restActionTimeoutMs (1000) must be >= maxConfirmTimeoutMs (5000)",
+    );
+  });
 });

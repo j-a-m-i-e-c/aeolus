@@ -158,5 +158,18 @@ describe("POST /api/mqtt/publish — confinement", () => {
       const res = await request(app, "POST", "/api/mqtt/publish", { topic: "   ", payload: "x" });
       expect(res.status).toBe(400);
     });
+
+    it("defaults role to 'user' when req.user is undefined", async () => {
+      // Build app without injecting req.user to test the ?? fallback
+      const app = express();
+      app.use(express.json());
+      app.use("/api/mqtt", createMqttRoutes(mqttService as never, POLICY));
+      app.use(errorHandler);
+
+      // Publish outside user namespace — should be denied as "user" role by default
+      const res = await request(app, "POST", "/api/mqtt/publish", { topic: "home/x", payload: "x" });
+      expect(res.status).toBe(403);
+      expect(mqttService.publish).not.toHaveBeenCalled();
+    });
   });
 });

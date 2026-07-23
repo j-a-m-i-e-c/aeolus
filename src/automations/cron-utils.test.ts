@@ -46,12 +46,14 @@ describe("cron-utils", () => {
     });
 
     it("describes every N minutes", () => {
+      expect(describeCron("*/1 * * * *")).toBe("Runs every 1 minute");
       expect(describeCron("*/5 * * * *")).toBe("Runs every 5 minutes");
       expect(describeCron("*/15 * * * *")).toBe("Runs every 15 minutes");
       expect(describeCron("*/30 * * * *")).toBe("Runs every 30 minutes");
     });
 
     it("describes every N hours", () => {
+      expect(describeCron("0 */1 * * *")).toBe("Runs every 1 hour");
       expect(describeCron("0 */6 * * *")).toBe("Runs every 6 hours");
       expect(describeCron("0 */12 * * *")).toBe("Runs every 12 hours");
     });
