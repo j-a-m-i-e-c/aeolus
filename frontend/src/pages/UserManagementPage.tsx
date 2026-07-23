@@ -88,7 +88,7 @@ export function UserManagementPage() {
   // ---------------------------------------------------------------------------
 
   const getGroupName = (groupId: string | null): string => {
-    if (!groupId) return "—";
+    if (!groupId) return "No access";
     const group = groups.find((g) => g.id === groupId);
     return group?.name ?? "Unknown";
   };
@@ -297,11 +297,14 @@ export function UserManagementPage() {
                 onChange={(e) => setCreateGroupId(e.target.value)}
                 className="w-full px-3 py-2 text-sm bg-background border border-[#2A3441] rounded-lg text-[#E6EDF3] focus:outline-none focus:border-primary transition-colors"
               >
-                <option value="">No group</option>
+                <option value="">None (no tab access)</option>
                 {groups.map((g) => (
                   <option key={g.id} value={g.id}>{g.name}</option>
                 ))}
               </select>
+              {!createGroupId && (
+                <p className="mt-1 text-[10px] text-[#6B7785]">User will not have access to any tabs until assigned a group.</p>
+              )}
             </div>
           </div>
 
@@ -371,7 +374,13 @@ export function UserManagementPage() {
                       {u.role}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-[#9AA6B2]">{getGroupName(u.groupId)}</td>
+                  <td className="px-4 py-3 text-[#9AA6B2]">
+                    {u.groupId ? (
+                      getGroupName(u.groupId)
+                    ) : (
+                      <span className="text-[#6B7785] italic">No access</span>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-[#6B7785]">{formatDate(u.createdAt)}</td>
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-end gap-1">
@@ -422,11 +431,14 @@ export function UserManagementPage() {
                   onChange={(e) => setEditGroupId(e.target.value)}
                   className="w-full px-3 py-2 text-sm bg-background border border-[#2A3441] rounded-lg text-[#E6EDF3] focus:outline-none focus:border-primary transition-colors"
                 >
-                  <option value="">No group</option>
+                  <option value="">None (no tab access)</option>
                   {groups.map((g) => (
                     <option key={g.id} value={g.id}>{g.name}</option>
                   ))}
                 </select>
+                {!editGroupId && (
+                  <p className="mt-1 text-[10px] text-[#6B7785]">User will not have access to any tabs.</p>
+                )}
               </div>
 
               <div>

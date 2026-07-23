@@ -22,11 +22,11 @@ export const passwordChangeSchema = z.object({
 export const createUserSchema = z.object({
   username: z.string().min(1, "Username must not be empty"),
   password: z.string().min(8, "Password must be at least 8 characters"),
-  groupId: z.string(),
+  groupId: z.string().nullable(),
 });
 
 export const updateUserSchema = z.object({
-  groupId: z.string().optional(),
+  groupId: z.string().nullable().optional(),
   password: z.string().min(8, "Password must be at least 8 characters").optional(),
 });
 

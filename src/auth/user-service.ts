@@ -78,7 +78,7 @@ function validatePassword(password: string): void {
 export async function createUser(
   username: string,
   password: string,
-  groupId: string,
+  groupId: string | null,
 ): Promise<User> {
   validatePassword(password);
 
