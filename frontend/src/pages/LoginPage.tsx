@@ -26,6 +26,9 @@ export function LoginPage() {
     setSubmitting(true);
     try {
       await login(username, password);
+      // Navigate to dashboard after successful login so the user doesn't land
+      // on a stale URL (e.g. /security) they may not have access to.
+      window.history.replaceState(null, "", "/dashboard");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");
     } finally {
