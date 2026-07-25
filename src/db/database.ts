@@ -190,6 +190,16 @@ export function initSchema(database: DatabaseType): void {
     ON automation_tab_assignments(tab_id);
   `);
 
+  // Admin-managed private MQTT topic filters. Mirrors migration 007 so
+  // legacy/test databases built via initSchema have it.
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS mqtt_private_topics (
+      id         TEXT PRIMARY KEY,
+      pattern    TEXT NOT NULL UNIQUE,
+      created_at INTEGER NOT NULL
+    );
+  `);
+
   migrateRemoveTypeCheck(database);
 }
 

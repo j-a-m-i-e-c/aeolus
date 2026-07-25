@@ -10,6 +10,7 @@ import { getDatabase, closeDatabase } from "./db/database.js";
 import { eventBus, DEVICE_STATE_CHANGE, AUTOMATION_STATE_CHANGE, WS_STATE_CHANGE, MQTT_RAW_MESSAGE, AUTOMATION_FIRED, AUTOMATION_COMPLETED, DATA_STORE_WRITE, DATA_STORE_COLLECTION_DELETED } from "./core/event-bus.js";
 import { DeviceRegistry } from "./core/device-registry.js";
 import { MqttService } from "./mqtt/mqtt-service.js";
+import { createPrivateTopicStore } from "./mqtt/private-topic-store.js";
 import { AutomationEngine } from "./automations/automation-engine.js";
 import { ConnectorRegistry } from "./connectors/connector-registry.js";
 import { ConnectorManager } from "./connectors/connector-manager.js";
@@ -241,6 +242,8 @@ async function main(): Promise<void> {
   const ownershipStore = createResourceOwnershipStore();
   const deviceExposureResolver = createDeviceExposureResolver(registry);
   const permissionResolver = createPermissionResolver(ownershipStore, deviceExposureResolver);
+  // Admin-managed private MQTT topic filters — gate the public raw-MQTT feed.
+  const privateTopicStore = createPrivateTopicStore();
   const requireDevice = (level: PermissionLevel) =>
     requireDevicePermission(level, {
       resolver: permissionResolver,
@@ -279,7 +282,7 @@ async function main(): Promise<void> {
     reservedSystemPrefixes: [ackTopicFilter.replace(/\/#$/, "/")],
     maxPayloadBytes: config.mqttPublish.maxPayloadBytes,
   };
-  app.use("/api/mqtt", createMqttRoutes(mqttService, mqttPublishPolicy));
+  app.use("/api/mqtt", createMqttRoutes(mqttService, mqttPublishPolicy, privateTopicStore));
   app.use("/api/mqtt/provisioning", createProvisioningRoutes(provisioningService));
   const sandboxTypesPath = path.resolve(import.meta.dirname, "automations/sandbox-types.d.ts");
   app.use("/api/automations", createAutomationRoutes(engine, db, registry, actionExecutor, executionLog, sandboxTypesPath, requireAutomation, permissionResolver, connectorRegistry, stateStore, conditionRegistry, (deviceId) => connectorManager.getCompletionTierCapability(deviceId)));
@@ -321,8 +324,16 @@ async function main(): Promise<void> {
   };
   // The raw MQTT feed is a discovery/debugging firehose: its value is showing
   // topics BEFORE anything consumes them (building an automation, onboarding a
-  // device), so it is public by default rather than tab-scoped.
-  const mqttVisibility = (): BroadcastEnvelope => ({ visibility: "public" });
+  // device), so it is public by default rather than tab-scoped. Admins can carve
+  // out sensitive topics via the private-topic filters; a message matching one
+  // is withheld from non-admins (admin-only) while everything else stays public.
+  const mqttVisibility = (data: unknown): BroadcastEnvelope => {
+    const topic = stringField(data, "topic");
+    if (topic && privateTopicStore.isPrivate(topic)) {
+      return { visibility: "admin" };
+    }
+    return { visibility: "public" };
+  };
 
   const WS_MAPPINGS: WsEventMapping[] = [
     { eventName: WS_STATE_CHANGE, messageType: "state-change", visibility: deviceVisibility },

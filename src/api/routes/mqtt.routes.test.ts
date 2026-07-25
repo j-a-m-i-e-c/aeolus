@@ -1,10 +1,13 @@
 // src/api/routes/mqtt.routes.test.ts — Unit tests for the confined MQTT publish route
 // Feature: mqtt-publish-confinement
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import express from "express";
+import Database from "better-sqlite3";
 import { createMqttRoutes } from "./mqtt.routes.js";
 import { errorHandler } from "../middleware/error-handler.js";
+import { initSchema } from "../../db/database.js";
+import { createPrivateTopicStore, type PrivateTopicStore } from "../../mqtt/private-topic-store.js";
 import type { PublishPolicyConfig } from "../../mqtt/publish-policy.js";
 
 // ─── Mocks ───────────────────────────────────────────────────────────────────
@@ -28,15 +31,27 @@ function createMockMqttService() {
   };
 }
 
+/** Create a real PrivateTopicStore backed by an in-memory database. */
+function createTestPrivateTopicStore(): { store: PrivateTopicStore; close: () => void } {
+  const db = new Database(":memory:");
+  db.pragma("foreign_keys = ON");
+  initSchema(db);
+  return { store: createPrivateTopicStore(db), close: () => db.close() };
+}
+
 /** Build an app that injects a req.user with the given role before the router. */
-function buildApp(role: "admin" | "user", mqttService: ReturnType<typeof createMockMqttService>) {
+function buildApp(
+  role: "admin" | "user",
+  mqttService: ReturnType<typeof createMockMqttService>,
+  privateTopicStore: PrivateTopicStore = createTestPrivateTopicStore().store,
+) {
   const app = express();
   app.use(express.json());
   app.use((req, _res, next) => {
     (req as unknown as { user: unknown }).user = { userId: `u-${role}`, username: role, role, groupId: null };
     next();
   });
-  app.use("/api/mqtt", createMqttRoutes(mqttService as never, POLICY));
+  app.use("/api/mqtt", createMqttRoutes(mqttService as never, POLICY, privateTopicStore));
   app.use(errorHandler);
   return app;
 }
@@ -163,13 +178,97 @@ describe("POST /api/mqtt/publish — confinement", () => {
       // Build app without injecting req.user to test the ?? fallback
       const app = express();
       app.use(express.json());
-      app.use("/api/mqtt", createMqttRoutes(mqttService as never, POLICY));
+      app.use("/api/mqtt", createMqttRoutes(mqttService as never, POLICY, createTestPrivateTopicStore().store));
       app.use(errorHandler);
 
       // Publish outside user namespace — should be denied as "user" role by default
       const res = await request(app, "POST", "/api/mqtt/publish", { topic: "home/x", payload: "x" });
       expect(res.status).toBe(403);
       expect(mqttService.publish).not.toHaveBeenCalled();
+    });
+  });
+});
+
+describe("Private topic filters — /api/mqtt/private-topics", () => {
+  let mqttService: ReturnType<typeof createMockMqttService>;
+  let storeHandle: { store: PrivateTopicStore; close: () => void };
+
+  beforeEach(() => {
+    mqttService = createMockMqttService();
+    storeHandle = createTestPrivateTopicStore();
+  });
+
+  afterEach(() => {
+    storeHandle.close();
+  });
+
+  describe("admin", () => {
+    it("adds, lists, and removes a private topic filter", async () => {
+      const app = buildApp("admin", mqttService, storeHandle.store);
+
+      const created = await request(app, "POST", "/api/mqtt/private-topics", { pattern: "home/locks/#" });
+      expect(created.status).toBe(201);
+      expect(created.body.topic.pattern).toBe("home/locks/#");
+      const id = created.body.topic.id as string;
+      expect(storeHandle.store.isPrivate("home/locks/front")).toBe(true);
+
+      const listed = await request(app, "GET", "/api/mqtt/private-topics");
+      expect(listed.status).toBe(200);
+      expect(listed.body.topics).toHaveLength(1);
+      expect(listed.body.topics[0].id).toBe(id);
+
+      const removed = await request(app, "DELETE", `/api/mqtt/private-topics/${id}`);
+      expect(removed.status).toBe(200);
+      expect(storeHandle.store.isPrivate("home/locks/front")).toBe(false);
+    });
+
+    it("trims the pattern and rejects a blank one with 400", async () => {
+      const app = buildApp("admin", mqttService, storeHandle.store);
+      const res = await request(app, "POST", "/api/mqtt/private-topics", { pattern: "   " });
+      expect(res.status).toBe(400);
+    });
+
+    it("returns 400 when removing an unknown filter", async () => {
+      const app = buildApp("admin", mqttService, storeHandle.store);
+      const res = await request(app, "DELETE", "/api/mqtt/private-topics/does-not-exist");
+      expect(res.status).toBe(400);
+    });
+
+    it("rejects a malformed topic filter with 400", async () => {
+      const app = buildApp("admin", mqttService, storeHandle.store);
+      expect((await request(app, "POST", "/api/mqtt/private-topics", { pattern: "sport/#/x" })).status).toBe(400);
+      expect((await request(app, "POST", "/api/mqtt/private-topics", { pattern: "bad+level" })).status).toBe(400);
+      expect(storeHandle.store.list()).toHaveLength(0);
+    });
+  });
+
+  describe("non-admin", () => {
+    it("can list and add filters (marking private only hides data)", async () => {
+      const app = buildApp("user", mqttService, storeHandle.store);
+
+      const added = await request(app, "POST", "/api/mqtt/private-topics", { pattern: "home/locks/#" });
+      expect(added.status).toBe(201);
+      expect(storeHandle.store.isPrivate("home/locks/front")).toBe(true);
+
+      const listed = await request(app, "GET", "/api/mqtt/private-topics");
+      expect(listed.status).toBe(200);
+      expect(listed.body.topics).toHaveLength(1);
+    });
+
+    it("cannot remove a filter (403) — re-exposing is admin-only", async () => {
+      const app = buildApp("user", mqttService, storeHandle.store);
+      const added = storeHandle.store.add("home/locks/#");
+
+      const res = await request(app, "DELETE", `/api/mqtt/private-topics/${added.id}`);
+      expect(res.status).toBe(403);
+      // Filter is untouched, topic still private.
+      expect(storeHandle.store.isPrivate("home/locks/front")).toBe(true);
+    });
+
+    it("still cannot add a malformed filter (400)", async () => {
+      const app = buildApp("user", mqttService, storeHandle.store);
+      const res = await request(app, "POST", "/api/mqtt/private-topics", { pattern: "a/#/b" });
+      expect(res.status).toBe(400);
     });
   });
 });

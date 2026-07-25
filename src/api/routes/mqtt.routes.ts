@@ -2,6 +2,7 @@
 
 import { Router } from "express";
 import type { MqttService } from "../../mqtt/mqtt-service.js";
+import type { PrivateTopicStore } from "../../mqtt/private-topic-store.js";
 import {
   BadRequestError,
   ForbiddenError,
@@ -9,7 +10,8 @@ import {
 } from "../middleware/error-handler.js";
 import { asyncHandler } from "../middleware/async-handler.js";
 import { validate } from "../middleware/validate.js";
-import { publishBodySchema } from "../schemas/mqtt.schemas.js";
+import { requireAdmin } from "../../auth/auth-middleware.js";
+import { publishBodySchema, privateTopicBodySchema } from "../schemas/mqtt.schemas.js";
 import { evaluatePublish, type PublishPolicyConfig } from "../../mqtt/publish-policy.js";
 import logger from "../../logger.js";
 
@@ -22,6 +24,7 @@ import logger from "../../logger.js";
 export function createMqttRoutes(
   mqttService: MqttService,
   policyConfig: PublishPolicyConfig,
+  privateTopicStore: PrivateTopicStore,
 ): Router {
   const router = Router();
 
@@ -71,6 +74,49 @@ export function createMqttRoutes(
         "MQTT message published via API",
       );
       res.json({ success: true, topic: cleanTopic });
+    }),
+  );
+
+  // --- Private topic filters ----------------------------------------------
+  // The raw MQTT inspector feed is broadcast to every authenticated client.
+  // These filters carve out sensitive topics: a message whose topic matches any
+  // registered filter is withheld from non-admins. Marking a topic private
+  // (add) and viewing the list are open to any authenticated user because they
+  // only ever *hide* data — the safe direction. Removing a filter re-exposes a
+  // topic, so DELETE stays admin-only.
+
+  /** GET /api/mqtt/private-topics — list the private topic filters */
+  router.get(
+    "/private-topics",
+    asyncHandler((_req, res) => {
+      res.json({ topics: privateTopicStore.list() });
+    }),
+  );
+
+  /** POST /api/mqtt/private-topics — register a private topic filter */
+  router.post(
+    "/private-topics",
+    validate({ body: privateTopicBodySchema }),
+    asyncHandler((req, res) => {
+      const { pattern } = req.body as { pattern: string };
+      const topic = privateTopicStore.add(pattern);
+      logger.info({ userId: req.user?.userId, pattern: topic.pattern }, "MQTT topic marked private");
+      res.status(201).json({ topic });
+    }),
+  );
+
+  /** DELETE /api/mqtt/private-topics/:id — remove a private topic filter (admin only) */
+  router.delete(
+    "/private-topics/:id",
+    requireAdmin,
+    asyncHandler((req, res) => {
+      const id = req.params.id as string;
+      const removed = privateTopicStore.remove(id);
+      if (!removed) {
+        throw new BadRequestError("Private topic filter not found");
+      }
+      logger.info({ userId: req.user?.userId, id }, "MQTT private topic filter removed");
+      res.json({ success: true });
     }),
   );
 

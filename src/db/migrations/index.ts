@@ -44,6 +44,7 @@ import { devicesRemoveCheck } from "./003-devices-remove-check.js";
 import { automationRulesCompletionTier } from "./004-automation-rules-completion-tier.js";
 import { executionHistory } from "./005-execution-history.js";
 import { automationTabAssignments } from "./006-automation-tab-assignments.js";
+import { mqttPrivateTopics } from "./007-mqtt-private-topics.js";
 
 export const migrations: Migration[] = [
   baseline,                      // id 1
@@ -52,4 +53,5 @@ export const migrations: Migration[] = [
   automationRulesCompletionTier, // id 4
   executionHistory,              // id 5
   automationTabAssignments,      // id 6
+  mqttPrivateTopics,             // id 7
 ];
