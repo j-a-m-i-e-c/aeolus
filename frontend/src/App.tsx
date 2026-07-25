@@ -11,7 +11,6 @@ import { DataStorePage } from "./pages/DataStorePage";
 import SecurityPage from "./pages/SecurityPage";
 import { SystemPage } from "./components/SystemPage";
 import { TabLayout } from "./components/TabLayout";
-import { WelcomeScreen } from "./components/WelcomeScreen";
 import { LoginPage } from "./pages/LoginPage";
 import { SetupPage } from "./pages/SetupPage";
 import { AnimatePresence } from "framer-motion";
@@ -28,15 +27,6 @@ import type { Device } from "./store/device-store";
 // ---------------------------------------------------------------------------
 
 function DashboardPage() {
-  const devices = useDeviceStore((s) => s.devices);
-  const user = useAuthStore((s) => s.user);
-  const hasDevices = Object.keys(devices).length > 0;
-
-  // WelcomeScreen is an admin onboarding prompt — non-admins should see SystemPage
-  if (!hasDevices && user?.role === "admin") {
-    return <WelcomeScreen />;
-  }
-
   return <SystemPage />;
 }
 
