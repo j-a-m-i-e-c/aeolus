@@ -118,12 +118,49 @@ On connection, the server sends an initial device snapshot. Live message types i
 
 The WebSocket layer maps internal event names to public message types at startup rather than hardcoding each event in the server class.
 
+Broadcast visibility is fail-closed. Each mapping carries a server-derived
+`BroadcastEnvelope` that decides who may observe an event; the server never
+trusts a visibility hint on the payload:
+
+- `public` — every authenticated client. Used for the raw `mqtt-message` feed,
+  which is a discovery firehose (its value is seeing topics before anything
+  consumes them), so scoping it to already-known devices would defeat its
+  purpose. Admins can carve out sensitive topics with private topic filters (see
+  below); a message matching one is downgraded to `admin`.
+- `admin` — admins only. This is the default for any event without an explicit
+  scope, so a new producer leaks nothing until its scope is defined. The
+  `data-store-*` events are admin-only today, as is any `mqtt-message` whose
+  topic matches a private topic filter.
+- `tabs` — non-admins receive it only when they can access one of the listed
+  tabs, using the same resolvers as REST authorization. `state-change` resolves
+  to the device's exposing tabs and the `automation-*` events resolve to the
+  automation's exposing tabs. An empty tab set reaches admins only.
+
 See:
 
 ```text
 src/websocket/ws-server.ts
 frontend/src/lib/ws-client.ts
 ```
+
+### Private topic filters
+
+These endpoints control which raw MQTT topics are withheld from non-admins on
+the live feed. A filter is a standard MQTT topic filter (`+` for one level, `#`
+as the last level); a message whose topic matches any filter is broadcast to
+admins only.
+
+- `GET /api/mqtt/private-topics` — list the filters. Any authenticated user.
+- `POST /api/mqtt/private-topics` — add a filter (`{ "pattern": "home/locks/#" }`).
+  Any authenticated user; marking a topic private only ever hides data. The
+  pattern is validated as a well-formed MQTT filter (bad `+`/`#` placement is
+  rejected with 400).
+- `DELETE /api/mqtt/private-topics/:id` — remove a filter (re-exposes the topic).
+  Admin only, because this is the data-exposing direction.
+
+Matching and filter validation live in `src/mqtt/topic-filter.ts` and are used
+by both `src/mqtt/private-topic-store.ts` and the request schema so evaluation
+and validation never diverge.
 
 ## Error shape
 

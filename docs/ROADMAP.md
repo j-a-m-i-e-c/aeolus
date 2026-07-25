@@ -71,6 +71,18 @@ Keep zero-friction discovery for development, while adding optional stricter ope
 - credential assignment;
 - visible firmware and version metadata.
 
+### Explore a power-user role
+
+Investigate whether a middle tier between `user` and `admin` is worth its cost.
+
+Today the two roles split cleanly into "governs the system" (admin) and "uses the system" (user). A power user would sit between them: elevated *operational and visibility* reach — building dashboards and automations, publishing more freely, removing private topic filters, broader real-time visibility — without any authority over *identity, access grants or MQTT credentials*, which must stay with admins so the tab boundary keeps meaning.
+
+Points to weigh before committing:
+
+- whether a fixed tier or per-group capability grants (e.g. manage layout, publish anywhere) fit a small, mostly-trusted deployment better;
+- the migration and middleware cost of a role hierarchy (`admin > power > user`) versus flat admin checks;
+- keeping the single-node, few-users experience simple rather than modelling a permission system the deployments do not need.
+
 ### Stronger state provenance
 
 Make it easier to distinguish:

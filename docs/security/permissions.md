@@ -72,8 +72,18 @@ resource (see Resource-level authorization above), so holding permission on an
 unrelated tab no longer authorizes operations on a resource that tab does not
 expose.
 
-Some paths remain outside this resource model — notably raw MQTT publish and
-WebSocket visibility filtering. Do not present the group system as strong tenant
+WebSocket visibility now follows the same resource model and is fail-closed:
+device state and automation events are scoped to the tabs that expose the
+resource, and any event without an explicit scope (Data Store events) is
+delivered to admins only rather than to every client. The raw MQTT feed is a
+deliberate exception: it is a discovery firehose and is visible to every
+authenticated client so it stays useful for building automations and onboarding
+devices. Sensitive topics can be withheld from that feed with private topic
+filters (`/api/mqtt/private-topics`): a message whose topic matches a filter is
+delivered to admins only. Any authenticated user may add a filter or view the
+list, because marking a topic private only hides data; removing a filter
+re-exposes the topic and is therefore admin-only. Raw MQTT publish remains
+outside the resource model. Do not present the group system as strong tenant
 isolation between hostile users; it is designed for a small, mostly-trusted
 local installation.
 
