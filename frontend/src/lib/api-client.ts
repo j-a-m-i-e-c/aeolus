@@ -45,6 +45,34 @@ export async function publishMqtt(topic: string, payload: string) {
   });
 }
 
+export interface PrivateTopic {
+  id: string;
+  pattern: string;
+  createdAt: number;
+}
+
+/** List the private MQTT topic filters (admin only). */
+export async function fetchPrivateTopics() {
+  const { topics } = await request<{ topics: PrivateTopic[] }>("/api/mqtt/private-topics");
+  return topics;
+}
+
+/** Register a private MQTT topic filter (admin only). */
+export async function addPrivateTopic(pattern: string) {
+  const { topic } = await request<{ topic: PrivateTopic }>("/api/mqtt/private-topics", {
+    method: "POST",
+    body: JSON.stringify({ pattern }),
+  });
+  return topic;
+}
+
+/** Remove a private MQTT topic filter (admin only). */
+export async function removePrivateTopic(id: string) {
+  return request<{ success: boolean }>(`/api/mqtt/private-topics/${id}`, {
+    method: "DELETE",
+  });
+}
+
 export interface AutomationRule {
   id: string;
   topic: string;
