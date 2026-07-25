@@ -37,28 +37,29 @@ describe("SecurityPage", () => {
     expect(screen.queryByTestId("mqtt-security")).not.toBeInTheDocument();
   });
 
-  it("shows the MQTT section by default for admins", () => {
+  it("shows the Users & Groups section by default for admins", () => {
     h.state.user = { role: "admin" };
     render(<SecurityPage />);
     expect(screen.getByText("Security")).toBeInTheDocument();
-    expect(screen.getByTestId("mqtt-security")).toBeInTheDocument();
-    expect(screen.queryByTestId("user-management")).not.toBeInTheDocument();
-  });
-
-  it("switches to the Users & Groups section when its tab is clicked", () => {
-    h.state.user = { role: "admin" };
-    render(<SecurityPage />);
-    fireEvent.click(screen.getByRole("button", { name: /Users & Groups/ }));
     expect(screen.getByTestId("group-management")).toBeInTheDocument();
     expect(screen.getByTestId("user-management")).toBeInTheDocument();
     expect(screen.queryByTestId("mqtt-security")).not.toBeInTheDocument();
   });
 
-  it("switches back to the MQTT section", () => {
+  it("switches to the MQTT section when its tab is clicked", () => {
     h.state.user = { role: "admin" };
     render(<SecurityPage />);
-    fireEvent.click(screen.getByRole("button", { name: /Users & Groups/ }));
     fireEvent.click(screen.getByRole("button", { name: /MQTT/ }));
     expect(screen.getByTestId("mqtt-security")).toBeInTheDocument();
+    expect(screen.queryByTestId("user-management")).not.toBeInTheDocument();
+  });
+
+  it("switches back to the Users & Groups section", () => {
+    h.state.user = { role: "admin" };
+    render(<SecurityPage />);
+    fireEvent.click(screen.getByRole("button", { name: /MQTT/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Users & Groups/ }));
+    expect(screen.getByTestId("group-management")).toBeInTheDocument();
+    expect(screen.getByTestId("user-management")).toBeInTheDocument();
   });
 });

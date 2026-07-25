@@ -156,7 +156,7 @@ function TabAssignmentPicker({
 // Group Management Page
 // ---------------------------------------------------------------------------
 
-export function GroupManagementPage() {
+export function GroupManagementPage({ onGroupsChanged }: { onGroupsChanged?: () => void }) {
   const [groups, setGroups] = useState<GroupRecord[]>([]);
   const [users, setUsers] = useState<UserRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -255,6 +255,7 @@ export function GroupManagementPage() {
       setCreateAssignments([]);
       setShowCreateForm(false);
       await fetchGroups();
+      onGroupsChanged?.();
     } catch (err) {
       setCreateError(err instanceof Error ? err.message : "Failed to create group");
     } finally {
@@ -299,6 +300,7 @@ export function GroupManagementPage() {
 
       setEditGroup(null);
       await fetchGroups();
+      onGroupsChanged?.();
     } catch (err) {
       setEditError(err instanceof Error ? err.message : "Failed to update group");
     } finally {
@@ -327,6 +329,7 @@ export function GroupManagementPage() {
 
       setDeleteGroup(null);
       await Promise.all([fetchGroups(), fetchUsers()]);
+      onGroupsChanged?.();
     } catch (err) {
       setDeleteError(err instanceof Error ? err.message : "Failed to delete group");
     } finally {

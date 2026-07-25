@@ -1,6 +1,6 @@
 // frontend/src/pages/SecurityPage.tsx — Unified Security page with section tabs
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { Shield, Users } from "lucide-react";
 import { useAuthStore } from "../store/auth-store";
 import MqttSecurityPage from "./MqttSecurityPage";
@@ -10,14 +10,19 @@ import { UserManagementPage } from "./UserManagementPage";
 type SecuritySection = "mqtt" | "users";
 
 const SECTIONS: { id: SecuritySection; label: string; icon: typeof Shield }[] = [
-  { id: "mqtt", label: "MQTT", icon: Shield },
   { id: "users", label: "Users & Groups", icon: Users },
+  { id: "mqtt", label: "MQTT", icon: Shield },
 ];
 
 export default function SecurityPage() {
   const user = useAuthStore((s) => s.user);
   const isAdmin = user?.role === "admin";
-  const [activeSection, setActiveSection] = useState<SecuritySection>("mqtt");
+  const [activeSection, setActiveSection] = useState<SecuritySection>("users");
+  const [groupVersion, setGroupVersion] = useState(0);
+
+  const onGroupsChanged = useCallback(() => {
+    setGroupVersion((v) => v + 1);
+  }, []);
 
   if (!isAdmin) {
     return (
@@ -60,8 +65,8 @@ export default function SecurityPage() {
       {activeSection === "mqtt" && <MqttSecurityPage />}
       {activeSection === "users" && (
         <div className="space-y-8">
-          <GroupManagementPage />
-          <UserManagementPage />
+          <GroupManagementPage onGroupsChanged={onGroupsChanged} />
+          <UserManagementPage key={groupVersion} />
         </div>
       )}
     </div>
