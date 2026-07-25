@@ -337,6 +337,8 @@ export function AutomationPane({ config, paneId }: Props) {
       if (!res.ok) {
         if (res.status === 400 && data.details) {
           setErrors(data.details);
+        } else if (data.error) {
+          setErrors([{ line: 0, column: 0, message: data.error }]);
         }
         return;
       }

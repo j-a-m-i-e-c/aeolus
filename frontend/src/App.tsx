@@ -29,9 +29,11 @@ import type { Device } from "./store/device-store";
 
 function DashboardPage() {
   const devices = useDeviceStore((s) => s.devices);
+  const user = useAuthStore((s) => s.user);
   const hasDevices = Object.keys(devices).length > 0;
 
-  if (!hasDevices) {
+  // WelcomeScreen is an admin onboarding prompt — non-admins should see SystemPage
+  if (!hasDevices && user?.role === "admin") {
     return <WelcomeScreen />;
   }
 

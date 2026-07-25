@@ -321,7 +321,7 @@ export function createAutomationRoutes(
   }));
 
   /** PUT /api/automations/:id — update an existing UI rule */
-  router.put("/:id", requireTabPermission("write"), validate({ body: updateAutomationBodySchema, params: automationIdParamsSchema }), asyncHandler((req, res) => {
+  router.put("/:id", requireAutomation("write"), validate({ body: updateAutomationBodySchema, params: automationIdParamsSchema }), asyncHandler((req, res) => {
     const id = req.params.id as string;
 
     // Check rule exists
@@ -411,7 +411,7 @@ export function createAutomationRoutes(
   }));
 
   /** DELETE /api/automations/:id — delete a UI rule */
-  router.delete("/:id", requireTabPermission("write"), asyncHandler((req, res) => {
+  router.delete("/:id", requireAutomation("write"), asyncHandler((req, res) => {
     const id = req.params.id as string;
     const existing = queryRuleById(db, id);
     if (!existing) {
