@@ -27,6 +27,9 @@ import {
   fetchDeviceHistory,
   clearDeviceHistory,
   clearAllDeviceHistory,
+  fetchPrivateTopics,
+  addPrivateTopic,
+  removePrivateTopic,
 } from "./api-client";
 import { authFetch } from "./auth-fetch";
 
@@ -205,6 +208,33 @@ describe("api-client — remaining endpoints", () => {
     await clearAllDeviceHistory();
     const [url, init] = mockAuthFetch.mock.calls[0];
     expect(url).toBe(`${base}/api/devices/history/all`);
+    expect(init?.method).toBe("DELETE");
+  });
+
+  it("fetches private topics and unwraps the topics array", async () => {
+    const topics = [{ id: "p1", pattern: "home/locks/#", createdAt: 1 }];
+    mockAuthFetch.mockResolvedValue(jsonResponse({ topics }));
+    const result = await fetchPrivateTopics();
+    expect(mockAuthFetch.mock.calls[0][0]).toBe(`${base}/api/mqtt/private-topics`);
+    expect(result).toEqual(topics);
+  });
+
+  it("adds a private topic via POST and unwraps the topic", async () => {
+    const topic = { id: "p2", pattern: "presence/#", createdAt: 2 };
+    mockAuthFetch.mockResolvedValue(jsonResponse({ topic }, 201));
+    const result = await addPrivateTopic("presence/#");
+    const [url, init] = mockAuthFetch.mock.calls[0];
+    expect(url).toBe(`${base}/api/mqtt/private-topics`);
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(init?.body as string)).toEqual({ pattern: "presence/#" });
+    expect(result).toEqual(topic);
+  });
+
+  it("removes a private topic via DELETE", async () => {
+    mockAuthFetch.mockResolvedValue(jsonResponse({ success: true }));
+    await removePrivateTopic("p3");
+    const [url, init] = mockAuthFetch.mock.calls[0];
+    expect(url).toBe(`${base}/api/mqtt/private-topics/p3`);
     expect(init?.method).toBe("DELETE");
   });
 });

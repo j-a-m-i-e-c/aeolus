@@ -212,5 +212,41 @@ describe("MqttInspector", () => {
       await waitFor(() => expect(mockFetchPrivateTopics).toHaveBeenCalled());
       expect(screen.getByTitle("Hidden from non-admins")).toBeInTheDocument();
     });
+
+    it("an admin removes a filter via the unlock control", async () => {
+      authState.user = { role: "admin" };
+      mockFetchPrivateTopics.mockResolvedValue([
+        { id: "p1", pattern: "home/locks/#", createdAt: 1 },
+      ]);
+      mockRemovePrivateTopic.mockResolvedValue({ success: true });
+      render(<MqttInspector />);
+      await waitFor(() => expect(mockFetchPrivateTopics).toHaveBeenCalled());
+
+      fireEvent.click(screen.getByTitle("Manage private topics"));
+      fireEvent.click(screen.getByTitle("Remove filter (re-expose topic)"));
+      await waitFor(() => expect(mockRemovePrivateTopic).toHaveBeenCalledWith("p1"));
+      await waitFor(() => expect(screen.queryByText("home/locks/#")).not.toBeInTheDocument());
+    });
+
+    it("marks a topic private directly from a message row", async () => {
+      authState.user = { role: "admin" };
+      mockFetchPrivateTopics.mockResolvedValue([]);
+      mockAddPrivateTopic.mockResolvedValue({ id: "p9", pattern: "home/office/temp", createdAt: 9 });
+      deviceState.mqttMessages = [msg({ topic: "home/office/temp", payload: "21" })];
+      render(<MqttInspector />);
+      await waitFor(() => expect(mockFetchPrivateTopics).toHaveBeenCalled());
+
+      fireEvent.click(screen.getByTitle("Make this topic private (hide from non-admins)"));
+      await waitFor(() => expect(mockAddPrivateTopic).toHaveBeenCalledWith("home/office/temp"));
+    });
+
+    it("keeps working when loading the filters fails", async () => {
+      authState.user = { role: "admin" };
+      mockFetchPrivateTopics.mockRejectedValue(new Error("offline"));
+      render(<MqttInspector />);
+      await waitFor(() => expect(mockFetchPrivateTopics).toHaveBeenCalled());
+      // The feed still renders; no filters are shown.
+      expect(screen.getByText("Waiting for MQTT messages...")).toBeInTheDocument();
+    });
   });
 });
