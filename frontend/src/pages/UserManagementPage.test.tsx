@@ -113,8 +113,15 @@ describe("UserManagementPage", () => {
   it("surfaces the server error message when creation fails", async () => {
     render(<UserManagementPage />);
     await screen.findByText("No users found");
-    h.authFetch.mockImplementationOnce(async () => jsonRes({ error: "Username taken" }, false));
     fireEvent.click(screen.getByRole("button", { name: /Add User/ }));
+    // Override only POST requests to fail — the refetch of groups (GET) should still succeed.
+    h.authFetch.mockImplementation(async (url: string, opts?: RequestInit) => {
+      const method = opts?.method ?? "GET";
+      if (method === "POST") return jsonRes({ error: "Username taken" }, false);
+      if (url.endsWith("/api/auth/users") && method === "GET") return jsonRes(h.users, h.usersOk);
+      if (url.endsWith("/api/auth/groups") && method === "GET") return jsonRes(h.groups);
+      return jsonRes({ id: "new-id" });
+    });
     fireEvent.change(screen.getByPlaceholderText("username"), { target: { value: "bob" } });
     fireEvent.change(screen.getByPlaceholderText("min 8 characters"), {
       target: { value: "password123" },

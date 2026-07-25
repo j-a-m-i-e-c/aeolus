@@ -150,6 +150,7 @@ export function UserManagementPage() {
   // ---------------------------------------------------------------------------
 
   const openEditModal = (user: UserRecord) => {
+    fetchGroups();
     setEditUser(user);
     setEditGroupId(user.groupId ?? "");
     setEditPassword("");
@@ -256,7 +257,7 @@ export function UserManagementPage() {
           <h2 className="text-sm font-semibold text-[#9AA6B2] uppercase tracking-wider">Users</h2>
         </div>
         <button
-          onClick={() => setShowCreateForm(!showCreateForm)}
+          onClick={() => { fetchGroups(); setShowCreateForm(!showCreateForm); }}
           className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-primary/20 text-primary border border-primary/30 hover:bg-primary/30 transition-colors"
         >
           <Plus size={12} />
