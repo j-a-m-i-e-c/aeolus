@@ -26,7 +26,7 @@ import { PendingCommandTracker } from "./automations/pending-command-tracker.js"
 import { Sandbox } from "./automations/sandbox.js";
 import { AutomationStateStore } from "./automations/automation-state-store.js";
 import { WsServer } from "./websocket/ws-server.js";
-import type { WsEventMapping } from "./websocket/ws-server.js";
+import type { WsEventMapping, BroadcastEnvelope } from "./websocket/ws-server.js";
 import { createDeviceRoutes } from "./api/routes/device.routes.js";
 import { createStateRoutes } from "./api/routes/state.routes.js";
 import { createHealthRoutes } from "./api/routes/health.routes.js";
@@ -295,12 +295,45 @@ async function main(): Promise<void> {
   // 10. HTTP + WebSocket server
   const server = createServer(app);
 
+  // Server-derived broadcast visibility. Producers never decorate events with a
+  // visibility field; these resolvers compute authorization scope from resource
+  // identity using the same authoritative resolvers as the REST layer. Anything
+  // without a resource→tab mapping is admin-only (fail-closed).
+  const stringField = (data: unknown, field: string): string | null => {
+    if (data && typeof data === "object" && field in data) {
+      const value = (data as Record<string, unknown>)[field];
+      return typeof value === "string" ? value : null;
+    }
+    return null;
+  };
+  // A device event is visible on exactly the tabs whose panes expose the device.
+  // No exposing tabs (unknown/unplaced device) ⇒ empty scope ⇒ admin-only.
+  const deviceVisibility = (data: unknown): BroadcastEnvelope => {
+    const deviceId = stringField(data, "deviceId");
+    if (!deviceId) return { visibility: "admin" };
+    return { visibility: "tabs", tabIds: deviceExposureResolver.getExposingTabs(deviceId) };
+  };
+  // An automation event is visible on the tabs that own/expose the automation.
+  const automationVisibility = (data: unknown): BroadcastEnvelope => {
+    const ruleId = stringField(data, "ruleId");
+    if (!ruleId) return { visibility: "admin" };
+    return { visibility: "tabs", tabIds: ownershipStore.getExposingTabs(ruleId) };
+  };
+  // The raw MQTT feed is a discovery/debugging firehose: its value is showing
+  // topics BEFORE anything consumes them (building an automation, onboarding a
+  // device), so it is public by default rather than tab-scoped.
+  const mqttVisibility = (): BroadcastEnvelope => ({ visibility: "public" });
+
   const WS_MAPPINGS: WsEventMapping[] = [
-    { eventName: WS_STATE_CHANGE, messageType: "state-change" },
-    { eventName: MQTT_RAW_MESSAGE, messageType: "mqtt-message" },
-    { eventName: AUTOMATION_FIRED, messageType: "automation-fired" },
-    { eventName: AUTOMATION_COMPLETED, messageType: "automation-completed" },
-    { eventName: AUTOMATION_STATE_CHANGE, messageType: "automation-state" },
+    { eventName: WS_STATE_CHANGE, messageType: "state-change", visibility: deviceVisibility },
+    // The raw MQTT feed is a discovery firehose — visible to all authenticated
+    // clients so it stays useful for building automations and onboarding.
+    { eventName: MQTT_RAW_MESSAGE, messageType: "mqtt-message", visibility: mqttVisibility },
+    { eventName: AUTOMATION_FIRED, messageType: "automation-fired", visibility: automationVisibility },
+    { eventName: AUTOMATION_COMPLETED, messageType: "automation-completed", visibility: automationVisibility },
+    { eventName: AUTOMATION_STATE_CHANGE, messageType: "automation-state", visibility: automationVisibility },
+    // Data Store events have no collection→tab authorization model yet, so they
+    // remain admin-only until one exists (fail-closed rather than broadcast-all).
     { eventName: DATA_STORE_WRITE, messageType: "data-store-write" },
     { eventName: DATA_STORE_COLLECTION_DELETED, messageType: "data-store-collection-deleted" },
   ];

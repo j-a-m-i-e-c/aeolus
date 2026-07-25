@@ -110,7 +110,21 @@ describe("WsServer Authentication", () => {
     port = (httpServer.address() as any).port;
 
     wsServer = new WsServer(httpServer, createMockRegistry(), eventBus, [
-      { eventName: "test-event", messageType: "test" },
+      // No visibility resolver → unscoped → admin-only (fail-closed default).
+      { eventName: "unscoped-event", messageType: "unscoped" },
+      // Explicitly public → all authenticated clients.
+      { eventName: "public-event", messageType: "public", visibility: () => ({ visibility: "public" }) },
+      // Tab-scoped → derived from the payload's `tabs` array (server-side here).
+      {
+        eventName: "scoped-event",
+        messageType: "scoped",
+        visibility: (data) => ({
+          visibility: "tabs",
+          tabIds: Array.isArray((data as { tabs?: unknown })?.tabs)
+            ? ((data as { tabs: string[] }).tabs)
+            : [],
+        }),
+      },
     ]);
   });
 
@@ -207,9 +221,9 @@ describe("WsServer Authentication", () => {
     });
   });
 
-  describe("Event Filtering", () => {
-    it("should send messages without tabId to all authenticated clients", async () => {
-      // Connect admin
+  describe("Event Filtering (fail-closed)", () => {
+    it("does NOT deliver unscoped events to non-admins, but does to admins", async () => {
+      // "unscoped-event" has no visibility resolver → admin-only by default.
       const adminToken = generateAccessToken({
         userId: "admin-1",
         username: "admin",
@@ -221,7 +235,6 @@ describe("WsServer Authentication", () => {
       await waitForOpen(adminWs);
       await adminCollector.waitForCount(1); // snapshot
 
-      // Connect regular user
       const userToken = generateAccessToken({
         userId: "user-1",
         username: "user1",
@@ -233,22 +246,21 @@ describe("WsServer Authentication", () => {
       await waitForOpen(userWs);
       await userCollector.waitForCount(1); // snapshot
 
-      // Emit event without tabId
-      eventBus.emit("test-event", { deviceId: "dev-1", state: { on: true } });
+      // Unscoped event: no tabId decoration anywhere. Fail-closed => admin only.
+      eventBus.emit("unscoped-event", { deviceId: "dev-1", state: { on: true } });
 
-      // Both should receive (snapshot + event = 2 messages each)
       const adminMsgs = await adminCollector.waitForCount(2);
-      const userMsgs = await userCollector.waitForCount(2);
+      expect(adminMsgs[1]).toEqual({ type: "unscoped", data: { deviceId: "dev-1", state: { on: true } } });
 
-      expect(adminMsgs[1]).toEqual({ type: "test", data: { deviceId: "dev-1", state: { on: true } } });
-      expect(userMsgs[1]).toEqual({ type: "test", data: { deviceId: "dev-1", state: { on: true } } });
+      // Give the non-admin ample time; it must NOT receive the unscoped event.
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(userCollector.messages.length).toBe(1); // snapshot only
 
       adminWs.close();
       userWs.close();
     });
 
-    it("should filter messages with tabId for non-admin users", async () => {
-      // Connect regular user (has access to tab-1 and tab-2 only)
+    it("delivers public events to every authenticated client", async () => {
       const userToken = generateAccessToken({
         userId: "user-1",
         username: "user1",
@@ -260,22 +272,45 @@ describe("WsServer Authentication", () => {
       await waitForOpen(userWs);
       await userCollector.waitForCount(1); // snapshot
 
-      // Emit event for tab-1 (user has access)
-      eventBus.emit("test-event", { tabId: "tab-1", someData: "hello" });
+      eventBus.emit("public-event", { hello: "world" });
       const msgs = await userCollector.waitForCount(2);
-      expect(msgs[1]).toEqual({ type: "test", data: { tabId: "tab-1", someData: "hello" } });
-
-      // Emit event for tab-3 (user does NOT have access)
-      eventBus.emit("test-event", { tabId: "tab-3", someData: "secret" });
-
-      // Wait a bit and verify no additional message arrived
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      expect(userCollector.messages.length).toBe(2); // still only snapshot + tab-1 event
+      expect(msgs[1]).toEqual({ type: "public", data: { hello: "world" } });
 
       userWs.close();
     });
 
-    it("should send all messages to admin regardless of tabId", async () => {
+    it("delivers a tab-scoped event only to clients with access to a listed tab", async () => {
+      // user-1 (group-1) can access tab-1 and tab-2, but NOT tab-3.
+      const userToken = generateAccessToken({
+        userId: "user-1",
+        username: "user1",
+        role: "user",
+        groupId: "group-1",
+      });
+      const userWs = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${userToken}`);
+      const userCollector = collectMessages(userWs);
+      await waitForOpen(userWs);
+      await userCollector.waitForCount(1); // snapshot
+
+      // Scoped to tab-1 (accessible) — should arrive.
+      eventBus.emit("scoped-event", { resource: "r1", tabs: ["tab-1"] });
+      const msgs = await userCollector.waitForCount(2);
+      expect(msgs[1]).toEqual({ type: "scoped", data: { resource: "r1", tabs: ["tab-1"] } });
+
+      // Scoped to tab-3 (not accessible) — must NOT arrive.
+      eventBus.emit("scoped-event", { resource: "r2", tabs: ["tab-3"] });
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(userCollector.messages.length).toBe(2);
+
+      // Empty scope — reaches admins only, so this non-admin must NOT get it.
+      eventBus.emit("scoped-event", { resource: "r3", tabs: [] });
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(userCollector.messages.length).toBe(2);
+
+      userWs.close();
+    });
+
+    it("delivers every event to admins regardless of scope", async () => {
       const adminToken = generateAccessToken({
         userId: "admin-1",
         username: "admin",
@@ -287,10 +322,10 @@ describe("WsServer Authentication", () => {
       await waitForOpen(adminWs);
       await adminCollector.waitForCount(1); // snapshot
 
-      // Emit event for tab-3 — admin should receive it
-      eventBus.emit("test-event", { tabId: "tab-3", someData: "admin-sees-all" });
+      // Scoped to a tab the admin has no explicit group assignment for — still delivered.
+      eventBus.emit("scoped-event", { resource: "r4", tabs: ["tab-3"] });
       const msgs = await adminCollector.waitForCount(2);
-      expect(msgs[1]).toEqual({ type: "test", data: { tabId: "tab-3", someData: "admin-sees-all" } });
+      expect(msgs[1]).toEqual({ type: "scoped", data: { resource: "r4", tabs: ["tab-3"] } });
 
       adminWs.close();
     });

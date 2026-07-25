@@ -14,11 +14,37 @@ import logger from "../logger.js";
 /** Time (ms) a client has to send a valid auth message before disconnection */
 const AUTH_TIMEOUT_MS = 5000;
 
+/**
+ * Server-derived authorization scope for a broadcast. This is the single source
+ * of truth for who may observe an event; it is computed on the server from the
+ * event's resource identity and is NEVER read from the (untrusted) payload.
+ *
+ * Fail-closed model:
+ *  - `public` — every authenticated client may observe it.
+ *  - `admin`  — only admins may observe it (the default for unscoped events).
+ *  - `tabs`   — non-admins may observe it iff they can access one of `tabIds`.
+ *               An empty `tabIds` therefore reaches admins only.
+ */
+export type BroadcastEnvelope =
+  | { visibility: "public" }
+  | { visibility: "admin" }
+  | { visibility: "tabs"; tabIds: string[] };
+
 /** Maps an internal event bus event to a WebSocket message type string */
 export interface WsEventMapping {
   eventName: string;
   messageType: string;
+  /**
+   * Computes the server-derived visibility for an event of this type from its
+   * payload. Producers do not decorate events with a visibility field; this
+   * resolver derives it from resource identity (e.g. a device's exposing tabs).
+   * Omit to treat the event as unscoped — admin-only.
+   */
+  visibility?: (data: unknown) => BroadcastEnvelope;
 }
+
+/** Unscoped events are admin-only by default (fail-closed). */
+const ADMIN_ONLY: BroadcastEnvelope = { visibility: "admin" };
 
 /** Authenticated WebSocket client with user context */
 export interface AuthenticatedClient {
@@ -27,6 +53,20 @@ export interface AuthenticatedClient {
   role: "admin" | "user";
   groupId: string | null;
   accessibleTabIds: Set<string>;
+}
+
+/**
+ * Decide whether a client may observe an event given its server-derived
+ * visibility. Fail-closed: a client only receives an event when a rule
+ * explicitly grants it. Admins observe the entire system.
+ */
+function canObserve(client: AuthenticatedClient, envelope: BroadcastEnvelope): boolean {
+  // Admins observe the entire system regardless of scope.
+  if (client.role === "admin") return true;
+  if (envelope.visibility === "public") return true;
+  if (envelope.visibility === "admin") return false;
+  // Tab-scoped: reachable only when the client shares one of the listed tabs.
+  return envelope.tabIds.some((tabId) => client.accessibleTabIds.has(tabId));
 }
 
 export class WsServer {
@@ -88,10 +128,13 @@ export class WsServer {
       });
     });
 
-    // Data-driven broadcast registration
-    for (const { eventName, messageType } of mappings) {
+    // Data-driven broadcast registration. Each mapping derives its own
+    // server-side visibility; an absent resolver means the event is unscoped
+    // and therefore admin-only (fail-closed).
+    for (const { eventName, messageType, visibility } of mappings) {
       eventBus.on(eventName, (data: unknown) => {
-        this.broadcast({ type: messageType, data });
+        const envelope = visibility ? visibility(data) : ADMIN_ONLY;
+        this.broadcast({ type: messageType, data }, envelope);
       });
     }
   }
@@ -180,36 +223,14 @@ export class WsServer {
     }
   }
 
-  private broadcast(message: unknown): void {
+  private broadcast(message: unknown, envelope: BroadcastEnvelope): void {
     const json = JSON.stringify(message);
-
-    // Extract tabId from message data for filtering
-    const msgData = (message as { data?: unknown })?.data;
-    const tabId =
-      msgData && typeof msgData === "object" && "tabId" in msgData
-        ? (msgData as { tabId: string }).tabId
-        : null;
 
     for (const [, client] of this.clients) {
       if (client.ws.readyState !== WebSocket.OPEN) continue;
-
-      // Admin users receive all messages
-      if (client.role === "admin") {
+      if (canObserve(client, envelope)) {
         client.ws.send(json);
-        continue;
       }
-
-      // If message has a tabId, only send to clients with access to that tab
-      if (tabId) {
-        if (client.accessibleTabIds.has(tabId)) {
-          client.ws.send(json);
-        }
-        // Skip clients without access to this tab
-        continue;
-      }
-
-      // Messages without a tabId are sent to all authenticated clients
-      client.ws.send(json);
     }
 
     const msgType = (message as { type?: string })?.type || "unknown";
