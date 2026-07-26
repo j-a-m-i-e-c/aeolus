@@ -6,7 +6,7 @@ services:
     ports:
       - "${MQTT_PORT:-1883}:1883"
     volumes:
-      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - ./mosquitto:/mosquitto/config
       - mosquitto_data:/mosquitto/data
       - mosquitto_log:/mosquitto/log
     logging:
@@ -14,6 +14,35 @@ services:
       options:
         max-size: "10m"
         max-file: "5"
+    networks:
+      - aeolus
+
+  # Lightweight sidecar that watches the shared password file and sends SIGHUP
+  # to the Mosquitto process when it changes. Shares the PID namespace with the
+  # mosquitto container so it can signal PID 1 directly — no Docker socket needed.
+  mosquitto-reloader:
+    image: alpine:3
+    container_name: aeolus-mosquitto-reloader
+    restart: unless-stopped
+    pid: "service:mosquitto"
+    depends_on:
+      - mosquitto
+    volumes:
+      - ./mosquitto:/watch:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        apk add --no-cache inotify-tools > /dev/null 2>&1
+        echo "mosquitto-reloader: watching /watch/password_file for changes"
+        while inotifywait -e close_write -e moved_to /watch/password_file 2>/dev/null; do
+          echo "mosquitto-reloader: password file changed, sending SIGHUP to mosquitto"
+          kill -HUP 1
+        done
+    logging:
+      driver: json-file
+      options:
+        max-size: "1m"
+        max-file: "2"
     networks:
       - aeolus
 
@@ -36,11 +65,16 @@ services:
       MQTT_TOPICS: "${MQTT_TOPICS:-#}"
       DB_PATH: /app/data/aeolus.db
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      # MQTT provisioning: shared config volume wiring
+      MQTT_PASSWORD_FILE: /mosquitto/config/password_file
+      MQTT_CONFIG_FILE: /mosquitto/config/mosquitto.conf
+      MQTT_RELOAD_STRATEGY: none
     depends_on:
       mosquitto:
         condition: service_started
     volumes:
       - backend_data:/app/data
+      - ./mosquitto:/mosquitto/config
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3001/api/health"]
       interval: 30s

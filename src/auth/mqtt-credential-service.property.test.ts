@@ -1,6 +1,8 @@
 // Feature: mqtt-device-provisioning, Property 7: Credential secrecy in list responses
 import crypto from "node:crypto";
-import { describe, expect, vi, afterEach } from "vitest";
+import os from "node:os";
+import path from "node:path";
+import { describe, expect, vi, beforeEach, afterEach } from "vitest";
 import { test, fc } from "@fast-check/vitest";
 import Database from "better-sqlite3";
 import type { Database as DatabaseType } from "better-sqlite3";
@@ -8,13 +10,6 @@ import type { Database as DatabaseType } from "better-sqlite3";
 // Mock child_process to prevent actual Docker calls
 vi.mock("node:child_process", () => ({
   execSync: vi.fn(() => "mocked-user:$7$101$mockedhash"),
-}));
-
-// Mock bcrypt to avoid slow hashing in property tests
-vi.mock("bcrypt", () => ({
-  default: {
-    hash: vi.fn(async () => "$2b$12$mockedhashvalue1234567890123456789012345678901234"),
-  },
 }));
 
 // Mock logger
@@ -50,13 +45,26 @@ function createTestDb(): DatabaseType {
       password_hash TEXT NOT NULL,
       created_at INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS system_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
   `);
   return db;
 }
 
 describe("Feature: mqtt-device-provisioning — Property 7: Credential secrecy in list responses", () => {
+  beforeEach(() => {
+    // Cheap PBKDF2 + a throwaway password-file path keep the property run fast
+    // and side-effect free without changing the credential format under test.
+    process.env.MQTT_PBKDF2_ITERATIONS = "2";
+    process.env.MQTT_PASSWORD_FILE = path.join(os.tmpdir(), `aeolus-pwfile-${crypto.randomUUID()}`);
+  });
+
   afterEach(() => {
     vi.clearAllMocks();
+    delete process.env.MQTT_PBKDF2_ITERATIONS;
+    delete process.env.MQTT_PASSWORD_FILE;
   });
 
   // Property 7: Credential secrecy in list responses

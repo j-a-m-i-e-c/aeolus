@@ -70,13 +70,35 @@ unaffected.
 
 ## Credential handling
 
-A generated device password is returned once. Aeolus stores a bcrypt hash and writes the Mosquitto password file.
+Aeolus hashes device passwords into Mosquitto's native sha512-pbkdf2 (`$7$`) format using Node's built-in `crypto.pbkdf2` — no external binary or Docker socket required. A generated device password is returned once; the `$7$` hash is stored in the database and written verbatim to the shared password file.
 
-The provisioning service is designed to update Mosquitto configuration and trigger a broker reload when the security level or credentials change. For that to work, the backend deployment must have writable access to the broker configuration and password file, plus a narrowly scoped way to reload Mosquitto.
+### Shared volume wiring
 
-The committed Docker Compose deployment does not grant those privileges. Its dashboard can expose the provisioning controls, but broker changes must be applied manually unless you add deployment-specific provisioning wiring. Avoid mounting the unrestricted Docker socket into the backend.
+In the Docker Compose deployment, the `./mosquitto` directory is bind-mounted into both the backend and the broker container at `/mosquitto/config`. This gives them a common view of `mosquitto.conf` and `password_file`. When the backend writes a credential change, a lightweight sidecar (`mosquitto-reloader`) detects the file update via `inotifywait` and sends SIGHUP to the broker — so the broker hot-reloads without needing a restart and without giving the backend any Docker or process privileges.
 
-In a provisioning-enabled deployment, the backend also maintains its own broker credential for secured modes.
+### Reload strategies
+
+The backend supports pluggable reload strategies via `MQTT_RELOAD_STRATEGY`:
+
+| Strategy | Mechanism | When to use |
+|---|---|---|
+| `none` (default) | No-op — an external watcher handles it | Docker Compose with the sidecar |
+| `signal` | `process.kill(pid, 'SIGHUP')` | Shared PID namespace or same host |
+| `docker` | `docker kill --signal=SIGHUP <container>` + restart fallback | Legacy; needs Docker socket |
+| `command` | Runs `MQTT_RELOAD_COMMAND` | Custom orchestration |
+
+### Environment variables
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `MQTT_PASSWORD_FILE` | `<project>/mosquitto/password_file` | Path to the shared password file |
+| `MQTT_CONFIG_FILE` | `<project>/mosquitto/mosquitto.conf` | Path to the Mosquitto config file |
+| `MQTT_RELOAD_STRATEGY` | `none` | Reload mechanism (see above) |
+| `MQTT_RELOAD_CONTAINER` | `aeolus-mosquitto` | Container name for the `docker` strategy |
+| `MQTT_RELOAD_PID` | — | Explicit PID for the `signal` strategy |
+| `MQTT_RELOAD_PID_FILE` | — | PID file for the `signal` strategy |
+| `MQTT_RELOAD_COMMAND` | — | Shell command for the `command` strategy |
+| `MQTT_PBKDF2_ITERATIONS` | `100000` | PBKDF2 iteration count (embedded in each hash) |
 
 ## Device guidance
 

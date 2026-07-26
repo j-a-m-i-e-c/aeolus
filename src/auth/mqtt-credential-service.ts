@@ -1,20 +1,33 @@
-// MQTT Credential Service — Manages MQTT device credentials and password file generation
-// Implements: createCredential, listCredentials, deleteCredential,
-//             ensureBackendCredential, regeneratePasswordFile
+// MQTT Credential Service — manages MQTT device credentials and the Mosquitto
+// password file.
+//
+// Credentials are hashed natively into Mosquitto's sha512-pbkdf2 (`$7$`) format
+// (see ../mqtt/mosquitto-password-hash.ts). The `$7$` hash line is what gets
+// stored in the database and written verbatim to the password file, so the
+// broker can authenticate the credential without Aeolus ever needing the
+// `mosquitto_passwd` binary or the Docker socket.
+//
+// Password-file composition is intentionally simple and mode-agnostic here:
+// `regeneratePasswordFile()` writes the backend credential plus every stored
+// device credential. Shared-mode composition (which must NOT include device
+// entries) is handled by the provisioning service via `writePasswordFile()`.
 
 import crypto from "node:crypto";
-import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import bcrypt from "bcrypt";
 import { getDatabase } from "../db/database.js";
 import { NotFoundError, ConflictError } from "../api/middleware/error-handler.js";
+import { buildPasswordLine, hashMosquittoPassword } from "../mqtt/mosquitto-password-hash.js";
+import { MosquittoReloader } from "../mqtt/mosquitto-reloader.js";
 import logger from "../logger.js";
 
-const BCRYPT_COST = 12;
 const PASSWORD_BYTES = 24;
-const BACKEND_DEVICE_NAME = "aeolus-backend";
-const BACKEND_USERNAME = "aeolus-backend";
+
+export const BACKEND_DEVICE_NAME = "aeolus-backend";
+export const BACKEND_USERNAME = "aeolus-backend";
+
+/** system_settings key holding the backend broker password (plaintext). */
+export const SETTING_BACKEND_PASSWORD = "mqtt_backend_password";
 
 export interface MqttCredential {
   id: string;
@@ -46,152 +59,116 @@ export function sanitizeUsername(deviceName: string): string {
 
 /**
  * Get the password file path. Configurable via MQTT_PASSWORD_FILE env var,
- * defaults to `mosquitto/password_file` relative to project root.
+ * defaults to `mosquitto/password_file` relative to the project root.
+ *
+ * In a shared-volume deployment this must resolve to the same file the broker
+ * reads (see docs/security/mqtt.md).
  */
 export function getPasswordFilePath(): string {
   if (process.env.MQTT_PASSWORD_FILE) {
     return process.env.MQTT_PASSWORD_FILE;
   }
-  // In Docker, the project is mounted at AEOLUS_PROJECT_DIR
   const projectDir = process.env.AEOLUS_PROJECT_DIR || process.cwd();
   return path.resolve(projectDir, "mosquitto", "password_file");
 }
 
-export interface PasswordFileEntry {
-  username: string;
-  plaintextPassword: string;
+// ─── Settings helpers ──────────────────────────────────────────────────────
+
+function readSetting(key: string): string | null {
+  const db = getDatabase();
+  const row = db.prepare("SELECT value FROM system_settings WHERE key = ?").get(key) as
+    | { value: string }
+    | undefined;
+  return row?.value ?? null;
 }
 
-const RETRY_INTERVAL_MS = 10_000;
-const MAX_RETRY_ATTEMPTS = 30;
-
-let retryTimer: ReturnType<typeof setInterval> | null = null;
-let retryAttempts = 0;
-
-/**
- * Generate a Mosquitto-native hash for a single entry by executing
- * `mosquitto_passwd -b /dev/null <username> <password>` inside the container.
- * Returns the full hash line (e.g. `username:$7$101$...`).
- */
-function getMosquittoHash(username: string, password: string): string {
-  const output = execSync(
-    `docker exec aeolus-mosquitto mosquitto_passwd -b /dev/null ${username} ${password}`,
-    { encoding: "utf-8", timeout: 10000, stdio: "pipe" }
-  );
-  return output.trim();
+function writeSetting(key: string, value: string): void {
+  const db = getDatabase();
+  db.prepare(
+    "INSERT INTO system_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+  ).run(key, value);
 }
 
-/**
- * Clear any pending retry timer.
- */
-function clearRetryQueue(): void {
-  if (retryTimer !== null) {
-    clearInterval(retryTimer);
-    retryTimer = null;
-  }
-  retryAttempts = 0;
-}
+// ─── Password file writing ─────────────────────────────────────────────────
 
 /**
- * Start the retry queue for password file generation.
- * Retries every 10 seconds, up to 30 attempts (5 minutes).
+ * Write the given password-file lines to disk atomically (temp file + rename)
+ * so the broker never observes a partially written file, then trigger a
+ * best-effort broker reload.
+ *
+ * Each line must already be a full Mosquitto entry (`username:$7$…`).
  */
-function startRetryQueue(entries: PasswordFileEntry[]): void {
-  // Clear any existing retry
-  clearRetryQueue();
-
-  retryTimer = setInterval(() => {
-    retryAttempts++;
-    logger.info(
-      { attempt: retryAttempts, maxAttempts: MAX_RETRY_ATTEMPTS },
-      "Retrying password file generation with mosquitto_passwd"
-    );
-
-    try {
-      writePasswordFileFromEntries(entries);
-      logger.info("Password file generation retry succeeded");
-      clearRetryQueue();
-    } catch {
-      if (retryAttempts >= MAX_RETRY_ATTEMPTS) {
-        logger.error(
-          { attempts: retryAttempts },
-          "Password file generation failed after maximum retry attempts"
-        );
-        clearRetryQueue();
-      } else {
-        logger.warn(
-          { attempt: retryAttempts, maxAttempts: MAX_RETRY_ATTEMPTS },
-          "Password file generation retry failed, will try again"
-        );
-      }
-    }
-  }, RETRY_INTERVAL_MS);
-}
-
-/**
- * Write the password file atomically from pre-generated hash lines.
- * Writes to a temp file first, then renames to the target path.
- */
-function writePasswordFileAtomic(hashLines: string[]): void {
+export function writePasswordFile(lines: string[]): void {
   const filePath = getPasswordFilePath();
   const dir = path.dirname(filePath);
-  const tempPath = path.join(dir, `.password_file.tmp.${Date.now()}`);
+  const tempPath = path.join(dir, `.password_file.tmp.${crypto.randomBytes(4).toString("hex")}`);
 
   fs.mkdirSync(dir, { recursive: true });
 
-  const content = hashLines.join("\n") + (hashLines.length > 0 ? "\n" : "");
+  const content = lines.join("\n") + (lines.length > 0 ? "\n" : "");
   fs.writeFileSync(tempPath, content, "utf-8");
   fs.renameSync(tempPath, filePath);
 
-  logger.info({ filePath, entryCount: hashLines.length }, "Password file written atomically");
+  logger.info({ filePath, entryCount: lines.length }, "Mosquitto password file written");
+
+  triggerReload();
 }
 
 /**
- * Generate hash lines for all entries using mosquitto_passwd.
- * Throws if the container is unavailable.
+ * Return the stored password-file lines for every device credential, excluding
+ * the backend credential. Lines come straight from the stored `$7$` hashes, so
+ * they survive process restarts without needing the original plaintext.
  */
-function writePasswordFileFromEntries(entries: PasswordFileEntry[]): void {
-  const hashLines: string[] = [];
-
-  for (const entry of entries) {
-    const hashLine = getMosquittoHash(entry.username, entry.plaintextPassword);
-    hashLines.push(hashLine);
-  }
-
-  writePasswordFileAtomic(hashLines);
+export function getDeviceCredentialLines(): string[] {
+  const db = getDatabase();
+  const rows = db
+    .prepare(
+      "SELECT username, password_hash FROM mqtt_credentials WHERE username != ? ORDER BY username",
+    )
+    .all(BACKEND_USERNAME) as Array<{ username: string; password_hash: string }>;
+  return rows.map((row) => `${row.username}:${row.password_hash}`);
 }
 
 /**
- * Generate the Mosquitto password file using native `mosquitto_passwd` hashes.
- * Executes `docker exec aeolus-mosquitto mosquitto_passwd -b /dev/null <username> <password>`
- * for each entry to produce Mosquitto-compatible PBKDF2-SHA512 hashes.
- *
- * If the container is unavailable, queues the operation for retry (every 10s, up to 30 attempts).
+ * Regenerate the password file from the backend credential plus all stored
+ * device credentials. Used after per-device credential create/revoke. The
+ * backend line is derived from the persisted backend password so the file and
+ * the backend's own broker connection always agree.
  */
-export function generatePasswordFileWithMosquittoPasswd(entries: PasswordFileEntry[]): void {
-  try {
-    writePasswordFileFromEntries(entries);
-    // Clear any pending retry since we succeeded
-    clearRetryQueue();
-  } catch (error) {
-    logger.warn(
-      { error, entryCount: entries.length },
-      "Mosquitto container unavailable for password hashing, queuing for retry"
-    );
-    startRetryQueue(entries);
+export function regeneratePasswordFile(): void {
+  const lines: string[] = [];
+
+  const backendPassword = readSetting(SETTING_BACKEND_PASSWORD);
+  if (backendPassword) {
+    lines.push(buildPasswordLine(BACKEND_USERNAME, backendPassword));
   }
+  lines.push(...getDeviceCredentialLines());
+
+  writePasswordFile(lines);
 }
+
+/**
+ * Trigger a best-effort broker reload using the deployment-configured strategy.
+ * Never throws: the file is already on disk, so a failed live reload only delays
+ * pickup until the broker's next start.
+ */
+function triggerReload(): void {
+  new MosquittoReloader().reload().catch(() => {
+    /* reload failures are logged inside the reloader; never fatal */
+  });
+}
+
+// ─── Credential CRUD ─────────────────────────────────────────────────────────
 
 /**
  * Create a new MQTT credential for a device.
- * Generates a username from the device name, a random password,
- * stores the bcrypt hash in the database, and regenerates the password file.
+ * Generates a username from the device name and a random password, stores the
+ * Mosquitto `$7$` hash in the database, and regenerates the password file.
  */
 export async function createCredential(deviceName: string): Promise<MqttCredential> {
   const db = getDatabase();
   const username = sanitizeUsername(deviceName);
 
-  // Check for duplicate username
   const existing = db.prepare("SELECT id FROM mqtt_credentials WHERE username = ?").get(username);
   if (existing) {
     throw new ConflictError(`MQTT credential with username "${username}" already exists`);
@@ -199,11 +176,11 @@ export async function createCredential(deviceName: string): Promise<MqttCredenti
 
   const id = crypto.randomUUID();
   const password = crypto.randomBytes(PASSWORD_BYTES).toString("base64url");
-  const passwordHash = await bcrypt.hash(password, BCRYPT_COST);
+  const passwordHash = hashMosquittoPassword(password);
   const createdAt = Date.now();
 
   db.prepare(
-    "INSERT INTO mqtt_credentials (id, device_name, username, password_hash, created_at) VALUES (?, ?, ?, ?, ?)"
+    "INSERT INTO mqtt_credentials (id, device_name, username, password_hash, created_at) VALUES (?, ?, ?, ?, ?)",
   ).run(id, deviceName, username, passwordHash, createdAt);
 
   regeneratePasswordFile();
@@ -218,9 +195,11 @@ export async function createCredential(deviceName: string): Promise<MqttCredenti
  */
 export function listCredentials(): MqttCredentialListItem[] {
   const db = getDatabase();
-  const rows = db.prepare(
-    "SELECT id, device_name, username, created_at FROM mqtt_credentials ORDER BY created_at DESC"
-  ).all() as Array<{ id: string; device_name: string; username: string; created_at: number }>;
+  const rows = db
+    .prepare(
+      "SELECT id, device_name, username, created_at FROM mqtt_credentials ORDER BY created_at DESC",
+    )
+    .all() as Array<{ id: string; device_name: string; username: string; created_at: number }>;
 
   return rows.map((row) => ({
     id: row.id,
@@ -250,30 +229,31 @@ export function deleteCredential(id: string): void {
 
 /**
  * Ensure the backend's own MQTT credential exists.
- * If it already exists, returns the existing credential (without the original password).
- * If not, creates a new one and returns it with the password.
+ *
+ * Generates a fresh password, stores its `$7$` hash on the backend row and the
+ * plaintext in system_settings (the single source used both to write the
+ * password file and to connect the backend to the broker), and returns the
+ * plaintext so the caller can connect.
  */
 export async function ensureBackendCredential(): Promise<MqttCredential> {
   const db = getDatabase();
 
-  const existing = db.prepare(
-    "SELECT id, device_name, username FROM mqtt_credentials WHERE username = ?"
-  ).get(BACKEND_USERNAME) as { id: string; device_name: string; username: string } | undefined;
+  const password = crypto.randomBytes(PASSWORD_BYTES).toString("base64url");
+  const passwordHash = hashMosquittoPassword(password);
+  writeSetting(SETTING_BACKEND_PASSWORD, password);
+
+  const existing = db
+    .prepare("SELECT id, device_name, username FROM mqtt_credentials WHERE username = ?")
+    .get(BACKEND_USERNAME) as
+    | { id: string; device_name: string; username: string }
+    | undefined;
 
   if (existing) {
-    // Backend credential already exists — regenerate password so caller gets a usable one
-    const password = crypto.randomBytes(PASSWORD_BYTES).toString("base64url");
-    const passwordHash = await bcrypt.hash(password, BCRYPT_COST);
-
     db.prepare("UPDATE mqtt_credentials SET password_hash = ? WHERE id = ?").run(
       passwordHash,
-      existing.id
+      existing.id,
     );
-
-    regeneratePasswordFile();
-
     logger.info({ id: existing.id }, "Backend MQTT credential password regenerated");
-
     return {
       id: existing.id,
       deviceName: existing.device_name,
@@ -282,62 +262,12 @@ export async function ensureBackendCredential(): Promise<MqttCredential> {
     };
   }
 
-  // Create new backend credential
   const id = crypto.randomUUID();
-  const password = crypto.randomBytes(PASSWORD_BYTES).toString("base64url");
-  const passwordHash = await bcrypt.hash(password, BCRYPT_COST);
-  const createdAt = Date.now();
-
   db.prepare(
-    "INSERT INTO mqtt_credentials (id, device_name, username, password_hash, created_at) VALUES (?, ?, ?, ?, ?)"
-  ).run(id, BACKEND_DEVICE_NAME, BACKEND_USERNAME, passwordHash, createdAt);
-
-  regeneratePasswordFile();
+    "INSERT INTO mqtt_credentials (id, device_name, username, password_hash, created_at) VALUES (?, ?, ?, ?, ?)",
+  ).run(id, BACKEND_DEVICE_NAME, BACKEND_USERNAME, passwordHash, Date.now());
 
   logger.info({ id }, "Backend MQTT credential created");
 
   return { id, deviceName: BACKEND_DEVICE_NAME, username: BACKEND_USERNAME, password };
-}
-
-/**
- * Regenerate the Mosquitto password file from all stored credentials.
- * Writes one `username:password_hash` entry per line in Mosquitto-compatible format.
- */
-export function regeneratePasswordFile(): void {
-  const db = getDatabase();
-  const rows = db.prepare(
-    "SELECT username, password_hash FROM mqtt_credentials ORDER BY username"
-  ).all() as Array<{ username: string; password_hash: string }>;
-
-  const content = rows.map((row) => `${row.username}:${row.password_hash}`).join("\n");
-
-  const filePath = getPasswordFilePath();
-  const dir = path.dirname(filePath);
-
-  fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(filePath, content + (content.length > 0 ? "\n" : ""), "utf-8");
-
-  logger.info({ filePath, credentialCount: rows.length }, "Mosquitto password file regenerated");
-
-  // Signal Mosquitto to reload the password file
-  reloadMosquitto();
-}
-
-/**
- * Send SIGHUP to the Mosquitto container to reload its password file.
- * Uses the Docker socket (mounted at /var/run/docker.sock) via docker exec.
- * Fails silently if the container isn't running or Docker isn't available.
- */
-function reloadMosquitto(): void {
-  try {
-    execSync("docker kill --signal=SIGHUP aeolus-mosquitto", {
-      timeout: 5000,
-      stdio: "pipe",
-    });
-    logger.info("Sent SIGHUP to aeolus-mosquitto (password file reload)");
-  } catch {
-    // Not critical — Mosquitto may not be running yet (first startup)
-    // or we may not be in Docker. The file will be picked up on next restart.
-    logger.debug("Could not signal Mosquitto to reload password file (container may not be running)");
-  }
 }

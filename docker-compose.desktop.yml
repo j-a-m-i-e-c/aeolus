@@ -25,3 +25,7 @@ services:
     environment:
       MQTT_BROKER_URL: mqtt://mosquitto:1883
       RATE_LIMIT_RPM: "10000"
+      # Provisioning env vars are inherited from the main compose file;
+      # only the broker URL needs overriding for bridge networking.
+    networks:
+      - aeolus

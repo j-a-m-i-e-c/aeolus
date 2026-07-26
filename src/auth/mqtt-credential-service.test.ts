@@ -18,7 +18,7 @@ vi.mock("../logger.js", () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
-// Mock child_process to prevent Docker calls
+// Mock child_process so the reloader never shells out during tests.
 vi.mock("node:child_process", () => ({
   execSync: vi.fn(() => ""),
 }));
@@ -47,11 +47,14 @@ const {
   listCredentials,
   deleteCredential,
   ensureBackendCredential,
-  generatePasswordFileWithMosquittoPasswd,
+  getDeviceCredentialLines,
+  writePasswordFile,
   regeneratePasswordFile,
 } = await import("./mqtt-credential-service.js");
 
 beforeEach(() => {
+  // Keep PBKDF2 cheap so the suite stays fast; the format is unaffected.
+  process.env.MQTT_PBKDF2_ITERATIONS = "2";
   testDb = new Database(":memory:");
   testDb.pragma("foreign_keys = ON");
   initSchema(testDb);
@@ -60,6 +63,7 @@ beforeEach(() => {
 
 afterEach(() => {
   testDb.close();
+  delete process.env.MQTT_PBKDF2_ITERATIONS;
 });
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
@@ -188,43 +192,46 @@ describe("mqtt-credential-service", () => {
     });
   });
 
-  describe("generatePasswordFileWithMosquittoPasswd", () => {
-    it("calls execSync for each entry and writes file atomically", async () => {
-      const childProcess = await import("node:child_process");
-      const fsModule = await import("node:fs");
-      vi.mocked(childProcess.execSync).mockReturnValue("user1:$7$hash1");
+  describe("credential hashing (Mosquitto $7$ format)", () => {
+    it("stores a Mosquitto $7$ hash (never bcrypt) in the database", async () => {
+      const cred = await createCredential("hash-device");
+      const row = testDb
+        .prepare("SELECT password_hash FROM mqtt_credentials WHERE id = ?")
+        .get(cred.id) as { password_hash: string };
+      expect(row.password_hash.startsWith("$7$")).toBe(true);
+      expect(row.password_hash.startsWith("$2b$")).toBe(false);
+    });
+  });
 
-      generatePasswordFileWithMosquittoPasswd([
-        { username: "user1", plaintextPassword: "pass1" },
-      ]);
-
-      expect(childProcess.execSync).toHaveBeenCalledWith(
-        expect.stringContaining("mosquitto_passwd"),
-        expect.any(Object),
-      );
-      expect(fsModule.default.writeFileSync).toHaveBeenCalled();
-      expect(fsModule.default.renameSync).toHaveBeenCalled();
+  describe("getDeviceCredentialLines", () => {
+    it("returns username:$7$ lines for device credentials", async () => {
+      await createCredential("sensor-x");
+      const lines = getDeviceCredentialLines();
+      expect(lines).toHaveLength(1);
+      expect(lines[0].startsWith("mqtt-sensor-x:$7$")).toBe(true);
     });
 
-    it("queues retry when container is unavailable", async () => {
-      const childProcess = await import("node:child_process");
-      const loggerMod = await import("../logger.js");
-      vi.mocked(childProcess.execSync).mockImplementation(() => { throw new Error("container not running"); });
+    it("excludes the backend credential", async () => {
+      await ensureBackendCredential();
+      await createCredential("sensor-y");
+      const lines = getDeviceCredentialLines();
+      expect(lines.some((l) => l.startsWith("aeolus-backend:"))).toBe(false);
+      expect(lines.some((l) => l.startsWith("mqtt-sensor-y:"))).toBe(true);
+    });
+  });
 
-      // Should not throw — queues for retry
-      generatePasswordFileWithMosquittoPasswd([
-        { username: "user1", plaintextPassword: "pass1" },
-      ]);
-
-      expect(loggerMod.default.warn).toHaveBeenCalledWith(
-        expect.objectContaining({ entryCount: 1 }),
-        expect.stringContaining("queuing for retry"),
-      );
+  describe("writePasswordFile", () => {
+    it("writes atomically (temp file then rename)", async () => {
+      const fsModule = await import("node:fs");
+      writePasswordFile(["mqtt-a:$7$1$salt$hash"]);
+      expect(fsModule.default.mkdirSync).toHaveBeenCalled();
+      expect(fsModule.default.writeFileSync).toHaveBeenCalled();
+      expect(fsModule.default.renameSync).toHaveBeenCalled();
     });
   });
 
   describe("regeneratePasswordFile", () => {
-    it("writes password file from database credentials", async () => {
+    it("writes the password file from stored credentials", async () => {
       const fsModule = await import("node:fs");
       await createCredential("test-device");
       vi.mocked(fsModule.default.writeFileSync).mockClear();
@@ -235,13 +242,10 @@ describe("mqtt-credential-service", () => {
       expect(fsModule.default.mkdirSync).toHaveBeenCalled();
     });
 
-    it("handles reloadMosquitto failure gracefully", async () => {
-      const childProcess = await import("node:child_process");
-      vi.mocked(childProcess.execSync).mockImplementation(() => { throw new Error("docker not available"); });
-
+    it("does not throw when the broker reload is unavailable", async () => {
       await createCredential("reload-test");
-      // Should not throw
-      regeneratePasswordFile();
+      // Reload strategy defaults to 'none' (no-op); must never throw.
+      expect(() => regeneratePasswordFile()).not.toThrow();
     });
   });
 });

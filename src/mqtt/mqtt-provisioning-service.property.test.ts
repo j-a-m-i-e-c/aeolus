@@ -28,19 +28,24 @@ vi.mock("../db/database.js", () => ({
   getDatabase: vi.fn(),
 }));
 
-// Mock the credential service
-const mockGeneratePasswordFile = vi.fn();
+// Mock the credential service. writePasswordFile receives the fully-composed
+// Mosquitto password-file lines the provisioning service produced.
+const mockWritePasswordFile = vi.fn();
 const mockGetPasswordFilePath = vi.fn(() => "/mock/mosquitto/password_file");
+const mockGetDeviceCredentialLines = vi.fn(() => [] as string[]);
 const mockCreateCredential = vi.fn();
 const mockDeleteCredential = vi.fn();
 const mockListCredentials = vi.fn(() => []);
 
 vi.mock("../auth/mqtt-credential-service.js", () => ({
-  generatePasswordFileWithMosquittoPasswd: (...args: unknown[]) => mockGeneratePasswordFile(...args),
+  writePasswordFile: (...args: unknown[]) => mockWritePasswordFile(...args),
   getPasswordFilePath: () => mockGetPasswordFilePath(),
+  getDeviceCredentialLines: () => mockGetDeviceCredentialLines(),
   createCredential: (...args: unknown[]) => mockCreateCredential(...args),
   deleteCredential: (...args: unknown[]) => mockDeleteCredential(...args),
   listCredentials: () => mockListCredentials(),
+  BACKEND_USERNAME: "aeolus-backend",
+  SETTING_BACKEND_PASSWORD: "mqtt_backend_password",
 }));
 
 import { getDatabase } from "../db/database.js";
@@ -89,7 +94,15 @@ function createMockMqttService(): MqttService {
   return {
     isConnected: vi.fn().mockReturnValue(true),
     reconnectWithCredentials: vi.fn().mockResolvedValue(undefined),
+    setCredentials: vi.fn(),
   } as unknown as MqttService;
+}
+
+/** Flatten the last writePasswordFile call's lines into usernames. */
+function lastWrittenUsernames(): string[] {
+  const calls = mockWritePasswordFile.mock.calls;
+  const lines = (calls[calls.length - 1]?.[0] ?? []) as string[];
+  return lines.map((line) => line.split(":")[0]);
 }
 
 // ─── Generators ──────────────────────────────────────────────────────────────
@@ -113,6 +126,7 @@ describe("Feature: mqtt-device-provisioning — MqttProvisioningService Property
   let service: MqttProvisioningService;
 
   beforeEach(() => {
+    process.env.MQTT_PBKDF2_ITERATIONS = "2";
     testDb = createTestDb();
     mockedGetDatabase.mockReturnValue(testDb);
     configWriter = createMockConfigWriter();
@@ -120,11 +134,13 @@ describe("Feature: mqtt-device-provisioning — MqttProvisioningService Property
     mqttService = createMockMqttService();
     service = new MqttProvisioningService(mqttService, configWriter, reloader);
     vi.clearAllMocks();
+    mockGetDeviceCredentialLines.mockReturnValue([]);
     mockedGetDatabase.mockReturnValue(testDb);
   });
 
   afterEach(() => {
     testDb.close();
+    delete process.env.MQTT_PBKDF2_ITERATIONS;
   });
 
   // ─── Property 1: Security level validation ─────────────────────────────────
@@ -181,37 +197,45 @@ describe("Feature: mqtt-device-provisioning — MqttProvisioningService Property
 
   describe("Property 5: Password file entry invariant (simplified)", () => {
     test.prop([fc.constant("shared_password" as SecurityLevel)], { numRuns: 100 })(
-      "shared_password mode generates exactly 2 password file entries (shared + backend)",
+      "shared_password mode writes exactly 2 password file lines (shared + backend)",
       async () => {
-        mockGeneratePasswordFile.mockClear();
+        mockWritePasswordFile.mockClear();
         await service.setSecurityLevel("shared_password");
 
-        expect(mockGeneratePasswordFile).toHaveBeenCalled();
-        const lastCall = mockGeneratePasswordFile.mock.calls[
-          mockGeneratePasswordFile.mock.calls.length - 1
-        ];
-        const entries = lastCall[0] as Array<{ username: string; plaintextPassword: string }>;
-        expect(entries).toHaveLength(2);
-
-        const usernames = entries.map((e) => e.username);
+        expect(mockWritePasswordFile).toHaveBeenCalled();
+        const usernames = lastWrittenUsernames();
+        expect(usernames).toHaveLength(2);
         expect(usernames).toContain("aeolus-shared");
         expect(usernames).toContain("aeolus-backend");
       },
     );
 
     test.prop([fc.constant("per_device" as SecurityLevel)], { numRuns: 100 })(
-      "per_device mode generates exactly 1 password file entry (backend only, no devices yet)",
+      "per_device mode writes exactly 1 password file line (backend only, no devices yet)",
       async () => {
-        mockGeneratePasswordFile.mockClear();
+        mockWritePasswordFile.mockClear();
+        mockGetDeviceCredentialLines.mockReturnValue([]);
         await service.setSecurityLevel("per_device");
 
-        expect(mockGeneratePasswordFile).toHaveBeenCalled();
-        const lastCall = mockGeneratePasswordFile.mock.calls[
-          mockGeneratePasswordFile.mock.calls.length - 1
-        ];
-        const entries = lastCall[0] as Array<{ username: string; plaintextPassword: string }>;
-        expect(entries).toHaveLength(1);
-        expect(entries[0].username).toBe("aeolus-backend");
+        expect(mockWritePasswordFile).toHaveBeenCalled();
+        const usernames = lastWrittenUsernames();
+        expect(usernames).toHaveLength(1);
+        expect(usernames[0]).toBe("aeolus-backend");
+      },
+    );
+
+    test.prop([fc.constant("per_device" as SecurityLevel)], { numRuns: 50 })(
+      "per_device mode reinstates already-provisioned device credentials in the file",
+      async () => {
+        mockWritePasswordFile.mockClear();
+        mockGetDeviceCredentialLines.mockReturnValue([
+          "mqtt-existing:$7$2$salt$hash",
+        ]);
+        await service.setSecurityLevel("per_device");
+
+        const usernames = lastWrittenUsernames();
+        expect(usernames).toContain("aeolus-backend");
+        expect(usernames).toContain("mqtt-existing");
       },
     );
   });
@@ -223,27 +247,22 @@ describe("Feature: mqtt-device-provisioning — MqttProvisioningService Property
     const authenticatedLevels = fc.constantFrom<SecurityLevel>("shared_password", "per_device");
 
     test.prop([authenticatedLevels], { numRuns: 100 })(
-      "authenticated modes include aeolus-backend in password file entries",
+      "authenticated modes include aeolus-backend in the password file",
       async (level) => {
-        mockGeneratePasswordFile.mockClear();
+        mockWritePasswordFile.mockClear();
         await service.setSecurityLevel(level);
 
-        expect(mockGeneratePasswordFile).toHaveBeenCalled();
-        const lastCall = mockGeneratePasswordFile.mock.calls[
-          mockGeneratePasswordFile.mock.calls.length - 1
-        ];
-        const entries = lastCall[0] as Array<{ username: string; plaintextPassword: string }>;
-        const usernames = entries.map((e) => e.username);
-        expect(usernames).toContain("aeolus-backend");
+        expect(mockWritePasswordFile).toHaveBeenCalled();
+        expect(lastWrittenUsernames()).toContain("aeolus-backend");
       },
     );
 
     test.prop([fc.constant("open" as SecurityLevel)], { numRuns: 100 })(
-      "open mode does not call generatePasswordFileWithMosquittoPasswd",
+      "open mode does not write a password file",
       async () => {
-        mockGeneratePasswordFile.mockClear();
+        mockWritePasswordFile.mockClear();
         await service.setSecurityLevel("open");
-        expect(mockGeneratePasswordFile).not.toHaveBeenCalled();
+        expect(mockWritePasswordFile).not.toHaveBeenCalled();
       },
     );
   });
@@ -390,7 +409,7 @@ describe("Feature: mqtt-device-provisioning — MqttProvisioningService Property
         // Clear mocks before initialize
         (configWriter.writeOpenConfig as ReturnType<typeof vi.fn>).mockClear();
         (configWriter.writeAuthenticatedConfig as ReturnType<typeof vi.fn>).mockClear();
-        mockGeneratePasswordFile.mockClear();
+        mockWritePasswordFile.mockClear();
 
         await service.initialize();
 
@@ -399,17 +418,9 @@ describe("Feature: mqtt-device-provisioning — MqttProvisioningService Property
           expect(configWriter.writeAuthenticatedConfig).not.toHaveBeenCalled();
         } else {
           expect(configWriter.writeAuthenticatedConfig).toHaveBeenCalled();
-          // Backend credential should be in the password file entries
-          expect(mockGeneratePasswordFile).toHaveBeenCalled();
-          const lastCall = mockGeneratePasswordFile.mock.calls[
-            mockGeneratePasswordFile.mock.calls.length - 1
-          ];
-          const entries = lastCall[0] as Array<{
-            username: string;
-            plaintextPassword: string;
-          }>;
-          const usernames = entries.map((e) => e.username);
-          expect(usernames).toContain("aeolus-backend");
+          // Backend credential should be present in the written password file
+          expect(mockWritePasswordFile).toHaveBeenCalled();
+          expect(lastWrittenUsernames()).toContain("aeolus-backend");
         }
       },
     );

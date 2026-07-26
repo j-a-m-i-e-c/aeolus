@@ -368,6 +368,15 @@ export class MqttService {
     });
   }
 
+  /**
+   * Set the credentials used for the next {@link connect}, without reconnecting.
+   * Used at startup so the initial connect authenticates in secured modes. Pass
+   * null to connect anonymously (open mode).
+   */
+  setCredentials(credentials: { username?: string; password?: string } | null): void {
+    this.credentials = credentials;
+  }
+
   /** Update connection credentials and reconnect to the broker. Pass null to connect without auth (open mode). */
   async reconnectWithCredentials(credentials: { username?: string; password?: string } | null): Promise<void> {
     await this.disconnect();

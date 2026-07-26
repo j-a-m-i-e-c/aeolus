@@ -92,9 +92,13 @@ async function main(): Promise<void> {
   );
 
   // 3b. MQTT Provisioning Service
+  // In a shared-volume deployment the broker config lives on a volume mounted
+  // into both the backend and the broker at the same path; MQTT_CONFIG_FILE
+  // points the writer at it (and MQTT_PASSWORD_FILE at the shared password file).
   const projectDir = process.env.AEOLUS_PROJECT_DIR || process.cwd();
   const configWriter = new MosquittoConfigWriter({
-    configPath: path.resolve(projectDir, "mosquitto", "mosquitto.conf"),
+    configPath:
+      process.env.MQTT_CONFIG_FILE || path.resolve(projectDir, "mosquitto", "mosquitto.conf"),
   });
   const reloader = new MosquittoReloader();
   const provisioningService = new MqttProvisioningService(mqttService, configWriter, reloader);

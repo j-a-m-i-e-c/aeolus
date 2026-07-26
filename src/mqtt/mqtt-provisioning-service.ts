@@ -6,14 +6,17 @@ import crypto from "node:crypto";
 import { getDatabase } from "../db/database.js";
 import {
   getPasswordFilePath,
-  generatePasswordFileWithMosquittoPasswd,
+  writePasswordFile,
+  getDeviceCredentialLines,
   createCredential,
   deleteCredential,
   listCredentials,
-  type PasswordFileEntry,
+  BACKEND_USERNAME,
+  SETTING_BACKEND_PASSWORD,
   type MqttCredential,
   type MqttCredentialListItem,
 } from "../auth/mqtt-credential-service.js";
+import { buildPasswordLine } from "./mosquitto-password-hash.js";
 import { BadRequestError, ConflictError } from "../api/middleware/error-handler.js";
 import type { MosquittoConfigWriter } from "./mosquitto-config-writer.js";
 import type { MosquittoReloader } from "./mosquitto-reloader.js";
@@ -35,9 +38,7 @@ export interface SecurityStatus {
 const SETTING_SECURITY_LEVEL = "mqtt_security_level";
 const SETTING_SHARED_USERNAME = "mqtt_shared_username";
 const SETTING_SHARED_PASSWORD = "mqtt_shared_password";
-const SETTING_BACKEND_PASSWORD = "mqtt_backend_password";
 
-const BACKEND_USERNAME = "aeolus-backend";
 const PASSWORD_BYTES = 24;
 
 /**
@@ -97,65 +98,43 @@ export class MqttProvisioningService {
     logger.info({ level }, "Initializing MQTT provisioning service with persisted security level");
 
     if (level === "open") {
-      // Open mode: write open config, no password file needed
+      // Open mode: write open config, no password file needed.
       this.configWriter.writeOpenConfig();
+      this.mqttService.setCredentials(null);
       logger.info("Mosquitto configured for open mode (no authentication)");
-    } else {
-      // Authenticated mode (shared_password or per_device)
-      const backendPassword = this.ensureBackendPassword();
-      const entries: PasswordFileEntry[] = [];
-
-      // Always include backend credential in authenticated modes
-      entries.push({ username: BACKEND_USERNAME, plaintextPassword: backendPassword });
-
-      if (level === "shared_password") {
-        // Include shared credential — plaintext is stored in system_settings for display
-        const sharedUsername = this.readSetting(SETTING_SHARED_USERNAME);
-        const sharedPassword = this.readSetting(SETTING_SHARED_PASSWORD);
-        if (sharedUsername && sharedPassword) {
-          entries.push({ username: sharedUsername, plaintextPassword: sharedPassword });
-        }
-      }
-
-      // Note: For per_device mode, individual device credential plaintexts are NOT stored
-      // in system_settings (only hashes in mqtt_credentials). The password file on disk
-      // already contains the correct device entries from when they were created.
-      // On startup we regenerate only the backend (+ shared) entries. The full file
-      // regeneration with all device entries happens in setSecurityLevel/create/revoke
-      // (tasks 5.2-5.4) where plaintext passwords are available at call time.
-      //
-      // For a complete reconstruction, we pass all entries we have plaintext for.
-      // generatePasswordFileWithMosquittoPasswd will overwrite the file, so for per_device
-      // mode we need to include device entries too. We read them from the credential service's
-      // existing regeneratePasswordFile approach (which uses stored hashes directly).
-      if (level === "per_device") {
-        // For per_device startup reconstruction, we use the existing regeneratePasswordFile()
-        // which writes bcrypt hashes directly. Then we overlay the backend credential using
-        // mosquitto_passwd. However, the design specifies mosquitto_passwd for all entries.
-        //
-        // Practical approach: trust the existing password file for device entries and only
-        // ensure the config file and backend credential are correct. The password file
-        // will be fully regenerated (with mosquitto_passwd) on the next credential operation.
-        this.configWriter.writeAuthenticatedConfig(getPasswordFilePath());
-        generatePasswordFileWithMosquittoPasswd(entries);
-        logger.info(
-          { level, entryCount: entries.length },
-          "Mosquitto configured for per_device mode (backend credential ensured)",
-        );
-        return;
-      }
-
-      // Regenerate password file with mosquitto_passwd hashes (shared_password mode)
-      generatePasswordFileWithMosquittoPasswd(entries);
-
-      // Write authenticated config pointing to the password file
-      this.configWriter.writeAuthenticatedConfig(getPasswordFilePath());
-
-      logger.info(
-        { level, entryCount: entries.length },
-        "Mosquitto configured for authenticated mode",
-      );
+      return;
     }
+
+    // Authenticated mode (shared_password or per_device). Rebuild the password
+    // file from persisted state so the broker sees the same credentials it had
+    // before the restart.
+    const backendPassword = this.ensureBackendPassword();
+    const lines: string[] = [buildPasswordLine(BACKEND_USERNAME, backendPassword)];
+
+    if (level === "shared_password") {
+      const sharedUsername = this.readSetting(SETTING_SHARED_USERNAME);
+      const sharedPassword = this.readSetting(SETTING_SHARED_PASSWORD);
+      if (sharedUsername && sharedPassword) {
+        lines.push(buildPasswordLine(sharedUsername, sharedPassword));
+      }
+    } else {
+      // per_device: reinstate every stored device credential (from their `$7$`
+      // hashes) so provisioned devices survive the restart, not just the backend.
+      lines.push(...getDeviceCredentialLines());
+    }
+
+    this.configWriter.writeAuthenticatedConfig(getPasswordFilePath());
+    writePasswordFile(lines);
+
+    // Prime the initial connection with the backend credential and reload the
+    // broker so it honours the freshly written config + password file.
+    this.mqttService.setCredentials({ username: BACKEND_USERNAME, password: backendPassword });
+    await this.reloader.reload();
+
+    logger.info(
+      { level, entryCount: lines.length },
+      "Mosquitto configured for authenticated mode",
+    );
   }
 
   /**
@@ -181,14 +160,12 @@ export class MqttProvisioningService {
     // Read the backend password from system_settings
     const backendPassword = this.ensureBackendPassword();
 
-    // Build password file entries: shared (with new password) + backend
-    const entries: PasswordFileEntry[] = [
-      { username, plaintextPassword: password },
-      { username: BACKEND_USERNAME, plaintextPassword: backendPassword },
-    ];
-
-    // Write the password file with mosquitto_passwd hashes
-    generatePasswordFileWithMosquittoPasswd(entries);
+    // Write password file: shared (new password) + backend. No device entries
+    // in shared mode.
+    writePasswordFile([
+      buildPasswordLine(username, password),
+      buildPasswordLine(BACKEND_USERNAME, backendPassword),
+    ]);
 
     // Reload broker to pick up the new password file
     await this.reloader.reload();
@@ -257,14 +234,11 @@ export class MqttProvisioningService {
     // Ensure backend password exists
     const backendPassword = this.ensureBackendPassword();
 
-    // Build password file entries: [shared, backend]
-    const entries: PasswordFileEntry[] = [
-      { username: sharedUsername, plaintextPassword: sharedPassword },
-      { username: BACKEND_USERNAME, plaintextPassword: backendPassword },
-    ];
-
-    // 1. Write password file (files first)
-    generatePasswordFileWithMosquittoPasswd(entries);
+    // 1. Write password file (files first): [shared, backend]. No device entries.
+    writePasswordFile([
+      buildPasswordLine(sharedUsername, sharedPassword),
+      buildPasswordLine(BACKEND_USERNAME, backendPassword),
+    ]);
 
     // 2. Write authenticated config
     this.configWriter.writeAuthenticatedConfig(getPasswordFilePath());
@@ -297,14 +271,12 @@ export class MqttProvisioningService {
     // Ensure backend password exists
     const backendPassword = this.ensureBackendPassword();
 
-    // Build password file entries: [backend] only
-    // Device entries are added individually when credentials are created (task 5.4)
-    const entries: PasswordFileEntry[] = [
-      { username: BACKEND_USERNAME, plaintextPassword: backendPassword },
-    ];
-
-    // 1. Write password file (files first)
-    generatePasswordFileWithMosquittoPasswd(entries);
+    // 1. Write password file (files first): backend + any already-provisioned
+    // device credentials (from their stored `$7$` hashes).
+    writePasswordFile([
+      buildPasswordLine(BACKEND_USERNAME, backendPassword),
+      ...getDeviceCredentialLines(),
+    ]);
 
     // 2. Write authenticated config
     this.configWriter.writeAuthenticatedConfig(getPasswordFilePath());
