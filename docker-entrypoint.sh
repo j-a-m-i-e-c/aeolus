@@ -29,6 +29,15 @@ if [ "$(id -u)" = "0" ]; then
     echo "aeolus-entrypoint: fixing ownership of $DATA_DIR -> $APP_USER" >&2
     chown -R "$APP_USER:$APP_USER" "$DATA_DIR"
   fi
+
+  # Fix the shared Mosquitto config directory if it exists and is mounted.
+  # The backend writes password_file and mosquitto.conf here for provisioning.
+  MQTT_CONFIG_DIR="$(dirname "${MQTT_CONFIG_FILE:-/mosquitto/config/mosquitto.conf}")"
+  if [ -d "$MQTT_CONFIG_DIR" ] && [ "$(stat -c '%U' "$MQTT_CONFIG_DIR")" != "$APP_USER" ]; then
+    echo "aeolus-entrypoint: fixing ownership of $MQTT_CONFIG_DIR -> $APP_USER" >&2
+    chown -R "$APP_USER:$APP_USER" "$MQTT_CONFIG_DIR"
+  fi
+
   exec gosu "$APP_USER" "$@"
 fi
 

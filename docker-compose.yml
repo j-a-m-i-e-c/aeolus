@@ -33,6 +33,8 @@ services:
     command:
       - |
         apk add --no-cache inotify-tools > /dev/null 2>&1
+        echo "mosquitto-reloader: waiting for /watch/password_file to appear"
+        while [ ! -f /watch/password_file ]; do sleep 2; done
         echo "mosquitto-reloader: watching /watch/password_file for changes"
         while inotifywait -e close_write -e moved_to /watch/password_file 2>/dev/null; do
           echo "mosquitto-reloader: password file changed, sending SIGHUP to mosquitto"
@@ -43,8 +45,6 @@ services:
       options:
         max-size: "1m"
         max-file: "2"
-    networks:
-      - aeolus
 
   backend:
     build:
