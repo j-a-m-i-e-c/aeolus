@@ -26,10 +26,11 @@ test.describe("authentication", () => {
     await createAdmin(page);
 
     // With no devices yet, the WelcomeScreen is the landing content, and the
-    // sidebar reflects the signed-in admin.
+    // sidebar reflects the signed-in admin. Allow extra time on first load —
+    // the backend has just initialised and the frontend is hydrating cold.
     await expect(
       page.getByRole("heading", { name: "Welcome to Aeolus" }),
-    ).toBeVisible();
+    ).toBeVisible({ timeout: 20000 });
     await expect(page.getByText("(admin)")).toBeVisible();
   });
 

@@ -22,6 +22,7 @@ export async function createAdmin(page: Page): Promise<void> {
   await page.locator("#setup-confirm-password").fill(ADMIN.password);
   await page.getByRole("button", { name: "Create Account" }).click();
   await expect(page).toHaveURL(/\/dashboard/);
+  await page.waitForLoadState("networkidle");
 }
 
 /** Log in as the admin and land on the dashboard (assumes an admin exists). */
