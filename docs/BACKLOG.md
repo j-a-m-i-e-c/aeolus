@@ -20,6 +20,13 @@ authorization model first, hardening against determined insiders second.
 
 ##  High — deployment & lifecycle correctness
 
+### Verify MQTT provisioning applies to the real broker 🟠
+Dashboard-managed Shared Password and Per-Device security are implemented and
+gated behind `MQTT_MANAGED_PROVISIONING_ENABLED=true`. The remaining work is
+proving the sidecar reload path: the backend must confirm Mosquitto has applied
+a credential change before reporting success. Until that verification loop is
+complete the feature stays disabled by default.
+
 ### Connector multi-instance ownership & registration 🟠
 Action/condition handlers are globally keyed by type while connector instances
 are independently enabled/disabled. Two instances of the same connector (two
