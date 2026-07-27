@@ -1,19 +1,18 @@
 # Add an MQTT device
 
-Create a broker credential for an ESP32, Arduino or other MQTT client.
+Configure an ESP32, Arduino or other MQTT client for the local broker.
 
 ## Before you start
 
-The steps below assume MQTT provisioning has been wired into your deployment. In the default Docker Compose setup, configure Mosquitto manually as described in [Production deployment](../production-deployment.md#2-mqtt-broker-security), then enter the same credentials in the device firmware.
+The default Docker Compose broker is Open and does not require credentials. Dashboard-managed Shared Password and
+Per-Device security are under development and disabled by default. For an authenticated production deployment,
+configure Mosquitto manually as described in [Production deployment](../production-deployment.md#2-mqtt-broker-security),
+then enter the same credentials in the device firmware.
 
-1. Log in as the administrator.
-2. Open **Security**.
-3. Select **MQTT Security**.
-4. Set the broker to **Per-Device** mode.
+The dashboard workflow below is available only for development testing when
+`MQTT_MANAGED_PROVISIONING_ENABLED=true` is set explicitly.
 
-Open mode does not require credentials. Shared mode uses one credential for all devices.
-
-## Create the credential
+## Create the credential (experimental dashboard workflow)
 
 1. In the Per-Device credential list, choose **Add Device**.
 2. Enter a recognisable device name, such as `living-room-esp32`.
@@ -55,7 +54,7 @@ docker logs aeolus-mosquitto
 
 In a provisioning-enabled deployment, delete the credential from **Security → MQTT Security**. In a manually managed deployment, also remove it from the Mosquitto password file and reload the broker.
 
-The current provisioning API is under:
+The experimental provisioning API is under:
 
 ```text
 /api/mqtt/provisioning

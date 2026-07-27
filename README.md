@@ -506,6 +506,8 @@ Defaults work with Docker Compose. Common environment variables include:
 |---|---|---|
 | `MQTT_BROKER_URL` | `mqtt://localhost:1883` | Broker used by the backend |
 | `MQTT_TOPICS` | `#` | MQTT subscription filter |
+| `MQTT_DISCOVERY_IGNORED_TOPIC_SUFFIXES` | `set,command,cmd,heartbeat,availability` | Topic leaf names excluded from automatic device discovery |
+| `MQTT_MANAGED_PROVISIONING_ENABLED` | `false` | Enables experimental dashboard management of Shared / Per-Device broker security |
 | `PORT` / `API_PORT` | `3001` | Backend API port |
 | `DB_PATH` | `./data/aeolus.db` | SQLite path outside Docker |
 | `LOG_LEVEL` | `info` | Application logging level |

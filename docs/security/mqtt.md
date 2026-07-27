@@ -1,6 +1,11 @@
 # MQTT security
 
-Aeolus supports Open, Shared and Per-Device Mosquitto security modes, with dashboard controls and provisioning APIs.
+Open broker access is the current default. Dashboard-managed Shared Password and Per-Device provisioning are under
+development and disabled by default because a deployment must prove that Mosquitto has applied every credential
+change before Aeolus can safely report it as active. The dashboard labels both options accordingly, and their APIs
+return `503` unless `MQTT_MANAGED_PROVISIONING_ENABLED=true` is set deliberately for development work.
+
+For authenticated production deployments today, manage Mosquitto credentials and reloads through the host deployment.
 
 ## Security levels
 
@@ -21,6 +26,8 @@ This is simpler than per-device provisioning but cannot identify or revoke one i
 Each device receives its own username and password. Credentials can be created and revoked independently.
 
 ## Provisioning API
+
+The following endpoints are experimental and require `MQTT_MANAGED_PROVISIONING_ENABLED=true`:
 
 | Method | Path | Access |
 |---|---|---|
@@ -72,9 +79,12 @@ unaffected.
 
 Aeolus hashes device passwords into Mosquitto's native sha512-pbkdf2 (`$7$`) format using Node's built-in `crypto.pbkdf2` — no external binary or Docker socket required. A generated device password is returned once; the `$7$` hash is stored in the database and written verbatim to the shared password file.
 
-### Shared volume wiring
+### Experimental shared-volume wiring
 
-In the Docker Compose deployment, the `./mosquitto` directory is bind-mounted into both the backend and the broker container at `/mosquitto/config`. This gives them a common view of `mosquitto.conf` and `password_file`. When the backend writes a credential change, a lightweight sidecar (`mosquitto-reloader`) detects the file update via `inotifywait` and sends SIGHUP to the broker — so the broker hot-reloads without needing a restart and without giving the backend any Docker or process privileges.
+The experimental implementation bind-mounts `./mosquitto` into both the backend and the broker at
+`/mosquitto/config`, then uses a sidecar to signal Mosquitto after a change. This is not yet a verified provisioning
+protocol: the feature stays disabled until the sidecar watches atomic replacements correctly and the backend proves
+the broker has applied a requested security transition.
 
 ### Reload strategies
 
@@ -99,6 +109,7 @@ The backend supports pluggable reload strategies via `MQTT_RELOAD_STRATEGY`:
 | `MQTT_RELOAD_PID_FILE` | — | PID file for the `signal` strategy |
 | `MQTT_RELOAD_COMMAND` | — | Shell command for the `command` strategy |
 | `MQTT_PBKDF2_ITERATIONS` | `100000` | PBKDF2 iteration count (embedded in each hash) |
+| `MQTT_MANAGED_PROVISIONING_ENABLED` | `false` | Enables experimental dashboard-managed Shared / Per-Device provisioning |
 
 ## Device guidance
 

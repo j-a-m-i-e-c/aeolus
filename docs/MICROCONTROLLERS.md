@@ -2,7 +2,7 @@
 
 Microcontrollers connect to the local Mosquitto broker, publish telemetry and optionally subscribe to command topics.
 
-Aeolus discovers devices from incoming MQTT topics. Firmware flashing and OTA updates remain outside the platform.
+Aeolus discovers devices from incoming MQTT state topics. Firmware flashing and OTA updates remain outside the platform.
 
 ## 1. Publish telemetry
 
@@ -57,6 +57,11 @@ Examples:
 | `light/stage/front-wash` | Stage fixture state |
 
 Recognised first segments help Aeolus choose a device type and display name, but unfamiliar topic shapes are still accepted.
+
+Topics ending in `set`, `command`, `cmd`, `heartbeat` or `availability` are treated as control-plane signals and do
+not create devices by default. They remain visible in the MQTT inspector. Set
+`MQTT_DISCOVERY_IGNORED_TOPIC_SUFFIXES` to an empty value, or replace the list, when a deployment intentionally uses
+one of those names for state.
 
 ## Payloads
 
@@ -156,6 +161,10 @@ For an MQTT device action, Aeolus uses:
 1. an explicit `commandTopic` on the device when available;
 2. otherwise the state topic with its last segment replaced by `set`;
 3. otherwise `{deviceId}/set`.
+
+Aeolus persists the original MQTT state topic, so this routing remains exact across a restart. Device IDs are
+human-readable where possible; if two different topics would produce the same legacy ID, Aeolus gives the second one
+a deterministic hash suffix rather than merging their state.
 
 For example:
 
