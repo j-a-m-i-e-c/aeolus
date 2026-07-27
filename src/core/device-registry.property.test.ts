@@ -84,16 +84,17 @@ describe("Property: Device Registry Upsert Invariant", () => {
       db.exec(`CREATE TABLE IF NOT EXISTS devices (
         id TEXT PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL,
         capabilities TEXT NOT NULL DEFAULT '[]', state TEXT NOT NULL DEFAULT '{}',
-        integration TEXT NOT NULL DEFAULT 'mqtt', last_seen INTEGER NOT NULL
+        integration TEXT NOT NULL DEFAULT 'mqtt', last_seen INTEGER NOT NULL,
+        topic TEXT DEFAULT NULL, command_topic TEXT DEFAULT NULL
       )`);
       const bus = new EventEmitter();
       const registry = new DeviceRegistry(db, bus);
 
-      const seenIds = new Set<string>();
+      const seenTopics = new Set<string>();
       for (const event of events) {
         const sizeBefore = registry.size;
-        const isNew = !seenIds.has(event.deviceId);
-        seenIds.add(event.deviceId);
+        const isNew = !seenTopics.has(event.topic);
+        seenTopics.add(event.topic);
 
         registry.upsert(event as NormalizedEvent);
 
@@ -103,7 +104,7 @@ describe("Property: Device Registry Upsert Invariant", () => {
           expect(registry.size).toBe(sizeBefore);
         }
 
-        const device = registry.getById(event.deviceId);
+        const device = registry.getByMqttTopic(event.topic);
         expect(device).toBeDefined();
         // State should contain the event's state values
         for (const [key, value] of Object.entries(event.state)) {
@@ -111,7 +112,7 @@ describe("Property: Device Registry Upsert Invariant", () => {
         }
       }
 
-      expect(registry.size).toBe(seenIds.size);
+      expect(registry.size).toBe(seenTopics.size);
       db.close();
     }
   );
@@ -130,7 +131,8 @@ describe("Feature: mqtt-topic-overhaul — Property 8: Registry Accepts Any Devi
       db.exec(`CREATE TABLE IF NOT EXISTS devices (
         id TEXT PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL,
         capabilities TEXT NOT NULL DEFAULT '[]', state TEXT NOT NULL DEFAULT '{}',
-        integration TEXT NOT NULL DEFAULT 'mqtt', last_seen INTEGER NOT NULL
+        integration TEXT NOT NULL DEFAULT 'mqtt', last_seen INTEGER NOT NULL,
+        topic TEXT DEFAULT NULL, command_topic TEXT DEFAULT NULL
       )`);
       const bus = new EventEmitter();
       const registry = new DeviceRegistry(db, bus);
@@ -145,7 +147,7 @@ describe("Feature: mqtt-topic-overhaul — Property 8: Registry Accepts Any Devi
 
       registry.upsert(event);
 
-      const device = registry.getById(deviceId);
+      const device = registry.getByMqttTopic(event.topic);
       expect(device).toBeDefined();
       expect(device!.type).toBe(deviceType);
       expect(device!.id).toBe(deviceId);

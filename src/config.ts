@@ -7,6 +7,10 @@ dotenv.config();
 export interface Config {
   mqttBrokerUrl: string;
   mqttTopics: string[];
+  /** Topic leaf names ignored by automatic device discovery. */
+  mqttDiscoveryIgnoredTopicSuffixes: string[];
+  /** Dashboard-managed Mosquitto provisioning is opt-in while under development. */
+  managedMqttProvisioningEnabled: boolean;
   port: number;
   dbPath: string;
   logLevel: string;
@@ -47,6 +51,12 @@ export const config: Config = {
   mqttTopics: (process.env.MQTT_TOPICS || "#")
     .split(",")
     .map((t) => t.trim()),
+  mqttDiscoveryIgnoredTopicSuffixes: (process.env.MQTT_DISCOVERY_IGNORED_TOPIC_SUFFIXES
+    ?? "set,command,cmd,heartbeat,availability")
+    .split(",")
+    .map((suffix) => suffix.trim().toLowerCase())
+    .filter(Boolean),
+  managedMqttProvisioningEnabled: process.env.MQTT_MANAGED_PROVISIONING_ENABLED === "true",
   port: parseInt(process.env.PORT || "3001", 10),
   dbPath: process.env.DB_PATH || "./data/aeolus.db",
   logLevel: process.env.LOG_LEVEL || "debug",

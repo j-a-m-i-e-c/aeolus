@@ -34,6 +34,8 @@ export interface MqttServiceConfig {
    * PendingCommandTracker rather than emitted as ordinary device state.
    */
   ackTopicFilter?: string;
+  /** Topic leaf names that are raw-visible but excluded from device discovery. */
+  discoveryIgnoredTopicSuffixes?: string[];
 }
 
 /**
@@ -251,6 +253,13 @@ export class MqttService {
       return;
     }
 
+    if (this.isIgnoredDiscoveryTopic(topic)) {
+      logger.debug({ topic }, "MQTT control-plane topic excluded from device discovery");
+      const ignoredDurationMs = Date.now() - start;
+      this.eventBus.emit(MQTT_MESSAGE_PROCESSED, { topic, durationMs: ignoredDurationMs });
+      return;
+    }
+
     const parsed = parseTopic(topic);
     if (!parsed) {
       logger.warn({ topic }, "Received message on unparseable topic");
@@ -280,7 +289,7 @@ export class MqttService {
     }
 
     const event: NormalizedEvent = {
-      deviceId: parsed.deviceId,
+      deviceId: this.deviceRegistry?.resolveMqttDeviceId(topic, parsed.deviceId) ?? parsed.deviceId,
       deviceType: parsed.deviceType,
       state,
       topic,
@@ -291,7 +300,7 @@ export class MqttService {
     this.eventBus.emit(DEVICE_STATE_CHANGE, event);
 
     // Feed observation-only confirmation off ambient device state (Req 5.8).
-    this.ackRouter?.observeState(parsed.deviceId, state);
+    this.ackRouter?.observeState(event.deviceId, state);
 
     // Emit processing complete event for MetricsService histogram
     const durationMs = Date.now() - start;
@@ -305,6 +314,13 @@ export class MqttService {
     // Strip an MQTT multi-level wildcard suffix ("aeolus/acks/#" → "aeolus/acks/").
     const prefix = filter.endsWith("/#") ? filter.slice(0, -1) : filter;
     return topic === prefix || topic.startsWith(prefix);
+  }
+
+  /** True when the final topic level is excluded from automatic discovery. */
+  private isIgnoredDiscoveryTopic(topic: string): boolean {
+    const leaf = topic.split("/").filter(Boolean).at(-1)?.toLowerCase();
+    return leaf !== undefined && this.config.discoveryIgnoredTopicSuffixes
+      ?.some((suffix) => suffix.toLowerCase() === leaf) === true;
   }
 
   /**

@@ -227,6 +227,25 @@ describe("ActionRouter", () => {
       expect(mqttService.publish).toHaveBeenCalledWith("home/light/cmd", "ON");
     });
 
+    it("derives the command topic from persisted device metadata", async () => {
+      const device = createMockDevice({
+        integration: "mqtt",
+        topic: "pump/well/state",
+        // A device payload may contain a data field named topic; metadata wins.
+        state: { on: false, topic: "untrusted/payload/topic" },
+      });
+      deviceRegistry.getById.mockReturnValue(device);
+
+      const mqttService = { isConnected: vi.fn().mockReturnValue(true), publish: vi.fn() } as unknown as MqttService;
+      router.setMqttService(mqttService);
+
+      const result = await router.executeAction("test-device-1", {
+        type: "on", deviceId: "test-device-1", params: { payload: "ON" },
+      });
+      expect(result.success).toBe(true);
+      expect(mqttService.publish).toHaveBeenCalledWith("pump/well/set", "ON");
+    });
+
     it("uses state.commandTopic as fallback", async () => {
       const device = createMockDevice({
         integration: "mqtt",

@@ -205,6 +205,82 @@ describe("DeviceRegistry — unit tests", () => {
     });
   });
 
+  describe("MQTT source topics", () => {
+    it("persists the exact MQTT state topic and restores it after restart", () => {
+      registry.upsert({
+        deviceId: "pump-well-state",
+        deviceType: "pump",
+        state: { running: true },
+        topic: "pump/well/state",
+        timestamp: Date.now(),
+      });
+
+      const stored = db.prepare(
+        "SELECT topic FROM devices WHERE id = ?",
+      ).get("pump-well-state") as { topic: string };
+      expect(stored.topic).toBe("pump/well/state");
+
+      const afterRestart = new DeviceRegistry(db, eventBus);
+      afterRestart.loadFromDb();
+      expect(afterRestart.getByMqttTopic("pump/well/state")).toMatchObject({
+        id: "pump-well-state",
+        topic: "pump/well/state",
+      });
+    });
+
+    it("keeps both topics when their legacy topic slugs collide", () => {
+      const first = registry.upsert({
+        deviceId: "a-b-c",
+        deviceType: "sensor",
+        state: { value: 1 },
+        topic: "a/b-c",
+        timestamp: Date.now(),
+      });
+      const second = registry.upsert({
+        deviceId: "a-b-c",
+        deviceType: "sensor",
+        state: { value: 2 },
+        topic: "a-b/c",
+        timestamp: Date.now(),
+      });
+
+      expect(first.id).toBe("a-b-c");
+      expect(second.id).toMatch(/^mqtt-a-b-c-[a-f0-9]{12}$/);
+      expect(second.id).not.toBe(first.id);
+      expect(registry.getByMqttTopic("a/b-c")?.state).toEqual({ value: 1 });
+      expect(registry.getByMqttTopic("a-b/c")?.state).toEqual({ value: 2 });
+
+      registry.upsert({
+        deviceId: "a-b-c",
+        deviceType: "sensor",
+        state: { battery: 80 },
+        topic: "a-b/c",
+        timestamp: Date.now(),
+      });
+      expect(registry.getById(second.id)?.state).toEqual({ value: 2, battery: 80 });
+      expect(registry.size).toBe(2);
+    });
+
+    it("preserves an explicit MQTT command topic", () => {
+      registry.registerDevice({
+        id: "pump-well",
+        name: "Well Pump",
+        type: "pump",
+        capabilities: ["on/off"],
+        state: {},
+        integration: "mqtt",
+        lastSeen: Date.now(),
+        topic: "pump/well/state",
+        commandTopic: "pump/well/command",
+      });
+
+      const afterRestart = new DeviceRegistry(db, eventBus);
+      afterRestart.loadFromDb();
+      expect(afterRestart.getByMqttTopic("pump/well/state")?.commandTopic)
+        .toBe("pump/well/command");
+    });
+  });
+
   describe("loadFromDb", () => {
     it("loads persisted devices on startup", () => {
       // Insert a device directly into the database

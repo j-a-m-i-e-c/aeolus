@@ -2,6 +2,7 @@
 
 import type { Database as DatabaseType } from "better-sqlite3";
 import type { EventEmitter } from "node:events";
+import { createHash } from "node:crypto";
 import type { Device, NormalizedEvent } from "./types.js";
 import { WS_STATE_CHANGE } from "./event-bus.js";
 import logger from "../logger.js";
@@ -14,6 +15,8 @@ interface DeviceRow {
   state: string;
   integration: string;
   last_seen: number;
+  topic?: string | null;
+  command_topic?: string | null;
 }
 
 /** Serialize a Device to JSON-safe values for SQLite */
@@ -26,6 +29,8 @@ export function serializeDevice(device: Device): Record<string, unknown> {
     state: JSON.stringify(device.state),
     integration: device.integration,
     last_seen: device.lastSeen,
+    topic: device.topic ?? null,
+    command_topic: device.commandTopic ?? null,
   };
 }
 
@@ -43,6 +48,8 @@ export function deserializeDevice(row: Record<string, unknown>): Device | null {
       state: JSON.parse(row.state as string),
       integration: (row.integration as string) || "mqtt",
       lastSeen: row.last_seen as number,
+      ...(typeof row.topic === "string" ? { topic: row.topic } : {}),
+      ...(typeof row.command_topic === "string" ? { commandTopic: row.command_topic } : {}),
     };
   } catch (err) {
     logger.warn({ row, error: (err as Error).message }, "Malformed device row, skipping");
@@ -52,6 +59,8 @@ export function deserializeDevice(row: Record<string, unknown>): Device | null {
 
 export class DeviceRegistry {
   private devices = new Map<string, Device>();
+  /** Exact MQTT state topic → device ID. Unlike the legacy slug, this is lossless. */
+  private mqttDeviceIdsByTopic = new Map<string, string>();
   private db: DatabaseType;
   private eventBus: EventEmitter;
 
@@ -68,6 +77,9 @@ export class DeviceRegistry {
       const device = deserializeDevice(row as unknown as Record<string, unknown>);
       if (device) {
         this.devices.set(device.id, device);
+        if (device.integration === "mqtt" && device.topic) {
+          this.mqttDeviceIdsByTopic.set(device.topic, device.id);
+        }
         loaded++;
       }
     }
@@ -82,12 +94,47 @@ export class DeviceRegistry {
     return this.devices.get(id);
   }
 
+  /** Return the MQTT device registered for this exact state topic, if any. */
+  getByMqttTopic(topic: string): Device | undefined {
+    const id = this.mqttDeviceIdsByTopic.get(topic);
+    return id ? this.devices.get(id) : undefined;
+  }
+
+  /**
+   * Resolve a device ID for an MQTT state topic without losing the topic as the
+   * source identity. Existing legacy devices retain their readable IDs when
+   * first associated with a source topic; only genuine slug collisions receive
+   * a deterministic hash suffix.
+   */
+  resolveMqttDeviceId(topic: string, legacyDeviceId: string): string {
+    const existingForTopic = this.getByMqttTopic(topic);
+    if (existingForTopic) return existingForTopic.id;
+
+    const legacyDevice = this.devices.get(legacyDeviceId);
+    if (!legacyDevice || (legacyDevice.integration === "mqtt" && !legacyDevice.topic)) {
+      return legacyDeviceId;
+    }
+
+    const hash = createHash("sha256").update(topic).digest("hex");
+    for (const length of [12, 16, 20, 24, 32, 64]) {
+      const candidate = `mqtt-${legacyDeviceId}-${hash.slice(0, length)}`;
+      const existing = this.devices.get(candidate);
+      if (!existing || existing.topic === topic) return candidate;
+    }
+
+    throw new Error(`Unable to allocate a collision-safe MQTT device ID for topic '${topic}'`);
+  }
+
   get size(): number {
     return this.devices.size;
   }
 
   upsert(event: NormalizedEvent): Device {
-    const existing = this.devices.get(event.deviceId);
+    const integration = event.integration || "mqtt";
+    const deviceId = integration === "mqtt"
+      ? this.resolveMqttDeviceId(event.topic, event.deviceId)
+      : event.deviceId;
+    const existing = this.devices.get(deviceId);
 
     const device: Device = existing
       ? {
@@ -95,18 +142,25 @@ export class DeviceRegistry {
           state: { ...existing.state, ...event.state },
           capabilities: event.capabilities ?? existing.capabilities,
           lastSeen: event.timestamp,
+          ...(integration === "mqtt" ? { topic: event.topic } : {}),
+          ...(event.commandTopic ? { commandTopic: event.commandTopic } : {}),
         }
       : {
-          id: event.deviceId,
-          name: event.name ?? this.deriveNameFromId(event.deviceId),
+          id: deviceId,
+          name: event.name ?? this.deriveNameFromId(deviceId),
           type: event.deviceType,
           capabilities: event.capabilities ?? this.inferCapabilities(event.deviceType),
           state: event.state,
-          integration: event.integration || "mqtt",
+          integration,
           lastSeen: event.timestamp,
+          ...(integration === "mqtt" ? { topic: event.topic } : {}),
+          ...(event.commandTopic ? { commandTopic: event.commandTopic } : {}),
         };
 
     this.devices.set(device.id, device);
+    if (device.integration === "mqtt" && device.topic) {
+      this.mqttDeviceIdsByTopic.set(device.topic, device.id);
+    }
     this.persistDevice(device, !!existing);
 
     this.eventBus.emit(WS_STATE_CHANGE, {
@@ -121,8 +175,12 @@ export class DeviceRegistry {
   }
 
   remove(id: string): boolean {
+    const device = this.devices.get(id);
     const existed = this.devices.delete(id);
     if (existed) {
+      if (device?.integration === "mqtt" && device.topic) {
+        this.mqttDeviceIdsByTopic.delete(device.topic);
+      }
       this.db.prepare("DELETE FROM devices WHERE id = ?").run(id);
     }
     return existed;
@@ -130,6 +188,9 @@ export class DeviceRegistry {
 
   registerDevice(device: Device): void {
     this.devices.set(device.id, device);
+    if (device.integration === "mqtt" && device.topic) {
+      this.mqttDeviceIdsByTopic.set(device.topic, device.id);
+    }
     this.persistDevice(device, false);
   }
 
@@ -138,12 +199,12 @@ export class DeviceRegistry {
       const s = serializeDevice(device);
       if (isUpdate) {
         this.db.prepare(
-          "UPDATE devices SET name=?, type=?, capabilities=?, state=?, integration=?, last_seen=? WHERE id=?"
-        ).run(s.name, s.type, s.capabilities, s.state, s.integration, s.last_seen, s.id);
+          "UPDATE devices SET name=?, type=?, capabilities=?, state=?, integration=?, last_seen=?, topic=?, command_topic=? WHERE id=?"
+        ).run(s.name, s.type, s.capabilities, s.state, s.integration, s.last_seen, s.topic, s.command_topic, s.id);
       } else {
         this.db.prepare(
-          "INSERT OR REPLACE INTO devices (id, name, type, capabilities, state, integration, last_seen) VALUES (?, ?, ?, ?, ?, ?, ?)"
-        ).run(s.id, s.name, s.type, s.capabilities, s.state, s.integration, s.last_seen);
+          "INSERT OR REPLACE INTO devices (id, name, type, capabilities, state, integration, last_seen, topic, command_topic) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        ).run(s.id, s.name, s.type, s.capabilities, s.state, s.integration, s.last_seen, s.topic, s.command_topic);
       }
     } catch (err) {
       logger.error({ deviceId: device.id, error: (err as Error).message }, "Failed to persist device");

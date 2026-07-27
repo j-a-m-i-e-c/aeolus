@@ -77,7 +77,8 @@ describe("MQTT Service Integration", () => {
     db.exec(`CREATE TABLE IF NOT EXISTS devices (
       id TEXT PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL,
       capabilities TEXT NOT NULL DEFAULT '[]', state TEXT NOT NULL DEFAULT '{}',
-      integration TEXT NOT NULL DEFAULT 'mqtt', last_seen INTEGER NOT NULL
+      integration TEXT NOT NULL DEFAULT 'mqtt', last_seen INTEGER NOT NULL,
+      topic TEXT DEFAULT NULL, command_topic TEXT DEFAULT NULL
     )`);
 
     eventBus = new EventEmitter();

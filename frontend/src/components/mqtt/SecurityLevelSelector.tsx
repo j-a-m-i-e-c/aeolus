@@ -53,11 +53,16 @@ function getConfirmationMessage(currentLevel: SecurityLevel): string {
 }
 
 export default function SecurityLevelSelector() {
-  const { level, setLevel, loading } = useMqttProvisioningStore();
+  const { level, setLevel, loading, managedProvisioningEnabled } = useMqttProvisioningStore();
   const [pending, setPending] = useState(false);
 
   const handleSelect = async (newLevel: SecurityLevel) => {
-    if (newLevel === level || loading || pending) return;
+    if (
+      newLevel === level
+      || loading
+      || pending
+      || (!managedProvisioningEnabled && newLevel !== "open")
+    ) return;
 
     // Show confirmation when switching away from modes with active credentials
     if (MODES_WITH_CREDENTIALS.includes(level)) {
@@ -77,7 +82,8 @@ export default function SecurityLevelSelector() {
     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
       {LEVEL_OPTIONS.map(({ level: optionLevel, icon: Icon, title, description }) => {
         const isActive = optionLevel === level;
-        const isDisabled = loading || pending;
+        const isUnderDevelopment = !managedProvisioningEnabled && optionLevel !== "open";
+        const isDisabled = loading || pending || isUnderDevelopment;
 
         return (
           <motion.button
@@ -107,6 +113,9 @@ export default function SecurityLevelSelector() {
                 {title}
               </span>
               <span className="text-xs text-secondary">{description}</span>
+              {isUnderDevelopment && (
+                <span className="text-xs font-medium text-amber-400">Under development</span>
+              )}
             </div>
 
             {/* Active indicator dot */}

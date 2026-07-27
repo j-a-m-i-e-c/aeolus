@@ -104,10 +104,16 @@ function createMockProvisioningService(
   } as unknown as MqttProvisioningService;
 }
 
-function createApp(mockService: MqttProvisioningService): express.Express {
+function createApp(
+  mockService: MqttProvisioningService,
+  managedProvisioningEnabled = true,
+): express.Express {
   const app = express();
   app.use(express.json());
-  app.use("/api/mqtt/provisioning", createProvisioningRoutes(mockService));
+  app.use(
+    "/api/mqtt/provisioning",
+    createProvisioningRoutes(mockService, { managedProvisioningEnabled }),
+  );
   app.use(errorHandler);
   return app;
 }
@@ -132,7 +138,23 @@ describe("Feature: mqtt-device-provisioning — Provisioning Routes Integration 
       const body = res.body as SecurityStatus;
       expect(body.level).toBe("open");
       expect(body.backendConnected).toBe(true);
+      expect((res.body as { managedProvisioningEnabled: boolean }).managedProvisioningEnabled).toBe(true);
     });
+  });
+
+  it("reports management as disabled and rejects mutating operations by default", async () => {
+    const disabledApp = createApp(mockService, false);
+
+    const status = await request(disabledApp, "GET", "/api/mqtt/provisioning/status");
+    expect(status.status).toBe(200);
+    expect((status.body as { managedProvisioningEnabled: boolean }).managedProvisioningEnabled).toBe(false);
+
+    const mutation = await request(disabledApp, "PUT", "/api/mqtt/provisioning/level", {
+      level: "shared_password",
+    });
+    expect(mutation.status).toBe(503);
+    expect((mutation.body as { error: string }).error).toContain("under development");
+    expect(mockService.setSecurityLevel).not.toHaveBeenCalled();
   });
 
   // ─── PUT /level ──────────────────────────────────────────────────────────

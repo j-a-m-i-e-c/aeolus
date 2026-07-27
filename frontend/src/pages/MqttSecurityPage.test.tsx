@@ -6,11 +6,13 @@ import { render, screen, waitFor } from "@testing-library/react";
 const mockFetchStatus = vi.fn();
 let mockLevel = "open";
 let mockLoading = true;
+let mockManagedProvisioningEnabled = true;
 
 vi.mock("../store/mqtt-provisioning-store", () => ({
   useMqttProvisioningStore: () => ({
     level: mockLevel,
     loading: mockLoading,
+    managedProvisioningEnabled: mockManagedProvisioningEnabled,
     fetchStatus: mockFetchStatus,
   }),
 }));
@@ -32,6 +34,7 @@ describe("MqttSecurityPage", () => {
     mockFetchStatus.mockResolvedValue(undefined);
     mockLevel = "open";
     mockLoading = true;
+    mockManagedProvisioningEnabled = true;
   });
 
   it("shows a loading spinner initially", () => {
@@ -74,5 +77,13 @@ describe("MqttSecurityPage", () => {
     await waitFor(() => expect(mockFetchStatus).toHaveBeenCalled());
     expect(screen.queryByTestId("shared-password-panel")).not.toBeInTheDocument();
     expect(screen.queryByTestId("device-credential-list")).not.toBeInTheDocument();
+  });
+
+  it("explains that managed modes are under development when disabled", async () => {
+    mockLoading = false;
+    mockManagedProvisioningEnabled = false;
+    render(<MqttSecurityPage />);
+
+    expect(await screen.findByText(/under development/i)).toBeInTheDocument();
   });
 });

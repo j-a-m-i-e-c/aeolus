@@ -87,7 +87,12 @@ async function main(): Promise<void> {
   // namespace cannot drift from the forged-ack surface the ingestion path trusts.
   const ackTopicFilter = "aeolus/acks/#";
   const mqttService = new MqttService(
-    { brokerUrl: config.mqttBrokerUrl, topics: config.mqttTopics, ackTopicFilter },
+    {
+      brokerUrl: config.mqttBrokerUrl,
+      topics: config.mqttTopics,
+      ackTopicFilter,
+      discoveryIgnoredTopicSuffixes: config.mqttDiscoveryIgnoredTopicSuffixes,
+    },
     eventBus
   );
 
@@ -102,7 +107,11 @@ async function main(): Promise<void> {
   });
   const reloader = new MosquittoReloader();
   const provisioningService = new MqttProvisioningService(mqttService, configWriter, reloader);
-  await provisioningService.initialize();
+  if (config.managedMqttProvisioningEnabled) {
+    await provisioningService.initialize();
+  } else {
+    logger.info("Dashboard-managed MQTT security is disabled while under development");
+  }
 
   // 4. Connector Framework (needed before CommandService)
   const connectorStore = new ConnectorStore(db);
@@ -207,8 +216,8 @@ async function main(): Promise<void> {
 
   // 7d. Wire MQTT events to device registry
   eventBus.on(DEVICE_STATE_CHANGE, (event) => {
-    registry.upsert(event);
-    stateHistory.record(event.deviceId, event.state, event.timestamp);
+    const device = registry.upsert(event);
+    stateHistory.record(device.id, event.state, event.timestamp);
   });
 
   // 8. Connect MQTT
@@ -287,7 +296,12 @@ async function main(): Promise<void> {
     maxPayloadBytes: config.mqttPublish.maxPayloadBytes,
   };
   app.use("/api/mqtt", createMqttRoutes(mqttService, mqttPublishPolicy, privateTopicStore));
-  app.use("/api/mqtt/provisioning", createProvisioningRoutes(provisioningService));
+  app.use(
+    "/api/mqtt/provisioning",
+    createProvisioningRoutes(provisioningService, {
+      managedProvisioningEnabled: config.managedMqttProvisioningEnabled,
+    }),
+  );
   const sandboxTypesPath = path.resolve(import.meta.dirname, "automations/sandbox-types.d.ts");
   app.use("/api/automations", createAutomationRoutes(engine, db, registry, actionExecutor, executionLog, sandboxTypesPath, requireAutomation, permissionResolver, connectorRegistry, stateStore, conditionRegistry, (deviceId) => connectorManager.getCompletionTierCapability(deviceId)));
   app.use("/api/connectors", createConnectorRoutes(connectorManager, connectorRegistry));

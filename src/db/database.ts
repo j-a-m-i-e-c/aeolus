@@ -25,7 +25,9 @@ export function initSchema(database: DatabaseType): void {
       capabilities TEXT NOT NULL DEFAULT '[]',
       state TEXT NOT NULL DEFAULT '{}',
       integration TEXT NOT NULL DEFAULT 'mqtt',
-      last_seen INTEGER NOT NULL
+      last_seen INTEGER NOT NULL,
+      topic TEXT DEFAULT NULL,
+      command_topic TEXT DEFAULT NULL
     );
   `);
   database.exec(`
@@ -51,6 +53,14 @@ export function initSchema(database: DatabaseType): void {
     try { database.exec(`ALTER TABLE automation_rules ADD COLUMN ${col} ${def};`); }
     catch { /* column already exists */ }
   };
+  const addDeviceColumn = (col: string, def: string) => {
+    try { database.exec(`ALTER TABLE devices ADD COLUMN ${col} ${def};`); }
+    catch { /* column already exists */ }
+  };
+  // MQTT source metadata is nullable so pre-existing devices remain valid and
+  // acquire their exact source topic lazily on the next observation.
+  addDeviceColumn("topic", "TEXT DEFAULT NULL");
+  addDeviceColumn("command_topic", "TEXT DEFAULT NULL");
   addColumn("rule_type", "TEXT NOT NULL DEFAULT 'form'");
   addColumn("script_source", "TEXT DEFAULT NULL");
   addColumn("compiled_js", "TEXT DEFAULT NULL");
@@ -199,6 +209,11 @@ export function initSchema(database: DatabaseType): void {
       created_at INTEGER NOT NULL
     );
   `);
+  database.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_integration_topic
+    ON devices(integration, topic)
+    WHERE topic IS NOT NULL;
+  `);
 
   migrateRemoveTypeCheck(database);
 }
@@ -239,12 +254,14 @@ function migrateRemoveTypeCheck(database: DatabaseType): void {
         capabilities TEXT NOT NULL DEFAULT '[]',
         state TEXT NOT NULL DEFAULT '{}',
         integration TEXT NOT NULL DEFAULT 'mqtt',
-        last_seen INTEGER NOT NULL
+        last_seen INTEGER NOT NULL,
+        topic TEXT DEFAULT NULL,
+        command_topic TEXT DEFAULT NULL
       );
     `);
     database.exec(`
-      INSERT INTO devices (id, name, type, capabilities, state, integration, last_seen)
-      SELECT id, name, type, capabilities, state, integration, last_seen
+      INSERT INTO devices (id, name, type, capabilities, state, integration, last_seen, topic, command_topic)
+      SELECT id, name, type, capabilities, state, integration, last_seen, topic, command_topic
       FROM devices_old;
     `);
     database.exec("DROP TABLE devices_old;");

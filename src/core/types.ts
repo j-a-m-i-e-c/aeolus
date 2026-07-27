@@ -33,6 +33,8 @@ export interface NormalizedEvent {
   name?: string;
   /** Explicit capabilities from connectors (overrides inferCapabilities when provided) */
   capabilities?: string[];
+  /** Explicit MQTT command topic when an integration provides one. */
+  commandTopic?: string;
 }
 
 /** Automation rule registered in the Rule Registry */

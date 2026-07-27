@@ -8,7 +8,7 @@ import SharedPasswordPanel from "../components/mqtt/SharedPasswordPanel";
 import DeviceCredentialList from "../components/mqtt/DeviceCredentialList";
 
 export default function MqttSecurityPage() {
-  const { level, loading, fetchStatus } = useMqttProvisioningStore();
+  const { level, loading, managedProvisioningEnabled, fetchStatus } = useMqttProvisioningStore();
   const [initialized, setInitialized] = useState(false);
 
   useEffect(() => {
@@ -36,14 +36,21 @@ export default function MqttSecurityPage() {
         <SecurityLevelSelector />
       </div>
 
+      {!managedProvisioningEnabled && (
+        <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-200">
+          Shared Password and Per-Device broker management are under development. Open mode remains available;
+          configure authenticated Mosquitto deployments through the host for now.
+        </div>
+      )}
+
       {/* Conditional panels based on active security level */}
-      {level === "shared_password" && (
+      {managedProvisioningEnabled && level === "shared_password" && (
         <div className="bg-surface border border-border rounded-xl p-5">
           <SharedPasswordPanel />
         </div>
       )}
 
-      {level === "per_device" && (
+      {managedProvisioningEnabled && level === "per_device" && (
         <div className="bg-surface border border-border rounded-xl p-5">
           <DeviceCredentialList />
         </div>

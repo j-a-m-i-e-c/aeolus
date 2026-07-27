@@ -168,6 +168,50 @@ describe("MqttService", () => {
     });
   });
 
+  it("excludes configured control-plane topics from discovery while retaining raw inspection", async () => {
+    const controlledService = new MqttService(
+      {
+        brokerUrl: "mqtt://localhost:1883",
+        topics: ["#"],
+        baseRetryDelayMs: 1000,
+        maxBackoffMs: 30000,
+        discoveryIgnoredTopicSuffixes: ["set", "heartbeat"],
+      },
+      eventBus,
+    );
+    const stateEvents: NormalizedEvent[] = [];
+    const rawEvents: unknown[] = [];
+    eventBus.on(DEVICE_STATE_CHANGE, (event: NormalizedEvent) => stateEvents.push(event));
+    eventBus.on(MQTT_RAW_MESSAGE, (event) => rawEvents.push(event));
+
+    const connectPromise = controlledService.connect();
+    mockClient.emit("connect");
+    await connectPromise;
+
+    const messageHandler = mockClient.listeners("message")[0] as (topic: string, payload: Buffer) => void;
+    messageHandler("pump/well/set", Buffer.from('{"running":true}'));
+
+    expect(rawEvents).toHaveLength(1);
+    expect(stateEvents).toHaveLength(0);
+  });
+
+  it("uses the registry's collision-safe MQTT identity in emitted events", async () => {
+    const resolveMqttDeviceId = vi.fn().mockReturnValue("mqtt-a-b-c-deadbeefcafe");
+    service.setDeviceRegistry({ resolveMqttDeviceId } as unknown as import("../core/device-registry.js").DeviceRegistry);
+
+    const connectPromise = service.connect();
+    mockClient.emit("connect");
+    await connectPromise;
+
+    const events: NormalizedEvent[] = [];
+    eventBus.on(DEVICE_STATE_CHANGE, (event: NormalizedEvent) => events.push(event));
+    const messageHandler = mockClient.listeners("message")[0] as (topic: string, payload: Buffer) => void;
+    messageHandler("a-b/c", Buffer.from('{"value":2}'));
+
+    expect(resolveMqttDeviceId).toHaveBeenCalledWith("a-b/c", "a-b-c");
+    expect(events[0]?.deviceId).toBe("mqtt-a-b-c-deadbeefcafe");
+  });
+
   describe("reconnection with exponential backoff (Requirement 10.2)", () => {
     it("attempts reconnection when connection is lost", async () => {
       const connectPromise = service.connect();

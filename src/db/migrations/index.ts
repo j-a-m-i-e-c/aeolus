@@ -45,6 +45,7 @@ import { automationRulesCompletionTier } from "./004-automation-rules-completion
 import { executionHistory } from "./005-execution-history.js";
 import { automationTabAssignments } from "./006-automation-tab-assignments.js";
 import { mqttPrivateTopics } from "./007-mqtt-private-topics.js";
+import { mqttDeviceSourceTopics } from "./008-mqtt-device-source-topics.js";
 
 export const migrations: Migration[] = [
   baseline,                      // id 1
@@ -54,4 +55,5 @@ export const migrations: Migration[] = [
   executionHistory,              // id 5
   automationTabAssignments,      // id 6
   mqttPrivateTopics,             // id 7
+  mqttDeviceSourceTopics,        // id 8
 ];

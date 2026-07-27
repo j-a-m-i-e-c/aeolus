@@ -6,9 +6,15 @@ import type { SecurityLevel } from "../../store/mqtt-provisioning-store";
 
 const h = vi.hoisted(() => {
   const setLevel = vi.fn().mockResolvedValue(undefined);
-  const state: { level: SecurityLevel; loading: boolean; setLevel: typeof setLevel } = {
+  const state: {
+    level: SecurityLevel;
+    loading: boolean;
+    managedProvisioningEnabled: boolean;
+    setLevel: typeof setLevel;
+  } = {
     level: "open",
     loading: false,
+    managedProvisioningEnabled: true,
     setLevel,
   };
   return { state, setLevel };
@@ -25,6 +31,7 @@ describe("SecurityLevelSelector", () => {
     h.setLevel.mockReset().mockResolvedValue(undefined);
     h.state.level = "open";
     h.state.loading = false;
+    h.state.managedProvisioningEnabled = true;
     vi.spyOn(window, "confirm").mockReturnValue(true);
   });
 
@@ -81,5 +88,17 @@ describe("SecurityLevelSelector", () => {
     render(<SecurityLevelSelector />);
     fireEvent.click(screen.getByText("Shared Password"));
     expect(h.setLevel).not.toHaveBeenCalled();
+  });
+
+  it("marks managed security options as under development when disabled", () => {
+    h.state.managedProvisioningEnabled = false;
+    render(<SecurityLevelSelector />);
+
+    expect(screen.getAllByText("Under development")).toHaveLength(2);
+    const sharedPassword = screen.getByRole("button", { name: /shared password/i });
+    expect(sharedPassword).toBeDisabled();
+    fireEvent.click(sharedPassword);
+    expect(h.setLevel).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: /^open/i })).not.toBeDisabled();
   });
 });

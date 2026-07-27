@@ -277,9 +277,8 @@ export class ActionRouter {
     }
 
     // Derive command topic: replace last segment with "set", or use explicit commandTopic
-    const topic = typeof device.state.topic === "string"
-      ? device.state.topic
-      : device.topic;
+    const topic = device.topic
+      ?? (typeof device.state.topic === "string" ? device.state.topic : undefined);
 
     const explicitCommandTopic = device.commandTopic
       ?? (typeof device.state.commandTopic === "string" ? device.state.commandTopic : undefined);

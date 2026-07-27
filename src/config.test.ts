@@ -23,6 +23,8 @@ describe("config", () => {
     // Clear relevant env vars
     delete process.env.MQTT_BROKER_URL;
     delete process.env.MQTT_TOPICS;
+    delete process.env.MQTT_DISCOVERY_IGNORED_TOPIC_SUFFIXES;
+    delete process.env.MQTT_MANAGED_PROVISIONING_ENABLED;
     delete process.env.PORT;
     delete process.env.DB_PATH;
     delete process.env.LOG_LEVEL;
@@ -35,6 +37,10 @@ describe("config", () => {
     const { config } = await import("./config.js");
     expect(config.mqttBrokerUrl).toBe("mqtt://localhost:1883");
     expect(config.mqttTopics).toEqual(["#"]);
+    expect(config.mqttDiscoveryIgnoredTopicSuffixes).toEqual([
+      "set", "command", "cmd", "heartbeat", "availability",
+    ]);
+    expect(config.managedMqttProvisioningEnabled).toBe(false);
     expect(config.port).toBe(3001);
     expect(config.dbPath).toBe("./data/aeolus.db");
     expect(config.logLevel).toBe("debug");
@@ -48,6 +54,8 @@ describe("config", () => {
   it("reads values from env vars when they are set", async () => {
     process.env.MQTT_BROKER_URL = "mqtt://broker.local:1884";
     process.env.MQTT_TOPICS = "home/+/temp, office/# ";
+    process.env.MQTT_DISCOVERY_IGNORED_TOPIC_SUFFIXES = "set, status ";
+    process.env.MQTT_MANAGED_PROVISIONING_ENABLED = "true";
     process.env.PORT = "4000";
     process.env.DB_PATH = "/data/custom.db";
     process.env.LOG_LEVEL = "warn";
@@ -60,6 +68,8 @@ describe("config", () => {
     const { config } = await import("./config.js");
     expect(config.mqttBrokerUrl).toBe("mqtt://broker.local:1884");
     expect(config.mqttTopics).toEqual(["home/+/temp", "office/#"]);
+    expect(config.mqttDiscoveryIgnoredTopicSuffixes).toEqual(["set", "status"]);
+    expect(config.managedMqttProvisioningEnabled).toBe(true);
     expect(config.port).toBe(4000);
     expect(config.dbPath).toBe("/data/custom.db");
     expect(config.logLevel).toBe("warn");
