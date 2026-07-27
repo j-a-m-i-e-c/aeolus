@@ -38,6 +38,14 @@ export interface MqttServiceConfig {
   discoveryIgnoredTopicSuffixes?: string[];
 }
 
+/** Optional collaborators injected at construction time. */
+export interface MqttServiceDeps {
+  /** Device registry for collision-safe ID resolution and command-topic observability. */
+  deviceRegistry?: DeviceRegistry;
+  /** Sink for correlated command replies and observation state. */
+  ackRouter?: AckRouter;
+}
+
 /**
  * Resolve the correlation id for an incoming response-topic message.
  *
@@ -86,26 +94,32 @@ export class MqttService {
   private deviceRegistry?: DeviceRegistry;
 
   /**
-   * Inject the sink for correlated command replies / observation state.
-   * Set once at composition, mirroring ActionRouter.setMqttService().
+   * Inject or replace the sink for correlated command replies / observation
+   * state. Prefer passing via {@link MqttServiceDeps} at construction; this
+   * setter remains for test ergonomics where the router is configured per-case.
    */
   setAckRouter(ackRouter: AckRouter): void {
     this.ackRouter = ackRouter;
   }
 
   /**
-   * Inject the device registry for best-effort command-topic observability.
-   * When set, publish() emits a debug signal when the target topic corresponds
-   * to a known device — indicating an unverified device command was published
-   * outside the CommandService boundary (Req 2.13).
+   * Inject or replace the device registry for collision-safe ID resolution and
+   * command-topic observability. Prefer passing via {@link MqttServiceDeps} at
+   * construction; this setter remains for test ergonomics.
    */
   setDeviceRegistry(registry: DeviceRegistry): void {
     this.deviceRegistry = registry;
   }
 
-  constructor(config: Partial<MqttServiceConfig> & Pick<MqttServiceConfig, "brokerUrl" | "topics">, eventBus: EventEmitter) {
+  constructor(
+    config: Partial<MqttServiceConfig> & Pick<MqttServiceConfig, "brokerUrl" | "topics">,
+    eventBus: EventEmitter,
+    deps?: MqttServiceDeps,
+  ) {
     this.config = { ...DEFAULT_CONFIG, ...config } as MqttServiceConfig;
     this.eventBus = eventBus;
+    this.deviceRegistry = deps?.deviceRegistry;
+    this.ackRouter = deps?.ackRouter;
   }
 
   async connect(): Promise<void> {

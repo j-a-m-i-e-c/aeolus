@@ -195,6 +195,34 @@ describe("MqttService", () => {
     expect(stateEvents).toHaveLength(0);
   });
 
+  it("handles trailing-slash topics without false-positive discovery exclusion", async () => {
+    const controlledService = new MqttService(
+      {
+        brokerUrl: "mqtt://localhost:1883",
+        topics: ["#"],
+        baseRetryDelayMs: 1000,
+        maxBackoffMs: 30000,
+        discoveryIgnoredTopicSuffixes: ["set", "heartbeat"],
+      },
+      eventBus,
+    );
+    const stateEvents: NormalizedEvent[] = [];
+    eventBus.on(DEVICE_STATE_CHANGE, (event: NormalizedEvent) => stateEvents.push(event));
+
+    const connectPromise = controlledService.connect();
+    mockClient.emit("connect");
+    await connectPromise;
+
+    const messageHandler = mockClient.listeners("message")[0] as (topic: string, payload: Buffer) => void;
+    // A trailing slash produces an empty final segment — .filter(Boolean) strips it,
+    // so the effective leaf is "well" which is NOT in the ignore list. The topic
+    // proceeds to normal discovery rather than being falsely excluded.
+    messageHandler("pump/well/", Buffer.from('{"value":1}'));
+
+    expect(stateEvents).toHaveLength(1);
+    expect(stateEvents[0]?.deviceId).toBe("pump-well");
+  });
+
   it("uses the registry's collision-safe MQTT identity in emitted events", async () => {
     const resolveMqttDeviceId = vi.fn().mockReturnValue("mqtt-a-b-c-deadbeefcafe");
     service.setDeviceRegistry({ resolveMqttDeviceId } as unknown as import("../core/device-registry.js").DeviceRegistry);

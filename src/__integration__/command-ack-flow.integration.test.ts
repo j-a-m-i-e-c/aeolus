@@ -57,6 +57,8 @@ describe("Command → Ack Flow Integration (Req 13)", () => {
     fakeClient = createFakeMqttClient();
     mockConnect.mockReturnValue(fakeClient);
 
+    tracker = new PendingCommandTracker();
+
     mqttService = new MqttService(
       {
         brokerUrl: "mqtt://localhost:1883",
@@ -66,10 +68,8 @@ describe("Command → Ack Flow Integration (Req 13)", () => {
         ackTopicFilter: "aeolus/acks/#",
       },
       eventBus,
+      { ackRouter: tracker },
     );
-
-    tracker = new PendingCommandTracker();
-    mqttService.setAckRouter(tracker);
 
     // Connect the service — triggers subscribe and message handler setup
     const connectPromise = mqttService.connect();

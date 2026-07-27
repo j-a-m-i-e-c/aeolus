@@ -86,6 +86,12 @@ async function main(): Promise<void> {
   // policy derives its reserved system prefix from this same value so the denied
   // namespace cannot drift from the forged-ack surface the ingestion path trusts.
   const ackTopicFilter = "aeolus/acks/#";
+
+  // Tracker correlates MQTT acknowledgements/observations back to dispatched
+  // commands; injected into both the CommandService (register) and the MQTT
+  // ingestion path (route/observeState).
+  const pendingCommandTracker = new PendingCommandTracker();
+
   const mqttService = new MqttService(
     {
       brokerUrl: config.mqttBrokerUrl,
@@ -93,7 +99,8 @@ async function main(): Promise<void> {
       ackTopicFilter,
       discoveryIgnoredTopicSuffixes: config.mqttDiscoveryIgnoredTopicSuffixes,
     },
-    eventBus
+    eventBus,
+    { deviceRegistry: registry, ackRouter: pendingCommandTracker },
   );
 
   // 3b. MQTT Provisioning Service
@@ -124,13 +131,6 @@ async function main(): Promise<void> {
   migrateLegacyHueCredentials(connectorStore);
 
   // 5. Action Executor, Execution Log, and Sandbox
-  // Tracker correlates MQTT acknowledgements/observations back to dispatched
-  // commands; injected into both the CommandService (register) and the MQTT
-  // ingestion path (route/observeState).
-  const pendingCommandTracker = new PendingCommandTracker();
-  mqttService.setAckRouter(pendingCommandTracker);
-  mqttService.setDeviceRegistry(registry);
-
   const actionExecutor = new CommandService({
     mqttService,
     connectorManager,
