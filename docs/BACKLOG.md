@@ -20,17 +20,6 @@ authorization model first, hardening against determined insiders second.
 
 ##  High — deployment & lifecycle correctness
 
-### Prove MQTT provisioning against the real broker 🟠
-The broker mounts `mosquitto.conf` but the backend only mounts its own data
-volume. If provisioning writes broker config/password files into the backend
-container, Mosquitto never sees them, and there is no reliable reload path.
-
-Fix: one shared config volume mounted into both containers; a controlled
-reload mechanism (sidecar, scoped signal, or orchestrated restart / generate-
-before-start). Add an integration test connecting directly to Mosquitto that
-verifies anonymous access is rejected, valid backend credentials work, device
-credentials survive a backend restart, and revoked credentials stop working.
-
 ### Connector multi-instance ownership & registration 🟠
 Action/condition handlers are globally keyed by type while connector instances
 are independently enabled/disabled. Two instances of the same connector (two
