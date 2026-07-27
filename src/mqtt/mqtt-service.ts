@@ -338,6 +338,8 @@ export class MqttService {
 
     const message: AckMessage = {
       correlationId,
+      ...(typeof payloadObject.success === "boolean" ? { success: payloadObject.success } : {}),
+      ...(typeof payloadObject.error === "string" ? { error: payloadObject.error } : {}),
       ...(typeof payloadObject.status === "string" ? { status: payloadObject.status } : {}),
       state: payloadObject,
     };

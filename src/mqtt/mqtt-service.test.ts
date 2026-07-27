@@ -601,6 +601,28 @@ describe("MqttService ack-topic routing", () => {
     expect(stateEvents).toHaveLength(0); // Not emitted as device state
   });
 
+  it("routes documented success and error fields from an ack-topic message", async () => {
+    const routeFn = vi.fn();
+    ackService.setAckRouter({ route: routeFn, observeState: vi.fn() });
+
+    const connectPromise = ackService.connect();
+    mockClient.emit("connect");
+    await connectPromise;
+
+    const messageHandler = mockClient.listeners("message")[0] as (topic: string, payload: Buffer, packet: unknown) => void;
+    messageHandler(
+      "aeolus/acks/device-1",
+      Buffer.from(JSON.stringify({ correlationId: "abc-123", success: false, error: "relay stuck" })),
+      { properties: {} },
+    );
+
+    expect(routeFn).toHaveBeenCalledWith(expect.objectContaining({
+      correlationId: "abc-123",
+      success: false,
+      error: "relay stuck",
+    }));
+  });
+
   it("handles ack message with MQTT 5 Correlation Data property", async () => {
     const routeFn = vi.fn();
     ackService.setAckRouter({ route: routeFn, observeState: vi.fn() });

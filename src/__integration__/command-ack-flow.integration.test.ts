@@ -120,7 +120,7 @@ describe("Command → Ack Flow Integration (Req 13)", () => {
         ) => void;
         messageHandler(
           "aeolus/acks/dev-1",
-          Buffer.from(JSON.stringify({ correlationId: capturedCorrelationId, status: "executed" })),
+          Buffer.from(JSON.stringify({ correlationId: capturedCorrelationId, success: true })),
           { properties: {} },
         );
       });
@@ -140,6 +140,40 @@ describe("Command → Ack Flow Integration (Req 13)", () => {
     expect(result.correlationId).toBeDefined();
     expect(capturedCorrelationId).toBeDefined();
     expect(result.correlationId).toBe(capturedCorrelationId);
+  });
+
+  it("returns a device-reported failure from the documented acknowledgement envelope", async () => {
+    commandService.registerHandler("device_action", (action: ActionDescriptor) => {
+      process.nextTick(() => {
+        const messageHandler = fakeClient.listeners("message")[0] as (
+          topic: string,
+          payload: Buffer,
+          packet: unknown,
+        ) => void;
+        messageHandler(
+          "aeolus/acks/dev-1",
+          Buffer.from(JSON.stringify({
+            correlationId: action.correlation?.correlationId,
+            success: false,
+            error: "relay stuck",
+          })),
+          { properties: {} },
+        );
+      });
+      return { success: true };
+    });
+
+    const result = await commandService.execute({
+      type: "device_action",
+      target: "dev-1",
+      params: { command: "turn_on" },
+    }, "rule-integration-failure");
+
+    expect(result).toMatchObject({
+      success: false,
+      lifecycleState: "FAILED",
+      error: "relay stuck",
+    });
   });
 
   it("tracked command resolves as TIMED_OUT when no ack arrives (Req 13.4)", async () => {

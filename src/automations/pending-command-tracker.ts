@@ -13,6 +13,13 @@ import { canTransition } from "./command-lifecycle.js";
 export interface AckMessage {
   /** Correlation id matching a Pending_Command. */
   correlationId: string;
+  /**
+   * Documented acknowledgement outcome. `true` confirms the command; `false`
+   * is a terminal device-reported failure.
+   */
+  success?: boolean;
+  /** Device-supplied reason when {@link success} is `false`. */
+  error?: string;
   /** Acknowledgement_Indicator value (e.g. status="executed"). Non-empty = ack. */
   status?: string;
   /** Observation_Indicator payload / device state (e.g. { state: "running" }). */
@@ -118,6 +125,19 @@ export class PendingCommandTracker {
       return;
     }
 
+    // A device can explicitly reject a command using the documented response
+    // envelope. This must win over any accompanying status or state payload:
+    // a failed command cannot become acknowledged or observed successfully.
+    if (message.success === false) {
+      this.finalize(
+        entry,
+        "FAILED",
+        false,
+        message.error || "Device reported command failure",
+      );
+      return;
+    }
+
     // 1. Acknowledgement — advance to ACKNOWLEDGED at most once.
     if (this.isAcknowledgement(message, entry.command)) {
       if (canTransition(entry.state, "ACKNOWLEDGED")) {
@@ -217,6 +237,10 @@ export class PendingCommandTracker {
 
   /** True when the message's acknowledgement indicator confirms receipt. */
   private isAcknowledgement(message: AckMessage, command: PendingCommand): boolean {
+    // `success: true` is Aeolus' documented acknowledgement protocol. It is
+    // independent of connector-specific legacy status values.
+    if (message.success === true) return true;
+
     if (message.status === undefined || message.status === "") return false;
     if (command.ackIndicatorValues && command.ackIndicatorValues.length > 0) {
       return command.ackIndicatorValues.includes(message.status);

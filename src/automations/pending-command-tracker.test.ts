@@ -53,6 +53,51 @@ describe("PendingCommandTracker branch coverage", () => {
   });
 
   describe("ackIndicatorValues filtering", () => {
+    it("accepts the documented success: true acknowledgement", async () => {
+      const tracker = new PendingCommandTracker();
+      const promise = tracker.register({
+        correlationId: "c1",
+        targetDeviceId: "dev-1",
+        observedDeviceId: "dev-1",
+        requiredTier: "acknowledged",
+        timeoutMs: 5000,
+        ackIndicatorValues: ["executed"],
+      });
+
+      tracker.route({ correlationId: "c1", success: true });
+
+      await expect(promise).resolves.toEqual({
+        lifecycleState: "ACKNOWLEDGED",
+        success: true,
+      });
+    });
+
+    it("fails immediately when the device reports success: false", async () => {
+      const tracker = new PendingCommandTracker();
+      const promise = tracker.register({
+        correlationId: "c1",
+        targetDeviceId: "dev-1",
+        observedDeviceId: "dev-1",
+        requiredTier: "observed",
+        condition: (state) => state.running === true,
+        timeoutMs: 5000,
+      });
+
+      tracker.route({
+        correlationId: "c1",
+        success: false,
+        error: "relay stuck",
+        status: "executed",
+        state: { running: true },
+      });
+
+      await expect(promise).resolves.toEqual({
+        lifecycleState: "FAILED",
+        success: false,
+        error: "relay stuck",
+      });
+    });
+
     it("only matches specified ack indicator values", async () => {
       const tracker = new PendingCommandTracker();
       const cmd: PendingCommand = {
