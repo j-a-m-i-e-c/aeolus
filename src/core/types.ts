@@ -132,7 +132,8 @@ export type CommandFailureKind =
   | "unsupported"    // no handler, or action not in the device's catalog
   | "invalid_params" // action parameters failed validation
   | "transport"      // broker/connector unavailable (not connected, disabled, none)
-  | "execution";     // connector handler threw while executing a valid command
+  | "execution"      // connector handler threw while executing a valid command
+  | "unauthorized";  // command is outside the authoring automation's authorization scope
 
 /** Result returned by ConnectorManager.executeAction() and devices.action(). */
 export interface ActionResult {

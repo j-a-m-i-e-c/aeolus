@@ -26,6 +26,7 @@ import { SandboxHost } from "../../sandbox/SandboxHost";
 import type { PropsPayload } from "../../sandbox/rpc-types";
 import type { ExecutionEntry } from "./custom/types";
 import { useDashboardStore } from "../../store/dashboard-store";
+import { useAuthStore } from "../../store/auth-store";
 import { useDeviceStore } from "../../store/device-store";
 import { useAutomationStateStore } from "../../store/automation-state-store";
 import type { PaneConfig } from "../../types/dashboard";
@@ -134,6 +135,9 @@ export default function MyComponent(aeolus: CustomComponentProps) {
 export function AutomationPane({ config, paneId }: Props) {
   const ruleId = (config.ruleId as string) || "";
   const updatePaneConfig = useDashboardStore((s) => s.updatePaneConfig);
+  const panes = useDashboardStore((s) => s.panes);
+  const activeTabId = useDashboardStore((s) => s.activeTabId);
+  const isAdmin = useAuthStore((s) => s.user?.role) === "admin";
 
   // Mode state
   const [mode, setMode] = useState<PaneMode>(ruleId ? "status" : "setup");
@@ -295,6 +299,12 @@ export function AutomationPane({ config, paneId }: Props) {
           ruleType: "script",
           scriptSource,
           uiSource: uiSource || undefined,
+          // A non-admin author binds the automation's scope to the tab this pane
+          // lives on (the pane's owning tab, falling back to the active tab).
+          // Admins author unrestricted, so no owning tab is sent.
+          ...(isAdmin
+            ? {}
+            : { tabId: panes.find((p) => p.id === paneId)?.tabId ?? activeTabId ?? undefined }),
         }),
       });
       const data = await res.json();
@@ -313,7 +323,7 @@ export function AutomationPane({ config, paneId }: Props) {
     } finally {
       setSaving(false);
     }
-  }, [name, triggerTopic, triggerType, cronExpression, scriptSource, uiSource, saving, paneId, config, updatePaneConfig]);
+  }, [name, triggerTopic, triggerType, cronExpression, scriptSource, uiSource, saving, paneId, config, updatePaneConfig, panes, activeTabId, isAdmin]);
 
   // ── Update handler (editing mode) — includes uiSource (15.4) ──
   const handleUpdate = useCallback(async () => {

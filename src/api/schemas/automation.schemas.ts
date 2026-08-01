@@ -2,6 +2,10 @@ import { z } from "zod";
 
 export const createAutomationBodySchema = z.object({
   name: z.string().min(1).max(200),
+  // Owning tab for non-admin (scoped) authoring. The requireTabPermission("write")
+  // guard verifies the caller holds write on it; the create handler binds the new
+  // automation's scope to it. Ignored for admins (who author unrestricted).
+  tabId: z.string().max(100).optional(),
   triggerTopic: z.string().max(500).optional(),
   ruleType: z.enum(["form", "script"]).optional(),
   triggerType: z.enum(["mqtt", "cron", "none"]).optional(),

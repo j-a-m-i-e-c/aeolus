@@ -18,7 +18,9 @@ import { createLayoutRoutes } from "../api/routes/layout.routes.js";
 import { createSystemRoutes } from "../api/routes/system.routes.js";
 import { automationExists } from "../api/routes/automation.routes.js";
 import { createResourceOwnershipStore } from "../auth/resource-ownership-store.js";
+import { createCollectionOwnershipStore } from "../auth/collection-ownership-store.js";
 import { createDeviceExposureResolver } from "../auth/device-exposure-resolver.js";
+import { createAutomationScopeResolver } from "../automations/automation-scope-resolver.js";
 import { createPermissionResolver } from "../auth/permission-resolver.js";
 import { requireDevicePermission, requireAutomationPermission } from "../auth/auth-middleware.js";
 import type { PermissionLevel } from "../auth/permission-service.js";
@@ -74,10 +76,22 @@ export function createTestApp(
 
   const dataStore = new DataStore(db, eventBus);
 
+  // Automation authorization scope (shared by CommandService and — where wired —
+  // the Sandbox). Built against the injected test `db`. Reused by the
+  // resource-level authorization block below.
+  const collectionOwnershipStore = createCollectionOwnershipStore(db);
+  const deviceExposureResolver = createDeviceExposureResolver(registry, db);
+  const automationScopeResolver = createAutomationScopeResolver(
+    deviceExposureResolver,
+    collectionOwnershipStore,
+    db,
+  );
+
   const actionExecutor = new CommandService({
     mqttService: createStubMqttService(),
     connectorManager: undefined,
     logger: createSilentLogger(),
+    scopeResolver: automationScopeResolver,
   } as unknown as CommandServiceDeps);
   actionExecutor.registerHandler("publish", handlePublish);
   actionExecutor.registerHandler("toggle", handleToggle);
@@ -105,7 +119,7 @@ export function createTestApp(
   // Constructed against the injected test `db` so authorization reads the same
   // database as the rest of the app.
   const ownershipStore = createResourceOwnershipStore(db);
-  const deviceExposureResolver = createDeviceExposureResolver(registry, db);
+  // `deviceExposureResolver` is created earlier (it also backs the scope resolver).
   const permissionResolver = createPermissionResolver(ownershipStore, deviceExposureResolver, db);
   const requireDevice = (level: PermissionLevel) =>
     requireDevicePermission(level, {

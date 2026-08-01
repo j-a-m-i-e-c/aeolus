@@ -65,7 +65,17 @@ export function createResourceOwnershipStore(
     const rows = db
       .prepare("SELECT tab_id FROM automation_tab_assignments WHERE automation_id = ?")
       .all(automationId) as TabIdRow[];
-    return rows.map((row) => row.tab_id);
+    const tabs = new Set(rows.map((row) => row.tab_id));
+
+    // The owning tab of a scoped automation always exposes it, in addition to
+    // any panes that reference it. This lets a non-admin author reach their own
+    // automation without editing the (admin-only) layout, and it survives layout
+    // saves because it derives from the automation's own owner_tab_id column.
+    const ownerTab = getOwnerTab(db, automationId);
+    if (ownerTab) {
+      tabs.add(ownerTab);
+    }
+    return Array.from(tabs);
   }
 
   function getExposingTabsBatch(automationIds: string[]): Map<string, string[]> {
@@ -85,13 +95,40 @@ export function createResourceOwnershipStore(
       )
       .all(...automationIds) as AssignmentRow[];
 
+    // Track membership per automation so the owner-tab union stays duplicate-free.
+    const sets = new Map<string, Set<string>>();
+    for (const id of automationIds) {
+      sets.set(id, new Set<string>());
+    }
     for (const row of rows) {
-      const tabs = result.get(row.automation_id);
-      if (tabs) {
-        tabs.push(row.tab_id);
+      sets.get(row.automation_id)?.add(row.tab_id);
+    }
+
+    // Union each automation's owning tab (when set), matching getExposingTabs.
+    const ownerPlaceholders = automationIds.map(() => "?").join(", ");
+    const ownerRows = db
+      .prepare(
+        `SELECT id, owner_tab_id FROM automation_rules WHERE id IN (${ownerPlaceholders})`,
+      )
+      .all(...automationIds) as { id: string; owner_tab_id: string | null }[];
+    for (const { id, owner_tab_id } of ownerRows) {
+      if (owner_tab_id) {
+        sets.get(id)?.add(owner_tab_id);
       }
     }
+
+    for (const [id, tabs] of sets) {
+      result.set(id, Array.from(tabs));
+    }
     return result;
+  }
+
+  /** The owning tab id of an automation, or null when it has none. */
+  function getOwnerTab(db: DatabaseType, automationId: string): string | null {
+    const row = db
+      .prepare("SELECT owner_tab_id FROM automation_rules WHERE id = ?")
+      .get(automationId) as { owner_tab_id: string | null } | undefined;
+    return row?.owner_tab_id ?? null;
   }
 
   function reconcileTabInternal(tabId: string, desiredAutomationIds: Set<string>): void {

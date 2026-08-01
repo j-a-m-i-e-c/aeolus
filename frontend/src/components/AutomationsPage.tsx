@@ -15,6 +15,9 @@ import {
 import type { TranspileError } from "./ScriptEditor";
 const ScriptEditor = lazy(() => import("./ScriptEditor").then(m => ({ default: m.ScriptEditor })));
 import { authFetch } from "../lib/auth-fetch";
+import { useAuthStore } from "../store/auth-store";
+import { usePermissionsStore } from "../store/permissions-store";
+import { useDashboardStore } from "../store/dashboard-store";
 
 import { API_URL } from "../lib/env";
 
@@ -35,9 +38,30 @@ interface AutomationRule {
   conditionValue?: string | null;
   scriptSource?: string;
   completionTier?: string | null;
+  ownerTabId?: string | null;
+  authoredUnrestricted?: boolean;
 }
 
 export function AutomationsPage() {
+  const role = useAuthStore((s) => s.user?.role);
+  const isAdmin = role === "admin";
+  const canPerform = usePermissionsStore((s) => s.canPerform);
+  const dashboardTabs = useDashboardStore((s) => s.tabs);
+
+  // Tabs the current user may author into. Admins author unrestricted (no owning
+  // tab); a non-admin authors a scoped automation bound to one tab they can write.
+  const writableTabs = dashboardTabs.filter((t) => canPerform(t.id, "write"));
+  // A non-admin with no writable tab cannot author (the server would 403).
+  const canAuthor = isAdmin || writableTabs.length > 0;
+
+  // The owning tab a non-admin author binds the new automation to.
+  const [ownerTabId, setOwnerTabId] = useState<string>("");
+  useEffect(() => {
+    if (!isAdmin && !ownerTabId && writableTabs.length > 0) {
+      setOwnerTabId(writableTabs[0].id);
+    }
+  }, [isAdmin, ownerTabId, writableTabs]);
+
   const [rules, setRules] = useState<AutomationRule[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [creationMode, setCreationMode] = useState<CreationMode>("form");
@@ -186,6 +210,9 @@ export function AutomationsPage() {
           actionTarget,
           actionParams,
           ...(form.completionTier ? { completionTier: form.completionTier } : {}),
+          // Non-admins bind the new automation's authorization scope to a tab
+          // they can write; admins author unrestricted (no owning tab).
+          ...(isAdmin ? {} : { tabId: ownerTabId }),
         }),
       });
       resetForm();
@@ -213,6 +240,9 @@ export function AutomationsPage() {
           triggerTopic: scriptTriggerTopic,
           ruleType: "script",
           scriptSource: source,
+          // Owning tab only matters on create; a non-admin binds scope to a tab
+          // they can write. On edit (PUT) the server ignores scope fields.
+          ...(isEditing || isAdmin ? {} : { tabId: ownerTabId }),
         }),
       });
 
@@ -260,21 +290,27 @@ export function AutomationsPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-[#E6EDF3]">Automations</h1>
         <div className="flex items-center gap-3">
-          <button
-            onClick={() => {
-              if (showForm) {
-                setShowForm(false);
-                resetForm();
-                resetScript();
-              } else {
-                setShowForm(true);
-              }
-            }}
-            className="flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-lg bg-primary/20 text-primary border border-primary/30 hover:bg-primary/30 transition-colors"
-          >
-            <Plus size={14} />
-            New Rule
-          </button>
+          {canAuthor ? (
+            <button
+              onClick={() => {
+                if (showForm) {
+                  setShowForm(false);
+                  resetForm();
+                  resetScript();
+                } else {
+                  setShowForm(true);
+                }
+              }}
+              className="flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-lg bg-primary/20 text-primary border border-primary/30 hover:bg-primary/30 transition-colors"
+            >
+              <Plus size={14} />
+              New Rule
+            </button>
+          ) : (
+            <span className="text-xs text-[#6B7785]">
+              Authoring requires write access to a tab.
+            </span>
+          )}
         </div>
       </div>
 
@@ -287,6 +323,28 @@ export function AutomationsPage() {
             exit={{ opacity: 0, height: 0 }}
             className="bg-surface border border-[#2A3441] rounded-xl p-5 space-y-4"
           >
+            {/* Owning-tab selector — non-admin authors bind scope to a tab they
+                can write. The automation may then act only on that tab's devices
+                and collections. Admins author unrestricted, so no selector. */}
+            {!editingRuleId && !isAdmin && (
+              <div className="rounded-lg border border-[#2A3441] bg-background p-3 space-y-1.5">
+                <label className="block text-[10px] text-[#6B7785] uppercase">Owning tab</label>
+                <select
+                  aria-label="Owning tab"
+                  value={ownerTabId}
+                  onChange={(e) => setOwnerTabId(e.target.value)}
+                  className="w-full px-3 py-2 text-sm bg-surface border border-[#2A3441] rounded-lg text-[#E6EDF3] focus:outline-none focus:border-primary transition-colors"
+                >
+                  {writableTabs.map((t) => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+                </select>
+                <p className="text-[10px] text-[#6B7785]">
+                  This automation can act only on the devices and collections this tab exposes.
+                </p>
+              </div>
+            )}
+
             {/* Mode toggle — segmented control */}
             <div className="flex items-center justify-between">
               <h2 className="text-sm font-semibold text-[#E6EDF3]">

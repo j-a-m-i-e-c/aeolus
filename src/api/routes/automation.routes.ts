@@ -47,6 +47,8 @@ interface StoredRule {
   trigger_type: string | null;
   cron_expression: string | null;
   completion_tier: string | null;
+  authored_unrestricted: number;
+  owner_tab_id: string | null;
   enabled: number;
   created_at: number;
 }
@@ -195,6 +197,8 @@ export function createAutomationRoutes(
         enabled: row.enabled === 1,
         triggerType,
         cronExpression: cronExpression || null,
+        ownerTabId: row.owner_tab_id ?? null,
+        authoredUnrestricted: row.authored_unrestricted === 1,
       };
       if (ruleType === "form") {
         entry.actionType = row.action_type;
@@ -250,6 +254,18 @@ export function createAutomationRoutes(
     const id = randomUUID();
     const now = Date.now();
 
+    // Bind the automation's authorization scope from the caller's server-side
+    // role. Admins author unrestricted (system-wide) automations; a non-admin
+    // authors a scoped automation confined to the tab they named — the
+    // `requireTabPermission("write")` guard already verified they hold write on
+    // it, and that named tab is both the ownership binding and the authority
+    // ceiling (it can never grant authority over another tab).
+    const authoredUnrestricted = req.user?.role === "admin" ? 1 : 0;
+    const ownerTabId =
+      authoredUnrestricted === 1
+        ? null
+        : ((req.body?.tabId ?? req.query.tabId) as string);
+
     if (ruleType === "script") {
       // Script rule — transpile and store
       if (!scriptSource) {
@@ -266,9 +282,9 @@ export function createAutomationRoutes(
       const { compiledJs, structuredJson } = compileScriptSource(scriptSource, effectiveTriggerTopic);
 
       db.prepare(
-        `INSERT INTO automation_rules (id, name, trigger_topic, condition_type, condition_value, action_type, action_target, action_params, rule_type, script_source, compiled_js, structured_metadata, ui_source, compiled_ui, trigger_type, cron_expression, completion_tier, enabled, created_at)
-         VALUES (?, ?, ?, ?, ?, 'script', '', '{}', 'script', ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`
-      ).run(id, name, effectiveTriggerTopic, conditionType || null, conditionValue || null, scriptSource, compiledJs, structuredJson, uiSourceValue, compiledUiValue, triggerType, effectiveCronExpression, completionTierValue, now);
+        `INSERT INTO automation_rules (id, name, trigger_topic, condition_type, condition_value, action_type, action_target, action_params, rule_type, script_source, compiled_js, structured_metadata, ui_source, compiled_ui, trigger_type, cron_expression, completion_tier, authored_unrestricted, owner_tab_id, enabled, created_at)
+         VALUES (?, ?, ?, ?, ?, 'script', '', '{}', 'script', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`
+      ).run(id, name, effectiveTriggerTopic, conditionType || null, conditionValue || null, scriptSource, compiledJs, structuredJson, uiSourceValue, compiledUiValue, triggerType, effectiveCronExpression, completionTierValue, authoredUnrestricted, ownerTabId, now);
 
       registerUiRule(engine, registry, actionExecutor, {
         id, name, trigger_topic: effectiveTriggerTopic,
@@ -278,11 +294,12 @@ export function createAutomationRoutes(
         structured_metadata: structuredJson, ui_source: uiSourceValue, compiled_ui: compiledUiValue,
         trigger_type: triggerType, cron_expression: effectiveCronExpression,
         completion_tier: completionTierValue,
+        authored_unrestricted: authoredUnrestricted, owner_tab_id: ownerTabId,
         enabled: 1, created_at: now,
       }, conditionRegistry, getCompletionTierCapability);
 
-      logger.info({ ruleId: id, name, triggerTopic: effectiveTriggerTopic, ruleType: "script" }, "Script automation rule created");
-      res.json({ success: true, id });
+      logger.info({ ruleId: id, name, triggerTopic: effectiveTriggerTopic, ruleType: "script", ownerTabId }, "Script automation rule created");
+      res.json({ success: true, id, ownerTabId, authoredUnrestricted: authoredUnrestricted === 1 });
     } else {
       // Form rule (default)
       if (!actionType || !actionTarget) {
@@ -299,9 +316,9 @@ export function createAutomationRoutes(
       }
 
       db.prepare(
-        `INSERT INTO automation_rules (id, name, trigger_topic, condition_type, condition_value, action_type, action_target, action_params, rule_type, ui_source, compiled_ui, trigger_type, cron_expression, completion_tier, enabled, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'form', ?, ?, ?, ?, ?, 1, ?)`
-      ).run(id, name, effectiveTriggerTopic, conditionType || null, conditionValue || null, actionType, actionTarget, JSON.stringify(actionParams || {}), uiSourceValue, compiledUiValue, triggerType, effectiveCronExpression, completionTierValue, now);
+        `INSERT INTO automation_rules (id, name, trigger_topic, condition_type, condition_value, action_type, action_target, action_params, rule_type, ui_source, compiled_ui, trigger_type, cron_expression, completion_tier, authored_unrestricted, owner_tab_id, enabled, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'form', ?, ?, ?, ?, ?, ?, ?, 1, ?)`
+      ).run(id, name, effectiveTriggerTopic, conditionType || null, conditionValue || null, actionType, actionTarget, JSON.stringify(actionParams || {}), uiSourceValue, compiledUiValue, triggerType, effectiveCronExpression, completionTierValue, authoredUnrestricted, ownerTabId, now);
 
       registerUiRule(engine, registry, actionExecutor, {
         id, name, trigger_topic: effectiveTriggerTopic,
@@ -312,11 +329,12 @@ export function createAutomationRoutes(
         structured_metadata: null, ui_source: uiSourceValue, compiled_ui: compiledUiValue,
         trigger_type: triggerType, cron_expression: effectiveCronExpression,
         completion_tier: completionTierValue,
+        authored_unrestricted: authoredUnrestricted, owner_tab_id: ownerTabId,
         enabled: 1, created_at: now,
       }, conditionRegistry, getCompletionTierCapability);
 
-      logger.info({ ruleId: id, name, triggerTopic: effectiveTriggerTopic }, "Form automation rule created");
-      res.json({ success: true, id });
+      logger.info({ ruleId: id, name, triggerTopic: effectiveTriggerTopic, ownerTabId }, "Form automation rule created");
+      res.json({ success: true, id, ownerTabId, authoredUnrestricted: authoredUnrestricted === 1 });
     }
   }));
 

@@ -30,6 +30,15 @@ export interface DeviceExposureResolver {
    * evaluates each device against them.
    */
   getExposingTabsBatch(deviceIds: string[]): Map<string, string[]>;
+
+  /**
+   * The inverse direction: the ids of the current inventory devices that the
+   * given tab's purposeful device panes expose. Used to compute a scoped
+   * automation's device authority (its owning tab's Tab_Device_Set). Computed
+   * live against the current panes and inventory, so it reflects devices added
+   * or removed since the last layout save with no persisted assignment.
+   */
+  getExposedDeviceIds(tabId: string): string[];
 }
 
 interface PaneRow {
@@ -99,7 +108,23 @@ export function createDeviceExposureResolver(
     return result;
   }
 
-  return { getExposingTabs, getExposingTabsBatch };
+  function getExposedDeviceIds(tabId: string): string[] {
+    // Only this tab's panes can contribute exposure, so load them once and match
+    // the live inventory against them.
+    const tabPanes = loadPanes().filter((p) => p.tabId === tabId);
+    if (tabPanes.length === 0) {
+      return [];
+    }
+    const ids: string[] = [];
+    for (const device of registry.getAll()) {
+      if (tabPanes.some(({ pane }) => matchesDeviceFilter(pane, device))) {
+        ids.push(device.id);
+      }
+    }
+    return ids;
+  }
+
+  return { getExposingTabs, getExposingTabsBatch, getExposedDeviceIds };
 }
 
 /** Parse a pane's stored JSON config, normalizing anything malformed to `{}`. */

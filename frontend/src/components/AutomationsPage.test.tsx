@@ -48,6 +48,9 @@ vi.mock("framer-motion", () => {
 });
 
 import { AutomationsPage } from "./AutomationsPage";
+import { useAuthStore } from "../store/auth-store";
+import { usePermissionsStore } from "../store/permissions-store";
+import { useDashboardStore } from "../store/dashboard-store";
 
 const RULES = [
   { id: "r1", name: "Form Rule", topic: "a/b", hasCondition: false, source: "ui", ruleType: "form", enabled: true, actionType: "log" },
@@ -72,6 +75,14 @@ describe("AutomationsPage", () => {
   beforeEach(() => {
     mockAuthFetch.mockReset();
     mockAuthFetch.mockResolvedValue(jsonResponse(RULES));
+    // Author as an admin by default so authoring controls are available (admins
+    // create unrestricted automations and need no owning-tab selection). Scoped
+    // non-admin authoring is covered by its own test below.
+    useAuthStore.setState({
+      user: { id: "admin", username: "admin", role: "admin", groupId: null },
+    });
+    usePermissionsStore.setState({ accessibleTabs: [], loaded: true });
+    useDashboardStore.setState({ tabs: [] });
   });
 
   it("fetches and renders existing rules on mount", async () => {
@@ -214,5 +225,47 @@ describe("AutomationsPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Update Script" }));
 
     expect(await screen.findByText(/Line 3:5 — Unexpected token/)).toBeInTheDocument();
+  });
+
+  it("a non-admin author binds the automation to a writable owning tab", async () => {
+    mockAuthFetch.mockResolvedValue(jsonResponse([]));
+    useAuthStore.setState({
+      user: { id: "u1", username: "alice", role: "user", groupId: "g1" },
+    });
+    usePermissionsStore.setState({
+      accessibleTabs: [{ tabId: "tab-x", permission: "write" }],
+      loaded: true,
+    });
+    useDashboardStore.setState({
+      tabs: [{ id: "tab-x", name: "Tab X", icon: "layout", order: 0, pinned: false, createdAt: 1 }],
+    });
+
+    render(<AutomationsPage />);
+    await screen.findByText("No automation rules");
+    await openForm();
+
+    // Owning-tab selector is present and lists the writable tab.
+    expect(screen.getByLabelText("Owning tab")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText("e.g. Night motion alert"), { target: { value: "Scoped" } });
+    fireEvent.change(screen.getByPlaceholderText("e.g. motion/hallway or sensor/#"), { target: { value: "motion/x" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create Rule" }));
+
+    await waitFor(() => expect(lastCallWithMethod("POST")).toBeTruthy());
+    const body = JSON.parse(lastCallWithMethod("POST")![1]!.body as string);
+    expect(body.tabId).toBe("tab-x");
+  });
+
+  it("hides authoring for a non-admin with no writable tab", async () => {
+    useAuthStore.setState({
+      user: { id: "u2", username: "bob", role: "user", groupId: "g2" },
+    });
+    usePermissionsStore.setState({ accessibleTabs: [], loaded: true });
+    useDashboardStore.setState({ tabs: [] });
+
+    render(<AutomationsPage />);
+    await screen.findByText("Form Rule");
+    expect(screen.queryByRole("button", { name: "New Rule" })).not.toBeInTheDocument();
+    expect(screen.getByText("Authoring requires write access to a tab.")).toBeInTheDocument();
   });
 });

@@ -19,6 +19,7 @@ import type { ActionResult, CommandLifecycleState, ConfirmOptions } from "../cor
 import { DEFAULT_CONFIRM_TIMEOUT_MS } from "../core/types.js";
 import { selectRequiredTier, type ConfirmationTier } from "./command-lifecycle.js";
 import type { PendingCommandTracker } from "./pending-command-tracker.js";
+import type { AutomationScopeResolver } from "./automation-scope-resolver.js";
 
 /** Correlation fields attached to a command envelope for MQTT-correlating dispatch. */
 export interface CommandCorrelation {
@@ -52,6 +53,13 @@ export interface CommandServiceDeps {
   pendingCommandTracker?: PendingCommandTracker;
   /** Base response-topic space for command acknowledgements (default "aeolus/acks"). */
   ackResponseTopicBase?: string;
+  /**
+   * Resolves the authoring automation's authorization scope by rule id. When
+   * present, a scoped automation may only act on devices its owning tab exposes
+   * and may not publish raw MQTT or invoke webhooks. When absent (e.g. a
+   * non-automation Command_Source), no scope restriction is applied.
+   */
+  scopeResolver?: AutomationScopeResolver;
 }
 
 /**
@@ -137,6 +145,17 @@ export class CommandService {
         lifecycleState: "FAILED",
         failureKind: "unsupported",
       };
+    }
+
+    // Authorization scope gate. A scoped (non-admin-authored) automation may only
+    // act on devices its owning tab exposes; it may never publish raw MQTT or
+    // invoke a webhook. Enforced here so both script host-callbacks and form-rule
+    // dispatch are covered uniformly, and so a script that fabricates an
+    // out-of-scope identifier is refused even though the injected device list
+    // never contained it. Unrestricted automations are unaffected.
+    const scopeRefusal = this.checkScope(action, ruleId);
+    if (scopeRefusal) {
+      return scopeRefusal;
     }
 
     const targetDeviceId = action.target;
@@ -320,6 +339,57 @@ export class CommandService {
       `Requested completion tier '${requiredTier}' exceeds device capability; clamping to '${ceiling}'`,
     );
     return ceiling;
+  }
+
+  /**
+   * Refuse a dispatch that falls outside the authoring automation's scope, or
+   * return `null` to allow it. Unrestricted automations (and Command_Sources
+   * with no scope resolver wired) are always allowed. A scoped automation may
+   * act only on devices in its owning tab's device set and may never publish raw
+   * MQTT or invoke a webhook. A refusal is terminal (FAILED) and never dispatches
+   * or registers a pending command.
+   */
+  private checkScope(action: ActionDescriptor, ruleId: string): ActionResult | null {
+    if (!this.deps.scopeResolver) {
+      return null;
+    }
+    const scope = this.deps.scopeResolver.resolve(ruleId);
+    if (scope.kind === "unrestricted") {
+      return null;
+    }
+
+    // Raw MQTT publish and webhooks have no per-tab ownership model, so a scoped
+    // automation is never permitted to use them.
+    if (action.type === "publish" || action.type === "webhook") {
+      this.deps.logger.warn(
+        { ruleId, actionType: action.type },
+        `Scoped automation ${ruleId} refused: ${action.type} is not permitted for scoped automations`,
+      );
+      return {
+        success: false,
+        error: `Action '${action.type}' is not permitted for a scoped automation`,
+        lifecycleState: "FAILED",
+        failureKind: "unauthorized",
+      };
+    }
+
+    // Device-directed actions must target a device the owning tab exposes.
+    if (action.type === "device_action" || action.type === "toggle") {
+      if (!scope.deviceIds.has(action.target)) {
+        this.deps.logger.warn(
+          { ruleId, target: action.target },
+          `Scoped automation ${ruleId} refused: device '${action.target}' is outside its authorization scope`,
+        );
+        return {
+          success: false,
+          error: `Device '${action.target}' is outside this automation's authorization scope`,
+          lifecycleState: "FAILED",
+          failureKind: "unauthorized",
+        };
+      }
+    }
+
+    return null;
   }
 
   /** Resolve the acknowledgement capability declared for a device, if any. */

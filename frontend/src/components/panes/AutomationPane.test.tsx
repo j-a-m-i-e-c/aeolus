@@ -51,8 +51,13 @@ vi.mock("../../sandbox/SandboxHost", () => ({
 
 const updatePaneConfig = vi.fn();
 vi.mock("../../store/dashboard-store", () => ({
-  useDashboardStore: (sel: (s: { updatePaneConfig: typeof updatePaneConfig }) => unknown) =>
-    sel({ updatePaneConfig }),
+  useDashboardStore: (
+    sel: (s: {
+      updatePaneConfig: typeof updatePaneConfig;
+      panes: unknown[];
+      activeTabId: string | null;
+    }) => unknown,
+  ) => sel({ updatePaneConfig, panes: [], activeTabId: null }),
 }));
 vi.mock("../../store/device-store", () => ({
   useDeviceStore: (sel: (s: { devices: Record<string, unknown> }) => unknown) => sel({ devices: {} }),

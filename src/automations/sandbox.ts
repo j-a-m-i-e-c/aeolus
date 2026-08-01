@@ -1,6 +1,7 @@
 // src/automations/sandbox.ts — Secure isolated-vm sandbox for user-authored automation scripts
 
 import type { CommandService, ActionDescriptor } from "./command-service.js";
+import type { AutomationScopeResolver, AuthorizationScope } from "./automation-scope-resolver.js";
 import type { ConfirmationTier } from "./command-lifecycle.js";
 import { isConfirmationTier, resolveEffectiveTier } from "./completion-tier.js";
 import type { CommandResultCollector } from "./command-result-collector.js";
@@ -269,6 +270,14 @@ export interface SandboxDeps {
   dataStore?: DataStore;
   collector?: CommandResultCollector;
   onStateChange?: (ruleId: string, key: string, value: unknown) => void;
+  /**
+   * Resolves the executing automation's authorization scope by rule id. When a
+   * scoped scope is returned, the sandbox injects only the owning tab's devices
+   * and confines Data Store access to that tab's collections (refusing shared
+   * buckets). When absent, or when the scope is unrestricted, the full inventory
+   * and Data Store surface are exposed as before.
+   */
+  scopeResolver?: AutomationScopeResolver;
 }
 
 /** Context describing the event that triggered the automation. */
@@ -605,6 +614,7 @@ export class Sandbox {
   private dataStore?: DataStore;
   private collector?: CommandResultCollector;
   private onStateChange?: (ruleId: string, key: string, value: unknown) => void;
+  private scopeResolver?: AutomationScopeResolver;
 
   constructor(deps: SandboxDeps) {
     this.actionExecutor = deps.actionExecutor;
@@ -613,6 +623,7 @@ export class Sandbox {
     this.dataStore = deps.dataStore;
     this.collector = deps.collector;
     this.onStateChange = deps.onStateChange;
+    this.scopeResolver = deps.scopeResolver;
   }
 
   /**
@@ -663,14 +674,23 @@ export class Sandbox {
       // Block forbidden globals
       await this.blockForbiddenGlobals(jail);
 
+      // Resolve the automation's authorization scope once for this execution.
+      // Unrestricted (or no resolver wired) exposes the full inventory and Data
+      // Store surface; scoped confines device injection and Data Store access to
+      // the owning tab. Device-action dispatch is independently re-checked in the
+      // CommandService, so this injection filtering is defense in depth.
+      const scope: AuthorizationScope = this.scopeResolver
+        ? this.scopeResolver.resolve(ruleId)
+        : { kind: "unrestricted" };
+
       // Set raw data and references on the global scope
-      await this.setDevicesRefs(jail, ruleId, inFlight, ruleTierDefault);
+      await this.setDevicesRefs(jail, ruleId, inFlight, ruleTierDefault, scope);
       await this.setMqttRefs(jail, ruleId);
       await this.setLogRefs(jail, ruleId);
       await this.setContextData(jail, context);
       await this.setHttpRefs(jail, ruleId);
       await this.setStateRefs(jail, ruleId);
-      await this.setDataStoreRefs(jail, ruleId);
+      await this.setDataStoreRefs(jail, ruleId, scope);
 
       // Run bootstrap to wire up the clean API from the raw refs
       const bootstrap = await isolate.compileScript(BOOTSTRAP_SCRIPT);
@@ -771,10 +791,17 @@ export class Sandbox {
     ruleId: string,
     inFlight: Set<Promise<unknown>>,
     ruleTierDefault?: ConfirmationTier,
+    scope: AuthorizationScope = { kind: "unrestricted" },
   ): Promise<void> {
     if (!ivm) return;
 
-    const allDevices = this.deviceRegistry.getAll();
+    // A scoped automation sees only the devices its owning tab exposes; an
+    // unrestricted one sees the full inventory. A scoped automation whose owning
+    // tab is gone has an empty device set (fail-closed).
+    const allDevices =
+      scope.kind === "scoped"
+        ? this.deviceRegistry.getAll().filter((d) => scope.deviceIds.has(d.id))
+        : this.deviceRegistry.getAll();
     const serialized = JSON.parse(JSON.stringify(allDevices)) as Device[];
 
     // Copy device list into isolate
@@ -1128,7 +1155,11 @@ export class Sandbox {
    * Provides `db.write()`, `db.query()`, `db.get()`, `db.set()`, `db.delete()`, `db.collections()`
    * via host-side callbacks. Only wired when dataStore is provided and enabled.
    */
-  private async setDataStoreRefs(jail: IvmGlobal, ruleId: string): Promise<void> {
+  private async setDataStoreRefs(
+    jail: IvmGlobal,
+    ruleId: string,
+    scope: AuthorizationScope = { kind: "unrestricted" },
+  ): Promise<void> {
     if (!ivm) return;
 
     const dataStore = this.dataStore;
@@ -1136,10 +1167,26 @@ export class Sandbox {
     // Only wire references when DataStore is provided and enabled
     if (!dataStore || !dataStore.isEnabled()) return;
 
+    // Scope gating: a scoped automation may read/write only the collections its
+    // owning tab surfaces, and may not use the shared key-value buckets (which
+    // have no per-tab ownership model). An unrestricted automation is unconfined.
+    const scoped = scope.kind === "scoped";
+    const allowedCollections: ReadonlySet<string> =
+      scope.kind === "scoped" ? scope.collections : new Set<string>();
+    const collectionAllowed = (collection: string): boolean =>
+      !scoped || allowedCollections.has(collection);
+
     // Host-side callback for db.write(collection, payloadJson, optionsJson)
     await jail.set(
       "__dbWriteRef",
       new ivm.Reference(function (collection: string, payloadJson: string, optionsJson: string) {
+        if (!collectionAllowed(collection)) {
+          logger.warn(
+            { ruleId, collection },
+            "[sandbox] db.write refused — collection outside automation scope",
+          );
+          return;
+        }
         try {
           const payload = JSON.parse(payloadJson);
           const options = JSON.parse(optionsJson);
@@ -1154,6 +1201,13 @@ export class Sandbox {
     await jail.set(
       "__dbQueryRef",
       new ivm.Reference(function (collection: string, optionsJson: string) {
+        if (!collectionAllowed(collection)) {
+          logger.warn(
+            { ruleId, collection },
+            "[sandbox] db.query refused — collection outside automation scope",
+          );
+          return JSON.stringify({ records: [], total: 0 });
+        }
         try {
           const options = JSON.parse(optionsJson);
           const result = dataStore.query(collection, options);
@@ -1169,6 +1223,10 @@ export class Sandbox {
     await jail.set(
       "__dbGetRef",
       new ivm.Reference(function (bucket: string, key: string) {
+        if (scoped) {
+          logger.warn({ ruleId }, "[sandbox] db.get refused — shared buckets are not available to scoped automations");
+          return undefined;
+        }
         try {
           const result = dataStore.get(bucket, key);
           return result === undefined ? undefined : JSON.stringify(result);
@@ -1183,6 +1241,10 @@ export class Sandbox {
     await jail.set(
       "__dbSetRef",
       new ivm.Reference(function (bucket: string, key: string, valueJson: string) {
+        if (scoped) {
+          logger.warn({ ruleId }, "[sandbox] db.set refused — shared buckets are not available to scoped automations");
+          return;
+        }
         try {
           const value = JSON.parse(valueJson);
           dataStore.set(bucket, key, value);
@@ -1196,6 +1258,10 @@ export class Sandbox {
     await jail.set(
       "__dbDeleteRef",
       new ivm.Reference(function (bucket: string, key: string) {
+        if (scoped) {
+          logger.warn({ ruleId }, "[sandbox] db.delete refused — shared buckets are not available to scoped automations");
+          return;
+        }
         try {
           dataStore.delete(bucket, key);
         } catch (err) {
@@ -1210,7 +1276,11 @@ export class Sandbox {
       new ivm.Reference(function () {
         try {
           const result = dataStore.listCollections();
-          return JSON.stringify(result);
+          // A scoped automation sees only the collections its owning tab surfaces.
+          const visible = scoped
+            ? result.filter((c) => allowedCollections.has(c.name))
+            : result;
+          return JSON.stringify(visible);
         } catch (err) {
           logger.error({ ruleId, error: (err as Error).message }, "[sandbox] db.collections failed");
           return JSON.stringify([]);

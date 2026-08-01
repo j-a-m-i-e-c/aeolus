@@ -38,6 +38,7 @@ import { createResourceOwnershipStore } from "./auth/resource-ownership-store.js
 import { createCollectionOwnershipStore } from "./auth/collection-ownership-store.js";
 import { createDataStoreVisibility } from "./websocket/data-store-visibility.js";
 import { createDeviceExposureResolver } from "./auth/device-exposure-resolver.js";
+import { createAutomationScopeResolver } from "./automations/automation-scope-resolver.js";
 import { createPermissionResolver } from "./auth/permission-resolver.js";
 import { requireDevicePermission, requireAutomationPermission } from "./auth/auth-middleware.js";
 import type { PermissionLevel } from "./auth/permission-service.js";
@@ -142,6 +143,19 @@ async function main(): Promise<void> {
 
   migrateLegacyHueCredentials(connectorStore);
 
+  // Automation authorization scope. Resolves each automation's runtime authority
+  // (unrestricted for admin-authored rules; scoped to the owning tab's devices
+  // and collections for non-admin-authored rules). Shared by the CommandService
+  // (dispatch enforcement) and the Sandbox (device/Data Store injection). The
+  // device-exposure resolver and collection-ownership store are also reused by
+  // the resource-level authorization wiring below.
+  const collectionOwnershipStore = createCollectionOwnershipStore();
+  const deviceExposureResolver = createDeviceExposureResolver(registry);
+  const automationScopeResolver = createAutomationScopeResolver(
+    deviceExposureResolver,
+    collectionOwnershipStore,
+  );
+
   // 5. Action Executor, Execution Log, and Sandbox
   const actionExecutor = new CommandService({
     mqttService,
@@ -149,6 +163,7 @@ async function main(): Promise<void> {
     logger,
     deviceRegistry: registry,
     pendingCommandTracker,
+    scopeResolver: automationScopeResolver,
   });
 
   // Register built-in action handlers
@@ -197,7 +212,7 @@ async function main(): Promise<void> {
   // single Execution_Owner that records history/metrics/completion/audit).
   const collector = new CommandResultCollector();
 
-  const sandbox = new Sandbox({ actionExecutor, deviceRegistry: registry, stateStore, dataStore, collector, onStateChange: (ruleId, key, value) => {
+  const sandbox = new Sandbox({ actionExecutor, deviceRegistry: registry, stateStore, dataStore, collector, scopeResolver: automationScopeResolver, onStateChange: (ruleId, key, value) => {
     eventBus.emit(AUTOMATION_STATE_CHANGE, { ruleId, key, value });
   } });
 
@@ -265,8 +280,8 @@ async function main(): Promise<void> {
   // once with the shared resolver and the appropriate server-side existence
   // predicate so route files stay declarative.
   const ownershipStore = createResourceOwnershipStore();
-  const collectionOwnershipStore = createCollectionOwnershipStore();
-  const deviceExposureResolver = createDeviceExposureResolver(registry);
+  // `collectionOwnershipStore` and `deviceExposureResolver` are created earlier
+  // (they also back the automation scope resolver) and reused here.
   const permissionResolver = createPermissionResolver(ownershipStore, deviceExposureResolver);
   // Admin-managed private MQTT topic filters — gate the public raw-MQTT feed.
   const privateTopicStore = createPrivateTopicStore();

@@ -48,6 +48,7 @@ import { mqttPrivateTopics } from "./007-mqtt-private-topics.js";
 import { mqttDeviceSourceTopics } from "./008-mqtt-device-source-topics.js";
 import { connectorInstanceOwnership } from "./009-connector-instance-ownership.js";
 import { collectionTabAssignments } from "./010-collection-tab-assignments.js";
+import { automationAuthorizationScope } from "./011-automation-authorization-scope.js";
 
 export const migrations: Migration[] = [
   baseline,                      // id 1
@@ -60,4 +61,5 @@ export const migrations: Migration[] = [
   mqttDeviceSourceTopics,        // id 8
   connectorInstanceOwnership,    // id 9
   collectionTabAssignments,      // id 10
+  automationAuthorizationScope,  // id 11
 ];

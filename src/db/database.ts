@@ -73,6 +73,12 @@ export function initSchema(database: DatabaseType): void {
   addColumn("trigger_type", "TEXT DEFAULT 'mqtt'");
   addColumn("cron_expression", "TEXT DEFAULT NULL");
   addColumn("completion_tier", "TEXT DEFAULT NULL");
+  // Per-automation authorization scope (scoped-automation-authoring). A row with
+  // authored_unrestricted = 1 runs system-wide; 0 is confined to owner_tab_id's
+  // exposed resources. owner_tab_id is nullable and set NULL when its tab is
+  // deleted (fail-closed for scoped rows, never unrestricted).
+  addColumn("authored_unrestricted", "INTEGER NOT NULL DEFAULT 0");
+  addColumn("owner_tab_id", "TEXT DEFAULT NULL REFERENCES tabs(id) ON DELETE SET NULL");
 
   // Backfill existing rows that lack a rule_type value
   database.exec(`UPDATE automation_rules SET rule_type = 'form' WHERE rule_type IS NULL;`);

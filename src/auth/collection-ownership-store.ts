@@ -12,6 +12,9 @@ export interface CollectionOwnershipStore {
   /** The set of tab ids that surface the given collection (empty when none). */
   getExposingTabs(collectionName: string): string[];
 
+  /** The collection names surfaced by the given tab (empty when none). */
+  getCollectionsForTab(tabId: string): string[];
+
   /**
    * Reconcile the whole layout in one transaction. For every tab in
    * `desiredByTab`, make its collection assignments equal the desired set; for
@@ -41,6 +44,16 @@ export function createCollectionOwnershipStore(
       .prepare("SELECT tab_id FROM collection_tab_assignments WHERE collection_name = ?")
       .all(collectionName) as TabIdRow[];
     return rows.map((row) => row.tab_id);
+  }
+
+  function getCollectionsForTab(tabId: string): string[] {
+    const db = resolveDb();
+    const rows = db
+      .prepare(
+        "SELECT collection_name FROM collection_tab_assignments WHERE tab_id = ?",
+      )
+      .all(tabId) as { collection_name: string }[];
+    return rows.map((row) => row.collection_name);
   }
 
   function reconcileTabInternal(tabId: string, desiredCollections: Set<string>): void {
@@ -91,5 +104,5 @@ export function createCollectionOwnershipStore(
     })();
   }
 
-  return { getExposingTabs, reconcileAll };
+  return { getExposingTabs, getCollectionsForTab, reconcileAll };
 }
