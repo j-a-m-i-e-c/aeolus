@@ -13,7 +13,6 @@ interface PaneConfigPanelProps {
   onClose: () => void;
 }
 
-const DEVICE_TYPE_OPTIONS = ["all", "light", "sensor", "switch", "climate"] as const;
 const SYSTEM_SECTIONS = ["host", "cpu", "temperature", "memory", "disk", "network"] as const;
 
 export function PaneConfigPanel({ paneId, paneType, config, onClose }: PaneConfigPanelProps) {
@@ -21,8 +20,6 @@ export function PaneConfigPanel({ paneId, paneType, config, onClose }: PaneConfi
   const panelRef = useRef<HTMLDivElement>(null);
 
   // Local form state seeded from current config
-  const [room, setRoom] = useState(config.room ?? "");
-  const [deviceType, setDeviceType] = useState(config.deviceType ?? "all");
   const [topicPattern, setTopicPattern] = useState(config.topicPattern ?? "");
   const [showSections, setShowSections] = useState<string[]>(
     config.showSections ?? [...SYSTEM_SECTIONS],
@@ -58,15 +55,6 @@ export function PaneConfigPanel({ paneId, paneType, config, onClose }: PaneConfi
     const newConfig: PaneConfig = {};
 
     switch (paneType) {
-      case "device-grid": {
-        if (room.trim()) newConfig.room = room.trim();
-        if (deviceType && deviceType !== "all") newConfig.deviceType = deviceType;
-        break;
-      }
-      case "sensor-panel": {
-        if (room.trim()) newConfig.room = room.trim();
-        break;
-      }
       case "mqtt-inspector": {
         if (topicPattern.trim()) newConfig.topicPattern = topicPattern.trim();
         break;
@@ -89,7 +77,7 @@ export function PaneConfigPanel({ paneId, paneType, config, onClose }: PaneConfi
   const displayName = entry?.displayName ?? paneType;
 
   // Determine if this pane type has configurable fields
-  const hasConfig = ["device-grid", "sensor-panel", "mqtt-inspector", "system-stats"].includes(paneType);
+  const hasConfig = ["mqtt-inspector", "system-stats"].includes(paneType);
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/40">
@@ -114,47 +102,6 @@ export function PaneConfigPanel({ paneId, paneType, config, onClose }: PaneConfi
         <div className="flex-1 overflow-auto px-4 py-4 space-y-4">
           {!hasConfig && (
             <p className="text-sm text-[#6B7785]">No configuration options for this pane type.</p>
-          )}
-
-          {/* device-grid config */}
-          {paneType === "device-grid" && (
-            <>
-              <FieldLabel label="Room Filter">
-                <input
-                  type="text"
-                  value={room}
-                  onChange={(e) => setRoom(e.target.value)}
-                  placeholder="e.g. kitchen, living-room"
-                  className="w-full px-3 py-2 rounded-lg bg-elevated border border-[#2A3441] text-sm text-[#E6EDF3] placeholder-[#6B7785] focus:outline-none focus:border-primary transition-colors"
-                />
-              </FieldLabel>
-              <FieldLabel label="Device Type">
-                <select
-                  value={deviceType}
-                  onChange={(e) => setDeviceType(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg bg-elevated border border-[#2A3441] text-sm text-[#E6EDF3] focus:outline-none focus:border-primary transition-colors"
-                >
-                  {DEVICE_TYPE_OPTIONS.map((opt) => (
-                    <option key={opt} value={opt}>
-                      {opt.charAt(0).toUpperCase() + opt.slice(1)}
-                    </option>
-                  ))}
-                </select>
-              </FieldLabel>
-            </>
-          )}
-
-          {/* sensor-panel config */}
-          {paneType === "sensor-panel" && (
-            <FieldLabel label="Room Filter">
-              <input
-                type="text"
-                value={room}
-                onChange={(e) => setRoom(e.target.value)}
-                placeholder="e.g. kitchen, living-room"
-                className="w-full px-3 py-2 rounded-lg bg-elevated border border-[#2A3441] text-sm text-[#E6EDF3] placeholder-[#6B7785] focus:outline-none focus:border-primary transition-colors"
-              />
-            </FieldLabel>
           )}
 
           {/* mqtt-inspector config */}

@@ -30,8 +30,8 @@ describe("PaneConfigPanel", () => {
   });
 
   it("shows the pane display name in the header", () => {
-    renderPanel("device-grid");
-    expect(screen.getByText("Configure: Display device-grid")).toBeInTheDocument();
+    renderPanel("mqtt-inspector");
+    expect(screen.getByText("Configure: Display mqtt-inspector")).toBeInTheDocument();
   });
 
   it("shows a no-config message for pane types without fields", () => {
@@ -41,30 +41,11 @@ describe("PaneConfigPanel", () => {
     ).toBeInTheDocument();
   });
 
-  it("renders device-grid room + device type fields seeded from config", () => {
-    renderPanel("device-grid", { room: "kitchen", deviceType: "light" });
-    expect(screen.getByDisplayValue("kitchen")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("Light")).toBeInTheDocument();
-  });
-
-  it("saves device-grid config with room and device type, then closes", () => {
-    const onClose = renderPanel("device-grid");
-    fireEvent.change(screen.getByPlaceholderText("e.g. kitchen, living-room"), {
-      target: { value: "garage" },
-    });
-    fireEvent.change(screen.getByRole("combobox"), { target: { value: "sensor" } });
-    fireEvent.click(screen.getByRole("button", { name: /Save/i }));
-    expect(dashboardState.updatePaneConfig).toHaveBeenCalledWith("p1", {
-      room: "garage",
-      deviceType: "sensor",
-    });
-    expect(onClose).toHaveBeenCalled();
-  });
-
-  it("omits deviceType when 'all' is selected for device-grid", () => {
-    renderPanel("device-grid", { room: "den" });
-    fireEvent.click(screen.getByRole("button", { name: /Save/i }));
-    expect(dashboardState.updatePaneConfig).toHaveBeenCalledWith("p1", { room: "den" });
+  it("shows a no-config message for the sensor-panel pane (room filter removed)", () => {
+    renderPanel("sensor-panel");
+    expect(
+      screen.getByText("No configuration options for this pane type."),
+    ).toBeInTheDocument();
   });
 
   it("saves mqtt-inspector topic pattern", () => {
