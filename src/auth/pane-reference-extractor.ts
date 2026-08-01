@@ -15,6 +15,9 @@ export interface PaneRef {
 /** The pane type that carries an explicit automation reference via `config.ruleId`. */
 const AUTOMATION_PANE_TYPE = "automation";
 
+/** The pane type that carries an explicit collection reference via `config.collection`. */
+const DATA_COLLECTION_PANE_TYPE = "data-collection";
+
 /**
  * Derive the desired automation→tab assignment set from a set of panes.
  *
@@ -56,6 +59,43 @@ export function extractAutomationAssignments(
       byTab.set(pane.tabId, set);
     }
     set.add(ruleId);
+  }
+
+  return byTab;
+}
+
+/**
+ * Derive the desired collection→tab assignment set from a set of panes.
+ *
+ * Only `data-collection` panes carry an explicit collection reference
+ * (`config.collection`); every other pane type contributes nothing. A pane
+ * contributes `{ tabId → collection }` only when its `config.collection` is a
+ * non-empty string. Unlike automations there is no "existing ids" filter: a
+ * pane may reference a not-yet-populated collection, and events only fire for
+ * collections that exist, so a dangling reference simply never scopes anything.
+ *
+ * The result maps each tab id to the distinct set of collection names it
+ * surfaces. A tab with no collection references does not appear in the map.
+ */
+export function extractCollectionAssignments(panes: PaneRef[]): Map<string, Set<string>> {
+  const byTab = new Map<string, Set<string>>();
+
+  for (const pane of panes) {
+    if (pane.paneType !== DATA_COLLECTION_PANE_TYPE) {
+      continue;
+    }
+
+    const collection = pane.config?.collection;
+    if (typeof collection !== "string" || collection.length === 0) {
+      continue;
+    }
+
+    let set = byTab.get(pane.tabId);
+    if (!set) {
+      set = new Set<string>();
+      byTab.set(pane.tabId, set);
+    }
+    set.add(collection);
   }
 
   return byTab;

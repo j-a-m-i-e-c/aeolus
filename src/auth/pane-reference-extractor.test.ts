@@ -2,7 +2,7 @@
 // Feature: resource-level-authorization
 
 import { describe, it, expect } from "vitest";
-import { extractAutomationAssignments, type PaneRef } from "./pane-reference-extractor.js";
+import { extractAutomationAssignments, extractCollectionAssignments, type PaneRef } from "./pane-reference-extractor.js";
 
 describe("extractAutomationAssignments", () => {
   it("maps an automation pane's ruleId to its owning tab", () => {
@@ -41,5 +41,52 @@ describe("extractAutomationAssignments", () => {
     ];
     const result = extractAutomationAssignments(panes);
     expect(result.size).toBe(0);
+  });
+});
+
+describe("extractCollectionAssignments", () => {
+  it("maps a data-collection pane's collection to its owning tab", () => {
+    const panes: PaneRef[] = [
+      { tabId: "tab-a", paneType: "data-collection", config: { collection: "temps" } },
+    ];
+    const result = extractCollectionAssignments(panes);
+    expect([...result.get("tab-a") ?? []]).toEqual(["temps"]);
+  });
+
+  it("records the same collection on multiple tabs", () => {
+    const panes: PaneRef[] = [
+      { tabId: "tab-a", paneType: "data-collection", config: { collection: "temps" } },
+      { tabId: "tab-b", paneType: "data-collection", config: { collection: "temps" } },
+    ];
+    const result = extractCollectionAssignments(panes);
+    expect([...result.get("tab-a") ?? []]).toEqual(["temps"]);
+    expect([...result.get("tab-b") ?? []]).toEqual(["temps"]);
+  });
+
+  it("ignores non-data-collection panes", () => {
+    const panes: PaneRef[] = [
+      { tabId: "tab-a", paneType: "automation", config: { collection: "temps" } },
+      { tabId: "tab-a", paneType: "sensor-panel", config: { collection: "temps" } },
+    ];
+    expect(extractCollectionAssignments(panes).size).toBe(0);
+  });
+
+  it("ignores empty or non-string collection references", () => {
+    const panes: PaneRef[] = [
+      { tabId: "tab-a", paneType: "data-collection", config: { collection: "" } },
+      { tabId: "tab-b", paneType: "data-collection", config: { collection: 42 } },
+      { tabId: "tab-c", paneType: "data-collection", config: {} },
+    ];
+    expect(extractCollectionAssignments(panes).size).toBe(0);
+  });
+
+  it("collects distinct collections per tab", () => {
+    const panes: PaneRef[] = [
+      { tabId: "tab-a", paneType: "data-collection", config: { collection: "temps" } },
+      { tabId: "tab-a", paneType: "data-collection", config: { collection: "humidity" } },
+      { tabId: "tab-a", paneType: "data-collection", config: { collection: "temps" } },
+    ];
+    const result = extractCollectionAssignments(panes);
+    expect([...result.get("tab-a") ?? []].sort()).toEqual(["humidity", "temps"]);
   });
 });

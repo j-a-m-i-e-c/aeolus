@@ -35,6 +35,8 @@ import { createMqttRoutes } from "./api/routes/mqtt.routes.js";
 import { createAutomationRoutes, loadUiRules, automationExists } from "./api/routes/automation.routes.js";
 import { createConnectorRoutes } from "./api/routes/connector.routes.js";
 import { createResourceOwnershipStore } from "./auth/resource-ownership-store.js";
+import { createCollectionOwnershipStore } from "./auth/collection-ownership-store.js";
+import { createDataStoreVisibility } from "./websocket/data-store-visibility.js";
 import { createDeviceExposureResolver } from "./auth/device-exposure-resolver.js";
 import { createPermissionResolver } from "./auth/permission-resolver.js";
 import { requireDevicePermission, requireAutomationPermission } from "./auth/auth-middleware.js";
@@ -263,6 +265,7 @@ async function main(): Promise<void> {
   // once with the shared resolver and the appropriate server-side existence
   // predicate so route files stay declarative.
   const ownershipStore = createResourceOwnershipStore();
+  const collectionOwnershipStore = createCollectionOwnershipStore();
   const deviceExposureResolver = createDeviceExposureResolver(registry);
   const permissionResolver = createPermissionResolver(ownershipStore, deviceExposureResolver);
   // Admin-managed private MQTT topic filters — gate the public raw-MQTT feed.
@@ -362,6 +365,9 @@ async function main(): Promise<void> {
     }
     return { visibility: "public" };
   };
+  // A Data Store event is visible on the tabs whose data-collection panes surface
+  // the collection. No surfacing pane ⇒ empty scope ⇒ admin-only (fail-closed).
+  const dataStoreVisibility = createDataStoreVisibility(collectionOwnershipStore);
 
   const WS_MAPPINGS: WsEventMapping[] = [
     { eventName: WS_STATE_CHANGE, messageType: "state-change", visibility: deviceVisibility },
@@ -371,10 +377,10 @@ async function main(): Promise<void> {
     { eventName: AUTOMATION_FIRED, messageType: "automation-fired", visibility: automationVisibility },
     { eventName: AUTOMATION_COMPLETED, messageType: "automation-completed", visibility: automationVisibility },
     { eventName: AUTOMATION_STATE_CHANGE, messageType: "automation-state", visibility: automationVisibility },
-    // Data Store events have no collection→tab authorization model yet, so they
-    // remain admin-only until one exists (fail-closed rather than broadcast-all).
-    { eventName: DATA_STORE_WRITE, messageType: "data-store-write" },
-    { eventName: DATA_STORE_COLLECTION_DELETED, messageType: "data-store-collection-deleted" },
+    // Data Store events are scoped to the tabs whose data-collection panes
+    // surface the collection; a collection no pane surfaces stays admin-only.
+    { eventName: DATA_STORE_WRITE, messageType: "data-store-write", visibility: dataStoreVisibility },
+    { eventName: DATA_STORE_COLLECTION_DELETED, messageType: "data-store-collection-deleted", visibility: dataStoreVisibility },
   ];
 
   const wsServer = new WsServer(server, registry, eventBus, WS_MAPPINGS);

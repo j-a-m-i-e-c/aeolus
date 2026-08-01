@@ -6,7 +6,7 @@ import { BadRequestError } from "../middleware/error-handler.js";
 import { asyncHandler } from "../middleware/async-handler.js";
 import { requireAdmin } from "../../auth/auth-middleware.js";
 import { safeJsonParse } from "../../core/safe-json.js";
-import { extractAutomationAssignments, type PaneRef } from "../../auth/pane-reference-extractor.js";
+import { extractAutomationAssignments, extractCollectionAssignments, type PaneRef } from "../../auth/pane-reference-extractor.js";
 import logger from "../../logger.js";
 
 interface TabRow {
@@ -119,6 +119,22 @@ export function createLayoutRoutes(db: DatabaseType): Router {
       for (const [tabId, automationIds] of desiredByTab) {
         for (const automationId of automationIds) {
           insertAssignment.run(automationId, tabId);
+        }
+      }
+
+      // Reconcile collection→tab ownership the same way: clear and rebuild from
+      // the new panes' explicit `config.collection` references. Scopes Data
+      // Store live events to the tabs that surface each collection. A collection
+      // name is a plain reference (no FK), so a pane may point at a not-yet-
+      // created collection without failing the write.
+      db.prepare("DELETE FROM collection_tab_assignments").run();
+      const desiredCollectionsByTab = extractCollectionAssignments(paneRefs);
+      const insertCollectionAssignment = db.prepare(
+        "INSERT OR IGNORE INTO collection_tab_assignments (collection_name, tab_id) VALUES (?, ?)",
+      );
+      for (const [tabId, collectionNames] of desiredCollectionsByTab) {
+        for (const collectionName of collectionNames) {
+          insertCollectionAssignment.run(collectionName, tabId);
         }
       }
     });

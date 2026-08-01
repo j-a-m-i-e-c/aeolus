@@ -119,6 +119,40 @@ describe("layout.routes", () => {
       expect(getRes.body.panes).toHaveLength(1);
     });
 
+    it("reconciles collection→tab assignments from data-collection panes", async () => {
+      await request(app, "PUT", "/api/layout", {
+        tabs: [{ id: "tab-1", name: "Data", icon: "x", order: 0, pinned: false, createdAt: 1000 }],
+        panes: [
+          { id: "p1", tabId: "tab-1", paneType: "data-collection", config: { collection: "temps" }, x: 0, y: 0, w: 6, h: 4, createdAt: 1000 },
+        ],
+      });
+
+      const rows = db
+        .prepare("SELECT collection_name, tab_id FROM collection_tab_assignments")
+        .all() as Array<{ collection_name: string; tab_id: string }>;
+      expect(rows).toEqual([{ collection_name: "temps", tab_id: "tab-1" }]);
+    });
+
+    it("clears a collection assignment when the data-collection pane is removed", async () => {
+      await request(app, "PUT", "/api/layout", {
+        tabs: [{ id: "tab-1", name: "Data", icon: "x", order: 0, pinned: false, createdAt: 1000 }],
+        panes: [
+          { id: "p1", tabId: "tab-1", paneType: "data-collection", config: { collection: "temps" }, x: 0, y: 0, w: 6, h: 4, createdAt: 1000 },
+        ],
+      });
+
+      // Re-save without the data-collection pane.
+      await request(app, "PUT", "/api/layout", {
+        tabs: [{ id: "tab-1", name: "Data", icon: "x", order: 0, pinned: false, createdAt: 1000 }],
+        panes: [],
+      });
+
+      const count = db
+        .prepare("SELECT COUNT(*) AS c FROM collection_tab_assignments")
+        .get() as { c: number };
+      expect(count.c).toBe(0);
+    });
+
     it("returns 400 when tabs is not an array", async () => {
       const res = await request(app, "PUT", "/api/layout", {
         tabs: "not-array",

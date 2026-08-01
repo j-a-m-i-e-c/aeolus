@@ -476,16 +476,18 @@ describe("Property 11: Guarded migrations are safe no-ops when change already ex
 // Feature: versioned-db-migrations, Property 12: Newer-than-binary databases are rejected without mutation
 describe("Property 12: Newer-than-binary databases are rejected without mutation", () => {
   it("throws DatabaseNewerThanBinaryError and does not mutate the DB", () => {
+    // Any id strictly greater than the binary's highest migration is "future".
+    const futureBase = getExpectedVersion(realMigrations) + 1;
     fc.assert(
       fc.property(
-        fc.integer({ min: 10, max: 100 }),
+        fc.integer({ min: futureBase, max: futureBase + 100 }),
         (futureId) => {
           const db = freshDb();
           ensureMigrationHistory(db);
           // Stamp a future version
           db.prepare("INSERT INTO schema_migrations (id, name, applied_at) VALUES (?, ?, ?)").run(futureId, "future", Date.now());
 
-          // Our registry only goes up to id 3
+          // The binary's registry only goes up to getExpectedVersion(realMigrations)
           const tablesBefore = (db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all() as Array<{ name: string }>).map((r) => r.name);
 
           expect(() => runMigrations(db, realMigrations, { skipCheckpoint: true })).toThrow(DatabaseNewerThanBinaryError);

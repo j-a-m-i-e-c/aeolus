@@ -203,6 +203,22 @@ export function initSchema(database: DatabaseType): void {
     ON automation_tab_assignments(tab_id);
   `);
 
+  // Collection→tab assignments (mirrors migration 010) so legacy/test databases
+  // built via initSchema have it. collection_name is a plain reference — Data
+  // Store collections live outside the migration schema and a pane may point at
+  // a not-yet-created collection.
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS collection_tab_assignments (
+      collection_name TEXT NOT NULL,
+      tab_id          TEXT NOT NULL REFERENCES tabs(id) ON DELETE CASCADE,
+      PRIMARY KEY (collection_name, tab_id)
+    );
+  `);
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS idx_collection_tab_assignments_collection
+    ON collection_tab_assignments(collection_name);
+  `);
+
   // Admin-managed private MQTT topic filters. Mirrors migration 007 so
   // legacy/test databases built via initSchema have it.
   database.exec(`
