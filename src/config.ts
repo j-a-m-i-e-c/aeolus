@@ -11,6 +11,20 @@ export interface Config {
   mqttDiscoveryIgnoredTopicSuffixes: string[];
   /** Dashboard-managed Mosquitto provisioning is opt-in while under development. */
   managedMqttProvisioningEnabled: boolean;
+  /**
+   * Broker-side verification of managed provisioning changes. After writing
+   * config/password files and triggering a reload, the provisioning service
+   * probes the broker to confirm the new policy is actually enforced before
+   * reporting success. Only active when managedMqttProvisioningEnabled is true.
+   */
+  mqttProvisioningVerify: {
+    /** Total polling budget to confirm a change (ms). */
+    budgetMs: number;
+    /** Gap between poll attempts (ms). */
+    pollIntervalMs: number;
+    /** Per-attempt connection timeout (ms). */
+    connectTimeoutMs: number;
+  };
   port: number;
   dbPath: string;
   logLevel: string;
@@ -57,6 +71,11 @@ export const config: Config = {
     .map((suffix) => suffix.trim().toLowerCase())
     .filter(Boolean),
   managedMqttProvisioningEnabled: process.env.MQTT_MANAGED_PROVISIONING_ENABLED === "true",
+  mqttProvisioningVerify: {
+    budgetMs: parseInt(process.env.MQTT_PROVISIONING_VERIFY_BUDGET_MS || "12000", 10),
+    pollIntervalMs: parseInt(process.env.MQTT_PROVISIONING_VERIFY_POLL_MS || "500", 10),
+    connectTimeoutMs: parseInt(process.env.MQTT_PROVISIONING_VERIFY_TIMEOUT_MS || "3000", 10),
+  },
   port: parseInt(process.env.PORT || "3001", 10),
   dbPath: process.env.DB_PATH || "./data/aeolus.db",
   logLevel: process.env.LOG_LEVEL || "debug",

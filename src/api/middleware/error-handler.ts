@@ -52,6 +52,18 @@ export class PayloadTooLargeError extends AppError {
   }
 }
 
+/**
+ * The change was written and a reload was triggered, but the broker did not
+ * confirm it within the verification budget. The files/settings are already
+ * persisted, so the broker will apply them on its next reload or restart — this
+ * signals that live confirmation did not land in time, not that the change was lost.
+ */
+export class BrokerNotConfirmedError extends AppError {
+  constructor(message = "Broker did not confirm the change within the verification window") {
+    super(503, message);
+  }
+}
+
 export function errorHandler(
   err: Error,
   _req: Request,

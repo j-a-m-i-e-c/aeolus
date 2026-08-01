@@ -41,6 +41,11 @@ describe("config", () => {
       "set", "command", "cmd", "heartbeat", "availability",
     ]);
     expect(config.managedMqttProvisioningEnabled).toBe(false);
+    expect(config.mqttProvisioningVerify).toEqual({
+      budgetMs: 12000,
+      pollIntervalMs: 500,
+      connectTimeoutMs: 3000,
+    });
     expect(config.port).toBe(3001);
     expect(config.dbPath).toBe("./data/aeolus.db");
     expect(config.logLevel).toBe("debug");
@@ -56,6 +61,9 @@ describe("config", () => {
     process.env.MQTT_TOPICS = "home/+/temp, office/# ";
     process.env.MQTT_DISCOVERY_IGNORED_TOPIC_SUFFIXES = "set, status ";
     process.env.MQTT_MANAGED_PROVISIONING_ENABLED = "true";
+    process.env.MQTT_PROVISIONING_VERIFY_BUDGET_MS = "8000";
+    process.env.MQTT_PROVISIONING_VERIFY_POLL_MS = "250";
+    process.env.MQTT_PROVISIONING_VERIFY_TIMEOUT_MS = "2000";
     process.env.PORT = "4000";
     process.env.DB_PATH = "/data/custom.db";
     process.env.LOG_LEVEL = "warn";
@@ -70,6 +78,11 @@ describe("config", () => {
     expect(config.mqttTopics).toEqual(["home/+/temp", "office/#"]);
     expect(config.mqttDiscoveryIgnoredTopicSuffixes).toEqual(["set", "status"]);
     expect(config.managedMqttProvisioningEnabled).toBe(true);
+    expect(config.mqttProvisioningVerify).toEqual({
+      budgetMs: 8000,
+      pollIntervalMs: 250,
+      connectTimeoutMs: 2000,
+    });
     expect(config.port).toBe(4000);
     expect(config.dbPath).toBe("/data/custom.db");
     expect(config.logLevel).toBe("warn");
