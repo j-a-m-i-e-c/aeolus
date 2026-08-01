@@ -12,7 +12,15 @@ export interface Device {
   type: DeviceType;
   capabilities: string[];
   state: Record<string, unknown>;
+  /** Connector type identifier (e.g. "hue", "kasa", "mqtt"). Not instance-specific. */
   integration: string;
+  /**
+   * The connector instance that owns this device. Absent for MQTT devices and
+   * for connector devices discovered before instance ownership existed (they
+   * reacquire it on the next discovery poll). Distinct from {@link integration},
+   * which identifies only the connector type.
+   */
+  connectorInstanceId?: string;
   lastSeen: number;
   /** MQTT state topic, present for MQTT-sourced devices. */
   topic?: string;
@@ -29,6 +37,8 @@ export interface NormalizedEvent {
   timestamp: number;
   /** Source integration identifier. Defaults to "mqtt" if not provided. */
   integration?: string;
+  /** Owning connector instance id, carried from discovery to the registry. */
+  connectorInstanceId?: string;
   /** Human-readable device name populated from ParsedTopic.name */
   name?: string;
   /** Explicit capabilities from connectors (overrides inferCapabilities when provided) */

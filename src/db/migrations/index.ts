@@ -46,6 +46,7 @@ import { executionHistory } from "./005-execution-history.js";
 import { automationTabAssignments } from "./006-automation-tab-assignments.js";
 import { mqttPrivateTopics } from "./007-mqtt-private-topics.js";
 import { mqttDeviceSourceTopics } from "./008-mqtt-device-source-topics.js";
+import { connectorInstanceOwnership } from "./009-connector-instance-ownership.js";
 
 export const migrations: Migration[] = [
   baseline,                      // id 1
@@ -56,4 +57,5 @@ export const migrations: Migration[] = [
   automationTabAssignments,      // id 6
   mqttPrivateTopics,             // id 7
   mqttDeviceSourceTopics,        // id 8
+  connectorInstanceOwnership,    // id 9
 ];

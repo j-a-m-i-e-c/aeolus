@@ -51,6 +51,70 @@ describe("DeviceRegistry — unit tests", () => {
       const result = registry.remove("nonexistent");
       expect(result).toBe(false);
     });
+  });
+
+  describe("connector instance ownership", () => {
+    it("stores connectorInstanceId from a discovery event", () => {
+      registry.upsert({
+        deviceId: "hue-1",
+        deviceType: "light",
+        state: { on: true },
+        topic: "connector/hue/hue-1",
+        timestamp: Date.now(),
+        integration: "hue",
+        connectorInstanceId: "bridge-a",
+      });
+      expect(registry.getById("hue-1")?.connectorInstanceId).toBe("bridge-a");
+    });
+
+    it("persists ownership across a reload", () => {
+      registry.upsert({
+        deviceId: "hue-1",
+        deviceType: "light",
+        state: { on: true },
+        topic: "connector/hue/hue-1",
+        timestamp: Date.now(),
+        integration: "hue",
+        connectorInstanceId: "bridge-a",
+      });
+
+      const reloaded = new DeviceRegistry(db, eventBus);
+      reloaded.loadFromDb();
+      expect(reloaded.getById("hue-1")?.connectorInstanceId).toBe("bridge-a");
+    });
+
+    it("preserves existing ownership when a later event omits it", () => {
+      registry.upsert({
+        deviceId: "hue-1",
+        deviceType: "light",
+        state: { on: true },
+        topic: "connector/hue/hue-1",
+        timestamp: Date.now(),
+        integration: "hue",
+        connectorInstanceId: "bridge-a",
+      });
+      // A subsequent state update that carries no ownership must not clear it.
+      registry.upsert({
+        deviceId: "hue-1",
+        deviceType: "light",
+        state: { on: false },
+        topic: "connector/hue/hue-1",
+        timestamp: Date.now(),
+        integration: "hue",
+      });
+      expect(registry.getById("hue-1")?.connectorInstanceId).toBe("bridge-a");
+    });
+
+    it("leaves ownership undefined for MQTT devices", () => {
+      registry.upsert({
+        deviceId: "sensor-1",
+        deviceType: "sensor",
+        state: { temperature: 20 },
+        topic: "home/sensor-1",
+        timestamp: Date.now(),
+      });
+      expect(registry.getById("sensor-1")?.connectorInstanceId).toBeUndefined();
+    });
 
     it("removes device from database", () => {
       registry.upsert({

@@ -17,6 +17,7 @@ interface DeviceRow {
   last_seen: number;
   topic?: string | null;
   command_topic?: string | null;
+  connector_instance_id?: string | null;
 }
 
 /** Serialize a Device to JSON-safe values for SQLite */
@@ -31,6 +32,7 @@ export function serializeDevice(device: Device): Record<string, unknown> {
     last_seen: device.lastSeen,
     topic: device.topic ?? null,
     command_topic: device.commandTopic ?? null,
+    connector_instance_id: device.connectorInstanceId ?? null,
   };
 }
 
@@ -50,6 +52,7 @@ export function deserializeDevice(row: Record<string, unknown>): Device | null {
       lastSeen: row.last_seen as number,
       ...(typeof row.topic === "string" ? { topic: row.topic } : {}),
       ...(typeof row.command_topic === "string" ? { commandTopic: row.command_topic } : {}),
+      ...(typeof row.connector_instance_id === "string" ? { connectorInstanceId: row.connector_instance_id } : {}),
     };
   } catch (err) {
     logger.warn({ row, error: (err as Error).message }, "Malformed device row, skipping");
@@ -144,6 +147,7 @@ export class DeviceRegistry {
           lastSeen: event.timestamp,
           ...(integration === "mqtt" ? { topic: event.topic } : {}),
           ...(event.commandTopic ? { commandTopic: event.commandTopic } : {}),
+          ...(event.connectorInstanceId ? { connectorInstanceId: event.connectorInstanceId } : {}),
         }
       : {
           id: deviceId,
@@ -155,6 +159,7 @@ export class DeviceRegistry {
           lastSeen: event.timestamp,
           ...(integration === "mqtt" ? { topic: event.topic } : {}),
           ...(event.commandTopic ? { commandTopic: event.commandTopic } : {}),
+          ...(event.connectorInstanceId ? { connectorInstanceId: event.connectorInstanceId } : {}),
         };
 
     this.devices.set(device.id, device);
@@ -199,12 +204,12 @@ export class DeviceRegistry {
       const s = serializeDevice(device);
       if (isUpdate) {
         this.db.prepare(
-          "UPDATE devices SET name=?, type=?, capabilities=?, state=?, integration=?, last_seen=?, topic=?, command_topic=? WHERE id=?"
-        ).run(s.name, s.type, s.capabilities, s.state, s.integration, s.last_seen, s.topic, s.command_topic, s.id);
+          "UPDATE devices SET name=?, type=?, capabilities=?, state=?, integration=?, last_seen=?, topic=?, command_topic=?, connector_instance_id=? WHERE id=?"
+        ).run(s.name, s.type, s.capabilities, s.state, s.integration, s.last_seen, s.topic, s.command_topic, s.connector_instance_id, s.id);
       } else {
         this.db.prepare(
-          "INSERT OR REPLACE INTO devices (id, name, type, capabilities, state, integration, last_seen, topic, command_topic) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
-        ).run(s.id, s.name, s.type, s.capabilities, s.state, s.integration, s.last_seen, s.topic, s.command_topic);
+          "INSERT OR REPLACE INTO devices (id, name, type, capabilities, state, integration, last_seen, topic, command_topic, connector_instance_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        ).run(s.id, s.name, s.type, s.capabilities, s.state, s.integration, s.last_seen, s.topic, s.command_topic, s.connector_instance_id);
       }
     } catch (err) {
       logger.error({ deviceId: device.id, error: (err as Error).message }, "Failed to persist device");

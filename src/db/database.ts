@@ -61,6 +61,9 @@ export function initSchema(database: DatabaseType): void {
   // acquire their exact source topic lazily on the next observation.
   addDeviceColumn("topic", "TEXT DEFAULT NULL");
   addDeviceColumn("command_topic", "TEXT DEFAULT NULL");
+  // Connector instance ownership is nullable so MQTT and pre-existing devices
+  // stay valid and connector devices reacquire their owner on the next poll.
+  addDeviceColumn("connector_instance_id", "TEXT DEFAULT NULL");
   addColumn("rule_type", "TEXT NOT NULL DEFAULT 'form'");
   addColumn("script_source", "TEXT DEFAULT NULL");
   addColumn("compiled_js", "TEXT DEFAULT NULL");
@@ -256,12 +259,13 @@ function migrateRemoveTypeCheck(database: DatabaseType): void {
         integration TEXT NOT NULL DEFAULT 'mqtt',
         last_seen INTEGER NOT NULL,
         topic TEXT DEFAULT NULL,
-        command_topic TEXT DEFAULT NULL
+        command_topic TEXT DEFAULT NULL,
+        connector_instance_id TEXT DEFAULT NULL
       );
     `);
     database.exec(`
-      INSERT INTO devices (id, name, type, capabilities, state, integration, last_seen, topic, command_topic)
-      SELECT id, name, type, capabilities, state, integration, last_seen, topic, command_topic
+      INSERT INTO devices (id, name, type, capabilities, state, integration, last_seen, topic, command_topic, connector_instance_id)
+      SELECT id, name, type, capabilities, state, integration, last_seen, topic, command_topic, connector_instance_id
       FROM devices_old;
     `);
     database.exec("DROP TABLE devices_old;");
