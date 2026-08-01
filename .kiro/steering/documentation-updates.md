@@ -69,7 +69,7 @@ Prefer:
 - one short summary;
 - one direct link to the maintained detail.
 
-Compatibility stubs such as `docs/COMPREHENSIVE_DOCUMENTATION.md` and `docs/AUTHENTICATION.md` only link to the split docs. Do not add new reference content to them.
+Compatibility stubs such as `docs/AUTHENTICATION.md` only link to the split docs. Do not add new reference content to them.
 
 ## Definition of done
 
