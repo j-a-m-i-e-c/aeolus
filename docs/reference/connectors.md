@@ -47,9 +47,15 @@ disconnect and dispose
 
 ## Device ownership
 
-Connector devices set their `integration` field to the connector ID. Action routing uses this value to find the responsible connector instance.
+Connector devices set their `integration` field to the connector ID (the type). They also record a `connectorInstanceId` identifying the specific enabled instance that discovered them, so multiple instances of one type — two Hue bridges, two Kasa networks — stay independent:
 
-Discovered devices should have stable IDs across restarts. They are normal Aeolus devices once registered, so they appear in the dashboard, emit internal state events and can trigger automations.
+- Action routing dispatches to the exact owning instance. If that instance is disabled, the command fails cleanly rather than being handed to a same-type sibling.
+- Disabling an instance removes only that instance's devices; a sibling keeps its own.
+- Type-generic contributions (action handlers, condition factories) are registered once for a type and torn down only when its last instance is disabled, so a sibling never loses functionality.
+
+Ownership is persisted, so it survives a restart; a device discovered before ownership existed reacquires it on the next poll, falling back to type-based routing until then. Discovered devices should have stable IDs across restarts. They are normal Aeolus devices once registered, so they appear in the dashboard, emit internal state events and can trigger automations.
+
+Device IDs must be unique across instances of the same type (namespace them by bridge/account), since the device registry is keyed by ID.
 
 ## Action catalogs
 

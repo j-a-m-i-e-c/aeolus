@@ -27,18 +27,6 @@ proving the sidecar reload path: the backend must confirm Mosquitto has applied
 a credential change before reporting success. Until that verification loop is
 complete the feature stays disabled by default.
 
-### Connector multi-instance ownership & registration 🟠
-Action/condition handlers are globally keyed by type while connector instances
-are independently enabled/disabled. Two instances of the same connector (two
-Hue bridges, two Kasa networks) can overwrite each other's handlers, and
-disabling one can unregister functionality the other still needs.
-
-Fix: namespace contributions by `connectorType + connectorInstanceId + actionType`
-(or a connector-level router resolving the owning instance at execution time).
-Device ownership must include `connectorInstanceId`, not just the type. Add a
-lifecycle integration test: two instances, discover + operate both, disable one,
-verify the other still works and keeps its devices.
-
 ---
 
 ## 🟡 Medium — clarity & reproducibility
