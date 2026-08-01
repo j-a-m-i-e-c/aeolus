@@ -79,6 +79,7 @@ export async function createUser(
   username: string,
   password: string,
   groupId: string | null,
+  role: "admin" | "user" = "user",
 ): Promise<User> {
   validatePassword(password);
 
@@ -90,8 +91,8 @@ export async function createUser(
   try {
     db.prepare(
       `INSERT INTO users (id, username, password_hash, role, group_id, created_at)
-       VALUES (?, ?, ?, 'user', ?, ?)`,
-    ).run(id, username, passwordHash, groupId, createdAt);
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(id, username, passwordHash, role, groupId, createdAt);
   } catch (err: unknown) {
     if (
       err instanceof Error &&
@@ -106,10 +107,25 @@ export async function createUser(
     id,
     username,
     passwordHash,
-    role: "user",
+    role,
     groupId,
     createdAt,
   };
+}
+
+/**
+ * Throw ConflictError if the system currently has only one admin. Shared by the
+ * demotion path (updateUser) and the deletion path (deleteUser) so the two
+ * cannot diverge. The count is evaluated at call time.
+ */
+function assertNotLastAdmin(): void {
+  const db = getDatabase();
+  const { count } = db
+    .prepare("SELECT COUNT(*) as count FROM users WHERE role = 'admin'")
+    .get() as { count: number };
+  if (count <= 1) {
+    throw new ConflictError("Cannot remove the last admin user");
+  }
 }
 
 /**
@@ -152,13 +168,26 @@ export function listUsers(): UserListItem[] {
  */
 export async function updateUser(
   id: string,
-  updates: { groupId?: string; password?: string },
+  updates: {
+    groupId?: string | null;
+    password?: string;
+    role?: "admin" | "user";
+  },
 ): Promise<User> {
   const db = getDatabase();
 
   const existing = getUser(id);
   if (!existing) {
     throw new NotFoundError("User not found");
+  }
+
+  // Role change (only when it actually differs). Demotion of the final admin is
+  // refused before any write so the system can never be left without an admin.
+  if (updates.role !== undefined && updates.role !== existing.role) {
+    if (existing.role === "admin" && updates.role === "user") {
+      assertNotLastAdmin();
+    }
+    db.prepare("UPDATE users SET role = ? WHERE id = ?").run(updates.role, id);
   }
 
   if (updates.password !== undefined) {
@@ -196,12 +225,7 @@ export function deleteUser(id: string): void {
 
   // Prevent deleting the last admin
   if (user.role === "admin") {
-    const adminCount = db
-      .prepare("SELECT COUNT(*) as count FROM users WHERE role = 'admin'")
-      .get() as { count: number };
-    if (adminCount.count <= 1) {
-      throw new ConflictError("Cannot delete the last admin user");
-    }
+    assertNotLastAdmin();
   }
 
   // Delete user — refresh_tokens cascade via ON DELETE CASCADE

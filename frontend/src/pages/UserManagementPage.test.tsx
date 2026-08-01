@@ -58,8 +58,9 @@ describe("UserManagementPage", () => {
     expect(screen.getByText("alice")).toBeInTheDocument();
     // Group name resolved from the groups list.
     expect(screen.getByText("Family")).toBeInTheDocument();
-    // Admin rows expose no delete action; only the user row does.
-    expect(screen.getByTitle("Delete user")).toBeInTheDocument();
+    // Every row (admin and user) now exposes a delete action; the last-admin
+    // safeguard is enforced server-side (409), not by hiding the control.
+    expect(screen.getAllByTitle("Delete user")).toHaveLength(2);
   });
 
   it("shows an error banner when the users request fails", async () => {
@@ -134,7 +135,8 @@ describe("UserManagementPage", () => {
     h.users = sampleUsers;
     render(<UserManagementPage />);
     await screen.findByText("alice");
-    fireEvent.click(screen.getByTitle("Delete user"));
+    // Rows are [root (admin), alice (user)]; delete the second (alice).
+    fireEvent.click(screen.getAllByTitle("Delete user")[1]);
     expect(screen.getByText("Delete User")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
     await waitFor(() =>
@@ -143,6 +145,74 @@ describe("UserManagementPage", () => {
         expect.objectContaining({ method: "DELETE" }),
       ),
     );
+  });
+
+  it("submits the selected role when creating a user", async () => {
+    render(<UserManagementPage />);
+    await screen.findByText("No users found");
+    fireEvent.click(screen.getByRole("button", { name: /Add User/ }));
+    fireEvent.change(screen.getByPlaceholderText("username"), { target: { value: "bob" } });
+    fireEvent.change(screen.getByPlaceholderText("min 8 characters"), {
+      target: { value: "password123" },
+    });
+    // Choose the admin role.
+    fireEvent.change(screen.getByRole("combobox", { name: /Role/i }), {
+      target: { value: "admin" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+
+    await waitFor(() =>
+      expect(h.authFetch).toHaveBeenCalledWith(
+        expect.stringContaining("/api/auth/users"),
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+    const postCall = h.authFetch.mock.calls.find((c) => c[1]?.method === "POST");
+    expect(JSON.parse(postCall![1].body)).toMatchObject({
+      username: "bob",
+      password: "password123",
+      role: "admin",
+    });
+  });
+
+  it("sends a role change from the edit modal", async () => {
+    h.users = sampleUsers;
+    render(<UserManagementPage />);
+    await screen.findByText("alice");
+    // Edit alice (row index 1) and promote to admin.
+    fireEvent.click(screen.getAllByTitle("Edit user")[1]);
+    expect(screen.getByText("Edit User: alice")).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("combobox", { name: /Role/i }), {
+      target: { value: "admin" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
+    await waitFor(() =>
+      expect(h.authFetch).toHaveBeenCalledWith(
+        expect.stringContaining("/api/auth/users/user-1"),
+        expect.objectContaining({ method: "PUT" }),
+      ),
+    );
+    const putCall = h.authFetch.mock.calls.find((c) => c[1]?.method === "PUT");
+    expect(JSON.parse(putCall![1].body)).toMatchObject({ role: "admin" });
+  });
+
+  it("surfaces a 409 when deleting the last admin and keeps the row", async () => {
+    h.users = sampleUsers;
+    render(<UserManagementPage />);
+    await screen.findByText("root");
+    h.authFetch.mockImplementation(async (url: string, opts?: RequestInit) => {
+      const method = opts?.method ?? "GET";
+      if (method === "DELETE") return jsonRes({ error: "Cannot remove the last admin user" }, false);
+      if (url.endsWith("/api/auth/users") && method === "GET") return jsonRes(h.users, h.usersOk);
+      if (url.endsWith("/api/auth/groups") && method === "GET") return jsonRes(h.groups);
+      return jsonRes({ id: "new-id" });
+    });
+    // Delete the admin row (index 0).
+    fireEvent.click(screen.getAllByTitle("Delete user")[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(await screen.findByText("Cannot remove the last admin user")).toBeInTheDocument();
+    // Row is still present (also appears in the still-open confirm modal).
+    expect(screen.getAllByText("root").length).toBeGreaterThan(0);
   });
 
   it("edits a user's password from the edit modal", async () => {

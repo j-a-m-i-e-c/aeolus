@@ -38,12 +38,14 @@ export function UserManagementPage() {
   const [createUsername, setCreateUsername] = useState("");
   const [createPassword, setCreatePassword] = useState("");
   const [createGroupId, setCreateGroupId] = useState<string>("");
+  const [createRole, setCreateRole] = useState<"admin" | "user">("user");
   const [createError, setCreateError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
 
   // Edit modal state
   const [editUser, setEditUser] = useState<UserRecord | null>(null);
   const [editGroupId, setEditGroupId] = useState<string>("");
+  const [editRole, setEditRole] = useState<"admin" | "user">("user");
   const [editPassword, setEditPassword] = useState("");
   const [editError, setEditError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -124,6 +126,7 @@ export function UserManagementPage() {
           username: createUsername.trim(),
           password: createPassword,
           groupId: createGroupId || null,
+          role: createRole,
         }),
       });
 
@@ -136,6 +139,7 @@ export function UserManagementPage() {
       setCreateUsername("");
       setCreatePassword("");
       setCreateGroupId("");
+      setCreateRole("user");
       setShowCreateForm(false);
       await fetchUsers();
     } catch (err) {
@@ -153,6 +157,7 @@ export function UserManagementPage() {
     fetchGroups();
     setEditUser(user);
     setEditGroupId(user.groupId ?? "");
+    setEditRole(user.role);
     setEditPassword("");
     setEditError(null);
   };
@@ -171,6 +176,9 @@ export function UserManagementPage() {
       const updates: Record<string, unknown> = {};
       if (editGroupId !== (editUser.groupId ?? "")) {
         updates.groupId = editGroupId || null;
+      }
+      if (editRole !== editUser.role) {
+        updates.role = editRole;
       }
       if (editPassword) {
         updates.password = editPassword;
@@ -270,7 +278,7 @@ export function UserManagementPage() {
         <div className="bg-surface border border-[#2A3441] rounded-xl p-4 space-y-3">
           <h3 className="text-sm font-medium text-[#E6EDF3]">Create User</h3>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             <div>
               <label className="block text-[10px] text-[#6B7785] uppercase mb-1">Username</label>
               <input
@@ -292,6 +300,21 @@ export function UserManagementPage() {
               />
             </div>
             <div>
+              <label className="block text-[10px] text-[#6B7785] uppercase mb-1">Role</label>
+              <select
+                aria-label="Role"
+                value={createRole}
+                onChange={(e) => setCreateRole(e.target.value as "admin" | "user")}
+                className="w-full px-3 py-2 text-sm bg-background border border-[#2A3441] rounded-lg text-[#E6EDF3] focus:outline-none focus:border-primary transition-colors"
+              >
+                <option value="user">User</option>
+                <option value="admin">Admin</option>
+              </select>
+              {createRole === "admin" && (
+                <p className="mt-1 text-[10px] text-[#6B7785]">Admins have full system-wide access and bypass tab permissions.</p>
+              )}
+            </div>
+            <div>
               <label className="block text-[10px] text-[#6B7785] uppercase mb-1">Group</label>
               <select
                 value={createGroupId}
@@ -303,7 +326,7 @@ export function UserManagementPage() {
                   <option key={g.id} value={g.id}>{g.name}</option>
                 ))}
               </select>
-              {!createGroupId && (
+              {!createGroupId && createRole !== "admin" && (
                 <p className="mt-1 text-[10px] text-[#6B7785]">User will not have access to any tabs until assigned a group.</p>
               )}
             </div>
@@ -392,15 +415,13 @@ export function UserManagementPage() {
                       >
                         <Pencil size={14} />
                       </button>
-                      {u.role !== "admin" && (
-                        <button
-                          onClick={() => setDeleteUser(u)}
-                          className="p-1.5 rounded-lg text-[#6B7785] hover:text-[#EF4444] hover:bg-[#EF4444]/10 transition-colors"
-                          title="Delete user"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      )}
+                      <button
+                        onClick={() => setDeleteUser(u)}
+                        className="p-1.5 rounded-lg text-[#6B7785] hover:text-[#EF4444] hover:bg-[#EF4444]/10 transition-colors"
+                        title="Delete user"
+                      >
+                        <Trash2 size={14} />
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -426,6 +447,22 @@ export function UserManagementPage() {
 
             <div className="space-y-3">
               <div>
+                <label className="block text-[10px] text-[#6B7785] uppercase mb-1">Role</label>
+                <select
+                  aria-label="Role"
+                  value={editRole}
+                  onChange={(e) => setEditRole(e.target.value as "admin" | "user")}
+                  className="w-full px-3 py-2 text-sm bg-background border border-[#2A3441] rounded-lg text-[#E6EDF3] focus:outline-none focus:border-primary transition-colors"
+                >
+                  <option value="user">User</option>
+                  <option value="admin">Admin</option>
+                </select>
+                {editRole === "admin" && (
+                  <p className="mt-1 text-[10px] text-[#6B7785]">Admins have full system-wide access and bypass tab permissions.</p>
+                )}
+              </div>
+
+              <div>
                 <label className="block text-[10px] text-[#6B7785] uppercase mb-1">Group Assignment</label>
                 <select
                   value={editGroupId}
@@ -437,7 +474,7 @@ export function UserManagementPage() {
                     <option key={g.id} value={g.id}>{g.name}</option>
                   ))}
                 </select>
-                {!editGroupId && (
+                {!editGroupId && editRole !== "admin" && (
                   <p className="mt-1 text-[10px] text-[#6B7785]">User will not have access to any tabs.</p>
                 )}
               </div>

@@ -68,6 +68,17 @@ describe("user-service", () => {
         createUser("duplicate", "password456", "g2"),
       ).rejects.toThrow("Username already exists");
     });
+
+    it("defaults to the user role when role is omitted", async () => {
+      const user = await createUser("defaultrole", "password123", null);
+      expect(user.role).toBe("user");
+    });
+
+    it("creates an admin when role is 'admin'", async () => {
+      const user = await createUser("newadmin", "password123", null, "admin");
+      expect(user.role).toBe("admin");
+      expect(getUser(user.id)!.role).toBe("admin");
+    });
   });
 
   describe("getUser", () => {
@@ -140,6 +151,66 @@ describe("user-service", () => {
         updateUser("non-existent", { groupId: "g1" }),
       ).rejects.toThrow("User not found");
     });
+
+    it("promotes a user to admin", async () => {
+      const user = await createUser("promoteme", "password123", "g1");
+      const updated = await updateUser(user.id, { role: "admin" });
+      expect(updated.role).toBe("admin");
+    });
+
+    it("demotes an admin to user when another admin exists", async () => {
+      const now = Date.now();
+      testDb
+        .prepare(
+          `INSERT INTO users (id, username, password_hash, role, group_id, created_at)
+           VALUES (?, ?, ?, 'admin', NULL, ?)`,
+        )
+        .run("admin-keep", "adminkeep", "hash", now);
+      testDb
+        .prepare(
+          `INSERT INTO users (id, username, password_hash, role, group_id, created_at)
+           VALUES (?, ?, ?, 'admin', NULL, ?)`,
+        )
+        .run("admin-demote", "admindemote", "hash", now);
+
+      const updated = await updateUser("admin-demote", { role: "user" });
+      expect(updated.role).toBe("user");
+    });
+
+    it("refuses to demote the last admin and leaves the role unchanged", async () => {
+      testDb
+        .prepare(
+          `INSERT INTO users (id, username, password_hash, role, group_id, created_at)
+           VALUES (?, ?, ?, 'admin', NULL, ?)`,
+        )
+        .run("admin-solo", "adminsolo", "hash", Date.now());
+
+      await expect(
+        updateUser("admin-solo", { role: "user" }),
+      ).rejects.toThrow("Cannot remove the last admin user");
+      expect(getUser("admin-solo")!.role).toBe("admin");
+    });
+
+    it("leaves role unchanged when role is omitted and still applies group", async () => {
+      const now = Date.now();
+      testDb
+        .prepare(
+          `INSERT INTO users (id, username, password_hash, role, group_id, created_at)
+           VALUES (?, ?, ?, 'admin', NULL, ?)`,
+        )
+        .run("admin-x", "adminx", "hash", now);
+      // Second admin so the guard would not fire even if it were consulted.
+      testDb
+        .prepare(
+          `INSERT INTO users (id, username, password_hash, role, group_id, created_at)
+           VALUES (?, ?, ?, 'admin', NULL, ?)`,
+        )
+        .run("admin-y", "adminy", "hash", now);
+
+      const updated = await updateUser("admin-x", { groupId: "g1" });
+      expect(updated.role).toBe("admin");
+      expect(updated.groupId).toBe("g1");
+    });
   });
 
   describe("deleteUser", () => {
@@ -163,7 +234,7 @@ describe("user-service", () => {
         .run("admin-1", "admin", "hash", Date.now());
 
       expect(() => deleteUser("admin-1")).toThrow(
-        "Cannot delete the last admin user",
+        "Cannot remove the last admin user",
       );
     });
 

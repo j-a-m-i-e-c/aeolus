@@ -183,8 +183,13 @@ export function createAuthRoutes(): Router {
     requireAdmin,
     validate({ body: createUserSchema }),
     asyncHandler(async (req, res) => {
-      const { username, password, groupId } = req.body;
-      const user = await userService.createUser(username, password, groupId);
+      const { username, password, groupId, role } = req.body;
+      const user = await userService.createUser(
+        username,
+        password,
+        groupId,
+        role,
+      );
       res.status(201).json({
         id: user.id,
         username: user.username,

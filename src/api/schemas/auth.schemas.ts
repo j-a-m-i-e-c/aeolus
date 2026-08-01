@@ -19,15 +19,19 @@ export const passwordChangeSchema = z.object({
 
 // ─── User Management Schemas ─────────────────────────────────────────────────
 
+const roleSchema = z.enum(["admin", "user"]);
+
 export const createUserSchema = z.object({
   username: z.string().min(1, "Username must not be empty"),
   password: z.string().min(8, "Password must be at least 8 characters"),
   groupId: z.string().nullable(),
+  role: roleSchema.optional(),
 });
 
 export const updateUserSchema = z.object({
   groupId: z.string().nullable().optional(),
   password: z.string().min(8, "Password must be at least 8 characters").optional(),
+  role: roleSchema.optional(),
 });
 
 // ─── Group Management Schemas ────────────────────────────────────────────────

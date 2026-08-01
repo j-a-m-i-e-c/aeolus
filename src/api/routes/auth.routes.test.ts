@@ -527,6 +527,53 @@ describe("auth.routes", () => {
       });
       expect(res.status).toBe(400);
     });
+
+    it("passes an explicit admin role through to createUser", async () => {
+      mocks.createUser.mockResolvedValue({
+        id: "new-admin-id",
+        username: "newadmin",
+        role: "admin",
+        groupId: null,
+        createdAt: 5000,
+      });
+      const res = await request(app, "POST", "/api/auth/users", {
+        username: "newadmin",
+        password: "password123",
+        groupId: null,
+        role: "admin",
+      });
+      expect(res.status).toBe(201);
+      expect((res.body as any).role).toBe("admin");
+      expect(mocks.createUser).toHaveBeenCalledWith(
+        "newadmin",
+        "password123",
+        null,
+        "admin",
+      );
+    });
+
+    it("returns 400 for an invalid role value", async () => {
+      const res = await request(app, "POST", "/api/auth/users", {
+        username: "newuser",
+        password: "password123",
+        groupId: null,
+        role: "superuser",
+      });
+      expect(res.status).toBe(400);
+    });
+
+    it("returns 403 for a non-admin caller", async () => {
+      const { ForbiddenError } = await import("../middleware/error-handler.js");
+      mocks.mockRequireAdmin.mockImplementation(() => {
+        throw new ForbiddenError();
+      });
+      const res = await request(app, "POST", "/api/auth/users", {
+        username: "newuser",
+        password: "password123",
+        groupId: null,
+      });
+      expect(res.status).toBe(403);
+    });
   });
 
   // ─── PUT /api/auth/users/:id ──────────────────────────────────────────────
@@ -542,6 +589,40 @@ describe("auth.routes", () => {
       expect(body.groupId).toBe("group-2");
       expect(mocks.updateUser).toHaveBeenCalledWith("u1", { groupId: "group-2" });
     });
+
+    it("passes a role change through to updateUser", async () => {
+      mocks.updateUser.mockResolvedValue({
+        id: "u1",
+        username: "someone",
+        role: "admin",
+        groupId: null,
+        createdAt: 1000,
+      });
+      const res = await request(app, "PUT", "/api/auth/users/u1", {
+        role: "admin",
+      });
+      expect(res.status).toBe(200);
+      expect((res.body as any).role).toBe("admin");
+      expect(mocks.updateUser).toHaveBeenCalledWith("u1", { role: "admin" });
+    });
+
+    it("returns 400 for an invalid role value", async () => {
+      const res = await request(app, "PUT", "/api/auth/users/u1", {
+        role: "root",
+      });
+      expect(res.status).toBe(400);
+    });
+
+    it("returns 409 when demoting the last admin", async () => {
+      const { ConflictError } = await import("../middleware/error-handler.js");
+      mocks.updateUser.mockRejectedValue(
+        new ConflictError("Cannot remove the last admin user"),
+      );
+      const res = await request(app, "PUT", "/api/auth/users/u1", {
+        role: "user",
+      });
+      expect(res.status).toBe(409);
+    });
   });
 
   // ─── DELETE /api/auth/users/:id ───────────────────────────────────────────
@@ -553,6 +634,15 @@ describe("auth.routes", () => {
       const body = res.body as any;
       expect(body.success).toBe(true);
       expect(mocks.deleteUser).toHaveBeenCalledWith("u1");
+    });
+
+    it("returns 409 when deleting the last admin", async () => {
+      const { ConflictError } = await import("../middleware/error-handler.js");
+      mocks.deleteUser.mockImplementation(() => {
+        throw new ConflictError("Cannot remove the last admin user");
+      });
+      const res = await request(app, "DELETE", "/api/auth/users/u1");
+      expect(res.status).toBe(409);
     });
   });
 
