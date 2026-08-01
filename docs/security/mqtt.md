@@ -79,12 +79,28 @@ unaffected.
 
 Aeolus hashes device passwords into Mosquitto's native sha512-pbkdf2 (`$7$`) format using Node's built-in `crypto.pbkdf2` — no external binary or Docker socket required. A generated device password is returned once; the `$7$` hash is stored in the database and written verbatim to the shared password file.
 
-### Experimental shared-volume wiring
+### Shared-volume wiring
 
-The experimental implementation bind-mounts `./mosquitto` into both the backend and the broker at
-`/mosquitto/config`, then uses a sidecar to signal Mosquitto after a change. This is not yet a verified provisioning
-protocol: the feature stays disabled until the sidecar watches atomic replacements correctly and the backend proves
-the broker has applied a requested security transition.
+The implementation bind-mounts `./mosquitto` into both the backend and the broker at `/mosquitto/config`, then uses a
+sidecar to signal Mosquitto after a change. The sidecar watches the config **directory** (not a single file path) for
+move/create events, so the backend's atomic temp-file-plus-rename password-file writes are reliably observed and the
+broker is sent `SIGHUP` for each one.
+
+### Change verification
+
+Writing files and triggering a reload does not by itself prove the broker applied the change — under the default
+`none` reload strategy the reload is delegated to the sidecar and is asynchronous. After each managed change the
+backend therefore probes the broker with short-lived throwaway connections and only reports success once the new
+policy is demonstrably enforced:
+
+- switching to Open confirms anonymous access is accepted;
+- switching to Shared Password / Per-Device confirms anonymous access is rejected and the backend credential is accepted;
+- regenerating the shared password confirms the new credential is accepted;
+- creating a device credential confirms it is accepted; revoking one confirms it is rejected while the backend still connects.
+
+The probes poll within a bounded budget to tolerate the asynchronous reload. If the broker does not converge within the
+budget, the API returns `503` — the change is still saved and will apply on the broker's next reload or restart; only the
+live confirmation did not land in time. Verification runs only while `MQTT_MANAGED_PROVISIONING_ENABLED=true`.
 
 ### Reload strategies
 
@@ -110,6 +126,9 @@ The backend supports pluggable reload strategies via `MQTT_RELOAD_STRATEGY`:
 | `MQTT_RELOAD_COMMAND` | — | Shell command for the `command` strategy |
 | `MQTT_PBKDF2_ITERATIONS` | `100000` | PBKDF2 iteration count (embedded in each hash) |
 | `MQTT_MANAGED_PROVISIONING_ENABLED` | `false` | Enables experimental dashboard-managed Shared / Per-Device provisioning |
+| `MQTT_PROVISIONING_VERIFY_BUDGET_MS` | `12000` | Total budget to confirm a change against the broker |
+| `MQTT_PROVISIONING_VERIFY_POLL_MS` | `500` | Gap between verification poll attempts |
+| `MQTT_PROVISIONING_VERIFY_TIMEOUT_MS` | `3000` | Per-attempt connection timeout for a verification probe |
 
 ## Device guidance
 

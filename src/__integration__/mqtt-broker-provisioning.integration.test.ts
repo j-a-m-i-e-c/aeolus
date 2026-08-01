@@ -49,6 +49,8 @@ const {
   getPasswordFilePath,
 } = await import("../auth/mqtt-credential-service.js");
 
+const { BrokerVerifier } = await import("../mqtt/broker-verifier.js");
+
 // ─── Docker / broker helpers ─────────────────────────────────────────────────
 
 function dockerAvailable(): boolean {
@@ -242,6 +244,38 @@ describeBroker("MQTT provisioning against a real Mosquitto broker", () => {
 
   it("accepts a provisioned device credential", async () => {
     expect(await tryConnect(brokerPort, deviceCred)).toBe(true);
+  });
+
+  describe("BrokerVerifier against the real broker", () => {
+    const verifier = () =>
+      new BrokerVerifier({
+        brokerUrl: `mqtt://127.0.0.1:${brokerPort}`,
+        connectTimeoutMs: 2000,
+        budgetMs: 6000,
+        pollIntervalMs: 300,
+      });
+
+    it("classifies the backend credential as accepted", async () => {
+      expect(await verifier().probe(backendCred)).toBe("accepted");
+    });
+
+    it("classifies an anonymous connection as rejected", async () => {
+      expect(await verifier().probe(null)).toBe("rejected");
+    });
+
+    it("classifies a wrong password as rejected", async () => {
+      expect(
+        await verifier().probe({ username: backendCred.username, password: "wrong" }),
+      ).toBe("rejected");
+    });
+
+    it("waitForAccepted resolves true for the backend credential", async () => {
+      expect(await verifier().waitForAccepted(backendCred)).toBe(true);
+    });
+
+    it("waitForRejected resolves true for anonymous access", async () => {
+      expect(await verifier().waitForRejected(null)).toBe(true);
+    });
   });
 
   it("device credentials survive a backend restart (file regenerated from stored hashes)", async () => {
