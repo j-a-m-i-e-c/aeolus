@@ -36,6 +36,29 @@ Exact request schemas are defined under `src/api/schemas/` and tested with the r
 | `GET` | `/api/state` | Devices keyed by ID |
 | `POST` | `/api/mqtt/publish` | Publish an MQTT message |
 
+### Device action outcomes
+
+`POST /api/devices/:id/action` returns the full command result as the body
+(`success`, `lifecycleState`, `error`, `failureKind`) and maps the outcome to an
+expressive HTTP status. The body is authoritative; the status lets clients that
+only read status codes react correctly.
+
+| Outcome | Status |
+|---|---|
+| Success (`DISPATCHED` / `ACKNOWLEDGED` / `OBSERVED`) | `200` |
+| Missing/empty action type (pre-flight) | `400` |
+| Not authorized for the device | `403` |
+| Device not found (`failureKind: not_found`) | `404` |
+| Observed state conflicts with the request (`STATE_MISMATCH`) | `409` |
+| Unsupported action / invalid params (`unsupported` / `invalid_params`) | `422` |
+| Connector/device errored downstream (`execution`) | `502` |
+| Broker or connector unavailable (`transport`) | `503` |
+| Command timed out (`TIMED_OUT`) | `504` |
+
+There is no `202`: the route awaits a terminal state within the REST action
+timeout, so a dispatched-but-unconfirmed command resolves to `DISPATCHED` (200)
+or `TIMED_OUT` (504).
+
 ## Automations
 
 | Method | Path | Purpose |

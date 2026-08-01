@@ -39,13 +39,6 @@ non-admins on the tabs that surface them, instead of defaulting to admin-only.
 This is the remaining follow-up from the fail-closed WebSocket visibility work;
 device, automation and MQTT events are already scoped.
 
-### Expressive HTTP status codes for command outcomes 🟡
-The device action route returns 200 for all outcomes (including failure,
-timeout, rejection). Map: 200 success / 202 accepted-async / 409|422 rejected /
-504 timeout / 502|503 transport unavailable — keeping the lifecycle object as
-the authoritative detail. Not a blocker, but reviewers question why timeouts
-look like successful HTTP calls.
-
 ### Remove the all-devices grid pane from the operator UI 🟡
 The `device-grid` ("all devices") pane dumps every device onto one surface.
 Operators should get purpose-built views, not a raw device list, and the
