@@ -43,7 +43,31 @@ vi.mock("mqtt", () => ({
   connect: (...args: unknown[]) => mockConnect(...args),
 }));
 
-import { MqttService, computeRetryDelay } from "./mqtt-service.js";
+import { MqttService, computeRetryDelay, redactBrokerUrl } from "./mqtt-service.js";
+
+describe("redactBrokerUrl", () => {
+  it("strips user:password userinfo from a broker URL", () => {
+    expect(redactBrokerUrl("mqtt://user:secret@broker.local:1883")).toBe(
+      "mqtt://***@broker.local:1883",
+    );
+  });
+
+  it("strips a username-only userinfo", () => {
+    expect(redactBrokerUrl("mqtts://alice@broker.local:8883")).toBe(
+      "mqtts://***@broker.local:8883",
+    );
+  });
+
+  it("leaves a URL without credentials unchanged", () => {
+    expect(redactBrokerUrl("mqtt://broker.local:1883")).toBe("mqtt://broker.local:1883");
+  });
+
+  it("does not treat a path segment as userinfo", () => {
+    expect(redactBrokerUrl("mqtt://broker.local:1883/topic@x")).toBe(
+      "mqtt://broker.local:1883/topic@x",
+    );
+  });
+});
 import logger from "../logger.js";
 
 describe("MqttService", () => {

@@ -12,6 +12,17 @@ import logger from "../logger.js";
 export type MqttConnectionState = "disconnected" | "connecting" | "connected" | "waiting_retry";
 
 /**
+ * Strip any userinfo (`user[:password]@`) from a broker URL so credentials
+ * embedded in the URL (e.g. `mqtt://user:pass@host:1883`) never reach logs.
+ * The scheme, host, port and path are preserved. A URL without userinfo, or a
+ * non-URL string, is returned with only the userinfo segment removed (a no-op
+ * when there is none).
+ */
+export function redactBrokerUrl(url: string): string {
+  return url.replace(/^([a-zA-Z][a-zA-Z0-9+.-]*:\/\/)[^/@]*@/, "$1***@");
+}
+
+/**
  * Sink for correlated command replies and observation state.
  *
  * Implemented by {@link PendingCommandTracker}; injected at composition so
@@ -152,7 +163,7 @@ export class MqttService {
         this.setupMessageHandler();
         this.setupDisconnectHandler();
         logger.info(
-          { broker: this.config.brokerUrl, topics: this.config.topics },
+          { broker: redactBrokerUrl(this.config.brokerUrl), topics: this.config.topics },
           "Connected to MQTT broker"
         );
         resolve();
@@ -200,7 +211,7 @@ export class MqttService {
       try {
         await this.attemptConnection();
         logger.info(
-          { attempt: this.reconnectAttempt, broker: this.config.brokerUrl },
+          { attempt: this.reconnectAttempt, broker: redactBrokerUrl(this.config.brokerUrl) },
           "MQTT reconnection successful"
         );
       } catch (err) {
