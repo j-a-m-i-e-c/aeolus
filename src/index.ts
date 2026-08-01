@@ -56,6 +56,7 @@ import { StateHistory } from "./core/state-history.js";
 import { DataStore } from "./data-store/data-store.js";
 import { MosquittoConfigWriter } from "./mqtt/mosquitto-config-writer.js";
 import { MosquittoReloader } from "./mqtt/mosquitto-reloader.js";
+import { BrokerVerifier } from "./mqtt/broker-verifier.js";
 import { MqttProvisioningService } from "./mqtt/mqtt-provisioning-service.js";
 import { metricsService } from "./metrics/metrics-service.js";
 import { metricsMiddleware } from "./metrics/metrics-middleware.js";
@@ -113,7 +114,16 @@ async function main(): Promise<void> {
       process.env.MQTT_CONFIG_FILE || path.resolve(projectDir, "mosquitto", "mosquitto.conf"),
   });
   const reloader = new MosquittoReloader();
-  const provisioningService = new MqttProvisioningService(mqttService, configWriter, reloader);
+  const brokerVerifier = new BrokerVerifier({
+    brokerUrl: config.mqttBrokerUrl,
+    budgetMs: config.mqttProvisioningVerify.budgetMs,
+    pollIntervalMs: config.mqttProvisioningVerify.pollIntervalMs,
+    connectTimeoutMs: config.mqttProvisioningVerify.connectTimeoutMs,
+  });
+  const provisioningService = new MqttProvisioningService(mqttService, configWriter, reloader, {
+    verifier: brokerVerifier,
+    enabled: config.managedMqttProvisioningEnabled,
+  });
   if (config.managedMqttProvisioningEnabled) {
     await provisioningService.initialize();
   } else {

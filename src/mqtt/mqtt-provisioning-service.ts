@@ -17,10 +17,11 @@ import {
   type MqttCredentialListItem,
 } from "../auth/mqtt-credential-service.js";
 import { buildPasswordLine } from "./mosquitto-password-hash.js";
-import { BadRequestError, ConflictError } from "../api/middleware/error-handler.js";
+import { BadRequestError, ConflictError, BrokerNotConfirmedError } from "../api/middleware/error-handler.js";
 import type { MosquittoConfigWriter } from "./mosquitto-config-writer.js";
 import type { MosquittoReloader } from "./mosquitto-reloader.js";
 import type { MqttService } from "./mqtt-service.js";
+import type { BrokerVerifier } from "./broker-verifier.js";
 import logger from "../logger.js";
 
 // --- Type Definitions ---
@@ -46,19 +47,60 @@ const PASSWORD_BYTES = 24;
  * It coordinates between the credential service, config writer, reloader, and MQTT service
  * to ensure the Mosquitto broker, password file, and backend connection are always in sync.
  */
+export interface ProvisioningVerification {
+  /** Confirms broker behaviour after a change. Omitted → verification disabled. */
+  verifier?: BrokerVerifier;
+  /** Guards whether verification runs at all (mirrors managed-provisioning gate). */
+  enabled?: boolean;
+}
+
 export class MqttProvisioningService {
   private readonly configWriter: MosquittoConfigWriter;
   private readonly reloader: MosquittoReloader;
   private readonly mqttService: MqttService;
+  private readonly verifier?: BrokerVerifier;
+  private readonly verificationEnabled: boolean;
 
   constructor(
     mqttService: MqttService,
     configWriter: MosquittoConfigWriter,
     reloader: MosquittoReloader,
+    verification: ProvisioningVerification = {},
   ) {
     this.mqttService = mqttService;
     this.configWriter = configWriter;
     this.reloader = reloader;
+    this.verifier = verification.verifier;
+    this.verificationEnabled = verification.enabled === true && verification.verifier !== undefined;
+  }
+
+  /**
+   * Confirm the broker enforces the expected policy after a change was written
+   * and a reload triggered. No-op when verification is disabled. Throws
+   * {@link BrokerNotConfirmedError} when the broker does not converge in time —
+   * the caller has already persisted the change, so this signals only that live
+   * confirmation did not land, not that the change was lost.
+   */
+  private async verify(
+    operation: string,
+    checks: Array<{ description: string; run: () => Promise<boolean> }>,
+  ): Promise<void> {
+    if (!this.verificationEnabled || !this.verifier) return;
+
+    for (const check of checks) {
+      const ok = await check.run();
+      if (!ok) {
+        logger.error(
+          { operation, check: check.description },
+          "Broker did not confirm provisioning change within the verification window",
+        );
+        throw new BrokerNotConfirmedError(
+          `Broker did not confirm '${operation}' (${check.description}) within the verification window. ` +
+            "The change is saved and will apply on the broker's next reload or restart.",
+        );
+      }
+    }
+    logger.info({ operation }, "Broker confirmed provisioning change");
   }
 
   /**
@@ -173,6 +215,14 @@ export class MqttProvisioningService {
     // Persist the new shared password to system_settings
     this.writeSetting(SETTING_SHARED_PASSWORD, password);
 
+    // Confirm the broker accepts the freshly regenerated shared credential
+    await this.verify("regenerate-shared-password", [
+      {
+        description: "new shared credential accepted",
+        run: () => this.verifier!.waitForAccepted({ username, password }),
+      },
+    ]);
+
     logger.info({ username }, "Shared MQTT password regenerated");
 
     return { username, password };
@@ -213,8 +263,13 @@ export class MqttProvisioningService {
     // 3. Reconnect MQTT without credentials (broker now allows anonymous)
     await this.mqttService.reconnectWithCredentials(null);
 
-    // 4. Persist level
+    // 4. Persist level (before verify, so a delayed reload still converges)
     this.writeSetting(SETTING_SECURITY_LEVEL, "open");
+
+    // 5. Confirm the broker now accepts anonymous connections
+    await this.verify("set-open", [
+      { description: "anonymous accepted", run: () => this.verifier!.waitForAccepted(null) },
+    ]);
 
     logger.info("Security level changed to open");
 
@@ -257,6 +312,15 @@ export class MqttProvisioningService {
     this.writeSetting(SETTING_SHARED_USERNAME, sharedUsername);
     this.writeSetting(SETTING_SHARED_PASSWORD, sharedPassword);
 
+    // 6. Confirm the broker now enforces auth: anonymous refused, backend accepted
+    await this.verify("set-shared-password", [
+      { description: "anonymous rejected", run: () => this.verifier!.waitForRejected(null) },
+      {
+        description: "backend credential accepted",
+        run: () => this.verifier!.waitForAccepted({ username: BACKEND_USERNAME, password: backendPassword }),
+      },
+    ]);
+
     logger.info({ sharedUsername }, "Security level changed to shared_password");
 
     return this.getStatus();
@@ -293,6 +357,15 @@ export class MqttProvisioningService {
     // 5. Persist level
     this.writeSetting(SETTING_SECURITY_LEVEL, "per_device");
 
+    // 6. Confirm the broker now enforces auth: anonymous refused, backend accepted
+    await this.verify("set-per-device", [
+      { description: "anonymous rejected", run: () => this.verifier!.waitForRejected(null) },
+      {
+        description: "backend credential accepted",
+        run: () => this.verifier!.waitForAccepted({ username: BACKEND_USERNAME, password: backendPassword }),
+      },
+    ]);
+
     logger.info("Security level changed to per_device");
 
     return this.getStatus();
@@ -315,6 +388,17 @@ export class MqttProvisioningService {
 
     const credential = await createCredential(deviceName);
 
+    // Confirm the broker accepts the newly provisioned device credential
+    await this.verify("create-device-credential", [
+      {
+        description: "new device credential accepted",
+        run: () => this.verifier!.waitForAccepted({
+          username: credential.username,
+          password: credential.password,
+        }),
+      },
+    ]);
+
     logger.info(
       { id: credential.id, deviceName, username: credential.username },
       "Per-device MQTT credential created via provisioning service",
@@ -336,7 +420,27 @@ export class MqttProvisioningService {
       throw new ConflictError("Operation requires per_device security level");
     }
 
+    // Capture the username before deletion so we can probe that it stops working.
+    const revokedUsername = listCredentials().find((c) => c.id === id)?.username;
+
     deleteCredential(id);
+
+    // Confirm the broker refuses the revoked credential while the backend still
+    // connects — the backend positive-probe distinguishes a genuine revocation
+    // from a transiently unreachable broker (which would also look "rejected").
+    const backendPassword = this.ensureBackendPassword();
+    await this.verify("revoke-device-credential", [
+      ...(revokedUsername
+        ? [{
+            description: "revoked credential rejected",
+            run: () => this.verifier!.waitForRejected({ username: revokedUsername, password: "revoked" }),
+          }]
+        : []),
+      {
+        description: "backend credential still accepted",
+        run: () => this.verifier!.waitForAccepted({ username: BACKEND_USERNAME, password: backendPassword }),
+      },
+    ]);
 
     logger.info({ id }, "Per-device MQTT credential revoked via provisioning service");
   }
