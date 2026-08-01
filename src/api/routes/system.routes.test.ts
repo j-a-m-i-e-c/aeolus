@@ -77,13 +77,41 @@ async function request(
 
 describe("system.routes", () => {
   let app: express.Express;
+  // Simulated authenticated principal; the real global `authenticate` runs before
+  // these routes in production. Defaults to an admin so the gated routes pass.
+  let testUser: { role: string } | null;
 
   beforeEach(() => {
     vi.clearAllMocks();
+    testUser = { role: "admin" };
     app = express();
     app.use(express.json());
+    app.use((req, _res, next) => {
+      if (testUser) (req as unknown as { user: unknown }).user = testUser;
+      next();
+    });
     app.use("/api/system", createSystemRoutes());
     app.use(errorHandler);
+  });
+
+  describe("admin gating", () => {
+    it("returns 403 on GET /api/system for a non-admin", async () => {
+      testUser = { role: "user" };
+      const res = await request(app, "GET", "/api/system");
+      expect(res.status).toBe(403);
+    });
+
+    it("returns 403 on GET /api/system/logs for a non-admin", async () => {
+      testUser = { role: "user" };
+      const res = await request(app, "GET", "/api/system/logs");
+      expect(res.status).toBe(403);
+    });
+
+    it("keeps GET /api/system/version available to a non-admin", async () => {
+      testUser = { role: "user" };
+      const res = await request(app, "GET", "/api/system/version");
+      expect(res.status).toBe(200);
+    });
   });
 
   describe("GET /api/system", () => {

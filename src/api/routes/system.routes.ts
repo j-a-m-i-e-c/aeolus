@@ -6,6 +6,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execSync } from "node:child_process";
 import { getRecentLogs } from "../../log-buffer.js";
+import { requireAdmin } from "../../auth/auth-middleware.js";
 
 const VALID_LOG_LEVELS = ["trace", "debug", "info", "warn", "error", "fatal"];
 
@@ -35,8 +36,13 @@ function getDiskUsage(): { total: number; used: number; free: number; usagePerce
 export function createSystemRoutes(): Router {
   const router = Router();
 
-  /** GET /api/system — host diagnostics */
-  router.get("/", (_req, res) => {
+  /**
+   * GET /api/system — host diagnostics (admin only).
+   * Exposes hostname, network addresses, CPU/memory/disk and runtime details, so
+   * it is restricted to admins. The version/health endpoint below stays available
+   * to any authenticated user.
+   */
+  router.get("/", requireAdmin, (_req, res) => {
     const cpus = os.cpus();
     const totalMem = os.totalmem();
     const freeMem = os.freemem();
@@ -84,8 +90,8 @@ export function createSystemRoutes(): Router {
     });
   });
 
-  /** GET /api/system/logs — recent application logs */
-  router.get("/logs", (req, res) => {
+  /** GET /api/system/logs — recent application logs (admin only) */
+  router.get("/logs", requireAdmin, (req, res) => {
     const rawCount = Number(req.query.count);
     const count = Number.isFinite(rawCount) && rawCount >= 1 && rawCount <= 200
       ? Math.floor(rawCount)

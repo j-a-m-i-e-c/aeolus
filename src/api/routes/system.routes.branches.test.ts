@@ -70,6 +70,12 @@ describe("system.routes — branch coverage", () => {
     vi.clearAllMocks();
     app = express();
     app.use(express.json());
+    // The diagnostics and logs routes are admin-gated; the real global
+    // `authenticate` runs before them in production. Inject an admin principal.
+    app.use((req, _res, next) => {
+      (req as unknown as { user: unknown }).user = { role: "admin" };
+      next();
+    });
     app.use("/api/system", createSystemRoutes());
     app.use(errorHandler);
   });
