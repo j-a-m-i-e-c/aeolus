@@ -112,18 +112,17 @@ connected, provisioning-enabled); expose the credential only via an admin-only
 endpoint if it must be retrievable at all — prefer one-time display on
 create/regenerate. (Relevant once managed provisioning is enabled.)
 
-### 7. System diagnostics and logs available to every authenticated user 🟠 (R7)
-`GET /api/system` (hostname, network addresses, CPU/memory/disk, runtime) and
-`GET /api/system/logs` (recent app logs) require no admin. Compounds other leaks
-because logs may contain connector/API URLs and the MQTT broker URL. Fix:
-admin-gate both; leave a minimal version/health endpoint open as needed.
+### 7. System diagnostics and logs available to every authenticated user ✅ (R7) — DONE
+`GET /api/system` and `GET /api/system/logs` now require admin;
+`GET /api/system/version` stays available to any authenticated user as a
+health/version endpoint. (`src/api/routes/system.routes.ts`.)
 
-### 8. MQTT broker credentials can be logged in plaintext 🟠 (R8)
-`MqttService` logs `this.config.brokerUrl` on connect/reconnect; with
-`mqtt://user:password@host:1883` URLs the password is written to logs. Combined
-with non-admin log access this is a concrete disclosure path. Fix: add a
-URL-redaction helper that strips userinfo before every log call; prefer separate
-`MQTT_USERNAME`/`MQTT_PASSWORD` config so the URL never carries credentials.
+### 8. MQTT broker credentials can be logged in plaintext ✅ (R8) — DONE
+A `redactBrokerUrl` helper strips userinfo from the broker URL before it is
+logged on connect and reconnect, so credentials embedded in
+`mqtt://user:pass@host` no longer reach the logs. (`src/mqtt/mqtt-service.ts`.)
+Separate `MQTT_USERNAME`/`MQTT_PASSWORD` config remains a possible future
+refinement.
 
 ### 9. Initial MQTT connection failure does not start the retry loop 🟠 (R9)
 `connect()` calls `attemptConnection()` once; the indefinite reconnection loop
@@ -135,12 +134,11 @@ backoff loop on initial failure without blocking startup; add a Mosquitto
 healthcheck and, where useful, a broker-health startup dependency. Keep
 reconnect resilient for external brokers too.
 
-### 10. Pin Node ≥ 22.22.1 consistently 🟡 (R12)
-`.nvmrc`, package engines and the backend Dockerfile pin 22.20.0 / `>=22.20.0`,
-but locked `lint-staged@17.0.7` requires Node `>=22.22.1`. Frontend Dockerfile
-and seed service use floating `node:22`. Fix: pin one tested patch release
-(≥ 22.22.1) everywhere — `.nvmrc`, engines, backend/frontend Dockerfiles, seed
-image and CI — so the CI environment matches the lockfile.
+### 10. Pin Node ≥ 22.22.1 consistently ✅ (R12) — DONE
+Pinned Node `22.22.1` across `.nvmrc` (which also drives CI and e2e via
+`node-version-file`), both package `engines` (`>=22.22.1 <23`), the backend and
+frontend Dockerfiles, and the compose seed image — matching the lockfile's
+`lint-staged@17.0.7` floor (`>=22.22.1`).
 
 ### 11. Documentation truthfulness pass 🟡 (R11)
 `docker-compose.yml` now mounts `./mosquitto` into the backend and includes a
