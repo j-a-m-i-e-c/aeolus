@@ -12,7 +12,6 @@ export interface Tab {
 
 /** Type-specific filter/display configuration for a Pane */
 export interface PaneConfig {
-  room?: string;
   deviceType?: string;
   topicPattern?: string;
   showSections?: string[];
@@ -23,7 +22,7 @@ export interface PaneConfig {
 export interface Pane {
   id: string;          // UUID v4
   tabId: string;       // Foreign key → Tab.id
-  paneType: string;    // Key into Pane_Registry, e.g. "device-grid"
+  paneType: string;    // Key into Pane_Registry, e.g. "hue-control"
   config: PaneConfig;  // Type-specific filter/display config
   x: number;           // Grid column position (0-based)
   y: number;           // Grid row position (0-based)

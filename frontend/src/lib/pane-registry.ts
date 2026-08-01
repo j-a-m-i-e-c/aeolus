@@ -2,7 +2,6 @@
 
 import type { ComponentType } from "react";
 import type { PaneConfig } from "../types/dashboard";
-import { DeviceGridPane } from "../components/panes/DeviceGridPane";
 import { SensorPanelPane } from "../components/panes/SensorPanelPane";
 import { MqttInspectorPane } from "../components/panes/MqttInspectorPane";
 import { HueControlPane } from "../components/panes/HueControlPane";
@@ -30,14 +29,6 @@ export interface PaneRegistryEntry {
 
 export const PANE_REGISTRY: Record<string, PaneRegistryEntry> = {
   // ── Controls ──
-  "device-grid": {
-    component: DeviceGridPane,
-    displayName: "Device Grid",
-    defaultIcon: "cpu",
-    defaultConfig: {},
-    defaultSize: { w: 12, h: 5 },
-    category: "controls",
-  },
   "hue-control": {
     component: HueControlPane,
     displayName: "Hue Lights",

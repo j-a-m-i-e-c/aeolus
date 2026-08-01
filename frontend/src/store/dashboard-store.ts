@@ -228,7 +228,9 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
       const pinnedTabs = DEFAULT_TABS.filter((t) => t.pinned);
       const savedCustomTabs = (layout.tabs || []).filter((t: Tab) => !t.pinned);
       const allTabs = [...pinnedTabs, ...savedCustomTabs];
-      const panes = layout.panes || DEFAULT_PANES;
+      // Drop panes whose type is no longer registered (e.g. the removed
+      // "device-grid" pane) so legacy layouts don't render broken/empty tiles.
+      const panes = (layout.panes || DEFAULT_PANES).filter((p: Pane) => p.paneType in PANE_REGISTRY);
       set({ tabs: allTabs, panes, activeTabId: allTabs[0]?.id ?? null, initialized: true });
     } catch (err) {
       console.warn("[dashboard-store] Failed to fetch layout, using defaults:", err);

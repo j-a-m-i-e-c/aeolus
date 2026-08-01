@@ -117,11 +117,11 @@ describe("dashboard-store", () => {
 
   describe("panes", () => {
     it("addPane applies the registry default size and merges config", () => {
-      d().addPane("tab-1", "device-grid", { title: "Lights" } as Pane["config"]);
+      d().addPane("tab-1", "hue-control", { title: "Lights" } as Pane["config"]);
       const pane = d().panes[0];
-      expect(pane.paneType).toBe("device-grid");
-      expect(pane.w).toBe(12); // device-grid default width
-      expect(pane.h).toBe(5);
+      expect(pane.paneType).toBe("hue-control");
+      expect(pane.w).toBe(12); // hue-control default width
+      expect(pane.h).toBe(6);
       expect(pane.config).toMatchObject({ title: "Lights" });
     });
 

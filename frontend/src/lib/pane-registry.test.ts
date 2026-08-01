@@ -7,9 +7,9 @@ const VALID_CATEGORIES = new Set(["controls", "automations", "monitoring", "syst
 
 describe("getPaneEntry", () => {
   it("returns the entry for a known pane type", () => {
-    const entry = getPaneEntry("device-grid");
+    const entry = getPaneEntry("hue-control");
     expect(entry).toBeDefined();
-    expect(entry?.displayName).toBe("Device Grid");
+    expect(entry?.displayName).toBe("Hue Lights");
     expect(entry?.category).toBe("controls");
   });
 
