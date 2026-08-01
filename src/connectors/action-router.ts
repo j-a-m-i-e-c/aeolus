@@ -37,6 +37,26 @@ export class ActionRouter {
   }
 
   /**
+   * Resolve the connector instance that owns a device.
+   *
+   * When the device records a `connectorInstanceId`, that exact instance is the
+   * owner: if it is not currently enabled we return `undefined` rather than
+   * falling through to a same-type sibling, so a command is never misrouted to
+   * an instance that does not own the device. Only when a device carries no
+   * ownership (MQTT devices, or connector devices discovered before ownership
+   * existed) do we fall back to the first enabled instance of the matching type.
+   */
+  private resolveOwningInstance(device: Device): ManagedInstance | undefined {
+    if (device.connectorInstanceId) {
+      return this.instances.get(device.connectorInstanceId);
+    }
+    for (const instance of this.instances.values()) {
+      if (instance.record.connectorType === device.integration) return instance;
+    }
+    return undefined;
+  }
+
+  /**
    * Route an action to the correct connector based on the device's integration field.
    *
    * Returns an ActionResult — never throws. All error paths are captured and
@@ -85,9 +105,11 @@ export class ActionRouter {
       return this.executeMqttAction(device, action, correlation);
     }
 
-    // Task 5.5 — connector execute with try/catch
-    for (const instance of this.instances.values()) {
-      if (instance.record.connectorType === device.integration) {
+    // Task 5.5 — connector execute with try/catch, dispatched to the owning instance
+    const owner = this.resolveOwningInstance(device);
+    if (owner) {
+      {
+        const instance = owner;
         try {
           const connectorResult = await instance.connector.execute(action);
 
@@ -143,6 +165,15 @@ export class ActionRouter {
       }
     }
 
+    // No owning instance is currently enabled. Distinguish a device whose
+    // specific owner is disabled from one with no matching connector at all,
+    // so the failure never implies a same-type sibling could have handled it.
+    if (device.connectorInstanceId) {
+      return {
+        success: false,
+        error: `Owning connector instance '${device.connectorInstanceId}' for device '${deviceId}' is not enabled`,
+      };
+    }
     return {
       success: false,
       error: `No enabled connector found for device '${deviceId}' (integration: '${device.integration}')`,
@@ -167,20 +198,17 @@ export class ActionRouter {
    * then falls back to CAPABILITY_ACTION_MAP. Returns undefined when no catalog is available.
    */
   private resolveActionCatalog(device: Device): CapabilityDescriptor[] | undefined {
-    // Check connector instance method first
-    for (const instance of this.instances.values()) {
-      if (instance.record.connectorType === device.integration) {
-        if (instance.connector.getActionCatalog) {
-          const catalog = instance.connector.getActionCatalog(device.id);
-          if (catalog !== undefined) return catalog;
-        }
-        // Check module-level method
-        const mod = this.registry.getModule(instance.record.connectorType);
-        if (mod?.getActionCatalog) {
-          const catalog = mod.getActionCatalog(device);
-          if (catalog !== undefined) return catalog;
-        }
-        break;
+    // Ask the owning instance first, then its module-level catalog.
+    const owner = this.resolveOwningInstance(device);
+    if (owner) {
+      if (owner.connector.getActionCatalog) {
+        const catalog = owner.connector.getActionCatalog(device.id);
+        if (catalog !== undefined) return catalog;
+      }
+      const mod = this.registry.getModule(owner.record.connectorType);
+      if (mod?.getActionCatalog) {
+        const catalog = mod.getActionCatalog(device);
+        if (catalog !== undefined) return catalog;
       }
     }
 
@@ -251,12 +279,8 @@ export class ActionRouter {
   getAcknowledgementCapability(deviceId: string): AcknowledgementCapability | undefined {
     const device = this.deviceRegistry.getById(deviceId);
     if (!device) return undefined;
-    for (const instance of this.instances.values()) {
-      if (instance.record.connectorType === device.integration) {
-        return instance.connector.getAcknowledgementCapability?.(deviceId);
-      }
-    }
-    return undefined;
+    const owner = this.resolveOwningInstance(device);
+    return owner?.connector.getAcknowledgementCapability?.(deviceId);
   }
 
   /**

@@ -7,6 +7,7 @@ import type { Device, Action, NormalizedEvent, ActionResult } from "../core/type
 import { DEVICE_STATE_CHANGE, CONNECTOR_POLL, CONNECTOR_ERROR } from "../core/event-bus.js";
 import type {
   Connector,
+  ConnectorModule,
   ConnectorInstanceInfo,
   ConnectorRecord,
   SetupStepDescriptor,
@@ -47,10 +48,13 @@ export interface ManagedInstance {
  */
 export class ConnectorManager {
   private instances = new Map<string, ManagedInstance>();
-  /** Tracks which action handler types each instance contributed, for cleanup on disable. */
-  private contributedHandlers = new Map<string, string[]>();
-  /** Tracks which condition types each instance contributed, for cleanup on disable. */
-  private contributedConditions = new Map<string, string[]>();
+  /**
+   * Number of enabled instances per connector type. Contributed action/condition
+   * handlers are type-generic, so they are registered once when the first
+   * instance of a type is enabled and torn down only when the last instance of
+   * that type is disabled — a sibling instance keeps them alive.
+   */
+  private activeInstanceCountByType = new Map<string, number>();
   private actionExecutor?: CommandService;
   private conditionRegistry?: ConditionRegistry;
   private readonly actionRouter: ActionRouter;
@@ -79,6 +83,53 @@ export class ConnectorManager {
   setRegistries(actionExecutor: CommandService, conditionRegistry: ConditionRegistry): void {
     this.actionExecutor = actionExecutor;
     this.conditionRegistry = conditionRegistry;
+  }
+
+  /**
+   * Register a connector type's contributed action/condition handlers when its
+   * first instance becomes active, and increment the per-type active count.
+   * Contributions are type-generic, so a second instance of the same type does
+   * not re-register them.
+   */
+  private registerContributions(connectorType: string, mod: ConnectorModule): void {
+    const count = this.activeInstanceCountByType.get(connectorType) ?? 0;
+    if (count === 0) {
+      if (mod.actionHandlers && this.actionExecutor) {
+        for (const [type, handler] of Object.entries(mod.actionHandlers)) {
+          this.actionExecutor.registerHandler(type, handler);
+        }
+      }
+      if (mod.conditions && this.conditionRegistry) {
+        for (const [type, factory] of Object.entries(mod.conditions)) {
+          this.conditionRegistry.registerCondition(type, factory);
+        }
+      }
+    }
+    this.activeInstanceCountByType.set(connectorType, count + 1);
+  }
+
+  /**
+   * Decrement the per-type active count and tear down the type's contributed
+   * handlers only when the last instance of that type is disabled. A sibling
+   * instance of the same type keeps the contributions registered.
+   */
+  private unregisterContributions(connectorType: string, mod: ConnectorModule): void {
+    const remaining = (this.activeInstanceCountByType.get(connectorType) ?? 1) - 1;
+    if (remaining <= 0) {
+      if (mod.actionHandlers && this.actionExecutor) {
+        for (const type of Object.keys(mod.actionHandlers)) {
+          this.actionExecutor.unregisterHandler(type);
+        }
+      }
+      if (mod.conditions && this.conditionRegistry) {
+        for (const type of Object.keys(mod.conditions)) {
+          this.conditionRegistry.unregisterCondition(type);
+        }
+      }
+      this.activeInstanceCountByType.delete(connectorType);
+    } else {
+      this.activeInstanceCountByType.set(connectorType, remaining);
+    }
   }
 
   /**
@@ -132,7 +183,7 @@ export class ConnectorManager {
     try {
       const discovered = await connector.discoverDevices();
       for (const device of discovered) {
-        this.emitDeviceEvent(device);
+        this.emitDeviceEvent(device, instanceId);
         devices.add(device.id);
       }
     } catch (err) {
@@ -142,23 +193,8 @@ export class ConnectorManager {
       );
     }
 
-    // Register contributed action handlers
-    if (mod.actionHandlers && this.actionExecutor) {
-      const types = Object.keys(mod.actionHandlers);
-      for (const [type, handler] of Object.entries(mod.actionHandlers)) {
-        this.actionExecutor.registerHandler(type, handler);
-      }
-      this.contributedHandlers.set(instanceId, types);
-    }
-
-    // Register contributed condition factories
-    if (mod.conditions && this.conditionRegistry) {
-      const types = Object.keys(mod.conditions);
-      for (const [type, factory] of Object.entries(mod.conditions)) {
-        this.conditionRegistry.registerCondition(type, factory);
-      }
-      this.contributedConditions.set(instanceId, types);
-    }
+    // Register contributed handlers (once per type, ref-counted across instances)
+    this.registerContributions(connectorType, mod);
 
     // Persist to store
     this.store.save(record);
@@ -189,22 +225,10 @@ export class ConnectorManager {
     // Stop polling
     clearInterval(instance.pollingTimer);
 
-    // Unregister contributed action handlers
-    const handlerTypes = this.contributedHandlers.get(instanceId);
-    if (handlerTypes && this.actionExecutor) {
-      for (const type of handlerTypes) {
-        this.actionExecutor.unregisterHandler(type);
-      }
-      this.contributedHandlers.delete(instanceId);
-    }
-
-    // Unregister contributed condition factories
-    const conditionTypes = this.contributedConditions.get(instanceId);
-    if (conditionTypes && this.conditionRegistry) {
-      for (const type of conditionTypes) {
-        this.conditionRegistry.unregisterCondition(type);
-      }
-      this.contributedConditions.delete(instanceId);
+    // Tear down contributed handlers only if this is the last instance of the type
+    const mod = this.registry.getModule(instance.record.connectorType);
+    if (mod) {
+      this.unregisterContributions(instance.record.connectorType, mod);
     }
 
     // Disconnect and dispose
@@ -226,11 +250,14 @@ export class ConnectorManager {
       );
     }
 
-    // Remove devices from DeviceRegistry that belong to this connector
+    // Remove only the devices this instance owns — never a sibling instance's.
+    // Primary signal is recorded ownership; the instance's own discovered-device
+    // set covers legacy/in-flight devices that have no persisted owner yet.
     const connectorType = instance.record.connectorType;
-    const allDevices = this.deviceRegistry.getAll();
-    for (const device of allDevices) {
-      if (device.integration === connectorType) {
+    for (const device of this.deviceRegistry.getAll()) {
+      const ownedById = device.connectorInstanceId === instanceId;
+      const ownedBySet = device.connectorInstanceId === undefined && instance.devices.has(device.id);
+      if (ownedById || ownedBySet) {
         this.deviceRegistry.remove(device.id);
       }
     }
@@ -287,7 +314,7 @@ export class ConnectorManager {
     try {
       const discovered = await instance.connector.discoverDevices();
       for (const device of discovered) {
-        this.emitDeviceEvent(device);
+        this.emitDeviceEvent(device, instanceId);
         instance.devices.add(device.id);
       }
     } catch (err) {
@@ -475,7 +502,7 @@ export class ConnectorManager {
       try {
         const discovered = await connector.discoverDevices();
         for (const device of discovered) {
-          this.emitDeviceEvent(device);
+          this.emitDeviceEvent(device, record.id);
           devices.add(device.id);
         }
       } catch (err) {
@@ -485,23 +512,8 @@ export class ConnectorManager {
         );
       }
 
-      // Register contributed action handlers
-      if (mod.actionHandlers && this.actionExecutor) {
-        const types = Object.keys(mod.actionHandlers);
-        for (const [type, handler] of Object.entries(mod.actionHandlers)) {
-          this.actionExecutor.registerHandler(type, handler);
-        }
-        this.contributedHandlers.set(record.id, types);
-      }
-
-      // Register contributed condition factories
-      if (mod.conditions && this.conditionRegistry) {
-        const types = Object.keys(mod.conditions);
-        for (const [type, factory] of Object.entries(mod.conditions)) {
-          this.conditionRegistry.registerCondition(type, factory);
-        }
-        this.contributedConditions.set(record.id, types);
-      }
+      // Register contributed handlers (once per type, ref-counted across instances)
+      this.registerContributions(record.connectorType, mod);
 
       const pollingTimer = this.startPolling(record.id, connector, devices, record.connectorType);
 
@@ -561,7 +573,7 @@ export class ConnectorManager {
         if (discovered.length > 0) {
           devices.clear();
           for (const device of discovered) {
-            this.emitDeviceEvent(device);
+            this.emitDeviceEvent(device, instanceId);
             devices.add(device.id);
           }
         }
@@ -588,7 +600,11 @@ export class ConnectorManager {
    * Uses a synthetic topic `connector/{integration}/{deviceId}` so automations
    * can match on connector device events using the standard topic pattern system.
    */
-  private emitDeviceEvent(device: Device): void {
+  private emitDeviceEvent(device: Device, instanceId?: string): void {
+    // The owning instance is the one that discovered the device. The optimistic
+    // re-emit path (ActionRouter) passes no id, so fall back to the ownership
+    // already recorded on the device, preserving it across state updates.
+    const connectorInstanceId = instanceId ?? device.connectorInstanceId;
     const event: NormalizedEvent = {
       deviceId: device.id,
       deviceType: device.type,
@@ -597,6 +613,7 @@ export class ConnectorManager {
       timestamp: device.lastSeen || Date.now(),
       integration: device.integration,
       capabilities: device.capabilities,
+      ...(connectorInstanceId ? { connectorInstanceId } : {}),
     };
     this.eventBus.emit(DEVICE_STATE_CHANGE, event);
   }

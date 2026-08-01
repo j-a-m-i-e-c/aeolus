@@ -74,6 +74,96 @@ describe("ActionRouter", () => {
     );
   });
 
+  /** Build a ManagedInstance with an explicit id and connector, and register it. */
+  function addInstance(id: string, connectorType: string, connector: Connector): void {
+    instances.set(id, {
+      connector,
+      record: {
+        id,
+        connectorType,
+        enabled: true,
+        config: {},
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      } as ConnectorRecord,
+      pollingTimer: null as unknown as ReturnType<typeof setInterval>,
+      devices: new Set<string>(),
+    });
+  }
+
+  describe("multi-instance ownership resolution", () => {
+    it("dispatches to the exact owning instance, not a same-type sibling", async () => {
+      const bridgeA = createMockConnector({ execute: vi.fn().mockResolvedValue({ success: true }) });
+      const bridgeB = createMockConnector({ execute: vi.fn().mockResolvedValue({ success: true }) });
+      addInstance("bridge-a", "hue", bridgeA);
+      addInstance("bridge-b", "hue", bridgeB);
+
+      const device = createMockDevice({
+        id: "hue-b-light",
+        integration: "hue",
+        connectorInstanceId: "bridge-b",
+      });
+      deviceRegistry.getById.mockReturnValue(device);
+
+      const result = await router.executeAction("hue-b-light", {
+        type: "on", deviceId: "hue-b-light", params: {},
+      });
+
+      expect(result.success).toBe(true);
+      expect(bridgeB.execute).toHaveBeenCalledTimes(1);
+      expect(bridgeA.execute).not.toHaveBeenCalled();
+    });
+
+    it("fails without dispatching when the owning instance is disabled", async () => {
+      const bridgeA = createMockConnector({ execute: vi.fn().mockResolvedValue({ success: true }) });
+      addInstance("bridge-a", "hue", bridgeA); // only bridge-a is enabled
+
+      const device = createMockDevice({
+        id: "hue-b-light",
+        integration: "hue",
+        connectorInstanceId: "bridge-b", // owner not enabled
+      });
+      deviceRegistry.getById.mockReturnValue(device);
+
+      const result = await router.executeAction("hue-b-light", {
+        type: "on", deviceId: "hue-b-light", params: {},
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("bridge-b");
+      expect(bridgeA.execute).not.toHaveBeenCalled();
+    });
+
+    it("falls back to the first type match when the device has no owner recorded", async () => {
+      const connector = createMockConnector({ execute: vi.fn().mockResolvedValue({ success: true }) });
+      addInstance("legacy", "hue", connector);
+
+      const device = createMockDevice({ id: "hue-legacy", integration: "hue" }); // no connectorInstanceId
+      deviceRegistry.getById.mockReturnValue(device);
+
+      const result = await router.executeAction("hue-legacy", {
+        type: "on", deviceId: "hue-legacy", params: {},
+      });
+
+      expect(result.success).toBe(true);
+      expect(connector.execute).toHaveBeenCalledTimes(1);
+    });
+
+    it("resolves the acknowledgement capability from the owning instance", () => {
+      const bridgeA = createMockConnector({ getAcknowledgementCapability: vi.fn().mockReturnValue({ supported: false }) });
+      const bridgeB = createMockConnector({ getAcknowledgementCapability: vi.fn().mockReturnValue({ supported: true }) });
+      addInstance("bridge-a", "hue", bridgeA);
+      addInstance("bridge-b", "hue", bridgeB);
+
+      const device = createMockDevice({ id: "hue-b", integration: "hue", connectorInstanceId: "bridge-b" });
+      deviceRegistry.getById.mockReturnValue(device);
+
+      expect(router.getAcknowledgementCapability("hue-b")).toEqual({ supported: true });
+      expect(bridgeB.getAcknowledgementCapability).toHaveBeenCalledWith("hue-b");
+      expect(bridgeA.getAcknowledgementCapability).not.toHaveBeenCalled();
+    });
+  });
+
   describe("executeAction — device not found", () => {
     it("returns error when device does not exist", async () => {
       deviceRegistry.getById.mockReturnValue(undefined);
