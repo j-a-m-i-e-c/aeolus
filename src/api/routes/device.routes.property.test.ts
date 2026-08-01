@@ -6,6 +6,7 @@ import * as fc from "fast-check";
 import express from "express";
 import request from "supertest";
 import { createDeviceRoutes } from "./device.routes.js";
+import { httpStatusForCommandResult } from "./command-status.js";
 import { errorHandler } from "../middleware/error-handler.js";
 import type { DeviceRegistry } from "../../core/device-registry.js";
 import type { CommandService } from "../../automations/command-service.js";
@@ -100,9 +101,10 @@ function buildApp(result: ActionResult): { app: express.Express; execute: Return
   return { app, execute };
 }
 
-// Feature: unified-command-boundary, Property 6: The REST route returns the Command_Result truthfully over HTTP 200
-describe("Property 6: REST route returns the Command_Result truthfully over HTTP 200", () => {
-  it("responds HTTP 200 with the unaltered Command_Result for any service outcome", async () => {
+// The REST route returns the Command_Result truthfully as the body, with an
+// expressive HTTP status derived purely from that result.
+describe("REST route returns the Command_Result truthfully with an expressive status", () => {
+  it("responds with the mapped status and the unaltered Command_Result for any service outcome", async () => {
     await fc.assert(
       fc.asyncProperty(
         commandResultArb,
@@ -115,14 +117,16 @@ describe("Property 6: REST route returns the Command_Result truthfully over HTTP
             .send({ type: actionType, params: {} })
             .set("Content-Type", "application/json");
 
-          // HTTP 200 for all domain outcomes — never an HTTP error status (Req 3.5).
-          expect(res.status).toBe(200);
-          // success is returned unaltered (Req 3.1).
+          // Status is the pure mapping of the outcome — success is always 200,
+          // failures get an expressive 4xx/5xx (never a masked 200).
+          expect(res.status).toBe(httpStatusForCommandResult(result));
+          if (result.success) expect(res.status).toBe(200);
+          // success is returned unaltered.
           expect(res.body.success).toBe(result.success);
-          // lifecycleState is one of the defined values (Req 3.2).
+          // lifecycleState is one of the defined values and preserved.
           expect(LIFECYCLE_STATES).toContain(res.body.lifecycleState);
           expect(res.body.lifecycleState).toBe(result.lifecycleState);
-          // Failures carry a non-empty human-readable reason (Req 3.3).
+          // Failures carry a non-empty human-readable reason, unaltered.
           if (!result.success) {
             expect(typeof res.body.error).toBe("string");
             expect(res.body.error.length).toBeGreaterThan(0);

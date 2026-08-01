@@ -170,6 +170,7 @@ describe("ActionRouter", () => {
       const result = await router.executeAction("nonexistent", { type: "on", deviceId: "nonexistent", params: {} });
       expect(result.success).toBe(false);
       expect(result.error).toContain("not found");
+      expect(result.failureKind).toBe("not_found");
     });
   });
 
@@ -189,6 +190,7 @@ describe("ActionRouter", () => {
       expect(result.success).toBe(false);
       expect(result.error).toContain("unsupported action 'dim'");
       expect(result.error).toContain("Supported: on, off");
+      expect(result.failureKind).toBe("unsupported");
     });
 
     it("rejects missing required params", async () => {
@@ -280,6 +282,7 @@ describe("ActionRouter", () => {
       });
       expect(result.success).toBe(false);
       expect(result.error).toContain("MQTT broker not connected");
+      expect(result.failureKind).toBe("transport");
     });
 
     it("publishes to derived command topic when no explicit commandTopic", async () => {
@@ -422,6 +425,7 @@ describe("ActionRouter", () => {
       });
       expect(result.success).toBe(false);
       expect(result.error).toContain("MQTT broker not connected");
+      expect(result.failureKind).toBe("transport");
     });
 
     it("catches publish error and returns failure", async () => {

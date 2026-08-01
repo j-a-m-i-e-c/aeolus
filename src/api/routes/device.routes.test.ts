@@ -397,19 +397,20 @@ describe("device.routes", () => {
   });
 
   describe("POST /api/devices/:id/action", () => {
-    it("should return HTTP 200 with success:false when the command fails (e.g. device not found)", async () => {
+    it("should return HTTP 404 with the Command_Result when the device is not found", async () => {
       // The CommandService owns validation and returns a terminal Command_Result.
       mockCommandService.execute.mockResolvedValue({
         success: false,
         lifecycleState: "FAILED",
         error: "Device 'nonexistent' not found",
+        failureKind: "not_found",
       });
 
       const res = await request(app, "POST", "/api/devices/nonexistent/action", {
         type: "toggle",
       });
-      // HTTP 200 with Command_Result — callers inspect success field
-      expect(res.status).toBe(200);
+      // Expressive status; body still carries the authoritative Command_Result.
+      expect(res.status).toBe(404);
       expect((res.body as any).success).toBe(false);
       expect((res.body as any).error).toContain("not found");
     });
@@ -456,22 +457,56 @@ describe("device.routes", () => {
       );
     });
 
-    it("should return HTTP 200 with success: false when action fails (not HTTP 500)", async () => {
+    it("should return HTTP 503 with the Command_Result for a transport failure", async () => {
       const device = makeDevice("dev-1");
       mockRegistry.getById.mockReturnValue(device);
       mockCommandService.execute.mockResolvedValue({
         success: false,
         lifecycleState: "FAILED",
-        error: "Connector offline",
+        error: "MQTT broker not connected",
+        failureKind: "transport",
       });
 
       const res = await request(app, "POST", "/api/devices/dev-1/action", {
         type: "toggle",
       });
-      // Per design: domain failures return HTTP 200 with Command_Result, not HTTP 500
-      expect(res.status).toBe(200);
+      // Transport unavailable → 503, never a masked 200 or a 500.
+      expect(res.status).toBe(503);
       expect((res.body as any).success).toBe(false);
-      expect((res.body as any).error).toContain("Connector offline");
+      expect((res.body as any).error).toContain("MQTT broker not connected");
+    });
+
+    it("should return HTTP 504 with the Command_Result when the command times out", async () => {
+      const device = makeDevice("dev-1");
+      mockRegistry.getById.mockReturnValue(device);
+      mockCommandService.execute.mockResolvedValue({
+        success: false,
+        lifecycleState: "TIMED_OUT",
+        error: "Device command timed out",
+      });
+
+      const res = await request(app, "POST", "/api/devices/dev-1/action", {
+        type: "toggle",
+      });
+      expect(res.status).toBe(504);
+      expect((res.body as any).lifecycleState).toBe("TIMED_OUT");
+    });
+
+    it("should return HTTP 422 with the Command_Result for an unsupported action", async () => {
+      const device = makeDevice("dev-1");
+      mockRegistry.getById.mockReturnValue(device);
+      mockCommandService.execute.mockResolvedValue({
+        success: false,
+        lifecycleState: "FAILED",
+        error: "unsupported action 'spin'",
+        failureKind: "unsupported",
+      });
+
+      const res = await request(app, "POST", "/api/devices/dev-1/action", {
+        type: "spin",
+      });
+      expect(res.status).toBe(422);
+      expect((res.body as any).success).toBe(false);
     });
   });
 });

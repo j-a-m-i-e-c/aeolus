@@ -79,7 +79,7 @@ export class ActionRouter {
     // Task 5.2 — device-not-found guard
     const device = this.deviceRegistry.getById(deviceId);
     if (!device) {
-      return { success: false, error: `Device '${deviceId}' not found` };
+      return { success: false, error: `Device '${deviceId}' not found`, failureKind: "not_found" };
     }
 
     // Task 5.3 — pre-flight validation
@@ -91,12 +91,13 @@ export class ActionRouter {
         return {
           success: false,
           error: `Device '${deviceId}': unsupported action '${action.type}'. Supported: ${supported || "(none)"}`,
+          failureKind: "unsupported",
         };
       }
       // Param schema validation (basic required-field check)
       const paramError = this.validateParams(deviceId, action.type, descriptor, action.params);
       if (paramError) {
-        return { success: false, error: paramError };
+        return { success: false, error: paramError, failureKind: "invalid_params" };
       }
     }
 
@@ -160,7 +161,7 @@ export class ActionRouter {
               : {}),
           };
         } catch (err) {
-          return { success: false, error: (err as Error).message };
+          return { success: false, error: (err as Error).message, failureKind: "execution" };
         }
       }
     }
@@ -172,11 +173,13 @@ export class ActionRouter {
       return {
         success: false,
         error: `Owning connector instance '${device.connectorInstanceId}' for device '${deviceId}' is not enabled`,
+        failureKind: "transport",
       };
     }
     return {
       success: false,
       error: `No enabled connector found for device '${deviceId}' (integration: '${device.integration}')`,
+      failureKind: "transport",
     };
   }
 
@@ -297,7 +300,7 @@ export class ActionRouter {
     correlation?: { correlationId: string; responseTopic: string },
   ): ActionResult {
     if (!this.mqttService || !this.mqttService.isConnected()) {
-      return { success: false, error: "MQTT broker not connected" };
+      return { success: false, error: "MQTT broker not connected", failureKind: "transport" };
     }
 
     // Derive command topic: replace last segment with "set", or use explicit commandTopic
@@ -340,7 +343,7 @@ export class ActionRouter {
       }
       return { success: true };
     } catch (err) {
-      return { success: false, error: (err as Error).message };
+      return { success: false, error: (err as Error).message, failureKind: "execution" };
     }
   }
 }

@@ -123,6 +123,17 @@ export interface ConfirmOptions {
 /** Default confirmation timeout applied when ConfirmOptions omit timeoutMs (Req 5.7). */
 export const DEFAULT_CONFIRM_TIMEOUT_MS = 5000;
 
+/**
+ * Coarse cause of a failed command, set at the failure's source so the REST
+ * layer can choose a truthful HTTP status without parsing error strings.
+ */
+export type CommandFailureKind =
+  | "not_found"      // target (or observed) device does not exist
+  | "unsupported"    // no handler, or action not in the device's catalog
+  | "invalid_params" // action parameters failed validation
+  | "transport"      // broker/connector unavailable (not connected, disabled, none)
+  | "execution";     // connector handler threw while executing a valid command
+
 /** Result returned by ConnectorManager.executeAction() and devices.action(). */
 export interface ActionResult {
   /** Whether the action completed without error. Always a boolean, never undefined. */
@@ -139,6 +150,8 @@ export interface ActionResult {
   lifecycleState?: CommandLifecycleState;
   /** Correlation id assigned at dispatch. Present for MQTT commands that correlate. */
   correlationId?: string;
+  /** Coarse cause when success is false; drives the REST action route's HTTP status. */
+  failureKind?: CommandFailureKind;
 }
 
 /** Result returned by devices.actionAll(). */

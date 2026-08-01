@@ -135,6 +135,7 @@ export class CommandService {
         success: false,
         error: `No handler for action type: '${action.type}'`,
         lifecycleState: "FAILED",
+        failureKind: "unsupported",
       };
     }
 
@@ -168,6 +169,7 @@ export class CommandService {
         success: false,
         error: `Confirmation observed device '${observedDeviceId}' not found`,
         lifecycleState: "FAILED",
+        failureKind: "not_found",
       };
     }
 

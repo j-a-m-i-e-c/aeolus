@@ -18,6 +18,7 @@ import type { ActionResult } from "../../core/types.js";
 import { config } from "../../config.js";
 import { NotFoundError, ForbiddenError } from "../middleware/error-handler.js";
 import { asyncHandler } from "../middleware/async-handler.js";
+import { httpStatusForCommandResult } from "./command-status.js";
 import { validateAction } from "../middleware/validators.js";
 import { requireAdmin } from "../../auth/auth-middleware.js";
 import type { PermissionLevel } from "../../auth/permission-service.js";
@@ -210,9 +211,10 @@ export function createDeviceRoutes(
       logger.warn({ deviceId: id, action: req.body.type, error: result.error }, "Action failed");
     }
 
-    // Always HTTP 200 for domain outcomes — callers inspect the Command_Result
-    // (success / lifecycleState / error) rather than the HTTP status (Req 3.5).
-    res.json(result);
+    // Map the outcome to an expressive HTTP status while keeping the full
+    // Command_Result as the authoritative body (success / lifecycleState /
+    // error). A timeout is 504, a rejection 4xx, a transport failure 5xx.
+    res.status(httpStatusForCommandResult(result)).json(result);
   }));
 
   return router;
