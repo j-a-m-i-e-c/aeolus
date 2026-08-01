@@ -35,9 +35,16 @@ services:
         apk add --no-cache inotify-tools > /dev/null 2>&1
         echo "mosquitto-reloader: waiting for /watch/password_file to appear"
         while [ ! -f /watch/password_file ]; do sleep 2; done
-        echo "mosquitto-reloader: watching /watch/password_file for changes"
-        while inotifywait -e close_write -e moved_to /watch/password_file 2>/dev/null; do
-          echo "mosquitto-reloader: password file changed, sending SIGHUP to mosquitto"
+        echo "mosquitto-reloader: watching /watch directory for config changes"
+        # Watch the DIRECTORY, not the file: the backend replaces password_file
+        # atomically (temp file + rename), which swaps the inode. A watch bound
+        # to the old file path would stop firing after the first replacement and
+        # never sees the rename (moved_to is a directory event). Watching the
+        # directory for moved_to/create/close_write reliably catches every
+        # atomic write and re-arms each iteration. The dir holds only
+        # mosquitto.conf and password_file, so reloading on any change is correct.
+        while inotifywait -e close_write -e moved_to -e create /watch 2>/dev/null; do
+          echo "mosquitto-reloader: config directory changed, sending SIGHUP to mosquitto"
           kill -HUP 1
         done
     logging:
