@@ -5,6 +5,7 @@ import { Cpu, HardDrive, MemoryStick, Thermometer, Wifi, Server, RefreshCw, Scro
 import { useDeviceStore } from "../store/device-store";
 import { fetchHealth } from "../lib/api-client";
 import { authFetch } from "../lib/auth-fetch";
+import { useAuthStore } from "../store/auth-store";
 import type { HealthStatus } from "../store/device-store";
 
 const API_URL = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:3001`;
@@ -57,6 +58,9 @@ function UsageBar({ percent, color = "#3BA4FF" }: { percent: number; color?: str
 }
 
 export function SystemPage() {
+  // Host diagnostics and application logs are admin-only on the backend; a
+  // non-admin sees the health summary and version only, without failed requests.
+  const isAdmin = useAuthStore((s) => s.user?.role === "admin");
   const [info, setInfo] = useState<SystemInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -67,6 +71,12 @@ export function SystemPage() {
   const setHealth = useDeviceStore((s) => s.setHealth);
 
   const fetchInfo = useCallback(async () => {
+    // Non-admins are not permitted to read host diagnostics; skip the request
+    // so their dashboard shows health + version without an error.
+    if (!isAdmin) {
+      setLoading(false);
+      return;
+    }
     try {
       const res = await authFetch(`${API_URL}/api/system`);
       if (res.ok) {
@@ -79,7 +89,7 @@ export function SystemPage() {
       setError("Failed to load system information");
     }
     setLoading(false);
-  }, []);
+  }, [isAdmin]);
 
   const fetchVersion = useCallback(async () => {
     try {
@@ -135,13 +145,15 @@ export function SystemPage() {
     );
   }
 
-  if (!info) {
+  // Only admins load host diagnostics; a non-admin proceeds with info === null
+  // and sees the health + version summary below.
+  if (isAdmin && !info) {
     return <div className="text-center py-12 text-[#6B7785]">Loading system info...</div>;
   }
 
-  const tempColor = info.cpuTemp && info.cpuTemp > 70 ? "#EF4444" : info.cpuTemp && info.cpuTemp > 55 ? "#F59E0B" : "#22C55E";
-  const memColor = info.memory.usagePercent > 85 ? "#EF4444" : info.memory.usagePercent > 60 ? "#F59E0B" : "#3BA4FF";
-  const diskColor = info.disk && info.disk.usagePercent > 85 ? "#EF4444" : "#3BA4FF";
+  const tempColor = info?.cpuTemp && info.cpuTemp > 70 ? "#EF4444" : info?.cpuTemp && info.cpuTemp > 55 ? "#F59E0B" : "#22C55E";
+  const memColor = info && info.memory.usagePercent > 85 ? "#EF4444" : info && info.memory.usagePercent > 60 ? "#F59E0B" : "#3BA4FF";
+  const diskColor = info?.disk && info.disk.usagePercent > 85 ? "#EF4444" : "#3BA4FF";
 
   return (
     <div className="space-y-6">
@@ -203,6 +215,9 @@ export function SystemPage() {
         </div>
       )}
 
+      {/* Host diagnostics (admin only) */}
+      {info && (
+      <>
       {/* Host info */}
       <div className="bg-surface border border-[#2A3441] rounded-xl p-4">
         <div className="flex items-center gap-2 mb-3">
@@ -328,8 +343,11 @@ export function SystemPage() {
         </div>
       </div>
 
-      {/* Application Logs */}
-      <LogViewer />
+      </>
+      )}
+
+      {/* Application Logs (admin only) */}
+      {isAdmin && <LogViewer />}
     </div>
   );
 }

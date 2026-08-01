@@ -23,6 +23,7 @@ vi.mock("../lib/auth-fetch", () => ({
 }));
 
 import { SystemPage } from "./SystemPage";
+import { useAuthStore } from "../store/auth-store";
 
 const SYSTEM_INFO = {
   hostname: "aeolus-host",
@@ -64,6 +65,11 @@ describe("SystemPage", () => {
       timestamp: "t",
     });
     mockAuthFetch.mockReset();
+    // Host diagnostics + logs are admin-only; default the viewer to an admin so
+    // the diagnostics-path tests exercise the full render.
+    useAuthStore.setState({
+      user: { id: "a", username: "admin", role: "admin", groupId: null },
+    });
   });
 
   function routeAuthFetch(systemResponse = () => jsonResponse(SYSTEM_INFO)) {
@@ -112,5 +118,33 @@ describe("SystemPage", () => {
     render(<SystemPage />);
     await waitFor(() => expect(mockFetchHealth).toHaveBeenCalled());
     await waitFor(() => expect(mockState.setHealth).toHaveBeenCalled());
+  });
+
+  it("for a non-admin, shows health but not host diagnostics, and never requests /api/system", async () => {
+    useAuthStore.setState({
+      user: { id: "u", username: "bob", role: "user", groupId: "g1" },
+    });
+    mockState.health = {
+      mqtt: "connected",
+      deviceCount: 7,
+      ruleCount: 4,
+      uptime: 3600,
+      timestamp: "t",
+    };
+    routeAuthFetch();
+    render(<SystemPage />);
+
+    // Health summary renders...
+    expect(await screen.findByText("7")).toBeInTheDocument();
+    expect(screen.getByText("connected")).toBeInTheDocument();
+    // ...but host diagnostics do not, and no error page appears.
+    expect(screen.queryByText("aeolus-host")).not.toBeInTheDocument();
+    expect(screen.queryByText("System Information Unavailable")).not.toBeInTheDocument();
+    expect(screen.queryByText("Application Logs")).not.toBeInTheDocument();
+
+    // The admin-only diagnostics/logs endpoints are never called.
+    const calledUrls = mockAuthFetch.mock.calls.map((c) => c[0] as string);
+    expect(calledUrls.some((u) => u.includes("/api/system/logs"))).toBe(false);
+    expect(calledUrls.some((u) => /\/api\/system(\?|$)/.test(u))).toBe(false);
   });
 });
