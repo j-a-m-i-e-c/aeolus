@@ -1,4 +1,4 @@
-FROM node:22.20.0-slim AS builder
+FROM node:22.22.1-slim AS builder
 WORKDIR /app
 
 # Build info passed as build args instead of copying .git
@@ -17,7 +17,7 @@ RUN echo "{\"commit\":\"${BUILD_COMMIT}\",\"buildDate\":\"${BUILD_DATE}\"}" > /t
 RUN npm run build
 
 # Production stage
-FROM node:22.20.0-slim AS production
+FROM node:22.22.1-slim AS production
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ wget curl ca-certificates gosu \
