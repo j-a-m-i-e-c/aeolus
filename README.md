@@ -156,9 +156,9 @@ Aeolus provides four pinned operational areas: **System**, **Connectors**, **Dat
 
 Custom tabs are composed from draggable and resizable panes. Built-in panes include:
 
-- device grids and connector-specific controls
+- connector and device controls
 - automation editors and automation lists
-- sensor panels and state-history charts
+- sensor panels, state-history charts and Data Store collection views
 - MQTT inspector and topic tree
 - event logs, schedules and trigger controls
 - live system and metrics views.
