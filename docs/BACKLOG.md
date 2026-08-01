@@ -20,12 +20,18 @@ authorization model first, hardening against determined insiders second.
 
 ##  High — deployment & lifecycle correctness
 
-### Verify MQTT provisioning applies to the real broker 🟠
-Dashboard-managed Shared Password and Per-Device security are implemented and
-gated behind `MQTT_MANAGED_PROVISIONING_ENABLED=true`. The remaining work is
-proving the sidecar reload path: the backend must confirm Mosquitto has applied
-a credential change before reporting success. Until that verification loop is
-complete the feature stays disabled by default.
+### Ungate dashboard-managed MQTT provisioning 🟠
+Broker-side verification is implemented: after writing credentials and
+triggering a reload, the backend probes the broker to confirm the new policy is
+actually enforced before reporting success (`BrokerVerifier`), and the Compose
+reload sidecar now watches the config directory so atomic password-file
+replacements are observed. Managed Shared Password / Per-Device security remain
+gated behind `MQTT_MANAGED_PROVISIONING_ENABLED=true` by default.
+
+The only remaining work is the deployment decision to flip the default on:
+exercise the verified provisioning path against a real broker deployment, then
+enable managed provisioning by default (or document it as a supported opt-in).
+This is an operational sign-off, not a code gap.
 
 ---
 
