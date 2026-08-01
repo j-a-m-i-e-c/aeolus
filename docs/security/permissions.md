@@ -54,14 +54,53 @@ that no tab exposes is inaccessible to non-admins (fail-closed). Missing
 resources return `404` before any permission check. Destructive device-history
 routes remain admin-only.
 
+## Automation authoring scope
+
+Every automation carries a server-side authorization scope so authored Logic
+cannot exceed the authority of whoever wrote it. Scope is two columns on
+`automation_rules`: `authored_unrestricted` and `owner_tab_id`.
+
+- **Admin-authored automations are unrestricted** (`authored_unrestricted = 1`):
+  they run with system-wide authority — all devices, any MQTT topic, all Data
+  Store collections and buckets, HTTP per the sandbox SSRF policy.
+- **Non-admin-authored automations are scoped** (`authored_unrestricted = 0`) to
+  a single owning tab chosen at creation. The author must hold `write` on that
+  tab. At runtime the automation may act only on the devices that tab exposes and
+  the Data Store collections it surfaces; it may not publish raw MQTT, may not use
+  shared key-value buckets, and its outbound HTTP is limited to the SSRF policy.
+  Form-rule webhook actions are refused for scoped automations.
+
+Scope is bound at creation from the caller's server-side role, never from a body
+field, and is immutable across non-admin updates. Enforcement is defense in
+depth: the sandbox injects only the in-scope device inventory and Data Store
+surface, and the command boundary re-checks every dispatch, so a script that
+fabricates an out-of-scope identifier is still refused. If a scoped automation's
+owning tab is deleted, its scope becomes empty (fail-closed) — it is never
+silently promoted to unrestricted.
+
+The owning tab also **exposes** its automations (in addition to any panes that
+reference them), so a non-admin author can view, fire, and edit their own
+automation through the resource guards above without needing an admin to place a
+pane. Pre-existing automations are marked unrestricted on upgrade so nothing
+that worked before breaks.
+
+Deferred (tracked in the backlog): per-automation MQTT publish namespaces that
+would let scoped automations publish safely, and consolidating outbound HTTP
+(script `http` and form-rule webhooks) behind one bounded, SSRF-checked host
+service.
+
 ## Admin role
 
 Admins bypass tab permission checks and can perform system-wide administration, including:
 
-- user and group management;
+- user and group management, including creating additional admin users and
+  promoting/demoting existing users between `admin` and `user`. The system
+  refuses to demote or delete the last remaining admin, so a deployment can never
+  be left with no administrator;
 - connector management;
 - MQTT credential management;
-- full layout administration.
+- full layout administration;
+- authoring unrestricted (system-wide) automations.
 
 ## Current scope
 
