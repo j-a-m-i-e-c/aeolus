@@ -48,6 +48,15 @@ describe("PaneConfigPanel", () => {
     ).toBeInTheDocument();
   });
 
+  it("saves the data-collection collection name", () => {
+    renderPanel("data-collection", { collection: "temps" });
+    fireEvent.change(screen.getByPlaceholderText("e.g. temperatures"), {
+      target: { value: "humidity" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Save/i }));
+    expect(dashboardState.updatePaneConfig).toHaveBeenCalledWith("p1", { collection: "humidity" });
+  });
+
   it("saves mqtt-inspector topic pattern", () => {
     renderPanel("mqtt-inspector");
     fireEvent.change(screen.getByPlaceholderText("e.g. sensor/+/temperature"), {

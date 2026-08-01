@@ -3,6 +3,7 @@
 import type { ComponentType } from "react";
 import type { PaneConfig } from "../types/dashboard";
 import { SensorPanelPane } from "../components/panes/SensorPanelPane";
+import { DataCollectionPane } from "../components/panes/DataCollectionPane";
 import { MqttInspectorPane } from "../components/panes/MqttInspectorPane";
 import { HueControlPane } from "../components/panes/HueControlPane";
 import { KasaControlPane } from "../components/panes/KasaControlPane";
@@ -134,6 +135,14 @@ export const PANE_REGISTRY: Record<string, PaneRegistryEntry> = {
     defaultIcon: "bar-chart-3",
     defaultConfig: {},
     defaultSize: { w: 12, h: 6 },
+    category: "monitoring",
+  },
+  "data-collection": {
+    component: DataCollectionPane,
+    displayName: "Data Collection",
+    defaultIcon: "database",
+    defaultConfig: { collection: "" },
+    defaultSize: { w: 6, h: 5 },
     category: "monitoring",
   },
 

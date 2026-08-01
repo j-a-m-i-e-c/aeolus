@@ -21,6 +21,9 @@ export function PaneConfigPanel({ paneId, paneType, config, onClose }: PaneConfi
 
   // Local form state seeded from current config
   const [topicPattern, setTopicPattern] = useState(config.topicPattern ?? "");
+  const [collection, setCollection] = useState(
+    typeof config.collection === "string" ? config.collection : "",
+  );
   const [showSections, setShowSections] = useState<string[]>(
     config.showSections ?? [...SYSTEM_SECTIONS],
   );
@@ -55,6 +58,10 @@ export function PaneConfigPanel({ paneId, paneType, config, onClose }: PaneConfi
     const newConfig: PaneConfig = {};
 
     switch (paneType) {
+      case "data-collection": {
+        if (collection.trim()) newConfig.collection = collection.trim();
+        break;
+      }
       case "mqtt-inspector": {
         if (topicPattern.trim()) newConfig.topicPattern = topicPattern.trim();
         break;
@@ -77,7 +84,7 @@ export function PaneConfigPanel({ paneId, paneType, config, onClose }: PaneConfi
   const displayName = entry?.displayName ?? paneType;
 
   // Determine if this pane type has configurable fields
-  const hasConfig = ["mqtt-inspector", "system-stats"].includes(paneType);
+  const hasConfig = ["data-collection", "mqtt-inspector", "system-stats"].includes(paneType);
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/40">
@@ -102,6 +109,19 @@ export function PaneConfigPanel({ paneId, paneType, config, onClose }: PaneConfi
         <div className="flex-1 overflow-auto px-4 py-4 space-y-4">
           {!hasConfig && (
             <p className="text-sm text-[#6B7785]">No configuration options for this pane type.</p>
+          )}
+
+          {/* data-collection config */}
+          {paneType === "data-collection" && (
+            <FieldLabel label="Collection">
+              <input
+                type="text"
+                value={collection}
+                onChange={(e) => setCollection(e.target.value)}
+                placeholder="e.g. temperatures"
+                className="w-full px-3 py-2 rounded-lg bg-elevated border border-[#2A3441] text-sm text-[#E6EDF3] placeholder-[#6B7785] focus:outline-none focus:border-primary transition-colors"
+              />
+            </FieldLabel>
           )}
 
           {/* mqtt-inspector config */}

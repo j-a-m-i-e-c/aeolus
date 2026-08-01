@@ -93,6 +93,11 @@ interface DataStoreState {
   recordsTotal: number;
   recordsLoading: boolean;
 
+  // Latest realtime record per collection, so independent panes (each showing a
+  // different collection) can receive live updates without sharing the single
+  // selected-collection `records` array used by the Data Explorer page.
+  latestRecordByCollection: Record<string, DataRecord>;
+
   // Buckets
   buckets: BucketSummary[];
   selectedBucket: string | null;
@@ -128,6 +133,7 @@ export const useDataStoreStore = create<DataStoreState>((set, get) => ({
   records: [],
   recordsTotal: 0,
   recordsLoading: false,
+  latestRecordByCollection: {},
   buckets: [],
   selectedBucket: null,
   bucketEntries: [],
@@ -227,6 +233,11 @@ export const useDataStoreStore = create<DataStoreState>((set, get) => ({
         recordsTotal: state.recordsTotal + 1,
       });
     }
+    // Publish the latest record for this collection so any data-collection pane
+    // showing it updates live, independent of the Data Explorer's selection.
+    set((prev) => ({
+      latestRecordByCollection: { ...prev.latestRecordByCollection, [collection]: record },
+    }));
     // Update collection metadata (increment record count)
     set((prev) => ({
       collections: prev.collections.map((c) =>
