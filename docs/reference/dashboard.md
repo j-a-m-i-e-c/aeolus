@@ -60,10 +60,22 @@ Common pane types include:
 - activity and event feeds;
 - state history;
 - metrics;
+- data collection (a live view of one Data Store collection);
 - connector-specific controls;
 - custom automation UI.
 
 Pinned platform pages are separate from user-created tabs.
+
+## Live event visibility
+
+Live WebSocket events are scoped server-side to the tabs that surface each
+resource, so a non-admin receives only the events for resources on tabs their
+group can reach. Devices resolve their exposing tabs live from the purposeful
+device panes that match them; automations and Data Store collections resolve
+theirs from an explicit pane reference — a data-collection pane's
+`config.collection` records which tabs surface a collection, exactly as an
+automation pane's `config.ruleId` does for automations. A resource no pane
+surfaces is admin-only (fail-closed).
 
 ## Frontend state
 

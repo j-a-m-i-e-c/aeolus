@@ -29,38 +29,7 @@ complete the feature stays disabled by default.
 
 ---
 
-## 🟡 Medium — clarity & reproducibility
-
-### Scope Data Store live events to tabs 🟡
-`data-store-write` / `data-store-collection-deleted` WebSocket events are
-broadcast to admins only, because there is no collection→tab authorization
-model. Give collections a collection→tab scope so their live events can reach
-non-admins on the tabs that surface them, instead of defaulting to admin-only.
-This is the remaining follow-up from the fail-closed WebSocket visibility work;
-device, automation and MQTT events are already scoped.
-
-### Remove the all-devices grid pane from the operator UI 🟡
-The `device-grid` ("all devices") pane dumps every device onto one surface.
-Operators should get purpose-built views, not a raw device list, and the
-resource-authorization work already treats `device-grid` as non-exposing for
-non-admins (only `hue-control` / `kasa-control` / `sensor-panel` grant access).
-Remove the pane from the product: delete the component, drop it from the pane
-registry and config panel, and add a layout migration so existing layouts
-containing a `device-grid` pane don't render a broken/empty tile. Backend
-authorization does not depend on this (device-grid is already non-exposing), so
-this is UI cleanup + defense-in-depth, not a security fix.
-
-### Remove the dead "Room Filter" pane config 🟡
-`PaneConfigPanel.tsx` offers a "Room Filter" input that writes `config.room` for
-`device-grid` / `sensor-panel` panes, but the backend `Device` model has no room
-attribute, so the filter matches nothing. "Room" also doesn't fit the platform's
-general (non-home-automation) positioning. Remove the Room Filter input and the
-`config.room` field (and any references) so users can't configure a filter that
-does nothing.
-
----
-
-## 📋 Planned — authoring safety & portability
+##  Planned — authoring safety & portability
 
 ### Automation deletion is unrecoverable 📋
 Deleting an automation is an immediate hard delete (`DELETE FROM automation_rules`)
