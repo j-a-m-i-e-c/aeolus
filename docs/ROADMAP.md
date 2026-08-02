@@ -15,6 +15,14 @@ The goal is consistent behaviour regardless of where a command starts:
 - useful audit history;
 - sensible handling of conflicting or overlapping commands.
 
+The 2 Aug 2026 fresh review found that this convergence is not just a future
+enhancement — the current composition mis-routes REST/dashboard/custom-UI device
+actions (source tags read as automation IDs, native actions with no generic
+handler, MQTT dispatch never wired in, a divergent brightness contract). That
+concrete breakage is a pre-promotion release gate tracked in
+`docs/BACKLOG.md` under "Critical / High — fresh review release gates"; the
+broader convergence goal here builds on that fix.
+
 ### Prove Aeolus on real equipment
 
 Turn the Koonorigan installation into a strong reference deployment using real sensors, water, energy and shed infrastructure.
