@@ -20,8 +20,12 @@ authorization model first, hardening against determined insiders second.
 > The public-promotion release gate (authoring scope, read-surface filtering,
 > named-trigger authorization, Data Store access control, connector/provisioning
 > secret redaction, system-log gating, broker-URL redaction, initial-MQTT retry,
-> Node pinning, and the docs truthfulness pass) is complete. Completed work is
-> recorded in git history (see `git log`).
+> Node pinning, and the docs truthfulness pass) is complete. A follow-up deep
+> audit (2 Aug 2026) then found and fixed two authoring-composition bugs
+> (non-admin editing/deleting an unrestricted automation; scope-blind
+> device-event triggering), the Hue contributed-action false-success bug, and
+> admin-password-reset refresh-token revocation. Completed work is recorded in
+> git history (see `git log`); the items below are what remains open.
 
 ---
 
@@ -35,10 +39,21 @@ reload sidecar now watches the config directory so atomic password-file
 replacements are observed. Managed Shared Password / Per-Device security remain
 gated behind `MQTT_MANAGED_PROVISIONING_ENABLED=true` by default.
 
-The only remaining work is the deployment decision to flip the default on:
-exercise the verified provisioning path against a real broker deployment, then
+Before flipping the default on: exercise the verified provisioning path against a
+real broker deployment (mode switch / rotation / revocation / restart), then
 enable managed provisioning by default (or document it as a supported opt-in).
-This is an operational sign-off, not a code gap.
+This is mostly an operational sign-off, with one code correction first:
+
+- **Per-device revocation verification is misleading.** `revokeDeviceCredential()`
+  deletes the credential then probes the broker with `{ username, password:
+  "revoked" }`. Rejecting a deliberately-wrong password does not prove the *old
+  valid* password stopped working — if the password file failed to reload, the
+  old credential could still be valid and verification would falsely pass. Since
+  Aeolus intentionally does not retain device plaintext, real post-delete login
+  verification needs a design change (rotate-with-known-old-secret, or verify a
+  config/password-file generation marker + successful reload). Until then, remove
+  or rename the misleading "revoked credential rejected" assertion. (Not a
+  default-path blocker — provisioning stays opt-in.)
 
 ### Default Compose should use `NODE_ENV=production` 🟡
 The production guide tells operators to set `NODE_ENV=production`, but the
@@ -68,6 +83,16 @@ evidence is a core differentiator): add a persisted per-device MQTT command
 profile (ack supported, response topic, QoS, optional indicator/status values).
 Fallback: clarify docs that correlated acknowledgement currently requires a
 connector/configuration path not exposed for generic discovered devices.
+
+### Hue `scene` / `color-loop` actions are not implemented in the connector 🟡
+The contributed `hue_scene` / `hue_color_loop` action handlers now correctly
+propagate the connector's `ActionResult` (so they can no longer report false
+success), but `HueConnector.execute()` has no `scene` / `color_loop` cases, so
+these actions currently resolve to a truthful `Unsupported action type` failure.
+Either implement `scene` / `color_loop` against the Hue bridge API (scene
+activation, native color-loop effect) so the actions become functional, or drop
+the two contributed handlers until the connector supports them. They are not
+surfaced in the dashboard UI today, so nothing depends on them yet.
 
 ---
 
@@ -105,6 +130,37 @@ shareable examples without a full marketplace.
 
 ---
 
+## Medium — authoring & data guardrails
+
+### Manual `/fire` accepts arbitrary full context from any interact user 🟡
+`POST /api/automations/:id/fire` lets any user with `interact` supply a full
+`{ context: { topic, state } }` override, so an operator can drive an
+admin-authored automation's Logic with synthetic topics/states its UI designer
+never intended. Restrict arbitrary `context` override to admins; give ordinary
+UI clients bounded primitives instead (an `eventName` + bounded payload, and a
+server-generated `state-set` event) so `interact` means "operate the exposed
+interface", not "fabricate arbitrary event contexts". Note the frontend
+`saveAndFire` currently depends on the full-context mode, so this needs a
+coordinated frontend change.
+
+### Data Store quota accounting is approximate 🟡
+`DataStore.write()` estimates storage as `recordCount * 200 bytes` rather than
+actual serialized size, ignores shared-bucket size, and auto-creates a missing
+collection without enforcing `maxCollections` (explicit `createCollection()`
+does enforce it). Large JSON records can overshoot `maxStorageMb` and
+auto-created collections can exceed `maxCollections`. Operational guardrail, not
+a security blocker under the current threat model: track real serialized size,
+include buckets, and enforce `maxCollections` on the auto-create path.
+
+### CSV export can carry spreadsheet formulas 🟡
+Data Store CSV export escapes quotes/commas/newlines correctly, but values
+beginning with `=`, `+`, `-`, or `@` remain formula-capable when opened in
+Excel/LibreOffice. If collection content can be influenced by external
+devices/APIs, neutralise leading formula characters on export. Low risk for the
+local/trusted model; easy hardening.
+
+---
+
 ## Additional hardening observations
 
 Not promotion blockers under the documented mostly-trusted single-site threat
@@ -130,6 +186,13 @@ model, but should remain visible:
 - The Mosquitto reload sidecar installs `inotify-tools` via `apk add` at
   container startup — bake it into a tiny pinned sidecar image for a
   resilient/offline appliance instead of needing the Alpine repo at runtime.
+- The frontend Dockerfile uses `npm install` rather than `npm ci` — switch to
+  `npm ci` for reproducible, lockfile-exact production image builds.
+- The Mosquitto healthcheck probes anonymously, so it reports the broker
+  unhealthy once managed provisioning switches it to `allow_anonymous false`.
+  It is observability-only (the backend does not gate startup on it), but the
+  probe strategy should adapt (authenticated probe, or a config-marker check)
+  when managed provisioning is enabled by default.
 
 ---
 
