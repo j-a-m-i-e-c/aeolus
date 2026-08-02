@@ -35,7 +35,7 @@ Use `.env.example` and `docker-compose.yml` as deployment starting points. `src/
 
 ## Container startup and the data volume
 
-The backend image ships an entrypoint (`docker-entrypoint.sh`) that repairs the
+The backend image ships an entrypoint (`scripts/docker-entrypoint.sh`) that repairs the
 data directory before the application starts. The container begins as root, so
 the entrypoint can `chown` the data directory (`DB_PATH`'s parent, default
 `/app/data`) to the unprivileged `aeolus` user, then drops privileges with

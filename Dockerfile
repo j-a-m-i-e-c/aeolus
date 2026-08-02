@@ -36,7 +36,7 @@ COPY src/automations/ui-types.d.ts ./dist/automations/ui-types.d.ts
 
 RUN mkdir -p /app/data && chown -R aeolus:aeolus /app
 
-COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 # NOTE: the container starts as root so the entrypoint can repair the data
