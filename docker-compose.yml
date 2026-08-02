@@ -9,6 +9,18 @@ services:
       - ./mosquitto:/mosquitto/config
       - mosquitto_data:/mosquitto/data
       - mosquitto_log:/mosquitto/log
+    # Broker reachability probe using the client shipped in the image. Reflects
+    # the default (allow_anonymous true) configuration. This is observability
+    # only: the backend does NOT gate startup on broker health (see the backend
+    # depends_on note) because the backend retries the initial connection itself,
+    # and under managed provisioning (allow_anonymous false) this anonymous probe
+    # would fail auth even though the broker is healthy.
+    healthcheck:
+      test: ["CMD-SHELL", "mosquitto_sub -p 1883 -t '$$SYS/broker/uptime' -C 1 -W 3 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      start_period: 5s
+      retries: 3
     logging:
       driver: json-file
       options:
@@ -78,6 +90,10 @@ services:
       MQTT_RELOAD_STRATEGY: none
     depends_on:
       mosquitto:
+        # Intentionally service_started, not service_healthy: the backend retries
+        # its initial MQTT connection with backoff, so it must not be blocked from
+        # starting when the broker is briefly unready — and a strict health gate
+        # would wrongly block boot in secured (allow_anonymous false) mode.
         condition: service_started
     volumes:
       - backend_data:/app/data

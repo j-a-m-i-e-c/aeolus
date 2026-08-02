@@ -247,12 +247,11 @@ async function main(): Promise<void> {
     stateHistory.record(device.id, event.state, event.timestamp);
   });
 
-  // 8. Connect MQTT
-  try {
-    await mqttService.connect();
-  } catch (err) {
-    logger.error({ error: (err as Error).message }, "MQTT connection failed — running without MQTT");
-  }
+  // 8. Connect MQTT — never blocks startup. If the broker is unavailable at boot
+  // (a common Compose/boot race), the service enters a background reconnection
+  // loop and recovers automatically once the broker is reachable, rather than
+  // leaving a healthy-looking backend permanently MQTT-disconnected.
+  await mqttService.connectWithRetry();
 
   // 9. Express app
   const app = express();

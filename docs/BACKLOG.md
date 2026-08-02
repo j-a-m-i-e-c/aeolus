@@ -137,15 +137,21 @@ logged on connect and reconnect, so credentials embedded in
 Separate `MQTT_USERNAME`/`MQTT_PASSWORD` config remains a possible future
 refinement.
 
-### 9. Initial MQTT connection failure does not start the retry loop 🟠 (R9)
-`connect()` calls `attemptConnection()` once; the indefinite reconnection loop
-only starts from an established client's `close` handler. If the first attempt
-fails, `src/index.ts` logs "running without MQTT" and no retry is scheduled — a
-healthy-looking backend can stay MQTT-disconnected until restarted (common in a
-boot race where the backend starts before Mosquitto). Fix: enter the same
-backoff loop on initial failure without blocking startup; add a Mosquitto
-healthcheck and, where useful, a broker-health startup dependency. Keep
-reconnect resilient for external brokers too.
+### 9. Initial MQTT connection failure does not start the retry loop ✅ (R9) — DONE
+**Resolved by the `mqtt-initial-retry` spec** (see
+`.kiro/specs/mqtt-initial-retry/`). A new `MqttService.connectWithRetry()` used
+at startup attempts one connection and, on failure, enters the *same*
+exponential-backoff reconnection loop a mid-session disconnect uses — in the
+background, without rejecting — so a broker that is briefly unavailable at boot
+no longer leaves a healthy-looking backend permanently MQTT-disconnected.
+`src/index.ts` now calls `connectWithRetry()` (no more handled-fatal "running
+without MQTT"), so the HTTP server still starts during a broker outage.
+`connect()` keeps its throw-on-failure contract for credentialed reconnection
+flows. `docker-compose.yml` gains a Mosquitto healthcheck for observability; the
+backend dependency intentionally stays `service_started` (not `service_healthy`)
+because the code-level retry guarantees recovery and a strict health gate would
+wrongly block boot under secured (`allow_anonymous false`) provisioning.
+Covered by `connectWithRetry` unit tests in `src/mqtt/mqtt-service.test.ts`.
 
 ### 10. Pin Node ≥ 22.22.1 consistently ✅ (R12) — DONE
 Pinned Node `22.22.1` across `.nvmrc` (which also drives CI and e2e via

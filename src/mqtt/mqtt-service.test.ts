@@ -346,6 +346,61 @@ describe("MqttService", () => {
     });
   });
 
+  describe("connectWithRetry — initial-connection failure enters the reconnection loop", () => {
+    it("resolves (does not throw) and enters the reconnection loop when the initial connection fails", async () => {
+      const p = service.connectWithRetry();
+      mockClient.emit("error", new Error("Connection refused"));
+      await expect(p).resolves.toBeUndefined();
+      expect(service.getConnectionState()).toBe("waiting_retry");
+    });
+
+    it("recovers on a later attempt: reconnects and subscribes after the initial failure", async () => {
+      const p = service.connectWithRetry();
+      mockClient.emit("error", new Error("Connection refused"));
+      await p;
+
+      const mockClient2 = createMockMqttClientInstance();
+      mockConnect.mockReturnValue(mockClient2);
+
+      // First backoff is baseRetryDelayMs (1000ms) → a fresh connection attempt.
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(mockConnect).toHaveBeenCalledTimes(2);
+
+      // The retry succeeds → connected + resubscribed to configured topics.
+      mockClient2.emit("connect");
+      expect(service.getConnectionState()).toBe("connected");
+      expect(mockClient2.subscribe).toHaveBeenCalledWith("sensor/#", expect.any(Function));
+      expect(mockClient2.subscribe).toHaveBeenCalledWith("light/#", expect.any(Function));
+    });
+
+    it("behaves like connect() on a successful initial connection (no reconnect scheduled)", async () => {
+      const p = service.connectWithRetry();
+      mockClient.emit("connect");
+      await p;
+
+      expect(service.isConnected()).toBe(true);
+      expect(mockClient.subscribe).toHaveBeenCalledWith("sensor/#", expect.any(Function));
+
+      // No reconnection loop should be pending after a clean initial connect.
+      mockConnect.mockClear();
+      await vi.advanceTimersByTimeAsync(60000);
+      expect(mockConnect).not.toHaveBeenCalled();
+    });
+
+    it("cancels the pending retry when disconnect() is called after an initial failure", async () => {
+      const p = service.connectWithRetry();
+      mockClient.emit("error", new Error("Connection refused"));
+      await p;
+      expect(service.getConnectionState()).toBe("waiting_retry");
+
+      await service.disconnect();
+
+      mockConnect.mockClear();
+      await vi.advanceTimersByTimeAsync(60000);
+      expect(mockConnect).not.toHaveBeenCalled();
+    });
+  });
+
   describe("resubscription on reconnect (Requirement 10.3)", () => {
     it("resubscribes to all configured topics after successful reconnection", async () => {
       const connectPromise = service.connect();

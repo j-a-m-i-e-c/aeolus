@@ -139,6 +139,29 @@ export class MqttService {
     await this.attemptConnection();
   }
 
+  /**
+   * Startup connect that never leaves the broker permanently down. Attempts one
+   * connection; on success the disconnect handler owns future reconnection, on
+   * failure it enters the same exponential-backoff reconnection loop in the
+   * background (indefinite retries) and resolves — so application startup is
+   * never blocked or aborted by an unavailable broker (e.g. a boot race where
+   * the backend starts before Mosquitto is ready). Unlike {@link connect}, an
+   * initial failure does not reject.
+   */
+  async connectWithRetry(): Promise<void> {
+    this.intentionalDisconnect = false;
+    this.reconnectAttempt = 0;
+    try {
+      await this.attemptConnection();
+    } catch (err) {
+      logger.warn(
+        { error: (err as Error).message, broker: redactBrokerUrl(this.config.brokerUrl) },
+        "Initial MQTT connection failed — scheduling background reconnection",
+      );
+      this.startReconnectionLoop();
+    }
+  }
+
   private attemptConnection(): Promise<void> {
     this.setConnectionState("connecting");
 
