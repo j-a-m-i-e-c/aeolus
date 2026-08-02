@@ -53,6 +53,15 @@ export async function withTimeout<T>(
   }
 }
 
+/**
+ * Device action types that manage the device on the external system rather than
+ * operate it, and therefore require administrator access — consistent with the
+ * permission model where `interact` means "operate the exposed interface" and
+ * connector/system management is admin-only. These are filtered out of the
+ * catalog served to non-admins and rejected before dispatch for non-admins.
+ */
+const ADMIN_ONLY_ACTIONS = new Set(["rename", "delete"]);
+
 export function createDeviceRoutes(
   registry: DeviceRegistry,
   commandService: CommandService,
@@ -114,7 +123,13 @@ export function createDeviceRoutes(
     // Resolve the catalog through the injected read-only accessor. The route is
     // a Command_Source and never holds a full ConnectorManager reference.
     const catalog = getActionCatalog(id);
-    res.json(catalog);
+    // Admin-management actions (rename/delete) are not part of the operate-level
+    // catalog non-admins see, so the UI never offers them to an `interact` user.
+    const visible =
+      req.user?.role === "admin"
+        ? catalog
+        : catalog.filter((d) => !ADMIN_ONLY_ACTIONS.has(d.type));
+    res.json(visible);
   });
 
   /** GET /api/devices/:id/completion-tiers — report the device's Capability_Ceiling (requires device read) (Req 2.6, 2.8, 7.6) */
@@ -190,6 +205,13 @@ export function createDeviceRoutes(
   /** POST /api/devices/:id/action — execute action on device via the CommandService */
   router.post("/:id/action", requireDevice("interact"), validateAction, asyncHandler(async (req, res) => {
     const id = req.params.id as string;
+
+    // Admin-management actions (rename/delete the device on the external system)
+    // require admin, even though ordinary operation is `interact`. This closes
+    // the gap where an interact user could rename/delete a Hue light.
+    if (ADMIN_ONLY_ACTIONS.has(req.body.type) && req.user?.role !== "admin") {
+      throw new ForbiddenError("This action requires administrator access");
+    }
 
     // Route through the single physical-command boundary. All device control
     // actions are normalized through the generic device_action handler so they

@@ -509,4 +509,72 @@ describe("device.routes", () => {
       expect((res.body as any).success).toBe(false);
     });
   });
+
+  describe("admin-only device actions (rename/delete)", () => {
+    /** Build an app whose requests carry the given role (or none). */
+    function appWithRole(role?: "admin" | "user") {
+      const a = express();
+      a.use(express.json());
+      if (role) {
+        a.use((req: any, _res, next) => { req.user = { userId: "u", role }; next(); });
+      }
+      a.use(
+        "/api/devices",
+        createDeviceRoutes(
+          mockRegistry as unknown as DeviceRegistry,
+          mockCommandService as unknown as CommandService,
+          mockGetActionCatalog as unknown as (id: string) => CapabilityDescriptor[],
+          passthroughGuard,
+          stubResolver,
+          mockStateHistory as unknown as StateHistory,
+        ),
+      );
+      a.use(errorHandler);
+      return a;
+    }
+
+    const fullCatalog = [
+      { type: "toggle", label: "Toggle", description: "", params: {} },
+      { type: "rename", label: "Rename", description: "", params: {} },
+      { type: "delete", label: "Delete", description: "", params: {} },
+    ] as CapabilityDescriptor[];
+
+    it("rejects a non-admin rename with 403 and never dispatches", async () => {
+      mockRegistry.getById.mockReturnValue(makeDevice("dev-1"));
+      const res = await request(appWithRole("user"), "POST", "/api/devices/dev-1/action", { type: "rename", params: { name: "X" } });
+      expect(res.status).toBe(403);
+      expect(mockCommandService.execute).not.toHaveBeenCalled();
+    });
+
+    it("rejects a non-admin delete with 403", async () => {
+      mockRegistry.getById.mockReturnValue(makeDevice("dev-1"));
+      const res = await request(appWithRole("user"), "POST", "/api/devices/dev-1/action", { type: "delete" });
+      expect(res.status).toBe(403);
+      expect(mockCommandService.execute).not.toHaveBeenCalled();
+    });
+
+    it("allows an admin rename to reach the CommandService", async () => {
+      mockRegistry.getById.mockReturnValue(makeDevice("dev-1"));
+      mockCommandService.execute.mockResolvedValue({ success: true, lifecycleState: "DISPATCHED" });
+      const res = await request(appWithRole("admin"), "POST", "/api/devices/dev-1/action", { type: "rename", params: { name: "X" } });
+      expect(res.status).toBe(200);
+      expect(mockCommandService.execute).toHaveBeenCalled();
+    });
+
+    it("hides rename/delete from the catalog served to a non-admin", async () => {
+      mockRegistry.getById.mockReturnValue(makeDevice("dev-1"));
+      mockGetActionCatalog.mockReturnValue(fullCatalog);
+      const res = await request(appWithRole("user"), "GET", "/api/devices/dev-1/actions");
+      expect(res.status).toBe(200);
+      expect((res.body as any[]).map((d) => d.type)).toEqual(["toggle"]);
+    });
+
+    it("includes rename/delete in the catalog served to an admin", async () => {
+      mockRegistry.getById.mockReturnValue(makeDevice("dev-1"));
+      mockGetActionCatalog.mockReturnValue(fullCatalog);
+      const res = await request(appWithRole("admin"), "GET", "/api/devices/dev-1/actions");
+      expect(res.status).toBe(200);
+      expect((res.body as any[]).map((d) => d.type)).toEqual(["toggle", "rename", "delete"]);
+    });
+  });
 });

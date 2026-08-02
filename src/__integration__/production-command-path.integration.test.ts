@@ -352,6 +352,17 @@ describe("Production command-path composition (integration)", () => {
     expect(types).toContain("rename");
   });
 
+  // rename/delete manage the device on the bridge and are admin-only, even for a
+  // non-admin who can otherwise operate (interact) the light.
+  it("rejects a non-admin rename with 403 and never reaches the connector", async () => {
+    const res = await request(app)
+      .post("/api/devices/dev-hue/action")
+      .set("Authorization", `Bearer ${userToken()}`)
+      .send({ type: "rename", params: { name: "Hijacked" } });
+    expect(res.status).toBe(403);
+    expect(executeCalls.hue.some((a) => a.type === "rename")).toBe(false);
+  });
+
   // Req 7.7 — a scoped automation cannot act outside its device set (fabricated / out-of-scope id).
   describe("scoped automation cannot escape its device set", () => {
     it("dispatches an in-scope device action", async () => {

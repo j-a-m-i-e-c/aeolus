@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Lightbulb, Sun, Palette, Pencil, Trash2, Check, X } from "lucide-react";
 import type { PaneConfig } from "../../types/dashboard";
 import { useDeviceStore } from "../../store/device-store";
+import { useAuthStore } from "../../store/auth-store";
 import { sendAction, fetchEnabledConnectors } from "../../lib/api-client";
 import { ColorTempSlider } from "./hue/ColorTempSlider";
 import { SearchLightsButton } from "./hue/SearchLightsButton";
@@ -50,6 +51,9 @@ interface Props {
 export function HueControlPane({ config: _config }: Props) {
   const devices = useDeviceStore((s) => s.devices);
   const updateDevice = useDeviceStore((s) => s.updateDevice);
+  // Rename/delete manage the light on the bridge and are admin-only, matching
+  // the backend gate. Non-admins see operate-level controls only.
+  const isAdmin = useAuthStore((s) => s.user?.role === "admin");
   const [localBri, setLocalBri] = useState<Record<string, number>>({});
   const [colorPickerOpen, setColorPickerOpen] = useState<string | null>(null);
   const [connectorId, setConnectorId] = useState<string | null>(null);
@@ -201,7 +205,7 @@ export function HueControlPane({ config: _config }: Props) {
                   </div>
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0">
-                  {renamingId !== light.id && (
+                  {isAdmin && renamingId !== light.id && (
                     <>
                       <button
                         onClick={() => { setRenamingId(light.id); setRenameValue(light.name); }}

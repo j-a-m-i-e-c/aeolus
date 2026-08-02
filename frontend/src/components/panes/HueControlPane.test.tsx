@@ -4,15 +4,21 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import type { PaneConfig } from "../../types/dashboard";
 
-const { deviceState, useDeviceStoreMock, mockSendAction, mockFetchConnectors } = vi.hoisted(
+const { deviceState, useDeviceStoreMock, authState, useAuthStoreMock, mockSendAction, mockFetchConnectors } = vi.hoisted(
   () => {
     const state: any = {};
     const store = Object.assign((selector: (s: any) => unknown) => selector(state), {
       getState: () => state,
     });
+    const auth: any = { user: { role: "admin" } };
+    const authStore = Object.assign((selector: (s: any) => unknown) => selector(auth), {
+      getState: () => auth,
+    });
     return {
       deviceState: state,
       useDeviceStoreMock: store,
+      authState: auth,
+      useAuthStoreMock: authStore,
       mockSendAction: vi.fn(),
       mockFetchConnectors: vi.fn(),
     };
@@ -21,6 +27,10 @@ const { deviceState, useDeviceStoreMock, mockSendAction, mockFetchConnectors } =
 
 vi.mock("../../store/device-store", () => ({
   useDeviceStore: useDeviceStoreMock,
+}));
+
+vi.mock("../../store/auth-store", () => ({
+  useAuthStore: useAuthStoreMock,
 }));
 
 vi.mock("../../lib/api-client", () => ({
@@ -86,6 +96,7 @@ describe("HueControlPane", () => {
       removeDevice: vi.fn(),
       setDevices: vi.fn(),
     });
+    authState.user = { role: "admin" };
     mockSendAction.mockReset();
     mockFetchConnectors.mockResolvedValue([]);
   });
@@ -173,5 +184,15 @@ describe("HueControlPane", () => {
     };
     renderPane();
     expect(screen.getByText("offline")).toBeInTheDocument();
+  });
+
+  it("hides the rename and delete controls from non-admin users", () => {
+    authState.user = { role: "user" };
+    deviceState.devices = { "hue-1": hueLight({ name: "Lamp" }) };
+    renderPane();
+    expect(screen.queryByTitle("Rename")).not.toBeInTheDocument();
+    expect(screen.queryByTitle("Remove from bridge")).not.toBeInTheDocument();
+    // Operate-level controls remain available.
+    expect(screen.getByText("Turn On")).toBeInTheDocument();
   });
 });
