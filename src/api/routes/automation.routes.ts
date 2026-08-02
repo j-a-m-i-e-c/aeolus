@@ -82,6 +82,24 @@ export function createAutomationRoutes(
     return resolver.hasResourcePermission(req.user?.userId ?? "", "automation", id, "read");
   }
 
+  /**
+   * Guard mutation of an automation by its *authoring authority*, not just its
+   * resource exposure. A non-admin holding `write` on a tab that exposes an
+   * unrestricted (admin-authored / pre-scoping) automation must NOT be able to
+   * modify, delete, or toggle it — otherwise they could replace its Logic and
+   * inherit its system-wide authority (raw MQTT, every device, every collection,
+   * outbound HTTP). Scoped automations carry `authored_unrestricted = 0` and
+   * remain editable by a user with resource `write` on their owning/exposing tab.
+   */
+  function assertMayMutateAuthority(
+    req: import("express").Request,
+    existing: { authored_unrestricted?: number },
+  ): void {
+    if (existing.authored_unrestricted === 1 && req.user?.role !== "admin") {
+      throw new ForbiddenError();
+    }
+  }
+
   /** GET /api/automations/snippets — return the snippet catalog */
   router.get("/snippets", (req, res) => {
     const mode = req.query.mode === "ui" ? "ui" : "logic";
@@ -382,6 +400,9 @@ export function createAutomationRoutes(
     if (!existing) {
       throw new NotFoundError(`Automation rule ${id} not found`);
     }
+    // A non-admin cannot edit an unrestricted automation's Logic/config and thereby
+    // inherit its system-wide authority (audit Critical 1).
+    assertMayMutateAuthority(req, existing);
 
     const { name, triggerTopic, conditionType, conditionValue, actionType, actionTarget, actionParams, scriptSource, uiSource, triggerType: rawTriggerType, cronExpression, completionTier } = req.body;
 
@@ -470,6 +491,8 @@ export function createAutomationRoutes(
     if (!existing) {
       throw new NotFoundError(`Automation rule ${id} not found`);
     }
+    // A non-admin cannot delete an unrestricted automation (audit Critical 1).
+    assertMayMutateAuthority(req, existing);
     if (stateStore) {
       stateStore.deleteAll(id);
     }
@@ -488,6 +511,8 @@ export function createAutomationRoutes(
     if (!existing) {
       throw new NotFoundError(`Automation rule ${id} not found`);
     }
+    // A non-admin cannot enable/disable an unrestricted automation (audit Critical 1).
+    assertMayMutateAuthority(req, existing);
 
     db.prepare("UPDATE automation_rules SET enabled = ? WHERE id = ?").run(enabled ? 1 : 0, id);
 

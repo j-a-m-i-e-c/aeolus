@@ -220,6 +220,7 @@ async function main(): Promise<void> {
   const engine = new AutomationEngine(eventBus, {
     sandbox,
     commandService: actionExecutor,
+    scopeResolver: automationScopeResolver,
     executionRecorder,
     collector,
   });

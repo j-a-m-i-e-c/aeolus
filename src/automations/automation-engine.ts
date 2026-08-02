@@ -11,6 +11,7 @@ import {
 import type { NormalizedEvent, EventContext, Rule } from "../core/types.js";
 import type { Sandbox, SandboxContext } from "./sandbox.js";
 import type { CommandService } from "./command-service.js";
+import type { AutomationScopeResolver } from "./automation-scope-resolver.js";
 import type { ExecutionLog } from "./execution-log.js";
 import { ExecutionRecorder, type ExecutionRecordRule } from "./execution-recorder.js";
 import { CommandResultCollector } from "./command-result-collector.js";
@@ -26,6 +27,14 @@ export interface AutomationEngineDeps {
   sandbox?: Sandbox;
   /** The single physical-command boundary (renamed from ActionExecutor, Req 1.6). */
   commandService?: CommandService;
+  /**
+   * Resolves an automation's authoring scope so device-event triggers can be
+   * admitted scope-aware. When present, a scoped automation is only triggered by
+   * (and only receives the state of) device events for devices its owning tab
+   * exposes; an unrestricted automation is triggered by any matching event. When
+   * absent, no admission filtering is applied (legacy/test wiring).
+   */
+  scopeResolver?: AutomationScopeResolver;
   /** The single Execution_Owner that records history/metrics/completion/audit (Req 8). */
   executionRecorder?: ExecutionRecorder;
   /** Per-execution Command_Result sink, keyed by executionId (Req 4.3, 5.1, 5.3). */
@@ -55,6 +64,7 @@ export class AutomationEngine {
   private eventBus: EventEmitter;
   private sandbox?: Sandbox;
   private commandService?: CommandService;
+  private scopeResolver?: AutomationScopeResolver;
   private executionRecorder?: ExecutionRecorder;
   private collector: CommandResultCollector;
   private cronTimerManager: CronTimerManager;
@@ -65,6 +75,7 @@ export class AutomationEngine {
     this.eventBus = eventBus;
     this.sandbox = deps?.sandbox;
     this.commandService = deps?.commandService;
+    this.scopeResolver = deps?.scopeResolver;
     this.collector = deps?.collector ?? new CommandResultCollector();
 
     if (deps?.executionRecorder) {
@@ -215,6 +226,12 @@ export class AutomationEngine {
 
     for (const rule of rules) {
       if (!this.topicMatches(rule.topic, event.topic)) continue;
+
+      // Scope-aware event admission (audit Critical 2): a scoped automation is
+      // only triggered by device events for devices its owning tab exposes, so
+      // out-of-scope device state never reaches its condition or Logic. This runs
+      // BEFORE the condition so the condition never observes a hidden device.
+      if (!this.admitDeviceEvent(rule.id, event.deviceId)) continue;
 
       try {
         if (rule.condition && !rule.condition(context)) continue;
@@ -376,6 +393,25 @@ export class AutomationEngine {
       triggerTopic: ctx.topic,
     };
     this.executionRecorder.record({ rule: recordRule, result, durationMs });
+  }
+
+  /**
+   * Decide whether a device event may trigger a rule, honouring the rule's
+   * authoring scope. Unrestricted rules (and all rules when no scope resolver is
+   * wired) admit every matching event. A scoped rule admits a device event only
+   * when the event's device is in its owning tab's exposed device set — so an
+   * out-of-scope device event (including a `#`/broad subscription, a service
+   * trigger with a synthetic device id, or a deleted-owner-tab empty scope)
+   * never reaches the rule's condition or Logic (audit Critical 2).
+   *
+   * Non-device internal events (cron, manual fire) do not flow through
+   * `evaluate()`, so this admission applies only to device state changes.
+   */
+  private admitDeviceEvent(ruleId: string, deviceId: string): boolean {
+    if (!this.scopeResolver) return true;
+    const scope = this.scopeResolver.resolve(ruleId);
+    if (scope.kind === "unrestricted") return true;
+    return scope.deviceIds.has(deviceId);
   }
 
   /** Check if a rule topic pattern matches an event topic */

@@ -146,6 +146,40 @@ describe("user-service", () => {
       );
     });
 
+    it("revokes refresh tokens when an admin resets the password (audit High 2)", async () => {
+      const user = await createUser("adminreset", "password123", "g1");
+      testDb
+        .prepare(
+          `INSERT INTO refresh_tokens (id, user_id, token_hash, expires_at, created_at)
+           VALUES (?, ?, ?, ?, ?)`,
+        )
+        .run("token-reset", user.id, "somehash", Date.now() + 86400000, Date.now());
+
+      await updateUser(user.id, { password: "newpassword123" });
+
+      const tokens = testDb
+        .prepare("SELECT * FROM refresh_tokens WHERE user_id = ?")
+        .all(user.id);
+      expect(tokens).toHaveLength(0);
+    });
+
+    it("does not revoke refresh tokens on a non-password update", async () => {
+      const user = await createUser("grouponly", "password123", "g1");
+      testDb
+        .prepare(
+          `INSERT INTO refresh_tokens (id, user_id, token_hash, expires_at, created_at)
+           VALUES (?, ?, ?, ?, ?)`,
+        )
+        .run("token-keep", user.id, "somehash", Date.now() + 86400000, Date.now());
+
+      await updateUser(user.id, { groupId: "g2" });
+
+      const tokens = testDb
+        .prepare("SELECT * FROM refresh_tokens WHERE user_id = ?")
+        .all(user.id);
+      expect(tokens).toHaveLength(1);
+    });
+
     it("throws NotFoundError for non-existent user", async () => {
       await expect(
         updateUser("non-existent", { groupId: "g1" }),

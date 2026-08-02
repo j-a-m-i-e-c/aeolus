@@ -152,4 +152,53 @@ describe("Scoped automation authoring (integration)", () => {
     // Scope unchanged despite the malicious fields.
     expect(scopeRow(id)).toEqual({ authored_unrestricted: 0, owner_tab_id: "tab-a" });
   });
+
+  it("blocks a non-admin from editing/deleting/toggling an admin-authored unrestricted automation exposed on their tab (audit Critical 1)", async () => {
+    // Admin creates an unrestricted (system-wide authority) automation.
+    const create = await request(app)
+      .post("/api/automations")
+      .set("Authorization", `Bearer ${adminToken()}`)
+      .send(formRule("Admin unrestricted"));
+    const id = create.body.id as string;
+    expect(scopeRow(id)).toEqual({ authored_unrestricted: 1, owner_tab_id: null });
+
+    // Expose it on tab-a, which u-user's group can write. The resource-permission
+    // resolver now legitimately grants u-user `write` on this automation.
+    testDb
+      .prepare("INSERT INTO automation_tab_assignments (automation_id, tab_id) VALUES (?, ?)")
+      .run(id, "tab-a");
+
+    // The non-admin must NOT be able to replace its Logic and inherit authority.
+    const put = await request(app)
+      .put(`/api/automations/${id}`)
+      .set("Authorization", `Bearer ${userToken()}`)
+      .send({ name: "Hijacked", actionType: "log", actionTarget: "noop" });
+    expect(put.status).toBe(403);
+
+    const toggle = await request(app)
+      .patch(`/api/automations/${id}/toggle`)
+      .set("Authorization", `Bearer ${userToken()}`)
+      .send({ enabled: false });
+    expect(toggle.status).toBe(403);
+
+    const del = await request(app)
+      .delete(`/api/automations/${id}`)
+      .set("Authorization", `Bearer ${userToken()}`);
+    expect(del.status).toBe(403);
+
+    // The rule is untouched: still unrestricted and still present.
+    expect(scopeRow(id)).toEqual({ authored_unrestricted: 1, owner_tab_id: null });
+
+    // An admin can still update and delete it.
+    const adminPut = await request(app)
+      .put(`/api/automations/${id}`)
+      .set("Authorization", `Bearer ${adminToken()}`)
+      .send({ name: "Admin edit" });
+    expect(adminPut.status).toBe(200);
+
+    const adminDel = await request(app)
+      .delete(`/api/automations/${id}`)
+      .set("Authorization", `Bearer ${adminToken()}`);
+    expect(adminDel.status).toBe(200);
+  });
 });

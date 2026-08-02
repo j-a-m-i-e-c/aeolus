@@ -109,7 +109,7 @@ export function createTestApp(
   const stateStore = new AutomationStateStore(db);
   stateStore.loadFromDb();
 
-  const engine = new AutomationEngine(eventBus, { commandService: actionExecutor, executionLog });
+  const engine = new AutomationEngine(eventBus, { commandService: actionExecutor, scopeResolver: automationScopeResolver, executionLog });
 
   // Stub MQTT service for health route
   const stubMqttService = createStubMqttService();

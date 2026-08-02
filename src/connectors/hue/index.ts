@@ -197,8 +197,16 @@ export const snippets: SnippetDescriptor[] = [
 // ── Contributed action handlers ─────────────────────────────────────────────
 
 export const actionHandlers: Record<string, ActionHandler> = {
-  /** Activate a Hue scene by name. */
-  hue_scene: async (action, ruleId, deps) => {
+  /**
+   * Activate a Hue scene by name.
+   *
+   * Returns the connector's ActionResult rather than discarding it, so a failed
+   * dispatch is reported truthfully instead of appearing as an accepted command
+   * (audit High 1). Note: the Hue connector does not yet implement `scene`, so
+   * this currently resolves to a truthful failure until that support lands
+   * (tracked in the backlog).
+   */
+  hue_scene: (action, ruleId, deps) => {
     const sceneName = typeof action.params.sceneName === "string"
       ? action.params.sceneName
       : "unknown";
@@ -206,22 +214,28 @@ export const actionHandlers: Record<string, ActionHandler> = {
       { ruleId, sceneName },
       `Activating Hue scene: ${sceneName}`,
     );
-    await deps.connectorManager.executeAction(action.target, {
+    return deps.connectorManager.executeAction(action.target, {
       type: "scene",
       deviceId: action.target,
       params: { sceneName },
     });
   },
 
-  /** Start or stop a color loop on a Hue light. */
-  hue_color_loop: async (action, ruleId, deps) => {
+  /**
+   * Start or stop a color loop on a Hue light.
+   *
+   * Returns the connector's ActionResult (see `hue_scene`). The Hue connector
+   * does not yet implement `color_loop`, so this currently resolves to a
+   * truthful failure until that support lands (tracked in the backlog).
+   */
+  hue_color_loop: (action, ruleId, deps) => {
     const enable = action.params.enable === true;
     const deviceId = action.target;
     deps.logger.info(
       { ruleId, deviceId, enable },
       `${enable ? "Starting" : "Stopping"} color loop on Hue light: ${deviceId}`,
     );
-    await deps.connectorManager.executeAction(deviceId, {
+    return deps.connectorManager.executeAction(deviceId, {
       type: "color_loop",
       deviceId,
       params: { enable },

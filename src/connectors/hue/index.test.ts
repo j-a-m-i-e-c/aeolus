@@ -70,24 +70,39 @@ describe("hue/index module exports", () => {
       expect(typeof actionHandlers.hue_color_loop).toBe("function");
     });
 
-    it("hue_scene calls connectorManager.executeAction", async () => {
+    it("hue_scene calls connectorManager.executeAction and returns its result", async () => {
+      const dispatchResult = { success: true, lifecycleState: "DISPATCHED" };
       const mockDeps = {
         logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-        connectorManager: { executeAction: vi.fn().mockResolvedValue(undefined) },
+        connectorManager: { executeAction: vi.fn().mockResolvedValue(dispatchResult) },
       };
       const action = { target: "hue-light-1", params: { sceneName: "Relax" } };
 
-      await actionHandlers.hue_scene(action as any, "rule-1", mockDeps as any);
+      const result = await actionHandlers.hue_scene(action as any, "rule-1", mockDeps as any);
       expect(mockDeps.connectorManager.executeAction).toHaveBeenCalledWith(
         "hue-light-1",
         expect.objectContaining({ type: "scene", params: { sceneName: "Relax" } }),
       );
+      // The result must be propagated, not discarded (audit High 1).
+      expect(result).toBe(dispatchResult);
+    });
+
+    it("hue_scene propagates a connector failure instead of reporting false success", async () => {
+      const failure = { success: false, lifecycleState: "FAILED", error: "Unsupported action type" };
+      const mockDeps = {
+        logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+        connectorManager: { executeAction: vi.fn().mockResolvedValue(failure) },
+      };
+      const action = { target: "hue-light-1", params: { sceneName: "Relax" } };
+
+      const result = await actionHandlers.hue_scene(action as any, "rule-1", mockDeps as any);
+      expect(result).toEqual(failure);
     });
 
     it("hue_scene uses 'unknown' when sceneName is not a string", async () => {
       const mockDeps = {
         logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-        connectorManager: { executeAction: vi.fn().mockResolvedValue(undefined) },
+        connectorManager: { executeAction: vi.fn().mockResolvedValue({ success: true, lifecycleState: "DISPATCHED" }) },
       };
       const action = { target: "hue-light-1", params: { sceneName: 123 } };
 
@@ -98,18 +113,20 @@ describe("hue/index module exports", () => {
       );
     });
 
-    it("hue_color_loop calls connectorManager.executeAction", async () => {
+    it("hue_color_loop calls connectorManager.executeAction and returns its result", async () => {
+      const dispatchResult = { success: true, lifecycleState: "DISPATCHED" };
       const mockDeps = {
         logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-        connectorManager: { executeAction: vi.fn().mockResolvedValue(undefined) },
+        connectorManager: { executeAction: vi.fn().mockResolvedValue(dispatchResult) },
       };
       const action = { target: "hue-light-1", params: { enable: true } };
 
-      await actionHandlers.hue_color_loop(action as any, "rule-1", mockDeps as any);
+      const result = await actionHandlers.hue_color_loop(action as any, "rule-1", mockDeps as any);
       expect(mockDeps.connectorManager.executeAction).toHaveBeenCalledWith(
         "hue-light-1",
         expect.objectContaining({ type: "color_loop", params: { enable: true } }),
       );
+      expect(result).toBe(dispatchResult);
     });
   });
 

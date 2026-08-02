@@ -197,6 +197,10 @@ export async function updateUser(
       passwordHash,
       id,
     );
+    // Revoke all existing refresh tokens so a stolen/old session cannot keep
+    // minting access tokens after an admin resets the password (audit High 2).
+    // Mirrors the self-service `changePassword` revocation.
+    db.prepare("DELETE FROM refresh_tokens WHERE user_id = ?").run(id);
   }
 
   if (updates.groupId !== undefined) {

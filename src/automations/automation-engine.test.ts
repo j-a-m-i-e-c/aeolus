@@ -20,7 +20,11 @@ const silentLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.f
 /** Build an engine wired to a spy ExecutionLog through the real Execution_Owner. */
 function makeEngine(
   eventBus: EventEmitter,
-  opts: { sandbox?: Sandbox; pushFn?: ReturnType<typeof vi.fn> } = {},
+  opts: {
+    sandbox?: Sandbox;
+    pushFn?: ReturnType<typeof vi.fn>;
+    scopeResolver?: import("./automation-scope-resolver.js").AutomationScopeResolver;
+  } = {},
 ): { engine: AutomationEngine; pushFn: ReturnType<typeof vi.fn> } {
   const pushFn = opts.pushFn ?? vi.fn();
   const executionLog = { push: pushFn } as unknown as ExecutionLog;
@@ -28,6 +32,7 @@ function makeEngine(
   const collector = new CommandResultCollector();
   const engine = new AutomationEngine(eventBus, {
     ...(opts.sandbox ? { sandbox: opts.sandbox } : {}),
+    ...(opts.scopeResolver ? { scopeResolver: opts.scopeResolver } : {}),
     executionRecorder,
     collector,
   });
@@ -379,6 +384,69 @@ describe("AutomationEngine", () => {
 
       eventBus.emit(DEVICE_STATE_CHANGE, makeEvent());
       expect(actionFn).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("scope-aware device-event admission (audit Critical 2)", () => {
+    type Scope = import("./automation-scope-resolver.js").AuthorizationScope;
+    function resolverFor(scopes: Record<string, Scope>) {
+      const empty: Scope = { kind: "scoped", tabId: null, deviceIds: new Set(), collections: new Set() };
+      return { resolve: (id: string): Scope => scopes[id] ?? empty };
+    }
+
+    it("triggers a scoped rule only for in-scope device events", () => {
+      const scopeResolver = resolverFor({
+        "scoped-1": { kind: "scoped", tabId: "tab-a", deviceIds: new Set(["in-scope"]), collections: new Set() },
+      });
+      const { engine } = makeEngine(eventBus, { scopeResolver });
+      const action = vi.fn();
+      engine.register({ id: "scoped-1", topic: "#", action });
+
+      eventBus.emit(DEVICE_STATE_CHANGE, makeEvent({ deviceId: "in-scope", topic: "x/y" }));
+      expect(action).toHaveBeenCalledOnce();
+    });
+
+    it("does not trigger a scoped rule for an out-of-scope device event (broad # subscription)", () => {
+      const scopeResolver = resolverFor({
+        "scoped-1": { kind: "scoped", tabId: "tab-a", deviceIds: new Set(["in-scope"]), collections: new Set() },
+      });
+      const { engine } = makeEngine(eventBus, { scopeResolver });
+      const action = vi.fn();
+      engine.register({ id: "scoped-1", topic: "#", action });
+
+      eventBus.emit(DEVICE_STATE_CHANGE, makeEvent({ deviceId: "other-device", topic: "x/y" }));
+      expect(action).not.toHaveBeenCalled();
+    });
+
+    it("triggers an unrestricted rule for any matching device event", () => {
+      const scopeResolver = resolverFor({ "unrestricted-1": { kind: "unrestricted" } });
+      const { engine } = makeEngine(eventBus, { scopeResolver });
+      const action = vi.fn();
+      engine.register({ id: "unrestricted-1", topic: "#", action });
+
+      eventBus.emit(DEVICE_STATE_CHANGE, makeEvent({ deviceId: "anything", topic: "x/y" }));
+      expect(action).toHaveBeenCalledOnce();
+    });
+
+    it("does not trigger a scoped rule whose owning tab was deleted (empty scope)", () => {
+      const scopeResolver = resolverFor({
+        orphan: { kind: "scoped", tabId: null, deviceIds: new Set(), collections: new Set() },
+      });
+      const { engine } = makeEngine(eventBus, { scopeResolver });
+      const action = vi.fn();
+      engine.register({ id: "orphan", topic: "#", action });
+
+      eventBus.emit(DEVICE_STATE_CHANGE, makeEvent({ deviceId: "any", topic: "x/y" }));
+      expect(action).not.toHaveBeenCalled();
+    });
+
+    it("admits every matching event when no scope resolver is wired (legacy)", () => {
+      const { engine } = makeEngine(eventBus);
+      const action = vi.fn();
+      engine.register({ id: "legacy", topic: "#", action });
+
+      eventBus.emit(DEVICE_STATE_CHANGE, makeEvent({ deviceId: "whatever", topic: "x/y" }));
+      expect(action).toHaveBeenCalledOnce();
     });
   });
 });
