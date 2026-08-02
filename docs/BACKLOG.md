@@ -46,29 +46,6 @@ authorization model first, hardening against determined insiders second.
 
 ---
 
-## Closed — second fresh review release gates (2 Aug 2026)
-
-Verified present in production code by the third fresh review. Kept here only as
-a pointer; full detail is in `git log` and the relevant specs.
-
-- ✅ **Unified command-source / device-action composition** — `CommandService`
-  now uses a discriminated `CommandSource` (`command-service.ts`) and applies the
-  `AutomationScopeResolver` only for `kind: "automation"`; the REST route sends a
-  canonical `device_action`; `connectorManager.setMqttService(mqttService)` is
-  wired at composition (`src/index.ts`); brightness now has one canonical
-  contract.
-- ✅ **Scoped `devices.actionAll()`** — operates over the injected scoped device
-  set; hidden devices are not handed to a scoped predicate.
-- ✅ **Pane removal decoupled from automation deletion** — removing a pane removes
-  only the pane/reference; deletion is a separate, confirmed operation.
-- ✅ **Layout editing authority** — admin-only in both frontend behaviour and
-  permissions documentation.
-- ✅ **Partial automation updates preserve omitted fields** — PATCH semantics
-  distinguish omitted from explicit clear, so editing name/source no longer
-  erases the completion tier.
-
----
-
 ## High — deployment & lifecycle correctness
 
 ### Ungate dashboard-managed MQTT provisioning 🟠
