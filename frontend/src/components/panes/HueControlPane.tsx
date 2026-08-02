@@ -151,7 +151,7 @@ export function HueControlPane({ config: _config }: Props) {
         updateType={healthStatus?.updateType as "bridge" | "lights" | "both" | undefined}
       />
 
-      {connectorId && (
+      {isAdmin && connectorId && (
         <div className="flex justify-end">
           <SearchLightsButton connectorId={connectorId} />
         </div>

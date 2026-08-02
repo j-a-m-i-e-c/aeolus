@@ -35,13 +35,14 @@ authorization model first, hardening against determined insiders second.
 >
 > A third fresh review (2 Aug 2026, `docs/history/audits/aeolus-v11-fresh-review-2026-08-02.md`)
 > confirmed no new core security/sandbox/MQTT flaw and verified the release-gate
-> work is present in production. It found the remaining public risk has moved
+> work is present in production. It found the remaining public risk had moved
 > outward into the **bundled Hue and Kasa connectors**: controls advertised by
 > capabilities or the UI but rejected/executed incorrectly, a Kasa discovery
-> listener leak, and device IDs that do not satisfy the documented multi-instance
-> guarantee. Those connector release gates are tracked in the
-> **`connector-correctness-release-gates`** spec (`.kiro/specs/`), not in this
-> file. Require green CI on the exact public commit once they are closed.
+> listener leak, and device IDs that did not satisfy the documented multi-instance
+> guarantee. **That connector release gate has since been completed** (see the
+> **`connector-correctness-release-gates`** spec in `.kiro/specs/` and `git log`);
+> a follow-up also closed the interact-level device rename/delete gap. The linked
+> audit is retained as historical context only.
 
 ---
 
