@@ -15,13 +15,20 @@ The goal is consistent behaviour regardless of where a command starts:
 - useful audit history;
 - sensible handling of conflicting or overlapping commands.
 
-The 2 Aug 2026 fresh review found that this convergence is not just a future
-enhancement — the current composition mis-routes REST/dashboard/custom-UI device
-actions (source tags read as automation IDs, native actions with no generic
-handler, MQTT dispatch never wired in, a divergent brightness contract). That
-concrete breakage is a pre-promotion release gate tracked in
-`docs/BACKLOG.md` under "Critical / High — fresh review release gates"; the
-broader convergence goal here builds on that fix.
+An earlier 2 Aug 2026 review found the command composition itself was mis-routing
+REST/dashboard/custom-UI device actions (source tags read as automation IDs,
+native actions with no generic handler, MQTT dispatch never wired in, a divergent
+brightness contract). That breakage is now fixed — the command source is an
+explicit discriminated union, MQTT dispatch is wired at composition, and
+brightness has one canonical contract. The convergence goal here builds on that
+fixed foundation.
+
+A follow-up review then found the remaining pre-promotion risk sits in the
+bundled Hue and Kasa connectors, which had drifted from the newer, stricter
+Action Catalog and multi-instance contracts (advertised controls that are
+rejected or executed incorrectly, a Kasa discovery listener leak, and non-unique
+device IDs). That connector-correctness work is the active pre-promotion connector
+gate, tracked in the `connector-correctness-release-gates` spec (`.kiro/specs/`).
 
 ### Prove Aeolus on real equipment
 
