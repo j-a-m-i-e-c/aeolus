@@ -58,6 +58,18 @@ function normalizeTier(value: unknown): ConfirmationTier | null {
   return isConfirmationTier(value) ? value : null;
 }
 
+/**
+ * PATCH-style field merge: undefined (omitted) preserves the existing value;
+ * null (explicit clear) stores null; any other value replaces.
+ * Used for completion_tier, condition_type, condition_value so that an
+ * unrelated update never silently erases a previously-authored setting.
+ *
+ * Requirements: 8.1–8.5 (pre-promotion-release-gates spec)
+ */
+function preserveOrReplace<T>(incoming: T | null | undefined, current: T | null): T | null {
+  return incoming === undefined ? current : incoming;
+}
+
 export function createAutomationRoutes(
   engine: AutomationEngine,
   db: DatabaseType,
@@ -423,13 +435,24 @@ export function createAutomationRoutes(
       if (completionTier !== undefined && completionTier !== null && !isConfirmationTier(completionTier)) {
         throw new BadRequestError("completionTier must be one of: dispatch, acknowledged, observed");
       }
-      const completionTierValue = normalizeTier(completionTier);
+      // PATCH semantics: undefined (omitted) preserves; null clears; valid replaces (Req 8.1–8.4).
+      const completionTierValue = preserveOrReplace(
+        completionTier === undefined ? undefined : normalizeTier(completionTier),
+        normalizeTier(existing.completion_tier),
+      );
 
       const { compiledJs, structuredJson } = compileScriptSource(updatedSource, effectiveTriggerTopic);
 
       db.prepare(
         `UPDATE automation_rules SET name = ?, trigger_topic = ?, condition_type = ?, condition_value = ?, script_source = ?, compiled_js = ?, structured_metadata = ?, ui_source = ?, compiled_ui = ?, trigger_type = ?, cron_expression = ?, completion_tier = ? WHERE id = ?`
-      ).run(name || existing.name, effectiveTriggerTopic, conditionType ?? existing.condition_type, conditionValue ?? existing.condition_value, updatedSource, compiledJs, structuredJson, uiSourceValue, compiledUiValue, triggerType, effectiveCronExpression, completionTierValue, id);
+      ).run(
+        name || existing.name,
+        effectiveTriggerTopic,
+        preserveOrReplace(conditionType, existing.condition_type),   // Req 8.5
+        preserveOrReplace(conditionValue, existing.condition_value), // Req 8.5
+        updatedSource, compiledJs, structuredJson, uiSourceValue, compiledUiValue,
+        triggerType, effectiveCronExpression, completionTierValue, id,
+      );
 
       // Re-register in engine
       engine.unregister(id);
@@ -446,21 +469,22 @@ export function createAutomationRoutes(
       const effectiveActionTarget = actionTarget || existing.action_target;
 
       // Validate completionTier format only — any valid tier is allowed regardless of device ceiling.
-      let completionTierValue: ConfirmationTier | null = null;
-      if (completionTier !== undefined && completionTier !== null) {
-        if (!isConfirmationTier(completionTier)) {
-          throw new BadRequestError("completionTier must be one of: dispatch, acknowledged, observed");
-        }
-        completionTierValue = completionTier;
+      // PATCH semantics: undefined (omitted) preserves; null clears; valid replaces (Req 8.1–8.4).
+      if (completionTier !== undefined && completionTier !== null && !isConfirmationTier(completionTier)) {
+        throw new BadRequestError("completionTier must be one of: dispatch, acknowledged, observed");
       }
+      const completionTierValue = preserveOrReplace(
+        completionTier === undefined ? undefined : normalizeTier(completionTier),
+        normalizeTier(existing.completion_tier),
+      );
 
       db.prepare(
         `UPDATE automation_rules SET name = ?, trigger_topic = ?, condition_type = ?, condition_value = ?, action_type = ?, action_target = ?, action_params = ?, ui_source = ?, compiled_ui = ?, trigger_type = ?, cron_expression = ?, completion_tier = ? WHERE id = ?`
       ).run(
         name || existing.name,
         effectiveTriggerTopic,
-        conditionType ?? existing.condition_type,
-        conditionValue ?? existing.condition_value,
+        preserveOrReplace(conditionType, existing.condition_type),   // Req 8.5
+        preserveOrReplace(conditionValue, existing.condition_value), // Req 8.5
         actionType || existing.action_type,
         effectiveActionTarget,
         JSON.stringify(actionParams || JSON.parse(existing.action_params)),
