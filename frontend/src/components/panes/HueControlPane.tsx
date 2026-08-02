@@ -26,7 +26,7 @@ const COLOR_SWATCHES = [
 function hueToHsl(h: number, s: number, b: number): string {
   const hDeg = Math.round((h / 65535) * 360);
   const sPct = Math.round((s / 254) * 100);
-  const lPct = Math.round((b / 254) * 50);
+  const lPct = Math.round((b / 100) * 50); // b is canonical brightness 0–100
   return `hsl(${hDeg}, ${sPct}%, ${Math.max(lPct, 10)}%)`;
 }
 
@@ -83,9 +83,9 @@ export function HueControlPane({ config: _config }: Props) {
   };
 
   const handleBrightness = async (deviceId: string, brightness: number) => {
-    // Convert from Hue-native 0–254 slider value to the canonical 0–100
-    // percentage contract (pre-promotion-release-gates gate 4, Req 4.1).
-    const pct = Math.round((brightness / 254) * 100);
+    // Brightness is the canonical 0–100 percentage end-to-end; the connector
+    // translates to the Hue-native 0–254 scale at the API boundary (H6).
+    const pct = Math.round(Math.min(100, Math.max(0, brightness)));
     try {
       await sendAction(deviceId, "brightness", { brightness: pct });
     } catch {}
@@ -156,7 +156,7 @@ export function HueControlPane({ config: _config }: Props) {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {hueLights.map((light) => {
           const isOn = Boolean(light.state.on);
-          const brightness = Number(light.state.brightness ?? 254);
+          const brightness = Number(light.state.brightness ?? 100);
           const reachable = light.state.reachable !== false && light.state.online !== false;
           const hueVal = Number(light.state.hue ?? 0);
           const satVal = Number(light.state.saturation ?? 0);
@@ -266,13 +266,13 @@ export function HueControlPane({ config: _config }: Props) {
                       <Sun size={10} /> Brightness
                     </span>
                     <span className="text-[10px] text-[#9AA6B2] font-mono">
-                      {Math.round(((localBri[light.id] ?? brightness) / 254) * 100)}%
+                      {Math.round(localBri[light.id] ?? brightness)}%
                     </span>
                   </div>
                   <input
                     type="range"
                     min="1"
-                    max="254"
+                    max="100"
                     value={localBri[light.id] ?? brightness}
                     onChange={(e) =>
                       setLocalBri((prev) => ({ ...prev, [light.id]: Number(e.target.value) }))

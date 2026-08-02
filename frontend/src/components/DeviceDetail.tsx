@@ -123,8 +123,8 @@ export function DeviceDetail({ deviceId, onClose }: DeviceDetailProps) {
                   <input
                     type="range"
                     min="0"
-                    max="254"
-                    value={Number(device.state.brightness ?? 127)}
+                    max="100"
+                    value={Number(device.state.brightness ?? 100)}
                     onChange={(e) => handleBrightness(Number(e.target.value))}
                     className="w-full accent-primary"
                   />
