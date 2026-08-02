@@ -243,6 +243,25 @@ describe("Resource-level authorization (integration)", () => {
     });
   });
 
+  describe("Named triggers are admin-only (release-gate item 3, R3)", () => {
+    it("rejects a non-admin firing a generic named trigger with 403", async () => {
+      const res = await request(app)
+        .post("/api/automations/trigger/night-mode")
+        .set("Authorization", `Bearer ${userToken()}`)
+        .send({ tabId: "tab-a" }); // a permitted tab id must not grant access
+      expect(res.status).toBe(403);
+    });
+
+    it("allows an admin to fire a named trigger", async () => {
+      const res = await request(app)
+        .post("/api/automations/trigger/night-mode")
+        .set("Authorization", `Bearer ${adminToken()}`)
+        .send({});
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ success: true, trigger: "night-mode" });
+    });
+  });
+
   describe("Destructive history routes stay admin-only (R11.1)", () => {
     it("rejects a non-admin and allows an admin without a resource check", async () => {
       const denied = await request(app)

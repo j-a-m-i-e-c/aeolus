@@ -21,7 +21,7 @@ import { BadRequestError, NotFoundError, ForbiddenError } from "../middleware/er
 import { validate } from "../middleware/validate.js";
 import { asyncHandler } from "../middleware/async-handler.js";
 import { createAutomationBodySchema, updateAutomationBodySchema, automationIdParamsSchema, toggleAutomationBodySchema, automationStateBodySchema } from "../schemas/automation.schemas.js";
-import { requireTabPermission } from "../../auth/auth-middleware.js";
+import { requireTabPermission, requireAdmin } from "../../auth/auth-middleware.js";
 import type { RequestHandler } from "express";
 import type { PermissionLevel } from "../../auth/permission-service.js";
 import type { PermissionResolver } from "../../auth/permission-resolver.js";
@@ -157,8 +157,17 @@ export function createAutomationRoutes(
     res.json(entries);
   });
 
-  /** POST /api/automations/trigger/:name — fire a named trigger event (replaces services trigger) */
-  router.post("/trigger/:name", requireTabPermission("interact"), (req, res) => {
+  /**
+   * POST /api/automations/trigger/:name — fire a named trigger event.
+   *
+   * A named trigger emits a global `service/trigger/{name}` event that any
+   * automation can subscribe to, so the supplied tab was never tied to the
+   * automations that actually run. `requireTabPermission("interact")` therefore
+   * let any interact-permitted tab fire a trigger consumed by an automation
+   * outside that tab. Until trigger→automation ownership is persisted and
+   * authorized server-side, generic named triggers are admin-only (R3).
+   */
+  router.post("/trigger/:name", requireAdmin, (req, res) => {
     const { name } = req.params;
     const body = req.body ?? {};
     const firedAt = Date.now();

@@ -82,13 +82,16 @@ Destructive device-history routes remain `requireAdmin`. Covered by
 `src/__integration__/read-surface-authorization.integration.test.ts` and WS
 snapshot-scoping tests.
 
-### 3. Named triggers use the old caller-supplied tab pattern 🟠 (R3)
-`POST /api/automations/trigger/:name` uses `requireTabPermission("interact")`
-then emits a global `service/trigger/{name}` event not tied to the automations
-that subscribe to it, so any interact-permitted tab can fire a globally named
-trigger used by an automation elsewhere. Short-term: make generic named
-triggers admin-only, or replace with resource-bound automation firing. Later:
-persist trigger→automation/tab ownership and authorize server-side.
+### 3. Named triggers use the old caller-supplied tab pattern ✅ (R3) — DONE
+`POST /api/automations/trigger/:name` emits a global `service/trigger/{name}`
+event not tied to the automations that subscribe to it, so the old
+`requireTabPermission("interact")` guard let any interact-permitted tab fire a
+trigger consumed by an automation elsewhere. The route is now `requireAdmin`
+(`src/api/routes/automation.routes.ts`), the short-term fix from the reassessment.
+A non-admin `TriggerButtonPane` therefore now receives 403 — acceptable under the
+current threat model until trigger→automation/tab ownership is persisted and
+authorized server-side (the deferred longer-term fix). Covered by an admin-only
+assertion in `src/__integration__/resource-authorization.integration.test.ts`.
 
 ### 4. Data Store REST access is global for every authenticated user 🟠 (R4)
 `createDataStoreRoutes()` has no admin/collection guards — any authenticated
