@@ -44,11 +44,11 @@ describe("CAPABILITY_ACTION_MAP — Property 8: capability-to-action mapping com
     );
   });
 
-  it("brightness descriptor has level param schema with range 0–100", () => {
+  it("brightness descriptor has brightness param schema with range 0–100", () => {
     const descriptor = CAPABILITY_ACTION_MAP["brightness"][0];
     const props = (descriptor.params as Record<string, unknown>).properties as Record<string, Record<string, unknown>>;
-    expect(props.level.minimum).toBe(0);
-    expect(props.level.maximum).toBe(100);
+    expect(props.brightness.minimum).toBe(0);
+    expect(props.brightness.maximum).toBe(100);
   });
 
   it("color descriptor has hue (0–65535) and saturation (0–254) param schemas", () => {

@@ -83,8 +83,11 @@ export function HueControlPane({ config: _config }: Props) {
   };
 
   const handleBrightness = async (deviceId: string, brightness: number) => {
+    // Convert from Hue-native 0–254 slider value to the canonical 0–100
+    // percentage contract (pre-promotion-release-gates gate 4, Req 4.1).
+    const pct = Math.round((brightness / 254) * 100);
     try {
-      await sendAction(deviceId, "brightness", { brightness });
+      await sendAction(deviceId, "brightness", { brightness: pct });
     } catch {}
   };
 

@@ -218,8 +218,11 @@ export class HueConnector implements Connector {
             `Light '${action.deviceId}' does not support brightness (type: ${this.getLightType(action.deviceId)})`,
           );
         }
-        const bri = Number(action.params.brightness ?? 254);
-        body = { bri: Math.min(254, Math.max(0, bri)) };
+        // Canonical contract is brightness 0–100 (percentage). Translate to the
+        // Hue-native 0–254 scale (pre-promotion-release-gates gate 4, Req 4.3).
+        const pct = Number(action.params.brightness ?? 100);
+        const bri = Math.round(Math.min(100, Math.max(0, pct)) / 100 * 254);
+        body = { bri };
         break;
       }
       case "color": {

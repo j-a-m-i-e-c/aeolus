@@ -36,17 +36,17 @@ export const CAPABILITY_ACTION_MAP: Record<string, CapabilityDescriptor[]> = {
     },
   ],
 
-  /** Requirement 4.5 — brightness → brightness with level param (0–100) */
+  /** Requirement 4.5 — brightness → brightness with value param (0–100 canonical percentage) */
   brightness: [
     {
       type: "brightness",
       label: "Set Brightness",
-      description: "Set brightness level (0–100)",
+      description: "Set brightness level as a percentage (0–100). Connectors translate to their device-native scale.",
       params: {
         type: "object",
-        required: ["level"],
+        required: ["brightness"],
         properties: {
-          level: { type: "number", minimum: 0, maximum: 100 },
+          brightness: { type: "number", minimum: 0, maximum: 100 },
         },
       },
     },
