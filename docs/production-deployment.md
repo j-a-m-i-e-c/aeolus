@@ -2,15 +2,18 @@
 
 A practical guide for running Aeolus on a Raspberry Pi in production. Covers authentication, MQTT security, TLS, firewalling, backups, monitoring, and updates.
 
-Aeolus runs as three containers defined in `docker-compose.yml`:
+Aeolus runs as four long-running services defined in `docker-compose.yml`:
 
 | Service | Network | Port | Description |
 |---------|---------|------|-------------|
 | `aeolus-mosquitto` | bridge | `1883` | Eclipse Mosquitto MQTT broker |
+| `aeolus-mosquitto-reloader` | shares Mosquitto's PID namespace | — | Sidecar that watches the shared Mosquitto config volume and sends `SIGHUP` to the broker when the password file or config changes |
 | `aeolus-backend` | **host** | `3001` | Express API + automation engine + WebSocket |
 | `aeolus-frontend` | bridge | `3000` → `80` | React dashboard (nginx) |
 
 > The backend uses `network_mode: host` so it can do UDP-broadcast discovery (Kasa) and reach LAN devices (Hue bridge) directly. That means the backend binds port `3001` straight onto the host rather than through Docker port mapping.
+
+> A fifth service, `seed`, is defined behind the `seed` Compose profile for one-shot demo seeding. It is **not** started by `docker compose up` — run it on demand (`make seed PASS=...`).
 
 ---
 
@@ -45,9 +48,9 @@ The **Security → MQTT Security** screen supports three modes:
 | **Shared Password** | One credential shared by external devices |
 | **Per-Device** | A separate username and password for each device |
 
-The backend provisioning service can write the Mosquitto configuration and password file, then reload the broker. That requires deployment-specific access to those files and to a broker reload mechanism.
+The backend provisioning service can write the Mosquitto configuration and password file, then reload the broker. The default Compose stack wires this up: it mounts `./mosquitto` into the backend (`MQTT_PASSWORD_FILE` / `MQTT_CONFIG_FILE`) and runs the `aeolus-mosquitto-reloader` sidecar, which `SIGHUP`s Mosquitto when the files change (`MQTT_RELOAD_STRATEGY=none` — the backend writes files and lets the sidecar reload). No Docker socket is mounted; the reload happens over a shared PID namespace, not the Docker API.
 
-> **Default Docker Compose note:** the committed `docker-compose.yml` deliberately does not mount the Docker socket or the Mosquitto configuration into the backend container. As a result, automatic broker reconfiguration from the dashboard is not wired into the default hardened Compose deployment. Use the manual procedure below, or create a narrowly scoped provisioning arrangement for your environment. Do not expose the full Docker socket merely to make this feature work.
+> **Opt-in by default:** dashboard-managed provisioning (Shared Password / Per-Device) is gated behind `MQTT_MANAGED_PROVISIONING_ENABLED`, which defaults to `false`. The plumbing above is present, but the managed security levels stay disabled until you set `MQTT_MANAGED_PROVISIONING_ENABLED=true`. With it disabled, use the manual procedure below. The Docker socket is deliberately never mounted — do not expose it to make this feature work.
 
 See [MQTT security](security/mqtt.md) for the credential model and provisioning API.
 

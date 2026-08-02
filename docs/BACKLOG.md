@@ -159,14 +159,17 @@ Pinned Node `22.22.1` across `.nvmrc` (which also drives CI and e2e via
 frontend Dockerfiles, and the compose seed image — matching the lockfile's
 `lint-staged@17.0.7` floor (`>=22.22.1`).
 
-### 11. Documentation truthfulness pass 🟡 (R11)
-`docker-compose.yml` now mounts `./mosquitto` into the backend and includes a
-`mosquitto-reloader` sidecar (a fourth long-running service). `README.md`,
-`docs/production-deployment.md` and `docs/reference/operations.md` still say the
-default Compose deliberately does not mount Mosquitto config, that dashboard
-broker reconfiguration is not wired, and that Aeolus runs as three containers.
-Fix these before a marketing push (see documentation-update rules for which file
-owns each claim).
+### 11. Documentation truthfulness pass ✅ (R11) — DONE
+`docs/production-deployment.md` was the only file carrying the stale claims
+(a grep of `README.md` and `docs/reference/operations.md` found no
+Mosquitto/container/broker-reconfiguration wording to correct). It now states
+the stack runs four long-running services — adding the `aeolus-mosquitto-reloader`
+sidecar row and noting the profile-gated on-demand `seed` service — and the MQTT
+provisioning note now says the default Compose **does** mount `./mosquitto` into
+the backend and runs the reload sidecar (reload over a shared PID namespace, no
+Docker socket), with dashboard-managed provisioning present but opt-in behind
+`MQTT_MANAGED_PROVISIONING_ENABLED` (default `false`). The Docker socket remains
+deliberately unmounted.
 
 ---
 
