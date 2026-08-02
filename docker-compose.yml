@@ -78,7 +78,10 @@ services:
     # and direct LAN access for Hue bridge communication
     network_mode: host
     environment:
-      NODE_ENV: ${NODE_ENV:-development}
+      # Compose is the main evaluation/install path, so default to production
+      # (avoids stack-trace/error-detail exposure). Local source development uses
+      # the dev scripts; override with NODE_ENV=development if needed.
+      NODE_ENV: ${NODE_ENV:-production}
       PORT: ${API_PORT:-3001}
       MQTT_BROKER_URL: mqtt://localhost:1883
       MQTT_TOPICS: "${MQTT_TOPICS:-#}"

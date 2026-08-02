@@ -55,13 +55,6 @@ This is mostly an operational sign-off, with one code correction first:
   or rename the misleading "revoked credential rejected" assertion. (Not a
   default-path blocker — provisioning stays opt-in.)
 
-### Default Compose should use `NODE_ENV=production` 🟡
-The production guide tells operators to set `NODE_ENV=production`, but the
-default Compose stack uses `${NODE_ENV:-development}`. Since Compose is also the
-main evaluation/installation path, production should be the safe default (avoids
-accidental stack-trace/error-detail exposure); local source development uses the
-dev scripts explicitly.
-
 ### Explicit trusted-proxy design for rate limiting 🟡
 Rate limiting keys on `req.ip`, but Express does not configure a trusted reverse
 proxy. Behind Caddy/nginx/Cloudflare, users can share the proxy address and one
@@ -143,21 +136,13 @@ interface", not "fabricate arbitrary event contexts". Note the frontend
 `saveAndFire` currently depends on the full-context mode, so this needs a
 coordinated frontend change.
 
-### Data Store quota accounting is approximate 🟡
+### Data Store storage accounting is approximate 🟡
 `DataStore.write()` estimates storage as `recordCount * 200 bytes` rather than
-actual serialized size, ignores shared-bucket size, and auto-creates a missing
-collection without enforcing `maxCollections` (explicit `createCollection()`
-does enforce it). Large JSON records can overshoot `maxStorageMb` and
-auto-created collections can exceed `maxCollections`. Operational guardrail, not
-a security blocker under the current threat model: track real serialized size,
-include buckets, and enforce `maxCollections` on the auto-create path.
-
-### CSV export can carry spreadsheet formulas 🟡
-Data Store CSV export escapes quotes/commas/newlines correctly, but values
-beginning with `=`, `+`, `-`, or `@` remain formula-capable when opened in
-Excel/LibreOffice. If collection content can be influenced by external
-devices/APIs, neutralise leading formula characters on export. Low risk for the
-local/trusted model; easy hardening.
+actual serialized size, and ignores shared-bucket size, so large JSON records
+can overshoot `maxStorageMb`. Operational guardrail, not a security blocker under
+the current threat model: track real serialized size and include buckets.
+(The `maxCollections` auto-create bypass is fixed — the write auto-create path
+now enforces the limit like explicit `createCollection()`.)
 
 ---
 
@@ -181,13 +166,9 @@ model, but should remain visible:
 - `/metrics` is deliberately open when `METRICS_TOKEN` is unset — fine on
   LAN-only installs; remotely reachable deployments should set a token or fail
   closed in production.
-- `GET /api/system/version` performs an outbound GitHub update check per request
-  — cache the result to reduce external dependency/abuse potential.
 - The Mosquitto reload sidecar installs `inotify-tools` via `apk add` at
   container startup — bake it into a tiny pinned sidecar image for a
   resilient/offline appliance instead of needing the Alpine repo at runtime.
-- The frontend Dockerfile uses `npm install` rather than `npm ci` — switch to
-  `npm ci` for reproducible, lockfile-exact production image builds.
 - The Mosquitto healthcheck probes anonymously, so it reports the broker
   unhealthy once managed provisioning switches it to `allow_anonymous false`.
   It is observability-only (the backend does not gate startup on it), but the

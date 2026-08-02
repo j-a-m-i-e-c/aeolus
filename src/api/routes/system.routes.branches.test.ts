@@ -287,5 +287,31 @@ describe("system.routes — branch coverage", () => {
       expect(res.status).toBe(200);
       expect(res.body.updateAvailable).toBe(false);
     });
+
+    it("caches the update check so repeat requests do not re-hit GitHub", async () => {
+      mockReadFileSync.mockImplementation((p: string) => {
+        if (typeof p === "string" && p.includes("build-info.json")) {
+          return JSON.stringify({ commit: "abc1234", buildDate: "2024-06-01" });
+        }
+        throw new Error("ENOENT");
+      });
+      const commits = [
+        { sha: "newer999newer999newer999newer999newer999n" },
+        { sha: "abc1234abc1234abc1234abc1234abc1234abc1234" },
+      ];
+      const fetchSpy = vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve(commits),
+      }) as any;
+      globalThis.fetch = fetchSpy;
+
+      const first = await request(app, "GET", "/api/system/version");
+      const second = await request(app, "GET", "/api/system/version");
+
+      expect(first.body.updateAvailable).toBe(true);
+      expect(second.body).toEqual(first.body);
+      // The GitHub update check runs once; the second request is served from cache.
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    });
   });
 });

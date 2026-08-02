@@ -246,11 +246,23 @@ export class DataStore {
       );
     }
 
-    // Auto-create collection if it doesn't exist
+    // Auto-create collection if it doesn't exist. The auto-create path enforces
+    // maxCollections too, so a write to a brand-new collection cannot bypass the
+    // limit that explicit createCollection() enforces.
     const existsRow = this.db.prepare(
       "SELECT 1 as exists_flag FROM ds_collections WHERE name = ?"
     ).get(collection) as { exists_flag: number } | undefined;
     if (!existsRow) {
+      const collCountRow = this.db.prepare("SELECT COUNT(*) as cnt FROM ds_collections").get() as { cnt: number };
+      if (collCountRow.cnt >= this.config.maxCollections) {
+        logger.warn(
+          { collection, maxCollections: this.config.maxCollections },
+          "Data Store collection limit reached — rejecting auto-create write",
+        );
+        throw new Error(
+          `Maximum collections limit reached: ${collCountRow.cnt} >= ${this.config.maxCollections}`,
+        );
+      }
       const now = Date.now();
       this.db.prepare(
         "INSERT INTO ds_collections (name, description, retention_days, created_at, updated_at) VALUES (?, NULL, NULL, ?, ?)"

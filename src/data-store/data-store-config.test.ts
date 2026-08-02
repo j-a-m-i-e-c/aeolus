@@ -315,6 +315,30 @@ describe("DataStore — Schema and Config", () => {
     });
   });
 
+  describe("maxCollections enforcement on the auto-create write path", () => {
+    it("rejects a write that would auto-create a collection beyond maxCollections", () => {
+      const store = new DataStore(db, eventBus);
+      store.enable({
+        enabled: true,
+        maxStorageMb: 100,
+        maxRecordsPerCollection: 1000,
+        maxCollections: 2,
+      });
+      store.createCollection("c1");
+      store.createCollection("c2");
+
+      // Writing to an existing collection is unaffected by the limit.
+      expect(() => store.write("c1", { v: 1 })).not.toThrow();
+
+      // A write to a brand-new collection would exceed maxCollections → rejected,
+      // matching explicit createCollection() rather than silently bypassing it.
+      expect(() => store.write("c3", { v: 1 })).toThrow(/Maximum collections limit reached/);
+
+      // The rejected collection was not created.
+      expect(store.listCollections().map((c) => c.name).sort()).toEqual(["c1", "c2"]);
+    });
+  });
+
   describe("dispose()", () => {
     it("does not throw", () => {
       const store = new DataStore(db, eventBus);

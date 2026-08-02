@@ -33,8 +33,23 @@ function getDiskUsage(): { total: number; used: number; free: number; usagePerce
   }
 }
 
+interface VersionInfo {
+  commit: string;
+  buildDate: string;
+  updateAvailable: boolean;
+  latestCommit: string | null;
+  commitsBehind: number;
+}
+
+/** Cache the version/update-check response so the per-request GitHub call is throttled. */
+const VERSION_CACHE_TTL_MS = 15 * 60 * 1000;
+
 export function createSystemRoutes(): Router {
   const router = Router();
+
+  // Cached version response (build info is process-stable; the update check is an
+  // outbound GitHub call we don't want to make on every request).
+  let versionCache: { at: number; data: VersionInfo } | null = null;
 
   /**
    * GET /api/system — host diagnostics (admin only).
@@ -110,8 +125,14 @@ export function createSystemRoutes(): Router {
     res.json(logs);
   });
 
-  /** GET /api/system/version — build-time version info + update check */
+  /** GET /api/system/version — build-time version info + update check (cached) */
   router.get("/version", async (_req, res) => {
+    // Serve a recent cached result to avoid an outbound GitHub call per request.
+    if (versionCache && Date.now() - versionCache.at < VERSION_CACHE_TTL_MS) {
+      res.json(versionCache.data);
+      return;
+    }
+
     // Read build info from file baked at container build time
     let commit = "unknown";
     let buildDate = "unknown";
@@ -164,7 +185,9 @@ export function createSystemRoutes(): Router {
       }
     }
 
-    res.json({ commit, buildDate, updateAvailable, latestCommit, commitsBehind });
+    const data: VersionInfo = { commit, buildDate, updateAvailable, latestCommit, commitsBehind };
+    versionCache = { at: Date.now(), data };
+    res.json(data);
   });
 
   return router;

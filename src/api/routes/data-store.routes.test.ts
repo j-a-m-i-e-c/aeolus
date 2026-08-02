@@ -511,5 +511,22 @@ describe("data-store.routes", () => {
       expect(lines[1]).toBe("1000,22.5,office");
       expect(lines[2]).toBe("2000,23,lab");
     });
+
+    it("neutralises spreadsheet formulas in exported values", async () => {
+      mockDataStore.query.mockReturnValue({
+        records: [
+          { payload: { note: "=SUM(A1,A2)" }, tags: { src: "+cmd" }, timestamp: 1000 },
+        ],
+        total: 1,
+      });
+      const res = await request(app, "GET", "/api/data-store/collections/sensors/export");
+      expect(res.status).toBe(200);
+      const csv = res.body as string;
+      const lines = csv.trim().split("\n");
+      // Formula-leading values are prefixed with a single quote so Excel/LibreOffice
+      // treat them as text. The "=SUM(A1,A2)" value also contains a comma, so it is
+      // additionally quoted; "+cmd" has no comma so it is just prefixed.
+      expect(lines[1]).toBe(`1000,"'=SUM(A1,A2)",'+cmd`);
+    });
   });
 });

@@ -20,7 +20,14 @@ function escapeCsvValue(value: unknown): string {
   if (value === undefined || value === null) {
     return "";
   }
-  const str = typeof value === "object" ? JSON.stringify(value) : String(value);
+  let str = typeof value === "object" ? JSON.stringify(value) : String(value);
+  // Neutralise spreadsheet formula injection: a value that begins with =, +, -,
+  // @ (or a leading tab/CR) is treated as a formula by Excel/LibreOffice. Prefix
+  // it with a single quote so it is rendered as literal text instead. Data Store
+  // content can be influenced by external devices/APIs, so this applies on export.
+  if (/^[=+\-@\t\r]/.test(str)) {
+    str = `'${str}`;
+  }
   if (str.includes(",") || str.includes('"') || str.includes("\n")) {
     return `"${str.replace(/"/g, '""')}"`;
   }
@@ -338,9 +345,10 @@ export function createDataStoreRoutes(
     const payloadFieldsArr = Array.from(payloadFields);
     const tagFieldsArr = Array.from(tagFields).map((t) => `tag:${t}`);
 
-    // Build CSV header
+    // Build CSV header. Field names come from record payloads/tags, so they are
+    // escaped/neutralised too (a field named "=cmd" or containing a comma).
     const headers = ["timestamp", ...payloadFieldsArr, ...tagFieldsArr];
-    const csvLines: string[] = [headers.join(",")];
+    const csvLines: string[] = [headers.map(escapeCsvValue).join(",")];
 
     // Build CSV rows
     for (const record of records) {
