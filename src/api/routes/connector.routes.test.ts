@@ -275,6 +275,25 @@ describe("connector.routes", () => {
       expect(res.status).toBe(200);
       expect((res.body as any).id).toBe("inst-1");
     });
+
+    it("should redact password fields in the status config", async () => {
+      const mod = makeModule("hue");
+      mockRegistry.getModule.mockReturnValue(mod);
+      mockManager.getStatus.mockReturnValue(
+        makeInstanceInfo("inst-1", {
+          connectorType: "hue",
+          config: { host: "192.168.1.100", apiKey: "super-secret-bridge-key" },
+        }),
+      );
+
+      const res = await request(app, "GET", "/api/connectors/inst-1/status");
+      expect(res.status).toBe(200);
+      const body = res.body as any;
+      expect(body.config.host).toBe("192.168.1.100");
+      expect(body.config.apiKey).toBe("********");
+      // The raw secret must never appear anywhere in the serialized payload.
+      expect(JSON.stringify(body)).not.toContain("super-secret-bridge-key");
+    });
   });
 
   describe("POST /api/connectors/:id/setup/:stepId", () => {

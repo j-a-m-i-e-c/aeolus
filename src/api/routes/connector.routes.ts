@@ -89,7 +89,14 @@ export function createConnectorRoutes(
     res.json(steps);
   });
 
-  /** GET /api/connectors/:id/status — get connector health status */
+  /**
+   * GET /api/connectors/:id/status — get connector health status.
+   *
+   * Available to any authenticated user for health display, so the raw instance
+   * config (which can include secrets such as a Hue bridge API key) must be
+   * redacted the same way the list endpoint redacts it. Without this, a
+   * `password`-typed field would leak to non-admins through the status payload.
+   */
   router.get("/:id/status", (req, res) => {
     const id = req.params.id as string;
     const status = connectorManager.getStatus(id);
@@ -99,7 +106,9 @@ export function createConnectorRoutes(
       return;
     }
 
-    res.json(status);
+    const mod = connectorRegistry.getModule(status.connectorType);
+    const redactedConfig = redactPasswords(status.config, mod);
+    res.json({ ...status, config: redactedConfig });
   });
 
   /** POST /api/connectors/:id/setup/:stepId — execute a setup step */
@@ -119,8 +128,8 @@ export function createConnectorRoutes(
     res.json({ success: true });
   }));
 
-  /** POST /api/connectors/:id/search-lights — start Zigbee light search */
-  router.post("/:id/search-lights", asyncHandler(async (req, res) => {
+  /** POST /api/connectors/:id/search-lights — start Zigbee light search (admin-only, like connector setup/management) */
+  router.post("/:id/search-lights", requireAdmin, asyncHandler(async (req, res) => {
     const id = req.params.id as string;
     const status = connectorManager.getStatus(id);
     if (!status) {
@@ -138,8 +147,8 @@ export function createConnectorRoutes(
     res.json(result);
   }));
 
-  /** GET /api/connectors/:id/search-lights/status — get search progress */
-  router.get("/:id/search-lights/status", asyncHandler((req, res) => {
+  /** GET /api/connectors/:id/search-lights/status — get search progress (admin-only, like connector setup/management) */
+  router.get("/:id/search-lights/status", requireAdmin, asyncHandler((req, res) => {
     const id = req.params.id as string;
     const status = connectorManager.getStatus(id);
     if (!status) {

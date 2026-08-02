@@ -19,14 +19,17 @@ vi.mock("../../logger.js", () => ({
   },
 }));
 
-// Mock auth middleware to pass through — tests focus on route logic, not auth
+// Mock auth middleware — tests focus on route logic, not token verification.
+// The authenticated user's role is driven by the `x-test-role` request header
+// so individual tests can exercise the admin vs non-admin status redaction.
 vi.mock("../../auth/auth-middleware.js", () => ({
   authenticate: (_req: unknown, _res: unknown, next: () => void) => {
-    // Set req.user to an admin user
-    (_req as express.Request).user = {
-      userId: "admin-1",
-      username: "admin",
-      role: "admin" as const,
+    const req = _req as express.Request;
+    const role = req.headers["x-test-role"] === "user" ? "user" : "admin";
+    req.user = {
+      userId: role === "admin" ? "admin-1" : "user-1",
+      username: role,
+      role: role as "admin" | "user",
       groupId: null,
     };
     next();
@@ -42,6 +45,7 @@ async function request(
   method: string,
   path: string,
   body?: unknown,
+  headers: Record<string, string> = {},
 ): Promise<{ status: number; body: unknown }> {
   return new Promise((resolve, reject) => {
     const server = app.listen(0, () => {
@@ -54,7 +58,7 @@ async function request(
       const url = `http://127.0.0.1:${addr.port}${path}`;
       const options: RequestInit = {
         method: method.toUpperCase(),
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...headers },
       };
       if (body !== undefined) {
         options.body = JSON.stringify(body);
@@ -139,6 +143,53 @@ describe("Feature: mqtt-device-provisioning — Provisioning Routes Integration 
       expect(body.level).toBe("open");
       expect(body.backendConnected).toBe(true);
       expect((res.body as { managedProvisioningEnabled: boolean }).managedProvisioningEnabled).toBe(true);
+    });
+
+    it("exposes the shared credential to admins", async () => {
+      const sharedService = createMockProvisioningService({
+        getStatus: vi.fn().mockReturnValue({
+          level: "shared_password",
+          sharedCredential: { username: "aeolus-shared", password: "super-secret-broker-pw" },
+          backendConnected: true,
+        } satisfies SecurityStatus),
+      });
+      const sharedApp = createApp(sharedService);
+
+      const res = await request(sharedApp, "GET", "/api/mqtt/provisioning/status");
+      expect(res.status).toBe(200);
+      const body = res.body as SecurityStatus;
+      expect(body.level).toBe("shared_password");
+      expect(body.sharedCredential).toEqual({
+        username: "aeolus-shared",
+        password: "super-secret-broker-pw",
+      });
+    });
+
+    it("redacts the shared credential for non-admins", async () => {
+      const sharedService = createMockProvisioningService({
+        getStatus: vi.fn().mockReturnValue({
+          level: "shared_password",
+          sharedCredential: { username: "aeolus-shared", password: "super-secret-broker-pw" },
+          backendConnected: true,
+        } satisfies SecurityStatus),
+      });
+      const sharedApp = createApp(sharedService);
+
+      const res = await request(
+        sharedApp,
+        "GET",
+        "/api/mqtt/provisioning/status",
+        undefined,
+        { "x-test-role": "user" },
+      );
+      expect(res.status).toBe(200);
+      const body = res.body as SecurityStatus;
+      // Non-admins still see level/connection (useful health signal)...
+      expect(body.level).toBe("shared_password");
+      expect(body.backendConnected).toBe(true);
+      // ...but never the broker-wide password.
+      expect(body.sharedCredential).toBeNull();
+      expect(JSON.stringify(body)).not.toContain("super-secret-broker-pw");
     });
   });
 

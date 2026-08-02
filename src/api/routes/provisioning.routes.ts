@@ -41,7 +41,14 @@ export function createProvisioningRoutes(
   /** GET /api/mqtt/provisioning/status — Return current security status */
   router.get("/status", authenticate, asyncHandler((req, res) => {
     const status = provisioningService.getStatus();
-    res.json({ ...status, managedProvisioningEnabled });
+    // getStatus() includes the broker-wide sharedCredential (username +
+    // plaintext password) at the shared_password level. Only admins may see it;
+    // non-admins receive the status with the credential stripped.
+    const isAdmin = req.user?.role === "admin";
+    const safeStatus = isAdmin
+      ? status
+      : { ...status, sharedCredential: null };
+    res.json({ ...safeStatus, managedProvisioningEnabled });
   }));
 
   // ─── Security Level Management (admin-only) ──────────────────────────────
