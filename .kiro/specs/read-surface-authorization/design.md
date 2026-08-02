@@ -341,7 +341,7 @@ Key cases:
 4. **Filter before limit for the automation global list.** Applying the read
    filter before the limit prevents a non-admin from receiving fewer than `limit`
    readable entries just because unreadable entries occupied the newest slots.
-5. **Filtered single layout endpoint, not a split endpoint.** The reassessment
-   offered either option; per-user filtering of the existing endpoint is smaller,
+5. **Filtered single layout endpoint, not a split endpoint.** Either option is
+   reasonable; per-user filtering of the existing endpoint is smaller,
    keeps one client contract, and matches the frontend's existing tab-access
    filtering.

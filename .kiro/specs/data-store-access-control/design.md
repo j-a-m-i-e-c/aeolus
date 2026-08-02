@@ -132,8 +132,8 @@ Same 403 gate prepended to `GET /collections/:name/export`.
 1. **Buckets are admin-only.** `collection_tab_assignments` maps *collections*,
    not buckets; there is no server-side ownership for the shared key/value
    namespace. Rather than invent one now, buckets are treated as admin/trusted
-   (the reassessment's explicit recommendation). A future bucket→tab model can
-   relax this.
+   (the recommended short-term posture for the shared bucket namespace). A future
+   bucket→tab model can relax this.
 2. **Writes are admin-only.** The REST record-write endpoint is a
    management/dashboard surface; automations write through the sandbox `db.*`
    API (scoped by `automation-scope-resolver`), not this route. Admin-gating REST

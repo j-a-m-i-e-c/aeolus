@@ -17,159 +17,11 @@ authorization model first, hardening against determined insiders second.
 - 🟡 Medium — clarity/reproducibility/polish
 - 📋 Planned — identified, not yet specced
 
-## Sources
-- Deep reassessment, 1 August 2026: `docs/aeolus-deep-reassessment-2026-08-01.md`
-  (numbers below such as "R1", "R8" map to that document's numbered items).
-
----
-
-## Release gate — fix before public repository / portfolio promotion
-
-The reassessment identifies a concentrated set of fixes that are either easy or
-directly contradict Aeolus's public multi-user/permission claims. These are the
-items most likely to create an embarrassing demo or security-review moment.
-Work them roughly in this order.
-
-### 1. Non-admin authored Logic executes with system-wide authority ✅ (R1) — DONE
-**Resolved by the `scoped-automation-authoring` spec** (see
-`.kiro/specs/scoped-automation-authoring/`). Every automation now carries a
-persisted authorization scope (`automation_rules.authored_unrestricted` +
-`owner_tab_id`, migration 011). Admin-authored automations stay unrestricted;
-non-admin-authored automations are bound at creation to a single owning tab the
-author holds `write` on and run confined to that tab's exposed devices and
-surfaced Data Store collections — no raw MQTT publish, no shared buckets,
-form-rule webhooks refused, HTTP limited to the SSRF policy.
-
-Enforcement is defense in depth via a new `AutomationScopeResolver` injected
-into both the sandbox (injects only in-scope devices; gates `db.*`) and the
-`CommandService` (re-checks every dispatch; out-of-scope device actions and all
-scoped publishes/webhooks return a terminal `unauthorized` failure). The owning
-tab also exposes its automations, so a scoped author can view/fire/edit their
-own work without admin layout edits. Scope is bound from the server-side role
-(never the body) and is immutable across non-admin updates; a deleted owning tab
-fails closed to an empty scope. `docs/security/permissions.md` documents the
-model. The companion `admin-user-management` spec adds create/promote/demote of
-admin users with last-admin protection.
-
-The old UI inconsistency is resolved too: the authoring UI now sends the owning
-`tabId` for non-admins (and hides authoring when the user has no writable tab).
-
-Deferred follow-ups (own backlog entries below):
-- per-automation MQTT publish namespaces (e.g. `aeolus/automations/{ruleId}/...`)
-  so scoped automations can publish safely instead of being denied;
-- consolidating outbound HTTP (script `http` + form-rule webhooks) behind one
-  bounded, SSRF-checked host service, after which scoped webhooks can be allowed.
-
-### 2. Read surfaces bypass the resource permission model ✅ (R2) — DONE
-**Resolved by the `read-surface-authorization` spec** (see
-`.kiro/specs/read-surface-authorization/`). The adjacent read surfaces now reuse
-the same `PermissionResolver` / `Device_Exposure_Resolver` / `requireDevice`
-stack the core routes use — no new tables, no migration:
-- `GET /api/state` is filtered by device read permission (admins see all), and
-  returns the same device set as `GET /api/devices`;
-- the initial WebSocket `snapshot` is scoped to the client's observable devices
-  using the *same* rule as the live device broadcast, so snapshot and live are
-  consistent by construction;
-- `GET /api/devices/:id/actions`, `/completion-tiers`, and `/history` are guarded
-  by `requireDevice("read")` (404-before-403, admin bypass);
-- `GET /api/automations/history` filters the global list to readable automations
-  (filter-before-limit) and 403s a `ruleId` the caller cannot read;
-- `GET /api/layout` returns only the tabs a non-admin can reach and their panes,
-  via a new `PermissionResolver.accessibleTabIds`; `PUT /api/layout` stays
-  admin-only.
-
-Destructive device-history routes remain `requireAdmin`. Covered by
-`src/__integration__/read-surface-authorization.integration.test.ts` and WS
-snapshot-scoping tests.
-
-### 3. Named triggers use the old caller-supplied tab pattern ✅ (R3) — DONE
-`POST /api/automations/trigger/:name` emits a global `service/trigger/{name}`
-event not tied to the automations that subscribe to it, so the old
-`requireTabPermission("interact")` guard let any interact-permitted tab fire a
-trigger consumed by an automation elsewhere. The route is now `requireAdmin`
-(`src/api/routes/automation.routes.ts`), the short-term fix from the reassessment.
-A non-admin `TriggerButtonPane` therefore now receives 403 — acceptable under the
-current threat model until trigger→automation/tab ownership is persisted and
-authorized server-side (the deferred longer-term fix). Covered by an admin-only
-assertion in `src/__integration__/resource-authorization.integration.test.ts`.
-
-### 4. Data Store REST access is global for every authenticated user ✅ (R4) — DONE
-**Resolved by the `data-store-access-control` spec** (see
-`.kiro/specs/data-store-access-control/`). The Data Store REST API now enforces
-authorization by reusing `requireAdmin`, `PermissionResolver.accessibleTabIds`,
-and the `Collection_Ownership_Store` — no new tables, no migration:
-- management + lifecycle (create/update/delete collection, config get/put, stats,
-  enable, disable), all record writes, and all shared key/value bucket routes are
-  `requireAdmin`;
-- `GET /collections` is filtered to the collections surfaced on tabs a non-admin
-  can reach (admins see all);
-- `GET /collections/:name/records` and `/export` require the collection to be
-  accessible (surfaced by a reachable tab) — non-admins get 403 otherwise,
-  including for unsurfaced or non-existent collections (fail-closed, no existence
-  probing).
-
-The scoping rule matches the live WebSocket Data Store visibility. Covered by
-`src/__integration__/data-store-access-control.integration.test.ts`.
-
-### 5. Connector status can leak raw connector secrets ✅ (R5) — DONE
-`GET /api/connectors/:id/status` now applies the same config-schema redaction as
-the list endpoint, so `password`-typed fields (e.g. a Hue bridge API key) are
-replaced with `********` before the status reaches any authenticated user. The
-`search-lights` start and status endpoints are now `requireAdmin`, matching the
-rest of connector setup/management. (`src/api/routes/connector.routes.ts`.)
-
-### 6. MQTT provisioning status exposes the shared broker password ✅ (R6) — DONE
-`GET /api/mqtt/provisioning/status` still serves level/connection to any
-authenticated user, but the broker-wide `sharedCredential` (username + plaintext
-password) is now stripped for non-admins and returned only to admins through the
-same endpoint. (`src/api/routes/provisioning.routes.ts`.) One-time display on
-create/regenerate remains a possible future refinement.
-
-### 7. System diagnostics and logs available to every authenticated user ✅ (R7) — DONE
-`GET /api/system` and `GET /api/system/logs` now require admin;
-`GET /api/system/version` stays available to any authenticated user as a
-health/version endpoint. (`src/api/routes/system.routes.ts`.)
-
-### 8. MQTT broker credentials can be logged in plaintext ✅ (R8) — DONE
-A `redactBrokerUrl` helper strips userinfo from the broker URL before it is
-logged on connect and reconnect, so credentials embedded in
-`mqtt://user:pass@host` no longer reach the logs. (`src/mqtt/mqtt-service.ts`.)
-Separate `MQTT_USERNAME`/`MQTT_PASSWORD` config remains a possible future
-refinement.
-
-### 9. Initial MQTT connection failure does not start the retry loop ✅ (R9) — DONE
-**Resolved by the `mqtt-initial-retry` spec** (see
-`.kiro/specs/mqtt-initial-retry/`). A new `MqttService.connectWithRetry()` used
-at startup attempts one connection and, on failure, enters the *same*
-exponential-backoff reconnection loop a mid-session disconnect uses — in the
-background, without rejecting — so a broker that is briefly unavailable at boot
-no longer leaves a healthy-looking backend permanently MQTT-disconnected.
-`src/index.ts` now calls `connectWithRetry()` (no more handled-fatal "running
-without MQTT"), so the HTTP server still starts during a broker outage.
-`connect()` keeps its throw-on-failure contract for credentialed reconnection
-flows. `docker-compose.yml` gains a Mosquitto healthcheck for observability; the
-backend dependency intentionally stays `service_started` (not `service_healthy`)
-because the code-level retry guarantees recovery and a strict health gate would
-wrongly block boot under secured (`allow_anonymous false`) provisioning.
-Covered by `connectWithRetry` unit tests in `src/mqtt/mqtt-service.test.ts`.
-
-### 10. Pin Node ≥ 22.22.1 consistently ✅ (R12) — DONE
-Pinned Node `22.22.1` across `.nvmrc` (which also drives CI and e2e via
-`node-version-file`), both package `engines` (`>=22.22.1 <23`), the backend and
-frontend Dockerfiles, and the compose seed image — matching the lockfile's
-`lint-staged@17.0.7` floor (`>=22.22.1`).
-
-### 11. Documentation truthfulness pass ✅ (R11) — DONE
-`docs/production-deployment.md` was the only file carrying the stale claims
-(a grep of `README.md` and `docs/reference/operations.md` found no
-Mosquitto/container/broker-reconfiguration wording to correct). It now states
-the stack runs four long-running services — adding the `aeolus-mosquitto-reloader`
-sidecar row and noting the profile-gated on-demand `seed` service — and the MQTT
-provisioning note now says the default Compose **does** mount `./mosquitto` into
-the backend and runs the reload sidecar (reload over a shared PID namespace, no
-Docker socket), with dashboard-managed provisioning present but opt-in behind
-`MQTT_MANAGED_PROVISIONING_ENABLED` (default `false`). The Docker socket remains
-deliberately unmounted.
+> The public-promotion release gate (authoring scope, read-surface filtering,
+> named-trigger authorization, Data Store access control, connector/provisioning
+> secret redaction, system-log gating, broker-URL redaction, initial-MQTT retry,
+> Node pinning, and the docs truthfulness pass) is complete. Completed work is
+> recorded in git history (see `git log`).
 
 ---
 
@@ -188,14 +40,14 @@ exercise the verified provisioning path against a real broker deployment, then
 enable managed provisioning by default (or document it as a supported opt-in).
 This is an operational sign-off, not a code gap.
 
-### Default Compose should use `NODE_ENV=production` 🟡 (R13)
+### Default Compose should use `NODE_ENV=production` 🟡
 The production guide tells operators to set `NODE_ENV=production`, but the
 default Compose stack uses `${NODE_ENV:-development}`. Since Compose is also the
 main evaluation/installation path, production should be the safe default (avoids
 accidental stack-trace/error-detail exposure); local source development uses the
 dev scripts explicitly.
 
-### Explicit trusted-proxy design for rate limiting 🟡 (R14)
+### Explicit trusted-proxy design for rate limiting 🟡
 Rate limiting keys on `req.ip`, but Express does not configure a trusted reverse
 proxy. Behind Caddy/nginx/Cloudflare, users can share the proxy address and one
 login/API rate-limit bucket. Do not blindly set `trust proxy = true`; add a
@@ -206,7 +58,7 @@ client-IP behaviour.
 
 ## Product truthfulness & connector capability
 
-### Generic MQTT devices have no config path to declare acknowledgement 🟠 (R10)
+### Generic MQTT devices have no config path to declare acknowledgement 🟠
 The ack parser works, but `CommandService` only attaches `correlationId` /
 `responseTopic` when `ConnectorManager.getAcknowledgementCapability(deviceId)`
 reports support — which comes from connector instances. A plain discovered MQTT
@@ -221,6 +73,15 @@ connector/configuration path not exposed for generic discovered devices.
 
 ## Planned — authoring safety & portability
 
+### Per-automation MQTT publish namespace for scoped automations 📋
+Scoped (non-admin) automations are currently denied raw MQTT publish by the
+`AutomationScopeResolver` (a deliberate fail-closed default from the
+`scoped-automation-authoring` work). Give them a safe, bounded per-automation
+publish namespace (e.g. `aeolus/automations/{ruleId}/...`) so they can publish
+within their own prefix instead of being denied outright. Companion to the
+outbound-HTTP consolidation below, after which scoped form-rule webhooks can also
+be allowed.
+
 ### Automation deletion is unrecoverable 📋
 Deleting an automation is an immediate hard delete (`DELETE FROM automation_rules`)
 that also wipes its stored state and unregisters it from the engine. There is no
@@ -228,8 +89,8 @@ confirmation, soft-delete, or undo, so a single misclick permanently destroys
 hand-written script and paired UI. Add a safety margin: soft-delete or
 archive-on-delete so a removed automation can be restored; a confirmation before
 destroying authored logic/UI; and retention of the rule's state until deletion is
-finalised. (Reassessment flags this as important for user trust before
-encouraging people to build valuable applications in Aeolus.)
+finalised. Important for user trust before encouraging people to build valuable
+applications in Aeolus.
 
 ### Export and import individual automations 📋
 Allow a single automation — its logic, paired UI, trigger configuration and
@@ -238,9 +99,9 @@ installation or kept as an off-system backup. This is the lightweight,
 per-automation companion to the roadmap's "Reusable Aeolus applications" (which
 packages a curated Logic/UI pair for distribution), and it gives authored work a
 durable home outside the database, complementing the deletion-recoverability item
-above. The reassessment rates this one of the highest-value adoption features
-after the safety fixes: applications can move between systems, live in source
-control and become shareable examples without a full marketplace.
+above. One of the highest-value adoption features after the safety fixes:
+applications can move between systems, live in source control and become
+shareable examples without a full marketplace.
 
 ---
 
@@ -254,11 +115,13 @@ model, but should remain visible:
   targets are not validated at the network layer; response bodies have no
   explicit size cap.
 - Form-rule webhook actions use host `fetch()` without the sandbox's timeout or
-  SSRF policy — consolidate outbound requests behind one bounded host HTTP
-  service.
+  SSRF policy — consolidate outbound requests (script `http` + form-rule
+  webhooks) behind one bounded, SSRF-checked host HTTP service, after which
+  scoped webhooks can be allowed.
 - Internal automation MQTT publish bypasses the REST raw-publish namespace
-  policy — acceptable for admin-authored code, not if non-admin script authoring
-  remains enabled (ties to release-gate item 1).
+  policy — acceptable for admin-authored code; scoped (non-admin) automations are
+  already denied raw publish by the `AutomationScopeResolver`. A per-automation
+  publish namespace (see Planned above) would let them publish safely.
 - `/metrics` is deliberately open when `METRICS_TOKEN` is unset — fine on
   LAN-only installs; remotely reachable deployments should set a token or fail
   closed in production.
@@ -273,18 +136,19 @@ model, but should remain visible:
 ## Testing
 
 ### Adversarial end-to-end tests with a real non-admin user 📋
-Prove the resource-authorization model holds: a non-admin attempts to act on a
-device/automation outside their tab scope and is rejected (403); legitimate
-in-scope actions succeed. Resource-level authorization is shipped; these tests
-can now be written. Extend coverage to the release-gate items above once fixed —
-authored-Logic scope enforcement (item 1), auxiliary read filtering (item 2),
-named-trigger authorization (item 3) and Data Store access (item 4).
+Resource-level authorization, read-surface filtering, named-trigger
+authorization, and Data Store access control are shipped with unit and
+integration coverage (see the `__integration__` suites). A full Playwright
+end-to-end pass with a real non-admin user is still worth adding: prove that a
+non-admin attempting to act on or read a device/automation/collection outside
+their tab scope is rejected (403) through the actual UI, while legitimate
+in-scope actions succeed.
 
 ---
 
 ## Acceptable to leave as documented early-alpha limitations
 
-The reassessment agrees these can ship as documented limitations:
+These can ship as documented early-alpha limitations:
 
 - State provenance and observation 📋 — generic DeviceStateObservation envelope
   across all connectors; origin = device | optimistic | synthetic; only
