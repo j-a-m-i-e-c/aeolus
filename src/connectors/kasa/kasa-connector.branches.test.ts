@@ -10,6 +10,7 @@ vi.mock("../../logger.js", () => ({
 const mockStartDiscovery = vi.fn();
 const mockStopDiscovery = vi.fn();
 const mockOn = vi.fn();
+const mockOff = vi.fn();
 
 vi.mock("tplink-smarthome-api", () => ({
   default: {
@@ -17,6 +18,7 @@ vi.mock("tplink-smarthome-api", () => ({
       startDiscovery: mockStartDiscovery,
       stopDiscovery: mockStopDiscovery,
       on: mockOn,
+      off: mockOff,
     })),
   },
 }));
@@ -63,7 +65,8 @@ describe("KasaConnector — branch coverage", () => {
 
       expect(devices.length).toBe(1);
       expect(devices[0].type).toBe("light");
-      expect(devices[0].capabilities).toContain("brightness");
+      // Kasa advertises only on/off — brightness is not implemented (H3).
+      expect(devices[0].capabilities).toEqual(["on/off"]);
       expect(devices[0].state.on).toBe(true);
       expect(devices[0].name).toBe("Bedroom Bulb");
     });
@@ -319,10 +322,13 @@ describe("KasaConnector — branch coverage", () => {
   describe("execute — action type branches", () => {
     async function setupWithDevice(deviceId: string, deviceObj: Record<string, unknown>) {
       await connector.connect();
-      // We need to get a device into discoveredDevices via discovery
+      // Identity now derives from the native deviceId (see H7). Inject one so
+      // the discovered id equals the `deviceId` argument the test executes
+      // against: `kasa-${nativeId}` where nativeId is the id minus the prefix.
+      const withNativeId = { ...deviceObj, deviceId: deviceId.replace(/^kasa-/, "") };
       mockOn.mockImplementation((event: string, handler: (device: unknown) => void) => {
         if (event === "device-new") {
-          setTimeout(() => handler(deviceObj), 50);
+          setTimeout(() => handler(withNativeId), 50);
         }
       });
       const devicesPromise = connector.discoverDevices();

@@ -10,6 +10,7 @@ vi.mock("../../logger.js", () => ({
 const mockStartDiscovery = vi.fn();
 const mockStopDiscovery = vi.fn();
 const mockOn = vi.fn();
+const mockOff = vi.fn();
 
 vi.mock("tplink-smarthome-api", () => ({
   default: {
@@ -17,6 +18,7 @@ vi.mock("tplink-smarthome-api", () => ({
       startDiscovery: mockStartDiscovery,
       stopDiscovery: mockStopDiscovery,
       on: mockOn,
+      off: mockOff,
     })),
   },
 }));

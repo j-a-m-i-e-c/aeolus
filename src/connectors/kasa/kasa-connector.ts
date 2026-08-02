@@ -5,8 +5,10 @@ const { Client } = pkg;
 import type {
   Connector,
   ConnectorHealthStatus,
+  CapabilityDescriptor,
 } from "../connector.interface.js";
 import type { Device, Action } from "../../core/types.js";
+import { kasaPowerState } from "./kasa-power-state.js";
 import logger from "../../logger.js";
 
 /**
@@ -59,39 +61,44 @@ export class KasaConnector implements Connector {
     const devices: Device[] = [];
     const client = this.client;
 
-    await new Promise<void>((resolve) => {
-      client.startDiscovery({
-        broadcast: this.broadcastAddress,
-        discoveryTimeout: this.discoveryTimeout,
-      });
-
-      const handleDevice = (device: unknown) => {
-        try {
-          const mapped = this.mapDevice(device);
-          if (mapped) {
-            // Avoid duplicates within the same scan
-            if (!devices.some((d) => d.id === mapped.id)) {
-              devices.push(mapped);
-            }
-            this.discoveredDevices.set(mapped.id, device);
+    const handleDevice = (device: unknown) => {
+      try {
+        const mapped = this.mapDevice(device);
+        if (mapped) {
+          // Avoid duplicates within the same scan
+          if (!devices.some((d) => d.id === mapped.id)) {
+            devices.push(mapped);
           }
-        } catch (err) {
-          logger.warn(
-            { error: (err as Error).message },
-            "Failed to map discovered Kasa device",
-          );
+          this.discoveredDevices.set(mapped.id, device);
         }
-      };
+      } catch (err) {
+        logger.warn(
+          { error: (err as Error).message },
+          "Failed to map discovered Kasa device",
+        );
+      }
+    };
 
-      // Listen for both new and already-known devices
-      client.on("device-new", handleDevice);
-      client.on("device-online", handleDevice);
+    // Register scan-local listeners and guarantee their removal when the scan
+    // settles, so repeated polls never accumulate handlers (see H4).
+    client.on("device-new", handleDevice);
+    client.on("device-online", handleDevice);
+    try {
+      await new Promise<void>((resolve) => {
+        client.startDiscovery({
+          broadcast: this.broadcastAddress,
+          discoveryTimeout: this.discoveryTimeout,
+        });
 
-      setTimeout(() => {
-        client.stopDiscovery();
-        resolve();
-      }, this.discoveryTimeout);
-    });
+        setTimeout(() => {
+          client.stopDiscovery();
+          resolve();
+        }, this.discoveryTimeout);
+      });
+    } finally {
+      client.off("device-new", handleDevice);
+      client.off("device-online", handleDevice);
+    }
 
     // Update health — the client is still functional even if no devices were found on this cycle.
     // Only mark disconnected if we've NEVER found any devices. If we previously found devices
@@ -129,25 +136,39 @@ export class KasaConnector implements Connector {
     const device = rawDevice as Record<string, unknown>;
     const alias = (device.alias as string) || "";
     const host = (device.host as string) || "unknown";
-    const deviceId = alias
-      ? `kasa-${alias.toLowerCase().replace(/\s+/g, "-")}`
-      : `kasa-${host}`;
+    // Identity comes from the immutable native device id / MAC, not the
+    // user-editable alias, so renaming a device does not change its Aeolus
+    // identity and two devices/instances cannot collide on the same alias
+    // (see H7). Fall back to host only when no native id is available.
+    const nativeId =
+      (device.deviceId as string) || (device.id as string) || (device.mac as string) || "";
+    let deviceId: string;
+    if (nativeId && nativeId.trim() !== "") {
+      deviceId = `kasa-${nativeId.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")}`;
+    } else {
+      logger.warn(
+        { host },
+        "Kasa device has no native deviceId/MAC — falling back to host-based id, which is not stable across IP changes",
+      );
+      deviceId = `kasa-${host}`;
+    }
 
     const sysInfo = device.sysInfo as Record<string, unknown> | undefined;
-    const isOn = sysInfo?.relay_state === 1 || sysInfo?.light_state
-      ? ((sysInfo.light_state as Record<string, unknown>)?.on_off === 1)
-      : false;
+    const isOn = kasaPowerState(sysInfo);
 
     // Determine device type based on constructor name / deviceType field
     const constructorName = device.constructor?.name || "";
     const deviceType = (device.deviceType as string) || "";
 
     if (constructorName === "Bulb" || deviceType === "bulb") {
+      // Only on/off is advertised: the connector implements toggle/on/off and
+      // does not (yet) implement brightness. Advertising "brightness" here would
+      // surface a control that fails (see H3).
       return {
         id: deviceId,
         name: alias || host,
         type: "light",
-        capabilities: ["on/off", "brightness"],
+        capabilities: ["on/off"],
         state: { on: isOn, online: true },
         integration: "kasa",
         lastSeen: Date.now(),
@@ -167,11 +188,15 @@ export class KasaConnector implements Connector {
       state.totalConsumption = realtime.total ?? realtime.total_wh ?? 0;
     }
 
+    // Energy telemetry (voltage/current/power) is exposed as device state for
+    // display, but "energy-monitoring" is not advertised as a capability: the
+    // connector implements no `read-energy` action, so advertising it would
+    // surface an action that fails (see H3). Only on/off is a real action.
     return {
       id: deviceId,
       name: alias || host,
       type: "plug",
-      capabilities: ["on/off", "energy-monitoring"],
+      capabilities: ["on/off"],
       state,
       integration: "kasa",
       lastSeen: Date.now(),
@@ -198,7 +223,9 @@ export class KasaConnector implements Connector {
     switch (action.type) {
       case "toggle": {
         const sysInfo = device.sysInfo as Record<string, unknown> | undefined;
-        const currentlyOn = sysInfo?.relay_state === 1;
+        // Use the canonical helper so bulbs (light_state.on_off) toggle
+        // correctly, not just plugs (relay_state) — see H2.
+        const currentlyOn = kasaPowerState(sysInfo);
         await setPowerState.call(device, !currentlyOn);
         break;
       }
@@ -222,6 +249,38 @@ export class KasaConnector implements Connector {
       { deviceId: action.deviceId, action: action.type },
       "Kasa action executed",
     );
+  }
+
+  /**
+   * Explicit action catalog. Kasa implements only the on/off family
+   * (`toggle`, `on`, `off`) for every device, so the connector advertises
+   * exactly those and nothing more (see H3). If brightness or energy reading is
+   * implemented later, it must be added here and in `execute()` together.
+   */
+  getActionCatalog(deviceId: string): CapabilityDescriptor[] | undefined {
+    if (!this.discoveredDevices.has(deviceId)) {
+      return undefined;
+    }
+    return [
+      {
+        type: "toggle",
+        label: "Toggle",
+        description: "Toggle the device on or off",
+        params: {},
+      },
+      {
+        type: "on",
+        label: "Turn On",
+        description: "Turn the device on",
+        params: {},
+      },
+      {
+        type: "off",
+        label: "Turn Off",
+        description: "Turn the device off",
+        params: {},
+      },
+    ];
   }
 
   getHealthStatus(): ConnectorHealthStatus {
