@@ -12,6 +12,7 @@ import { Router } from "express";
 import type { RequestHandler } from "express";
 import type { DeviceRegistry } from "../../core/device-registry.js";
 import type { CommandService } from "../../automations/command-service.js";
+import { restSource } from "../../automations/command-service.js";
 import type { CapabilityDescriptor } from "../../connectors/connector.interface.js";
 import type { StateHistory } from "../../core/state-history.js";
 import type { ActionResult } from "../../core/types.js";
@@ -190,12 +191,15 @@ export function createDeviceRoutes(
   router.post("/:id/action", requireDevice("interact"), validateAction, asyncHandler(async (req, res) => {
     const id = req.params.id as string;
 
-    // Route through the single physical-command boundary. Bound by an outer
-    // timeout so the HTTP response is never held open indefinitely (Req 3.6).
+    // Route through the single physical-command boundary. All device control
+    // actions are normalized through the generic device_action handler so they
+    // reach the device's Action_Catalog uniformly, regardless of action type
+    // (pre-promotion-release-gates Req 2.1, 2.2, 2.3). Pass a rest source so
+    // the scope resolver is not applied (Req 1.3, 1.4).
     const result = await withTimeout(
       commandService.execute(
-        { type: req.body.type, target: id, params: req.body.params ?? {} },
-        `rest:${id}`,
+        { type: "device_action", target: id, params: { actionType: req.body.type, ...(req.body.params ?? {}) } },
+        restSource(),
       ),
       config.restActionTimeoutMs,
       (): ActionResult => ({

@@ -21,6 +21,28 @@ import { selectRequiredTier, type ConfirmationTier } from "./command-lifecycle.j
 import type { PendingCommandTracker } from "./pending-command-tracker.js";
 import type { AutomationScopeResolver } from "./automation-scope-resolver.js";
 
+// ── Explicit command source model (pre-promotion-release-gates Req 1) ────────
+
+/**
+ * Discriminated union identifying the origin of a physical device command.
+ * The `AutomationScopeResolver` is applied only when `kind === "automation"`.
+ *
+ * - `automation` — an automation rule is dispatching (carries the authoring rule id)
+ * - `rest` — a REST device-action request (already resource-authorized at the route)
+ * - `system` — an internal/system-originated command
+ */
+export type CommandSource =
+  | { kind: "automation"; ruleId: string }
+  | { kind: "rest"; label?: string }
+  | { kind: "system"; label: string };
+
+/** Create an automation command source carrying the authoring rule id. */
+export const automationSource = (ruleId: string): CommandSource => ({ kind: "automation", ruleId });
+/** Create a REST command source (resource authorization already occurred at the route boundary). */
+export const restSource = (label?: string): CommandSource => ({ kind: "rest", label });
+/** Create a system/internal command source. */
+export const systemSource = (label: string): CommandSource => ({ kind: "system", label });
+
 /** Correlation fields attached to a command envelope for MQTT-correlating dispatch. */
 export interface CommandCorrelation {
   correlationId: string;
@@ -128,15 +150,21 @@ export class CommandService {
    */
   async execute(
     action: ActionDescriptor,
-    ruleId: string,
+    source: CommandSource | string,
     confirm?: ConfirmOptions,
     requiredTier?: ConfirmationTier,
   ): Promise<ActionResult> {
+    // Coerce a bare string to an automation source so existing automation call
+    // sites (sandbox host callbacks, form-rule closures, executeSequence) work
+    // without edits. This is NOT string-pattern inference (Req 1.5, 1.7).
+    const src: CommandSource = typeof source === "string" ? automationSource(source) : source;
+    const logId = src.kind === "automation" ? src.ruleId : (src.label ?? src.kind);
+
     // REQUESTED
     const handler = this.handlers.get(action.type);
     if (!handler) {
       this.deps.logger.warn(
-        { ruleId, actionType: action.type },
+        { ruleId: logId, actionType: action.type },
         `No handler for action type: ${action.type}`,
       );
       return {
@@ -147,13 +175,10 @@ export class CommandService {
       };
     }
 
-    // Authorization scope gate. A scoped (non-admin-authored) automation may only
-    // act on devices its owning tab exposes; it may never publish raw MQTT or
-    // invoke a webhook. Enforced here so both script host-callbacks and form-rule
-    // dispatch are covered uniformly, and so a script that fabricates an
-    // out-of-scope identifier is refused even though the injected device list
-    // never contained it. Unrestricted automations are unaffected.
-    const scopeRefusal = this.checkScope(action, ruleId);
+    // Authorization scope gate. Applied ONLY to automation sources (Req 1.2, 1.3).
+    // A Rest_Source or System_Source is already resource-authorized at the route
+    // boundary and is never treated as an unknown automation (Req 1.4).
+    const scopeRefusal = this.checkScope(action, src);
     if (scopeRefusal) {
       return scopeRefusal;
     }
@@ -172,7 +197,7 @@ export class CommandService {
       ceiling,
       hasConfirm,
       hasAckCapability,
-      ruleId,
+      logId,
       targetDeviceId,
     );
 
@@ -212,27 +237,27 @@ export class CommandService {
     if (tier === "dispatch" || !this.deps.pendingCommandTracker) {
       let dispatchResult: ActionResult | void;
       try {
-        dispatchResult = await handler(dispatchAction, ruleId, this.deps);
+        dispatchResult = await handler(dispatchAction, logId, this.deps);
       } catch (err) {
         const message = (err as Error).message;
         this.deps.logger.error(
-          { ruleId, actionType: action.type, target: action.target, error: message },
-          `Action execution failed for rule ${ruleId}`,
+          { ruleId: logId, actionType: action.type, target: action.target, error: message },
+          `Action execution failed for rule ${logId}`,
         );
-        this.logTerminal(ruleId, action.target, "FAILED", message);
+        this.logTerminal(logId, action.target, "FAILED", message);
         return { success: false, error: message, lifecycleState: "FAILED" };
       }
 
       // A handler that reports an explicit dispatch failure → FAILED.
       if (dispatchResult && dispatchResult.success === false) {
-        this.logTerminal(ruleId, action.target, "FAILED", dispatchResult.error);
+        this.logTerminal(logId, action.target, "FAILED", dispatchResult.error);
         return { ...dispatchResult, lifecycleState: "FAILED" };
       }
 
       const dispatchData = dispatchResult && dispatchResult.success ? dispatchResult.data : undefined;
 
       // Dispatch-only tier → DISPATCHED is the truthful terminal success (Req 4.8, 9.3, 9.5).
-      this.logTerminal(ruleId, action.target, "DISPATCHED");
+      this.logTerminal(logId, action.target, "DISPATCHED");
       return {
         success: true,
         ...(dispatchData ? { data: dispatchData } : {}),
@@ -262,22 +287,22 @@ export class CommandService {
     // never rejects, so the un-awaited resolved promise cannot leak.
     let dispatchResult: ActionResult | void;
     try {
-      dispatchResult = await handler(dispatchAction, ruleId, this.deps);
+      dispatchResult = await handler(dispatchAction, logId, this.deps);
     } catch (err) {
       this.deps.pendingCommandTracker.cancel(correlationId as string);
       const message = (err as Error).message;
       this.deps.logger.error(
-        { ruleId, actionType: action.type, target: action.target, error: message },
-        `Action execution failed for rule ${ruleId}`,
+        { ruleId: logId, actionType: action.type, target: action.target, error: message },
+        `Action execution failed for rule ${logId}`,
       );
-      this.logTerminal(ruleId, action.target, "FAILED", message);
+      this.logTerminal(logId, action.target, "FAILED", message);
       return { success: false, error: message, lifecycleState: "FAILED" };
     }
 
     // A handler that reports an explicit dispatch failure → FAILED.
     if (dispatchResult && dispatchResult.success === false) {
       this.deps.pendingCommandTracker.cancel(correlationId as string);
-      this.logTerminal(ruleId, action.target, "FAILED", dispatchResult.error);
+      this.logTerminal(logId, action.target, "FAILED", dispatchResult.error);
       return { ...dispatchResult, lifecycleState: "FAILED" };
     }
 
@@ -288,7 +313,7 @@ export class CommandService {
     const resolution = await resolutionPromise;
 
     this.logTerminal(
-      ruleId,
+      logId,
       action.target,
       resolution.lifecycleState,
       resolution.error,
@@ -343,16 +368,25 @@ export class CommandService {
 
   /**
    * Refuse a dispatch that falls outside the authoring automation's scope, or
-   * return `null` to allow it. Unrestricted automations (and Command_Sources
-   * with no scope resolver wired) are always allowed. A scoped automation may
-   * act only on devices in its owning tab's device set and may never publish raw
-   * MQTT or invoke a webhook. A refusal is terminal (FAILED) and never dispatches
-   * or registers a pending command.
+   * return `null` to allow it.
+   *
+   * Applied ONLY when the source is an automation (Req 1.2, 1.3). Non-automation
+   * sources (rest, system) are never scope-checked — they are already authorized
+   * at the route boundary or internally trusted.
+   *
+   * A scoped automation may act only on devices in its owning tab's device set
+   * and may never publish raw MQTT or invoke a webhook. A refusal is terminal
+   * (FAILED) and never dispatches or registers a pending command.
    */
-  private checkScope(action: ActionDescriptor, ruleId: string): ActionResult | null {
+  private checkScope(action: ActionDescriptor, source: CommandSource): ActionResult | null {
+    // Req 1.3: non-automation sources bypass the scope resolver entirely.
+    if (source.kind !== "automation") {
+      return null;
+    }
     if (!this.deps.scopeResolver) {
       return null;
     }
+    const ruleId = source.ruleId;
     const scope = this.deps.scopeResolver.resolve(ruleId);
     if (scope.kind === "unrestricted") {
       return null;

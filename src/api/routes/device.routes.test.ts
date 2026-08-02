@@ -437,8 +437,8 @@ describe("device.routes", () => {
       expect((res.body as any).success).toBe(true);
       expect((res.body as any).lifecycleState).toBe("DISPATCHED");
       expect(mockCommandService.execute).toHaveBeenCalledWith(
-        { type: "toggle", target: "dev-1", params: { on: false } },
-        "rest:dev-1",
+        { type: "device_action", target: "dev-1", params: { actionType: "toggle", on: false } },
+        { kind: "rest", label: undefined },
       );
     });
 
@@ -452,8 +452,8 @@ describe("device.routes", () => {
       });
       expect(res.status).toBe(200);
       expect(mockCommandService.execute).toHaveBeenCalledWith(
-        { type: "setBrightness", target: "dev-1", params: {} },
-        "rest:dev-1",
+        { type: "device_action", target: "dev-1", params: { actionType: "setBrightness" } },
+        { kind: "rest", label: undefined },
       );
     });
 

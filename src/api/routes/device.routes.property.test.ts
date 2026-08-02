@@ -138,7 +138,7 @@ describe("REST route returns the Command_Result truthfully with an expressive st
     );
   });
 
-  it("submits the command to the CommandService with a rest:<id> source tag", async () => {
+  it("submits the command to the CommandService normalized as device_action with a rest source", async () => {
     await fc.assert(
       fc.asyncProperty(
         commandResultArb,
@@ -153,8 +153,8 @@ describe("REST route returns the Command_Result truthfully with an expressive st
             .set("Content-Type", "application/json");
 
           expect(execute).toHaveBeenCalledWith(
-            { type: actionType, target: "dev-1", params },
-            "rest:dev-1",
+            { type: "device_action", target: "dev-1", params: { actionType, ...params } },
+            { kind: "rest", label: undefined },
           );
         },
       ),

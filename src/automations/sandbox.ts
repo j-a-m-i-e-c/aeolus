@@ -861,7 +861,13 @@ export class Sandbox {
 
     // Host-side callback for devices.actionAll() — returns BulkActionResult
     // Requirements: 7.1–7.7, 9.2
-    const deviceRegistry = this.deviceRegistry;
+    //
+    // Capture the scoped inventory that setDevicesRefs() already computed rather
+    // than re-reading the full device registry. Without this, a scoped automation's
+    // predicate is evaluated against hidden devices and the BulkActionResult can
+    // leak hidden device ids, counts, and state-side-channels — contradicting the
+    // scoped-device-inventory guarantee (pre-promotion-release-gates gate 2, Req 5.1–5.6).
+    const scopedInventory: Device[] = allDevices;  // already scope-filtered above
     await jail.set(
       "__actionAllRef",
       new ivm.Reference(function (
@@ -887,11 +893,10 @@ export class Sandbox {
             };
           }
 
-          // Catch predicate throws
+          // Catch predicate throws; filter only the scoped inventory (Req 5.1, 5.6)
           let matched: Device[];
           try {
-            const all = deviceRegistry.getAll();
-            matched = all.filter(filter);
+            matched = scopedInventory.filter(filter);
           } catch (err) {
             return {
               total: 0,

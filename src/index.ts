@@ -182,6 +182,10 @@ async function main(): Promise<void> {
 
   // Wire registries into ConnectorManager so contributed handlers are registered on restore
   connectorManager.setRegistries(actionExecutor, conditionRegistry);
+  // Wire the live MqttService into ConnectorManager so ActionRouter can publish MQTT
+  // device commands. Without this, generic MQTT device dispatch reports "broker not
+  // connected" even while mqttService is connected (pre-promotion-release-gates gate 3).
+  connectorManager.setMqttService(mqttService);
   await connectorManager.restoreFromStore();
 
   const executionLog = new ExecutionLog(200, db);
