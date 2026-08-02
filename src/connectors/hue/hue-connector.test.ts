@@ -1,7 +1,7 @@
 // src/connectors/hue/hue-connector.test.ts — Comprehensive unit tests for Hue connector
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { HueConnector } from "./hue-connector.js";
+import { HueConnector, hueDeviceId } from "./hue-connector.js";
 
 vi.mock("../../logger.js", () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
@@ -42,6 +42,13 @@ const MOCK_LIGHTS = {
     swversion: "1.88.1",
   },
 };
+
+// Device identities now derive from each light's immutable uniqueid (see H7),
+// not the bridge-local index. Compute the expected ids from the same helper the
+// connector uses so these tests track the identity scheme.
+const ID1 = hueDeviceId(MOCK_LIGHTS["1"].uniqueid, "1");
+const ID2 = hueDeviceId(MOCK_LIGHTS["2"].uniqueid, "2");
+const ID3 = hueDeviceId(MOCK_LIGHTS["3"].uniqueid, "3");
 
 const MOCK_CONFIG_NO_UPDATES = {
   swversion: "1956178040",
@@ -219,7 +226,7 @@ describe("HueConnector", () => {
       expect(devices.length).toBe(3);
       expect(devices[0].integration).toBe("hue");
       expect(devices[0].name).toBe("Living Room");
-      expect(devices[0].id).toBe("hue-light-1");
+      expect(devices[0].id).toBe(ID1);
       expect(devices[0].state.on).toBe(true);
       expect(devices[0].type).toBe("light");
       expect(devices[1].name).toBe("Kitchen");
@@ -261,7 +268,7 @@ describe("HueConnector", () => {
       });
       mockFetch.mockResolvedValueOnce({ ok: true, json: async () => [{ success: {} }] });
 
-      await connector.execute({ type: "toggle", deviceId: "hue-light-1", params: {} });
+      await connector.execute({ type: "toggle", deviceId: ID1, params: {} });
       const putCall = mockFetch.mock.calls.find(
         (c) => c[1]?.method === "PUT" && c[0].includes("/lights/1/state"),
       );
@@ -277,7 +284,7 @@ describe("HueConnector", () => {
       });
       mockFetch.mockResolvedValueOnce({ ok: true, json: async () => [{ success: {} }] });
 
-      await connector.execute({ type: "toggle", deviceId: "hue-light-1", params: {} });
+      await connector.execute({ type: "toggle", deviceId: ID1, params: {} });
       const putCall = mockFetch.mock.calls.find(
         (c) => c[1]?.method === "PUT" && c[0].includes("/lights/1/state"),
       );
@@ -287,7 +294,7 @@ describe("HueConnector", () => {
 
     it("executes brightness action with clamping", async () => {
       mockFetch.mockResolvedValueOnce({ ok: true, json: async () => [{ success: {} }] });
-      await connector.execute({ type: "brightness", deviceId: "hue-light-1", params: { brightness: 300 } });
+      await connector.execute({ type: "brightness", deviceId: ID1, params: { brightness: 300 } });
       const putCall = mockFetch.mock.calls[mockFetch.mock.calls.length - 1];
       const body = JSON.parse(putCall[1].body);
       expect(body.bri).toBe(254); // clamped to max
@@ -295,7 +302,7 @@ describe("HueConnector", () => {
 
     it("executes brightness action with zero", async () => {
       mockFetch.mockResolvedValueOnce({ ok: true, json: async () => [{ success: {} }] });
-      await connector.execute({ type: "brightness", deviceId: "hue-light-1", params: { brightness: -10 } });
+      await connector.execute({ type: "brightness", deviceId: ID1, params: { brightness: -10 } });
       const putCall = mockFetch.mock.calls[mockFetch.mock.calls.length - 1];
       const body = JSON.parse(putCall[1].body);
       expect(body.bri).toBe(0); // clamped to min
@@ -304,13 +311,13 @@ describe("HueConnector", () => {
     it("throws when brightness is used on non-dimmable light", async () => {
       // hue-light-3 is "On/Off plug-in unit" which doesn't support brightness
       await expect(
-        connector.execute({ type: "brightness", deviceId: "hue-light-3", params: { brightness: 100 } }),
+        connector.execute({ type: "brightness", deviceId: ID3, params: { brightness: 100 } }),
       ).rejects.toThrow("does not support brightness");
     });
 
     it("executes color action", async () => {
       mockFetch.mockResolvedValueOnce({ ok: true, json: async () => [{ success: {} }] });
-      await connector.execute({ type: "color", deviceId: "hue-light-1", params: { hue: 30000, saturation: 200 } });
+      await connector.execute({ type: "color", deviceId: ID1, params: { hue: 30000, saturation: 200 } });
       const putCall = mockFetch.mock.calls[mockFetch.mock.calls.length - 1];
       const body = JSON.parse(putCall[1].body);
       expect(body.hue).toBeDefined();
@@ -319,13 +326,13 @@ describe("HueConnector", () => {
 
     it("throws when color is used on non-color light", async () => {
       await expect(
-        connector.execute({ type: "color", deviceId: "hue-light-2", params: { hue: 100, saturation: 100 } }),
+        connector.execute({ type: "color", deviceId: ID2, params: { hue: 100, saturation: 100 } }),
       ).rejects.toThrow("does not support color");
     });
 
     it("executes color-temp action", async () => {
       mockFetch.mockResolvedValueOnce({ ok: true, json: async () => [{ success: {} }] });
-      await connector.execute({ type: "color-temp", deviceId: "hue-light-1", params: { ct: 300 } });
+      await connector.execute({ type: "color-temp", deviceId: ID1, params: { ct: 300 } });
       const putCall = mockFetch.mock.calls[mockFetch.mock.calls.length - 1];
       const body = JSON.parse(putCall[1].body);
       expect(body.ct).toBeDefined();
@@ -333,13 +340,13 @@ describe("HueConnector", () => {
 
     it("throws when color-temp is used on non-ct light", async () => {
       await expect(
-        connector.execute({ type: "color-temp", deviceId: "hue-light-3", params: { ct: 300 } }),
+        connector.execute({ type: "color-temp", deviceId: ID3, params: { ct: 300 } }),
       ).rejects.toThrow("does not support color temperature");
     });
 
     it("executes rename action", async () => {
       mockFetch.mockResolvedValueOnce({ ok: true, json: async () => [{ success: {} }] });
-      await connector.execute({ type: "rename", deviceId: "hue-light-1", params: { name: "New Name" } });
+      await connector.execute({ type: "rename", deviceId: ID1, params: { name: "New Name" } });
       const putCall = mockFetch.mock.calls.find(
         (c) => c[1]?.method === "PUT" && c[0].includes("/lights/1") && !c[0].includes("/state"),
       );
@@ -350,20 +357,20 @@ describe("HueConnector", () => {
 
     it("throws when rename has empty name", async () => {
       await expect(
-        connector.execute({ type: "rename", deviceId: "hue-light-1", params: { name: "  " } }),
+        connector.execute({ type: "rename", deviceId: ID1, params: { name: "  " } }),
       ).rejects.toThrow("non-empty");
     });
 
     it("throws when rename API fails", async () => {
       mockFetch.mockResolvedValueOnce({ ok: false, status: 500 });
       await expect(
-        connector.execute({ type: "rename", deviceId: "hue-light-1", params: { name: "New" } }),
+        connector.execute({ type: "rename", deviceId: ID1, params: { name: "New" } }),
       ).rejects.toThrow("500");
     });
 
     it("executes delete action", async () => {
       mockFetch.mockResolvedValueOnce({ ok: true, json: async () => [{ success: {} }] });
-      await connector.execute({ type: "delete", deviceId: "hue-light-1", params: {} });
+      await connector.execute({ type: "delete", deviceId: ID1, params: {} });
       const deleteCall = mockFetch.mock.calls.find(
         (c) => c[1]?.method === "DELETE",
       );
@@ -373,13 +380,13 @@ describe("HueConnector", () => {
     it("throws when delete API fails", async () => {
       mockFetch.mockResolvedValueOnce({ ok: false, status: 404 });
       await expect(
-        connector.execute({ type: "delete", deviceId: "hue-light-1", params: {} }),
+        connector.execute({ type: "delete", deviceId: ID1, params: {} }),
       ).rejects.toThrow("404");
     });
 
     it("throws for unsupported action type", async () => {
       await expect(
-        connector.execute({ type: "unsupported", deviceId: "hue-light-1", params: {} }),
+        connector.execute({ type: "unsupported", deviceId: ID1, params: {} }),
       ).rejects.toThrow("Unsupported action type");
     });
 
@@ -398,13 +405,13 @@ describe("HueConnector", () => {
       // PUT state fails
       mockFetch.mockResolvedValueOnce({ ok: false, status: 503 });
       await expect(
-        connector.execute({ type: "toggle", deviceId: "hue-light-1", params: {} }),
+        connector.execute({ type: "toggle", deviceId: ID1, params: {} }),
       ).rejects.toThrow("503");
     });
 
     it("uses default brightness when param is missing", async () => {
       mockFetch.mockResolvedValueOnce({ ok: true, json: async () => [{ success: {} }] });
-      await connector.execute({ type: "brightness", deviceId: "hue-light-1", params: {} });
+      await connector.execute({ type: "brightness", deviceId: ID1, params: {} });
       const putCall = mockFetch.mock.calls[mockFetch.mock.calls.length - 1];
       const body = JSON.parse(putCall[1].body);
       expect(body.bri).toBe(254);

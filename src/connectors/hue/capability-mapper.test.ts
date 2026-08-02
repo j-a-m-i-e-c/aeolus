@@ -77,7 +77,8 @@ describe("extractDeviceState", () => {
     const caps = mapTypeToCapabilities("Extended color light");
     const state = extractDeviceState(baseLight, caps);
     expect(state.on).toBe(true);
-    expect(state.brightness).toBe(200);
+    // Canonical 0–100: round(200 / 254 * 100) = 79 (see H6)
+    expect(state.brightness).toBe(79);
     expect(state.hue).toBe(5000);
     expect(state.saturation).toBe(150);
     expect(state.colorMode).toBe("hs");
@@ -90,7 +91,8 @@ describe("extractDeviceState", () => {
   it("omits color and ct fields for Dimmable light", () => {
     const caps = mapTypeToCapabilities("Dimmable light");
     const state = extractDeviceState(baseLight, caps);
-    expect(state.brightness).toBe(200);
+    // Canonical 0–100: round(200 / 254 * 100) = 79 (see H6)
+    expect(state.brightness).toBe(79);
     expect(state.hue).toBeUndefined();
     expect(state.ct).toBeUndefined();
   });

@@ -55,11 +55,11 @@ export const snippets: SnippetDescriptor[] = [
   {
     id: "set-brightness",
     name: "Set Brightness",
-    description: "Set a Hue light to a specific brightness (0-254)",
+    description: "Set a Hue light to a specific brightness percentage (0-100)",
     code: `function setHueBrightness(context) {
-  devices.action("hue-light-1", "brightness", { brightness: 128 });
+  devices.action("hue-light-1", "brightness", { brightness: 50 });
   log.info("Set Hue light brightness to 50%");
-  state.set("brightness", 128);
+  state.set("brightness", 50);
 }`,
   },
   {
@@ -69,7 +69,7 @@ export const snippets: SnippetDescriptor[] = [
     code: `function dimAllHueLights(context) {
   const hueLights = devices.filter(d => d.integration === "hue" && d.type === "light");
   for (const light of hueLights) {
-    devices.action(light.id, "brightness", { brightness: 60 });
+    devices.action(light.id, "brightness", { brightness: 25 });
   }
   log.info(\`Dimmed \${hueLights.length} Hue lights\`);
   state.set("dimmedCount", hueLights.length);
@@ -122,13 +122,13 @@ export const snippets: SnippetDescriptor[] = [
   {
     id: "ui-brightness-slider",
     name: "Brightness Slider",
-    description: "Range input to control Hue light brightness",
+    description: "Range input to control Hue light brightness (0-100%)",
     mode: "ui",
     code: `<input
   type="range"
   min={0}
-  max={254}
-  defaultValue={128}
+  max={100}
+  defaultValue={50}
   onChange={(e) => aeolus.control("hue-light-1", "brightness", { brightness: Number(e.target.value) })}
   className="w-full accent-[#F59E0B]"
 />`,

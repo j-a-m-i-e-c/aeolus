@@ -5,6 +5,7 @@ import type {
   ConnectorHealthStatus,
   SetupStepDescriptor,
   SetupStepResult,
+  CapabilityDescriptor,
 } from "../connector.interface.js";
 import type { Device, Action } from "../../core/types.js";
 import logger from "../../logger.js";
@@ -22,6 +23,28 @@ interface ZigbeeSearchState {
   startedAt: number | null;
   newLights: Array<{ id: string; name: string }>;
   error: string | null;
+}
+
+/**
+ * Build a stable, globally-unique Aeolus device id for a Hue light.
+ *
+ * Prefers the light's immutable `uniqueid` (Zigbee MAC + endpoint), sanitised
+ * for use as an id. Falls back to the bridge-local index only when `uniqueid`
+ * is absent (rare/old bridges), which is not globally unique — logged so it is
+ * visible. See H7.
+ */
+export function hueDeviceId(uniqueId: string | undefined, index: string): string {
+  if (uniqueId && uniqueId.trim() !== "") {
+    const sanitised = uniqueId.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+    if (sanitised !== "") {
+      return `hue-${sanitised}`;
+    }
+  }
+  logger.warn(
+    { index },
+    "Hue light has no uniqueid — falling back to bridge-local index id, which is not unique across bridges",
+  );
+  return `hue-light-${index}`;
 }
 
 export class HueConnector implements Connector {
@@ -169,7 +192,11 @@ export class HueConnector implements Connector {
     const devices: Device[] = [];
 
     for (const [index, light] of Object.entries(lights)) {
-      const deviceId = `hue-light-${index}`;
+      // Derive a globally-unique, stable identity from the light's immutable
+      // Zigbee uniqueid rather than the bridge-local index, so two bridges
+      // cannot both expose `hue-light-1` (see H7). The index is bridge-local
+      // and can change; uniqueid is the device's MAC + endpoint.
+      const deviceId = hueDeviceId(light.uniqueid, index);
       this.deviceMap.set(deviceId, index);
 
       const capabilitySet = mapTypeToCapabilities(light.type);
@@ -210,6 +237,16 @@ export class HueConnector implements Connector {
         const stateRes = await fetch(`${this.baseUrl}/lights/${lightIndex}`);
         const light = (await stateRes.json()) as RawHueLight;
         body = { on: !light.state.on };
+        break;
+      }
+      case "on": {
+        // Explicit on/off — advertised by the on/off capability and now
+        // implemented so the catalog is truthful (see H5).
+        body = { on: true };
+        break;
+      }
+      case "off": {
+        body = { on: false };
         break;
       }
       case "brightness": {
@@ -311,6 +348,99 @@ export class HueConnector implements Connector {
   private getLightType(deviceId: string): string {
     const state = this.deviceStateMap.get(deviceId);
     return (state?.lightType as string) ?? "unknown";
+  }
+
+  /**
+   * Explicit per-device action catalog (see H5). Built from the device's
+   * discovered `CapabilitySet` plus the bridge-management actions the connector
+   * implements. This makes the connector the source of truth and avoids the
+   * generic `CAPABILITY_ACTION_MAP` fallback, which is keyed `color-temp` while
+   * Hue advertises the `color-temperature` capability (so `color-temp` was
+   * being rejected before it reached `execute()`), and which has no
+   * `rename`/`delete` entries.
+   *
+   * An action is advertised if and only if `execute()` implements it for the
+   * device's capability set.
+   */
+  getActionCatalog(deviceId: string): CapabilityDescriptor[] | undefined {
+    const capabilitySet = this.capabilityMap.get(deviceId);
+    if (!capabilitySet) {
+      return undefined;
+    }
+
+    const descriptors: CapabilityDescriptor[] = [
+      { type: "toggle", label: "Toggle", description: "Toggle the light on or off", params: {} },
+      { type: "on", label: "Turn On", description: "Turn the light on", params: {} },
+      { type: "off", label: "Turn Off", description: "Turn the light off", params: {} },
+    ];
+
+    if (capabilitySet.hasBrightness) {
+      descriptors.push({
+        type: "brightness",
+        label: "Set Brightness",
+        description: "Set brightness level as a percentage (0–100)",
+        params: {
+          type: "object",
+          required: ["brightness"],
+          properties: {
+            brightness: { type: "number", minimum: 0, maximum: 100 },
+          },
+        },
+      });
+    }
+
+    if (capabilitySet.hasColor) {
+      descriptors.push({
+        type: "color",
+        label: "Set Color",
+        description: "Set hue and saturation",
+        params: {
+          type: "object",
+          required: ["hue", "saturation"],
+          properties: {
+            hue: { type: "number", minimum: 0, maximum: 65535 },
+            saturation: { type: "number", minimum: 0, maximum: 254 },
+          },
+        },
+      });
+    }
+
+    if (capabilitySet.hasColorTemp) {
+      descriptors.push({
+        type: "color-temp",
+        label: "Set Color Temperature",
+        description: "Set color temperature in mireds",
+        params: {
+          type: "object",
+          required: ["ct"],
+          properties: {
+            ct: { type: "number" },
+          },
+        },
+      });
+    }
+
+    // Bridge-management actions the connector always implements.
+    descriptors.push(
+      {
+        type: "rename",
+        label: "Rename",
+        description: "Rename the light on the bridge",
+        params: {
+          type: "object",
+          required: ["name"],
+          properties: { name: { type: "string" } },
+        },
+      },
+      {
+        type: "delete",
+        label: "Delete",
+        description: "Remove the light from the bridge",
+        params: {},
+      },
+    );
+
+    return descriptors;
   }
 
   getHealthStatus(): ConnectorHealthStatus & {

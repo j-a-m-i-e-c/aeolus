@@ -100,7 +100,11 @@ export function extractDeviceState(
   };
 
   if (capabilitySet.hasBrightness) {
-    state.brightness = rawLight.state.bri;
+    // Store Canonical_Brightness (0–100), converted from the Hue-native 0–254
+    // `bri` scale, so normalized state and the command contract share one
+    // representation end-to-end (see H6). The connector translates back to
+    // 0–254 only at the Hue API boundary in execute().
+    state.brightness = Math.round((rawLight.state.bri / 254) * 100);
   }
 
   if (capabilitySet.hasColor) {
