@@ -24,6 +24,14 @@ function createMockRegistry() {
   return { getAll: () => [] } as any;
 }
 
+function createMockDeviceExposureResolver() {
+  return {
+    getExposingTabs: () => [],
+    getExposingTabsBatch: (ids: string[]) => new Map(ids.map((id) => [id, [] as string[]])),
+    getExposedDeviceIds: () => [],
+  } as any;
+}
+
 function waitForOpen(ws: WebSocket): Promise<void> {
   return new Promise((resolve, reject) => {
     if (ws.readyState === WebSocket.OPEN) { resolve(); return; }
@@ -86,7 +94,7 @@ describe("WsServer — branch coverage", () => {
 
     wsServer = new WsServer(httpServer, createMockRegistry(), eventBus, [
       { eventName: "test-event", messageType: "test" },
-    ]);
+    ], createMockDeviceExposureResolver());
   });
 
   afterEach(async () => {

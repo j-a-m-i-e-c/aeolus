@@ -46,6 +46,14 @@ export interface PermissionResolver {
     resourceIds: string[],
     required: PermissionLevel,
   ): string[];
+
+  /**
+   * The tab ids on which the user's group holds any permission level (i.e. at
+   * least `read`). Empty when the user has no group. Derived solely from
+   * `group_tab_assignments`; reads no tab id from the request. Admins are
+   * handled at the call site (they see every tab), not here.
+   */
+  accessibleTabIds(userId: string): string[];
 }
 
 /** `none` ranks below every real permission level. */
@@ -173,9 +181,20 @@ export function createPermissionResolver(
     });
   }
 
+  function accessibleTabIds(userId: string): string[] {
+    const groupId = getUserGroupId(userId);
+    if (groupId === null) {
+      return [];
+    }
+    // groupRankByTab maps every tab the group is assigned to → its rank, so its
+    // key set is exactly "tabs the group can reach at >= read".
+    return Array.from(groupRankByTab(groupId).keys());
+  }
+
   return {
     effectivePermission,
     hasResourcePermission,
     filterByPermission,
+    accessibleTabIds,
   };
 }

@@ -7,10 +7,32 @@ import { createStateRoutes } from "./state.routes.js";
 import { createTestDatabase } from "../../__test-helpers__/index.js";
 import { DeviceRegistry } from "../../core/device-registry.js";
 import type { Database as DatabaseType } from "better-sqlite3";
+import type { PermissionResolver } from "../../auth/permission-resolver.js";
 
 vi.mock("../../logger.js", () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
+
+// These tests focus on state serialization, so they run as an admin (full state,
+// no per-user filtering). The stub resolver is only invoked for non-admins;
+// non-admin device filtering is covered via the fully-wired test app. See
+// read-surface-authorization.integration.test.ts.
+const stubResolver = {
+  effectivePermission: () => "none",
+  hasResourcePermission: () => false,
+  filterByPermission: () => [],
+  accessibleTabIds: () => [],
+} as unknown as PermissionResolver;
+
+const setAdminUser: express.RequestHandler = (req, _res, next) => {
+  (req as express.Request).user = {
+    userId: "admin-1",
+    username: "admin",
+    role: "admin",
+    groupId: null,
+  };
+  next();
+};
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -50,7 +72,8 @@ describe("state.routes", () => {
 
     app = express();
     app.use(express.json());
-    app.use("/api/state", createStateRoutes(registry));
+    app.use(setAdminUser);
+    app.use("/api/state", createStateRoutes(registry, stubResolver));
   });
 
   afterEach(() => {

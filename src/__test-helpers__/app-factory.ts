@@ -136,7 +136,7 @@ export function createTestApp(
 
   app.use("/api/auth", createAuthRoutes());
   app.use("/api/devices", createDeviceRoutes(registry, actionExecutor, () => [], requireDevice, permissionResolver));
-  app.use("/api/state", createStateRoutes(registry));
+  app.use("/api/state", createStateRoutes(registry, permissionResolver));
   app.use("/api/health", createHealthRoutes(stubMqttService as never, registry, engine, startTime));
   app.use("/api/automations", createAutomationRoutes(
     engine,
@@ -152,7 +152,7 @@ export function createTestApp(
     conditionRegistry,
   ));
   app.use("/api/system", createSystemRoutes());
-  app.use("/api/layout", createLayoutRoutes(db));
+  app.use("/api/layout", createLayoutRoutes(db, permissionResolver));
   app.use("/api/data-store", createDataStoreRoutes(dataStore));
 
   // ─── Error Handler (must be last) ───────────────────────────────────────

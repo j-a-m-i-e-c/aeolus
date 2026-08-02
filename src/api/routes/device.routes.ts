@@ -101,8 +101,8 @@ export function createDeviceRoutes(
     return res.json(device);
   });
 
-  /** GET /api/devices/:id/actions — return the action catalog for a device */
-  router.get("/:id/actions", (req, res) => {
+  /** GET /api/devices/:id/actions — return the action catalog for a device (requires device read) */
+  router.get("/:id/actions", requireDevice("read"), (req, res) => {
     const id = req.params.id as string;
     const device = registry.getById(id);
     if (!device) {
@@ -116,8 +116,8 @@ export function createDeviceRoutes(
     res.json(catalog);
   });
 
-  /** GET /api/devices/:id/completion-tiers — report the device's Capability_Ceiling (Req 2.6, 2.8, 7.6) */
-  router.get("/:id/completion-tiers", (req, res) => {
+  /** GET /api/devices/:id/completion-tiers — report the device's Capability_Ceiling (requires device read) (Req 2.6, 2.8, 7.6) */
+  router.get("/:id/completion-tiers", requireDevice("read"), (req, res) => {
     if (!getCompletionTierCapability) {
       res.status(501).json({ error: "Completion tier capability not available" });
       return;
@@ -131,8 +131,8 @@ export function createDeviceRoutes(
     res.json({ deviceId: id, resolved: true, availableTiers: cap.tiers, ceiling: cap.ceiling });
   });
 
-  /** GET /api/devices/:id/history — get state history for a device */
-  router.get("/:id/history", (req, res, next) => {
+  /** GET /api/devices/:id/history — get state history for a device (requires device read) */
+  router.get("/:id/history", requireDevice("read"), (req, res, next) => {
     if (!stateHistory) {
       return res.json([]);
     }

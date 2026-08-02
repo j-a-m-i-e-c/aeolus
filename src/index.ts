@@ -315,7 +315,7 @@ async function main(): Promise<void> {
       (id, observationAvailable) => connectorManager.getCompletionTierCapability(id, observationAvailable),
     ),
   );
-  app.use("/api/state", createStateRoutes(registry));
+  app.use("/api/state", createStateRoutes(registry, permissionResolver));
   app.use("/api/health", createHealthRoutes(mqttService, registry, engine, startTime));
   const mqttPublishPolicy = {
     userNamespacePrefix: config.mqttPublish.userNamespacePrefix,
@@ -335,7 +335,7 @@ async function main(): Promise<void> {
   app.use("/api/connectors", createConnectorRoutes(connectorManager, connectorRegistry));
   app.use("/api/metrics", createMetricsSummaryRoute(metricsService));
   app.use("/api/system", createSystemRoutes());
-  app.use("/api/layout", createLayoutRoutes(db));
+  app.use("/api/layout", createLayoutRoutes(db, permissionResolver));
   app.use("/api/data-store", createDataStoreRoutes(dataStore));
 
   app.use(errorHandler);
@@ -398,7 +398,7 @@ async function main(): Promise<void> {
     { eventName: DATA_STORE_COLLECTION_DELETED, messageType: "data-store-collection-deleted", visibility: dataStoreVisibility },
   ];
 
-  const wsServer = new WsServer(server, registry, eventBus, WS_MAPPINGS);
+  const wsServer = new WsServer(server, registry, eventBus, WS_MAPPINGS, deviceExposureResolver);
 
   server.listen(config.port, () => {
     logger.info(

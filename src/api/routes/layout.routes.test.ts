@@ -6,6 +6,28 @@ import { createLayoutRoutes } from "./layout.routes.js";
 import { errorHandler } from "../middleware/error-handler.js";
 import { createTestDatabase } from "../../__test-helpers__/index.js";
 import type { Database as DatabaseType } from "better-sqlite3";
+import type { PermissionResolver } from "../../auth/permission-resolver.js";
+
+// These CRUD tests focus on layout read/replace behavior, so they run as an
+// admin (full layout, no per-user filtering). The stub resolver is only invoked
+// for non-admins, so admin tests never touch it; non-admin layout filtering is
+// covered separately via the fully-wired test app. See read-surface-authorization.
+const stubResolver = {
+  effectivePermission: () => "none",
+  hasResourcePermission: () => false,
+  filterByPermission: () => [],
+  accessibleTabIds: () => [],
+} as unknown as PermissionResolver;
+
+const setAdminUser: express.RequestHandler = (req, _res, next) => {
+  (req as express.Request).user = {
+    userId: "admin-1",
+    username: "admin",
+    role: "admin",
+    groupId: null,
+  };
+  next();
+};
 
 // ─── Mocks ───────────────────────────────────────────────────────────────────
 
@@ -55,7 +77,8 @@ describe("layout.routes", () => {
     db = createTestDatabase();
     app = express();
     app.use(express.json());
-    app.use("/api/layout", createLayoutRoutes(db));
+    app.use(setAdminUser);
+    app.use("/api/layout", createLayoutRoutes(db, stubResolver));
     app.use(errorHandler);
   });
 
@@ -186,7 +209,8 @@ describe("layout.routes", () => {
       const closedDb = createTestDatabase();
       const brokenApp = express();
       brokenApp.use(express.json());
-      brokenApp.use("/api/layout", createLayoutRoutes(closedDb));
+      brokenApp.use(setAdminUser);
+      brokenApp.use("/api/layout", createLayoutRoutes(closedDb, stubResolver));
       brokenApp.use(errorHandler);
       closedDb.close();
 
@@ -204,7 +228,8 @@ describe("layout.routes", () => {
       const closedDb = createTestDatabase();
       const brokenApp = express();
       brokenApp.use(express.json());
-      brokenApp.use("/api/layout", createLayoutRoutes(closedDb));
+      brokenApp.use(setAdminUser);
+      brokenApp.use("/api/layout", createLayoutRoutes(closedDb, stubResolver));
       brokenApp.use(errorHandler);
       closedDb.close();
 

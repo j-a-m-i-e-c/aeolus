@@ -113,21 +113,47 @@ export function createAutomationRoutes(
     res.type("text/plain").send(content);
   }));
 
-  /** GET /api/automations/history — return execution log entries */
+  /**
+   * GET /api/automations/history — return execution log entries, filtered by
+   * automation read permission. Admins see everything. A `ruleId` query targets
+   * one automation and requires read on it (403 otherwise); the global list is
+   * filtered to the automations the user can read, applying the read filter
+   * BEFORE any `limit` so a non-admin still receives up to `limit` readable
+   * entries.
+   */
   router.get("/history", (req, res) => {
     const limit = req.query.limit !== undefined ? Number(req.query.limit) : undefined;
     const ruleId = req.query.ruleId as string | undefined;
+    const isAdmin = req.user?.role === "admin";
 
-    let entries;
     if (ruleId) {
-      entries = executionLog.getByRuleId(ruleId);
+      if (!canReadAutomation(req, ruleId)) {
+        res.status(403).json({ error: "Forbidden" });
+        return;
+      }
+      let entries = executionLog.getByRuleId(ruleId);
       if (limit !== undefined && limit >= 0) {
         entries = entries.slice(0, limit);
       }
-    } else {
-      entries = executionLog.list(limit);
+      res.json(entries);
+      return;
     }
 
+    if (isAdmin) {
+      res.json(executionLog.list(limit));
+      return;
+    }
+
+    // Non-admin global list: filter to readable automations, then apply limit.
+    const all = executionLog.list();
+    const ruleIds = [...new Set(all.map((e) => e.ruleId))];
+    const readable = new Set(
+      resolver.filterByPermission(req.user?.userId ?? "", "automation", ruleIds, "read"),
+    );
+    let entries = all.filter((e) => readable.has(e.ruleId));
+    if (limit !== undefined && limit >= 0) {
+      entries = entries.slice(0, limit);
+    }
     res.json(entries);
   });
 

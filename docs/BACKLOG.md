@@ -60,23 +60,27 @@ Deferred follow-ups (own backlog entries below):
 - consolidating outbound HTTP (script `http` + form-rule webhooks) behind one
   bounded, SSRF-checked host service, after which scoped webhooks can be allowed.
 
-### 2. Read surfaces bypass the resource permission model 🟠 (R2)
-Core `/api/devices` and `/api/automations` lists are filtered, but adjacent
-routes still disclose out-of-scope resources:
-- `GET /api/state` returns `registry.getAll()` to every authenticated user;
-- the initial WebSocket `snapshot` sends every registered device to every
-  client (live updates are scoped — a snapshot/live inconsistency);
-- `GET /api/devices/:id/actions` — no device read permission check;
-- `GET /api/devices/:id/completion-tiers` — no device read permission check;
-- `GET /api/devices/:id/history` — checks existence but not read permission;
-- `GET /api/automations/history` — global execution log / arbitrary `ruleId`
-  history without resource filtering;
-- `GET /api/layout` — returns all tabs and pane config to every user.
+### 2. Read surfaces bypass the resource permission model ✅ (R2) — DONE
+**Resolved by the `read-surface-authorization` spec** (see
+`.kiro/specs/read-surface-authorization/`). The adjacent read surfaces now reuse
+the same `PermissionResolver` / `Device_Exposure_Resolver` / `requireDevice`
+stack the core routes use — no new tables, no migration:
+- `GET /api/state` is filtered by device read permission (admins see all), and
+  returns the same device set as `GET /api/devices`;
+- the initial WebSocket `snapshot` is scoped to the client's observable devices
+  using the *same* rule as the live device broadcast, so snapshot and live are
+  consistent by construction;
+- `GET /api/devices/:id/actions`, `/completion-tiers`, and `/history` are guarded
+  by `requireDevice("read")` (404-before-403, admin bypass);
+- `GET /api/automations/history` filters the global list to readable automations
+  (filter-before-limit) and 403s a `ruleId` the caller cannot read;
+- `GET /api/layout` returns only the tabs a non-admin can reach and their panes,
+  via a new `PermissionResolver.accessibleTabIds`; `PUT /api/layout` stays
+  admin-only.
 
-Fix: reuse `PermissionResolver` for `/api/state` and WebSocket snapshot
-generation; apply `requireDevice("read")` / automation read checks to auxiliary
-routes; filter layout to accessible tabs (or split admin vs user-view layout
-endpoints). Mostly mechanical now the resolver exists.
+Destructive device-history routes remain `requireAdmin`. Covered by
+`src/__integration__/read-surface-authorization.integration.test.ts` and WS
+snapshot-scoping tests.
 
 ### 3. Named triggers use the old caller-supplied tab pattern 🟠 (R3)
 `POST /api/automations/trigger/:name` uses `requireTabPermission("interact")`
@@ -96,21 +100,19 @@ assignment if non-admin viewing is needed; treat shared buckets as admin/trusted
 Alternatively document the Data Store as installation-global and ensure the UI
 does not imply otherwise.
 
-### 5. Connector status can leak raw connector secrets 🟠 (R5)
-`GET /api/connectors` redacts `password`-typed config, but
-`GET /api/connectors/:id/status` returns `ConnectorManager.getStatus(id)`
-directly, including the instance's raw config (e.g. a Hue bridge API key).
-`search-lights` start/status endpoints are also not admin-gated. Fix: admin-gate
-connector status/setup/discovery, or apply the same schema redaction to status
-output; make `search-lights` admin-only.
+### 5. Connector status can leak raw connector secrets ✅ (R5) — DONE
+`GET /api/connectors/:id/status` now applies the same config-schema redaction as
+the list endpoint, so `password`-typed fields (e.g. a Hue bridge API key) are
+replaced with `********` before the status reaches any authenticated user. The
+`search-lights` start and status endpoints are now `requireAdmin`, matching the
+rest of connector setup/management. (`src/api/routes/connector.routes.ts`.)
 
-### 6. MQTT provisioning status exposes the shared broker password 🟠 (R6)
-`GET /api/mqtt/provisioning/status` is available to any authenticated user and
-`getStatus()` includes `sharedCredential: { username, password }` at security
-level `shared_password`. Fix: return a redacted status to non-admins (level,
-connected, provisioning-enabled); expose the credential only via an admin-only
-endpoint if it must be retrievable at all — prefer one-time display on
-create/regenerate. (Relevant once managed provisioning is enabled.)
+### 6. MQTT provisioning status exposes the shared broker password ✅ (R6) — DONE
+`GET /api/mqtt/provisioning/status` still serves level/connection to any
+authenticated user, but the broker-wide `sharedCredential` (username + plaintext
+password) is now stripped for non-admins and returned only to admins through the
+same endpoint. (`src/api/routes/provisioning.routes.ts`.) One-time display on
+create/regenerate remains a possible future refinement.
 
 ### 7. System diagnostics and logs available to every authenticated user ✅ (R7) — DONE
 `GET /api/system` and `GET /api/system/logs` now require admin;

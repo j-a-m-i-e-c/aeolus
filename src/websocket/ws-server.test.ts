@@ -18,11 +18,21 @@ vi.mock("../db/database.js", async (importOriginal) => {
 // Import after mock setup
 const { WsServer } = await import("./ws-server.js");
 const { generateAccessToken, _resetSecretCache } = await import("../auth/token-service.js");
+const { createDeviceExposureResolver } = await import("../auth/device-exposure-resolver.js");
 
 // Minimal DeviceRegistry mock
 function createMockRegistry() {
   return {
     getAll: () => [],
+  } as any;
+}
+
+// Minimal Device_Exposure_Resolver mock (no devices → empty exposure)
+function createMockDeviceExposureResolver() {
+  return {
+    getExposingTabs: () => [],
+    getExposingTabsBatch: (ids: string[]) => new Map(ids.map((id) => [id, [] as string[]])),
+    getExposedDeviceIds: () => [],
   } as any;
 }
 
@@ -125,7 +135,7 @@ describe("WsServer Authentication", () => {
             : [],
         }),
       },
-    ]);
+    ], createMockDeviceExposureResolver());
   });
 
   afterEach(async () => {
@@ -329,5 +339,88 @@ describe("WsServer Authentication", () => {
 
       adminWs.close();
     });
+  });
+});
+
+// ─── Initial snapshot is scoped to the client's observable devices ────────────
+
+describe("WsServer initial snapshot scoping", () => {
+  let httpServer: Server;
+  let wsServer: InstanceType<typeof WsServer>;
+  let eventBus: EventEmitter;
+  let port: number;
+
+  // dev-hue is exposed by a hue-control pane on tab-1 (user-1 has read on tab-1);
+  // dev-kasa is exposed by a kasa-control pane on tab-3 (user-1 has NO access).
+  const devices = [
+    { id: "dev-hue", name: "Hue", type: "light", capabilities: [], state: {}, integration: "hue", lastSeen: 0 },
+    { id: "dev-kasa", name: "Kasa", type: "plug", capabilities: [], state: {}, integration: "kasa", lastSeen: 0 },
+  ];
+
+  beforeEach(async () => {
+    testDb = new Database(":memory:");
+    testDb.pragma("journal_mode = WAL");
+    testDb.pragma("foreign_keys = ON");
+    initSchema(testDb);
+
+    process.env.JWT_SECRET = "test-ws-snapshot-secret";
+    _resetSecretCache();
+
+    const now = Date.now();
+    const insertTab = testDb.prepare('INSERT INTO tabs (id, name, icon, "order", pinned, created_at) VALUES (?, ?, ?, ?, ?, ?)');
+    insertTab.run("tab-1", "Tab 1", "home", 0, 0, now);
+    insertTab.run("tab-3", "Tab 3", "data", 1, 0, now);
+    testDb.prepare("INSERT INTO groups (id, name, created_at) VALUES (?, ?, ?)").run("group-1", "Group 1", now);
+    testDb.prepare("INSERT INTO group_tab_assignments (group_id, tab_id, permission) VALUES (?, ?, ?)").run("group-1", "tab-1", "read");
+    testDb.prepare("INSERT INTO users (id, username, password_hash, role, group_id, created_at) VALUES (?, ?, ?, ?, ?, ?)").run("admin-1", "admin", "hash", "admin", null, now);
+    testDb.prepare("INSERT INTO users (id, username, password_hash, role, group_id, created_at) VALUES (?, ?, ?, ?, ?, ?)").run("user-1", "user1", "hash", "user", "group-1", now);
+    const insertPane = testDb.prepare("INSERT INTO panes (id, tab_id, pane_type, config, x, y, w, h, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+    insertPane.run("pane-1", "tab-1", "hue-control", "{}", 0, 0, 6, 4, now);
+    insertPane.run("pane-3", "tab-3", "kasa-control", "{}", 0, 0, 6, 4, now);
+
+    const registry = {
+      getAll: () => devices,
+      getById: (id: string) => devices.find((d) => d.id === id),
+    } as never;
+    const exposureResolver = createDeviceExposureResolver(registry, testDb);
+
+    eventBus = new EventEmitter();
+    httpServer = createServer();
+    await new Promise<void>((resolve) => httpServer.listen(0, "127.0.0.1", () => resolve()));
+    port = (httpServer.address() as any).port;
+    wsServer = new WsServer(httpServer, registry, eventBus, [], exposureResolver);
+  });
+
+  afterEach(async () => {
+    wsServer.closeAll();
+    await new Promise<void>((resolve) => httpServer.close(() => resolve()));
+    testDb.close();
+    delete process.env.JWT_SECRET;
+    _resetSecretCache();
+  });
+
+  it("sends only the devices a non-admin may observe", async () => {
+    const token = generateAccessToken({ userId: "user-1", username: "user1", role: "user", groupId: "group-1" });
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${token}`);
+    const collector = collectMessages(ws);
+    await waitForOpen(ws);
+
+    const msgs = await collector.waitForCount(1);
+    const snapshot = (msgs[0] as { type: string; data: Record<string, unknown> });
+    expect(snapshot.type).toBe("snapshot");
+    expect(Object.keys(snapshot.data)).toEqual(["dev-hue"]);
+    ws.close();
+  });
+
+  it("sends every device to an admin", async () => {
+    const token = generateAccessToken({ userId: "admin-1", username: "admin", role: "admin", groupId: null });
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${token}`);
+    const collector = collectMessages(ws);
+    await waitForOpen(ws);
+
+    const msgs = await collector.waitForCount(1);
+    const snapshot = (msgs[0] as { type: string; data: Record<string, unknown> });
+    expect(Object.keys(snapshot.data).sort()).toEqual(["dev-hue", "dev-kasa"]);
+    ws.close();
   });
 });

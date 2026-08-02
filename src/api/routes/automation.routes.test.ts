@@ -270,9 +270,12 @@ describe("automation.routes", () => {
     });
 
     it("should limit results when limit query param is provided", async () => {
+      // Non-admin path (no req.user) filters by readable rule before applying the
+      // limit, so the limit is enforced on the returned entries rather than passed
+      // straight to executionLog.list().
       const res = await request(app, "GET", "/api/automations/history?limit=1");
       expect(res.status).toBe(200);
-      expect(mockExecutionLog.list).toHaveBeenCalledWith(1);
+      expect((res.body as any[]).length).toBe(1);
     });
   });
 

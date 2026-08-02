@@ -6,6 +6,7 @@ import type { Server } from "node:http";
 import type { EventEmitter } from "node:events";
 import type { DeviceRegistry } from "../core/device-registry.js";
 import type { Device } from "../core/types.js";
+import type { DeviceExposureResolver } from "../auth/device-exposure-resolver.js";
 import { verifyAccessTokenWithExpiry } from "../auth/token-service.js";
 import { getUserAccessibleTabs } from "../auth/permission-service.js";
 import { WS_CLIENT_CONNECT, WS_CLIENT_DISCONNECT, WS_BROADCAST } from "../core/event-bus.js";
@@ -73,9 +74,17 @@ export class WsServer {
   private wss: WebSocketServer;
   private clients = new Map<WebSocket, AuthenticatedClient>();
   private eventBus: EventEmitter;
+  private deviceExposureResolver: DeviceExposureResolver;
 
-  constructor(server: Server, registry: DeviceRegistry, eventBus: EventEmitter, mappings: WsEventMapping[]) {
+  constructor(
+    server: Server,
+    registry: DeviceRegistry,
+    eventBus: EventEmitter,
+    mappings: WsEventMapping[],
+    deviceExposureResolver: DeviceExposureResolver,
+  ) {
     this.eventBus = eventBus;
+    this.deviceExposureResolver = deviceExposureResolver;
     this.wss = new WebSocketServer({ server, path: "/ws" });
 
     this.wss.on("connection", (ws, req) => {
@@ -182,11 +191,26 @@ export class WsServer {
 
     this.eventBus.emit(WS_CLIENT_CONNECT, { userId: payload.userId, clientCount: this.clients.size });
 
-    // Send initial snapshot
+    // Send initial snapshot, scoped to the devices this client may observe.
+    // Uses the SAME rule as the live device broadcast (device exposing tabs
+    // intersected with the client's accessible tabs, admins see all) so the
+    // snapshot and the live stream are consistent by construction.
     const devices = registry.getAll();
     const snapshot: Record<string, Device> = {};
-    for (const d of devices) {
-      snapshot[d.id] = d;
+    if (client.role === "admin") {
+      for (const d of devices) {
+        snapshot[d.id] = d;
+      }
+    } else {
+      const exposingByDevice = this.deviceExposureResolver.getExposingTabsBatch(
+        devices.map((d) => d.id),
+      );
+      for (const d of devices) {
+        const tabIds = exposingByDevice.get(d.id) ?? [];
+        if (canObserve(client, { visibility: "tabs", tabIds })) {
+          snapshot[d.id] = d;
+        }
+      }
     }
     this.send(ws, { type: "snapshot", data: snapshot });
 

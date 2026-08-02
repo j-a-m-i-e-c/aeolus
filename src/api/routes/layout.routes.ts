@@ -5,6 +5,7 @@ import type { Database as DatabaseType } from "better-sqlite3";
 import { BadRequestError } from "../middleware/error-handler.js";
 import { asyncHandler } from "../middleware/async-handler.js";
 import { requireAdmin } from "../../auth/auth-middleware.js";
+import type { PermissionResolver } from "../../auth/permission-resolver.js";
 import { safeJsonParse } from "../../core/safe-json.js";
 import { extractAutomationAssignments, extractCollectionAssignments, type PaneRef } from "../../auth/pane-reference-extractor.js";
 import logger from "../../logger.js";
@@ -30,11 +31,22 @@ interface PaneRow {
   created_at: number;
 }
 
-export function createLayoutRoutes(db: DatabaseType): Router {
+export function createLayoutRoutes(
+  db: DatabaseType,
+  resolver: PermissionResolver,
+): Router {
   const router = Router();
 
-  /** GET /api/layout → { tabs: Tab[], panes: Pane[] } */
-  router.get("/", (_req, res) => {
+  /**
+   * GET /api/layout → { tabs: Tab[], panes: Pane[] }
+   *
+   * Admins receive the full layout. Non-admins receive only the tabs their group
+   * can reach (any permission level) and the panes on those tabs, so the layout
+   * does not disclose tabs and pane configuration the user has no access to.
+   * Accessible tabs are resolved server-side from group assignments, never from
+   * a caller-supplied tab identifier.
+   */
+  router.get("/", (req, res) => {
     try {
       const tabRows = db.prepare('SELECT * FROM tabs ORDER BY "order"').all() as TabRow[];
       const paneRows = db.prepare("SELECT * FROM panes").all() as PaneRow[];
@@ -60,7 +72,16 @@ export function createLayoutRoutes(db: DatabaseType): Router {
         createdAt: row.created_at,
       }));
 
-      res.json({ tabs, panes });
+      if (req.user?.role === "admin") {
+        res.json({ tabs, panes });
+        return;
+      }
+
+      const accessible = new Set(resolver.accessibleTabIds(req.user?.userId ?? ""));
+      res.json({
+        tabs: tabs.filter((t) => accessible.has(t.id)),
+        panes: panes.filter((p) => accessible.has(p.tabId)),
+      });
     } catch (err) {
       logger.error(err, "Failed to read layout from database");
       res.json({ tabs: [], panes: [] });
