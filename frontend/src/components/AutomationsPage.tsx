@@ -261,6 +261,11 @@ export function AutomationsPage() {
   };
 
   const deleteRule = async (id: string) => {
+    // Require explicit confirmation before permanently deleting an automation
+    // (pre-promotion-release-gates Req 6.3). This is now the only path to deletion.
+    if (!window.confirm("Delete this automation? This action cannot be undone.")) {
+      return;
+    }
     await authFetch(`${API_URL}/api/automations/${id}`, { method: "DELETE" });
     fetchRules();
   };

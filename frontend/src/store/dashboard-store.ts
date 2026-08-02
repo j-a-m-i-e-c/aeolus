@@ -4,7 +4,7 @@ import { create } from "zustand";
 import type { Tab, Pane, PaneConfig } from "../types/dashboard";
 import { DEFAULT_TABS, DEFAULT_PANES } from "../types/dashboard";
 import { PANE_REGISTRY } from "../lib/pane-registry";
-import { fetchLayout, saveLayout, deleteAutomation } from "../lib/api-client";
+import { fetchLayout, saveLayout } from "../lib/api-client";
 
 /** Generate a UUID that works in non-secure contexts (HTTP) */
 function generateId(): string {
@@ -205,17 +205,10 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
   },
 
   removePane: (paneId) => {
-    const state = get();
-    const pane = state.panes.find((p) => p.id === paneId);
-
-    // If this is an automation pane with a linked rule, delete the rule from the backend
-    if (pane?.paneType === "automation" && pane.config?.ruleId) {
-      deleteAutomation(pane.config.ruleId as string).catch(() => {
-        // Non-critical — rule may already be deleted
-      });
-    }
-
-    set({ panes: state.panes.filter((p) => p.id !== paneId) });
+    // Remove the pane from the layout only — do NOT delete the linked automation.
+    // Automation deletion is now a separate explicit, confirmed operation
+    // (pre-promotion-release-gates Req 6.1, 6.4).
+    set((state) => ({ panes: state.panes.filter((p) => p.id !== paneId) }));
     debouncedPersist(get);
   },
 

@@ -146,12 +146,14 @@ describe("dashboard-store", () => {
       expect(pane2.config).toEqual({ title: "Sensors" });
     });
 
-    it("removePane drops the pane and deletes a linked automation rule", () => {
+    it("removePane drops the pane without deleting the linked automation", () => {
       d().addPane("tab-1", "automation", { ruleId: "rule-42" } as Pane["config"]);
       const id = d().panes[0].id;
       d().removePane(id);
       expect(d().panes).toHaveLength(0);
-      expect(vi.mocked(deleteAutomation)).toHaveBeenCalledWith("rule-42");
+      // Automation deletion is now an explicit, confirmed operation — not a
+      // side-effect of pane removal (pre-promotion-release-gates Req 6.1).
+      expect(vi.mocked(deleteAutomation)).not.toHaveBeenCalled();
     });
 
     it("removePane does not call deleteAutomation for non-automation panes", () => {

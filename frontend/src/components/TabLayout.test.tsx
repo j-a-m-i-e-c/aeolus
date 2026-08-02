@@ -89,6 +89,7 @@ describe("TabLayout", () => {
     });
     permState.canWrite = true;
     permState.canInteract = true;
+    permState.isAdmin = true;
   });
 
   it("renders the write controls and pane content for a writable tab", () => {
@@ -99,7 +100,8 @@ describe("TabLayout", () => {
     expect(screen.getByTestId("pane-body")).toBeInTheDocument();
   });
 
-  it("hides the write controls when the user cannot write", () => {
+  it("hides the layout controls when the user is not an admin", () => {
+    permState.isAdmin = false;
     permState.canWrite = false;
     render(<TabLayout tabId="tab1" />);
     expect(screen.queryByText("New Automation Pane")).not.toBeInTheDocument();

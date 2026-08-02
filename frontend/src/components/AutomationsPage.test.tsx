@@ -192,12 +192,14 @@ describe("AutomationsPage", () => {
     expect(lastCallWithMethod("PATCH")![0]).toBe("http://test.local:3001/api/automations/r1/toggle");
   });
 
-  it("deletes a rule via DELETE", async () => {
+  it("deletes a rule via DELETE after confirmation", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
     render(<AutomationsPage />);
     await screen.findByText("Form Rule");
     fireEvent.click(screen.getAllByTitle("Delete")[0]);
     await waitFor(() => expect(lastCallWithMethod("DELETE")).toBeTruthy());
     expect(lastCallWithMethod("DELETE")![0]).toBe("http://test.local:3001/api/automations/r1");
+    vi.mocked(window.confirm).mockRestore();
   });
 
   it("opens a script rule for editing and updates it via PUT", async () => {

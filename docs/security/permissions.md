@@ -12,7 +12,14 @@ write > interact > read
 |---|---|
 | `read` | View a tab and its information |
 | `interact` | Use controls and fire actions |
-| `write` | Edit panes, automation configuration and other writable content |
+| `write` | Author and edit scoped automations; interact with automation pane settings |
+
+> **Layout editing (adding, removing, dragging, resizing panes; creating tabs) is
+> currently admin-only.** A non-admin `write` user may author and configure
+> scoped automations but cannot rearrange the dashboard layout, because layout
+> persistence uses a full-layout replacement that requires admin authority. A
+> future tab-scoped layout endpoint may enable non-admin dashboard composition
+> without granting full-layout control.
 
 A check for `read` accepts all three levels. A check for `interact` accepts `interact` and `write`.
 

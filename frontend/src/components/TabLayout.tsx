@@ -12,11 +12,6 @@ import { PanePicker } from "./PanePicker";
 import { PaneConfigPanel } from "./PaneConfigPanel";
 import { motion } from "framer-motion";
 import { useTabPermission } from "../hooks/useTabPermission";
-import { authFetch } from "../lib/auth-fetch";
-
-const API_URL =
-  import.meta.env.VITE_API_URL ||
-  `http://${window.location.hostname}:3001`;
 
 interface TabLayoutProps {
   tabId: string;
@@ -29,7 +24,13 @@ export function TabLayout({ tabId }: TabLayoutProps) {
   const removePane = useDashboardStore((s) => s.removePane);
 
   // Permission-based controls
-  const { canInteract, canWrite } = useTabPermission(tabId);
+  const { canInteract, canWrite: _canWrite, isAdmin } = useTabPermission(tabId);
+
+  // Layout mutation controls (add/remove/drag/resize/settings) are admin-only.
+  // Non-admins cannot persist layout changes (PUT /api/layout is requireAdmin),
+  // so offering them edits would silently fail on reload.
+  // Tab write permission remains for automation authoring/editing (pre-promotion-release-gates Req 7.1–7.3, 7.6).
+  const canEditLayout = isAdmin;
 
   // PanePicker visibility
   const [showPicker, setShowPicker] = useState(false);
@@ -95,24 +96,18 @@ export function TabLayout({ tabId }: TabLayoutProps) {
 
   const handleRemovePane = useCallback(
     (paneId: string) => {
-      const pane = tabPanes.find((p) => p.id === paneId);
-      if (pane?.paneType === "automation" && pane.config.ruleId) {
-        // Fire-and-forget DELETE for the linked automation rule
-        authFetch(`${API_URL}/api/automations/${pane.config.ruleId}`, {
-          method: "DELETE",
-        }).catch(() => {
-          // Do not block removal on failure
-        });
-      }
+      // Remove the pane only — do NOT delete the underlying automation.
+      // Automation deletion is now an explicit, confirmed operation from the
+      // automation editor/management surface (pre-promotion-release-gates Req 6.1, 6.4).
       removePane(paneId);
     },
-    [tabPanes, removePane],
+    [removePane],
   );
 
   return (
     <div ref={containerRef} className="w-full">
-      {/* Header area with New Automation Pane + Browse Panes buttons — write permission required */}
-      {canWrite && (
+      {/* Header area with New Automation Pane + Browse Panes buttons — admin layout editing */}
+      {canEditLayout && (
       <div className="flex items-center justify-end gap-2 px-4 py-2">
         <motion.button
           whileHover={{ scale: 1.02 }}
@@ -149,8 +144,8 @@ export function TabLayout({ tabId }: TabLayoutProps) {
         cols={{ lg: 12, md: 12, sm: 6, xs: 4, xxs: 2 }}
         rowHeight={60}
         onLayoutChange={handleLayoutChange}
-        dragConfig={{ enabled: canWrite, handle: ".pane-drag-handle" }}
-        resizeConfig={{ enabled: canWrite, handles: ["se"] }}
+        dragConfig={{ enabled: canEditLayout, handle: ".pane-drag-handle" }}
+        resizeConfig={{ enabled: canEditLayout, handles: ["se"] }}
         compactor={verticalCompactor}
       >
         {tabPanes.map((pane) => {
@@ -162,11 +157,11 @@ export function TabLayout({ tabId }: TabLayoutProps) {
               className="relative bg-surface border border-[#2A3441] rounded-xl overflow-hidden flex flex-col"
             >
               {/* Header bar */}
-              <div className={`pane-drag-handle flex items-center justify-between px-3 py-2 border-b border-[#2A3441] ${canWrite ? "cursor-grab" : "cursor-default"} bg-elevated/50`}>
+              <div className={`pane-drag-handle flex items-center justify-between px-3 py-2 border-b border-[#2A3441] ${canEditLayout ? "cursor-grab" : "cursor-default"} bg-elevated/50`}>
                 <span className="text-xs font-medium text-[#9AA6B2] truncate select-none">
                   {(pane.config.ruleName as string) || entry?.displayName || pane.paneType}
                 </span>
-                {canWrite && (
+                {canEditLayout && (
                 <div className="flex items-center gap-1 shrink-0">
                   <button
                     className="p-1 rounded text-[#6B7785] hover:text-[#9AA6B2] hover:bg-elevated transition-colors"
@@ -199,8 +194,8 @@ export function TabLayout({ tabId }: TabLayoutProps) {
                 )}
               </div>
 
-              {/* Resize grip indicator — only shown for write permission */}
-              {canWrite && (
+              {/* Resize grip indicator — only shown for admin layout editing */}
+              {canEditLayout && (
               <div className="absolute bottom-1 right-1 text-[#2A3441] hover:text-[#6B7785] transition-colors pointer-events-none">
                 <svg width="12" height="12" viewBox="0 0 12 12">
                   <circle cx="9" cy="9" r="1.5" fill="currentColor" />

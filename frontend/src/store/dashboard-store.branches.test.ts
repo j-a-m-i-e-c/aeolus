@@ -118,7 +118,7 @@ describe("dashboard-store — branch coverage", () => {
   });
 
   describe("removePane", () => {
-    it("calls deleteAutomation when pane is automation type with ruleId", () => {
+    it("removes the pane without deleting the linked automation", () => {
       const pane: Pane = {
         id: "p1", tabId: "tab-1", paneType: "automation",
         config: { ruleId: "rule-123" }, x: 0, y: 0, w: 6, h: 4, createdAt: 0,
@@ -127,7 +127,8 @@ describe("dashboard-store — branch coverage", () => {
 
       d().removePane("p1");
 
-      expect(deleteAutomation).toHaveBeenCalledWith("rule-123");
+      // Automation deletion is now explicit+confirmed, not a pane-removal side-effect
+      expect(deleteAutomation).not.toHaveBeenCalled();
       expect(d().panes).toHaveLength(0);
     });
 
