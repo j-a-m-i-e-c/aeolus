@@ -99,4 +99,4 @@ frontend/src/sandbox/
 frontend/src/lib/
 ```
 
-Last reviewed: 2026-07-17
+Last reviewed: 2026-08-02

@@ -135,4 +135,4 @@ aeolus/
 
 Follow `.kiro/steering/documentation-updates.md`. Do not put new material into the old comprehensive compatibility stub.
 
-Last reviewed: 2026-07-17
+Last reviewed: 2026-08-02
