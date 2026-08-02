@@ -1,3 +1,10 @@
+> **SUPERSEDED — historical audit.** The connector issues described below (Hue/Kasa
+> action catalog, brightness units, device identity, listener leak) have since been
+> addressed, and the interact-level rename/delete gap was subsequently closed. This
+> report is retained only for history; it does not describe the current state of
+> Aeolus. See `docs/BACKLOG.md`, `docs/ROADMAP.md` and the `.kiro/specs/` for
+> current status.
+
 # Aeolus fresh pre-public review — aeolus-main(11)
 
 **Review date:** 2 August 2026  

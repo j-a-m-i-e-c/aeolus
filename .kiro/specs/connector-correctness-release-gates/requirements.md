@@ -6,8 +6,9 @@ The core Aeolus platform reached a strong pre-promotion state: resource
 authorization, scoped automation authority, event admission, command-source
 typing, MQTT command wiring, pane-deletion semantics, layout permissions and
 partial automation updates are all in place. A fresh review (2 Aug 2026,
-`docs/aeolus-v11-fresh-review-2026-08-02.md`) found that the remaining public
-release risk has moved outward into the **bundled Hue and Kasa connectors**:
+`docs/history/audits/aeolus-v11-fresh-review-2026-08-02.md`) found that the
+remaining public release risk has moved outward into the **bundled Hue and Kasa
+connectors**:
 several controls are advertised by device capabilities or the UI but are
 rejected or executed incorrectly by the connector, plus a long-running Kasa
 listener leak and device identifiers that do not satisfy the documented

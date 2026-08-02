@@ -55,10 +55,12 @@ Connector devices set their `integration` field to the connector ID (the type). 
 
 Ownership is persisted, so it survives a restart; a device discovered before ownership existed reacquires it on the next poll, falling back to type-based routing until then. Discovered devices should have stable IDs across restarts. They are normal Aeolus devices once registered, so they appear in the dashboard, emit internal state events and can trigger automations.
 
-Device IDs must be unique across instances of the same type (namespace them by bridge/account), since the device registry is keyed by ID. The bundled connectors derive their IDs from an immutable native identity rather than a bridge-local index or an editable name, so two instances never collide and renaming a device does not change its identity:
+Device IDs must be unique across instances of the same type (namespace them by bridge/account), since the device registry is keyed by ID. The bundled connectors use immutable native IDs where available, avoiding normal cross-instance collisions, and renaming a device does not change its identity:
 
 - Hue uses the light's `uniqueid` (its Zigbee address), e.g. `hue-00-11-22-33-44-55-66-77-0b`.
 - Kasa uses the device's native id/MAC, e.g. `kasa-8006abcd1234`.
+
+When a native identifier is missing, the connector falls back to a less stable identity (Hue to the bridge-local light index, Kasa to the host address) and logs it. These fallback IDs are not guaranteed unique across instances.
 
 ## Action catalogs
 

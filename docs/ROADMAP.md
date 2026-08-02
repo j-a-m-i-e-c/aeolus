@@ -23,12 +23,13 @@ explicit discriminated union, MQTT dispatch is wired at composition, and
 brightness has one canonical contract. The convergence goal here builds on that
 fixed foundation.
 
-A follow-up review then found the remaining pre-promotion risk sits in the
+A follow-up review then found the remaining pre-promotion risk had moved into the
 bundled Hue and Kasa connectors, which had drifted from the newer, stricter
-Action Catalog and multi-instance contracts (advertised controls that are
+Action Catalog and multi-instance contracts (advertised controls that were
 rejected or executed incorrectly, a Kasa discovery listener leak, and non-unique
-device IDs). That connector-correctness work is the active pre-promotion connector
-gate, tracked in the `connector-correctness-release-gates` spec (`.kiro/specs/`).
+device IDs). That connector-correctness work is now complete — see the
+`connector-correctness-release-gates` spec (`.kiro/specs/`) and `git log`. The
+remaining convergence work here builds on those fixed connectors.
 
 ### Prove Aeolus on real equipment
 

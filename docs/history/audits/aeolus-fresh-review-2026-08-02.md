@@ -1,3 +1,8 @@
+> **SUPERSEDED — historical audit.** The issues described below have since been
+> addressed. This report is retained only for history; it does not describe the
+> current state of Aeolus. See `docs/BACKLOG.md`, `docs/ROADMAP.md` and the
+> `.kiro/specs/` for current status.
+
 # Aeolus fresh pre-public review
 
 **Archive reviewed:** `aeolus-main(10)`  

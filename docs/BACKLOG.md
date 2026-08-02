@@ -33,7 +33,7 @@ authorization model first, hardening against determined insiders second.
 > completion tier. **Those gates are now closed** (see "Closed — second fresh
 > review release gates" below and `git log`).
 >
-> A third fresh review (2 Aug 2026, `docs/aeolus-v11-fresh-review-2026-08-02.md`)
+> A third fresh review (2 Aug 2026, `docs/history/audits/aeolus-v11-fresh-review-2026-08-02.md`)
 > confirmed no new core security/sandbox/MQTT flaw and verified the release-gate
 > work is present in production. It found the remaining public risk has moved
 > outward into the **bundled Hue and Kasa connectors**: controls advertised by
