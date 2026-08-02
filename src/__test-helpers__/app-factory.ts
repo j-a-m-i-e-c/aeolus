@@ -153,7 +153,7 @@ export function createTestApp(
   ));
   app.use("/api/system", createSystemRoutes());
   app.use("/api/layout", createLayoutRoutes(db, permissionResolver));
-  app.use("/api/data-store", createDataStoreRoutes(dataStore));
+  app.use("/api/data-store", createDataStoreRoutes(dataStore, permissionResolver, collectionOwnershipStore));
 
   // ─── Error Handler (must be last) ───────────────────────────────────────
 

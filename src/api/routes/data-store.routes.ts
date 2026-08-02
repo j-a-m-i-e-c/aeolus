@@ -4,6 +4,9 @@ import { Router } from "express";
 import type { Request, Response, NextFunction } from "express";
 import type { DataStore } from "../../data-store/data-store.js";
 import type { QueryOptions } from "../../data-store/data-store.js";
+import type { PermissionResolver } from "../../auth/permission-resolver.js";
+import type { CollectionOwnershipStore } from "../../auth/collection-ownership-store.js";
+import { requireAdmin } from "../../auth/auth-middleware.js";
 import { BadRequestError, NotFoundError, ConflictError, AppError } from "../middleware/error-handler.js";
 import { asyncHandler } from "../middleware/async-handler.js";
 import { validate } from "../middleware/validate.js";
@@ -122,26 +125,56 @@ function dataStoreErrorMapper(err: unknown, _req: Request, _res: Response, next:
  * Provides REST endpoints for managing collections, records, buckets,
  * configuration, and lifecycle operations.
  */
-export function createDataStoreRoutes(dataStore: DataStore): Router {
+export function createDataStoreRoutes(
+  dataStore: DataStore,
+  resolver: PermissionResolver,
+  collectionOwnership: CollectionOwnershipStore,
+): Router {
   const router = Router();
+
+  /**
+   * True when the requesting user may read the named collection. Admins always
+   * may. A non-admin may iff the collection is surfaced by a tab their group can
+   * reach. A collection surfaced by no tab (or one that does not exist) resolves
+   * to no tabs → false, so non-admins fail closed and cannot probe existence.
+   */
+  function canReadCollection(req: Request, name: string): boolean {
+    if (req.user?.role === "admin") {
+      return true;
+    }
+    const accessible = new Set(resolver.accessibleTabIds(req.user?.userId ?? ""));
+    return collectionOwnership.getExposingTabs(name).some((tabId) => accessible.has(tabId));
+  }
 
   // ─── Collection Endpoints ────────────────────────────────────────────────
 
-  /** GET /collections — list all collections with metadata */
-  router.get("/collections", (_req, res) => {
+  /**
+   * GET /collections — list collections with metadata. Admins see all;
+   * non-admins see only collections surfaced by a tab their group can reach.
+   */
+  router.get("/collections", (req, res) => {
     const collections = dataStore.listCollections();
-    res.json(collections);
+    if (req.user?.role === "admin") {
+      res.json(collections);
+      return;
+    }
+    const accessible = new Set(resolver.accessibleTabIds(req.user?.userId ?? ""));
+    res.json(
+      collections.filter((c) =>
+        collectionOwnership.getExposingTabs(c.name).some((tabId) => accessible.has(tabId)),
+      ),
+    );
   });
 
-  /** POST /collections — create a new collection */
-  router.post("/collections", validate({ body: createCollectionBodySchema }), asyncHandler((req, res) => {
+  /** POST /collections — create a new collection (admin-only) */
+  router.post("/collections", requireAdmin, validate({ body: createCollectionBodySchema }), asyncHandler((req, res) => {
     const { name, description, retentionDays } = req.body;
     dataStore.createCollection(name.trim(), description, retentionDays);
     res.status(201).json({ success: true });
   }));
 
-  /** PATCH /collections/:name — update collection description/retentionDays */
-  router.patch("/collections/:name", validate({ body: updateCollectionBodySchema, params: collectionNameParamsSchema }), asyncHandler((req, res) => {
+  /** PATCH /collections/:name — update collection description/retentionDays (admin-only) */
+  router.patch("/collections/:name", requireAdmin, validate({ body: updateCollectionBodySchema, params: collectionNameParamsSchema }), asyncHandler((req, res) => {
     const name = req.params.name as string;
     const { description, retentionDays } = req.body;
 
@@ -153,8 +186,8 @@ export function createDataStoreRoutes(dataStore: DataStore): Router {
     res.json({ success: true });
   }));
 
-  /** DELETE /collections/:name — delete collection and all its records */
-  router.delete("/collections/:name", asyncHandler((req, res) => {
+  /** DELETE /collections/:name — delete collection and all its records (admin-only) */
+  router.delete("/collections/:name", requireAdmin, asyncHandler((req, res) => {
     const name = req.params.name as string;
     dataStore.deleteCollection(name);
     res.json({ success: true });
@@ -162,8 +195,8 @@ export function createDataStoreRoutes(dataStore: DataStore): Router {
 
   // ─── Record Endpoints ──────────────────────────────────────────────────────
 
-  /** POST /collections/:name/records — write a record to a collection */
-  router.post("/collections/:name/records", validate({ body: writeRecordBodySchema, params: collectionNameParamsSchema }), asyncHandler((req, res) => {
+  /** POST /collections/:name/records — write a record to a collection (admin-only) */
+  router.post("/collections/:name/records", requireAdmin, validate({ body: writeRecordBodySchema, params: collectionNameParamsSchema }), asyncHandler((req, res) => {
     const name = req.params.name as string;
     const { payload, tags, timestamp } = req.body;
 
@@ -175,9 +208,13 @@ export function createDataStoreRoutes(dataStore: DataStore): Router {
     res.status(201).json({ success: true });
   }));
 
-  /** GET /collections/:name/records — query records with filtering and aggregation */
+  /** GET /collections/:name/records — query records (requires collection read access) */
   router.get("/collections/:name/records", asyncHandler((req, res) => {
     const name = req.params.name as string;
+    if (!canReadCollection(req, name)) {
+      res.status(403).json({ error: "Forbidden" });
+      return;
+    }
     const options = parseRecordQueryOptions(req.query);
     const result = dataStore.query(name, options);
     res.json(result);
@@ -185,21 +222,24 @@ export function createDataStoreRoutes(dataStore: DataStore): Router {
 
   // ─── Bucket Endpoints ──────────────────────────────────────────────────────
 
-  /** GET /buckets — list all buckets with key counts */
-  router.get("/buckets", (_req, res) => {
+  // Shared key/value buckets have no tab-ownership mapping, so they are treated
+  // as admin/trusted state (admin-only) until a bucket→tab model exists.
+
+  /** GET /buckets — list all buckets with key counts (admin-only) */
+  router.get("/buckets", requireAdmin, (_req, res) => {
     const buckets = dataStore.listBuckets();
     res.json(buckets);
   });
 
-  /** GET /buckets/:bucket — list all entries in a bucket */
-  router.get("/buckets/:bucket", (req, res) => {
-    const { bucket } = req.params;
+  /** GET /buckets/:bucket — list all entries in a bucket (admin-only) */
+  router.get("/buckets/:bucket", requireAdmin, (req, res) => {
+    const bucket = req.params.bucket as string;
     const entries = dataStore.listBucket(bucket);
     res.json(entries);
   });
 
-  /** PUT /buckets/:bucket/:key — set a key-value pair */
-  router.put("/buckets/:bucket/:key", validate({ body: setBucketValueBodySchema, params: bucketKeyParamsSchema }), asyncHandler((req, res) => {
+  /** PUT /buckets/:bucket/:key — set a key-value pair (admin-only) */
+  router.put("/buckets/:bucket/:key", requireAdmin, validate({ body: setBucketValueBodySchema, params: bucketKeyParamsSchema }), asyncHandler((req, res) => {
     const bucket = req.params.bucket as string;
     const key = req.params.key as string;
     const { value } = req.body;
@@ -212,8 +252,8 @@ export function createDataStoreRoutes(dataStore: DataStore): Router {
     res.json({ success: true });
   }));
 
-  /** DELETE /buckets/:bucket/:key — delete a key from a bucket */
-  router.delete("/buckets/:bucket/:key", asyncHandler((req, res) => {
+  /** DELETE /buckets/:bucket/:key — delete a key from a bucket (admin-only) */
+  router.delete("/buckets/:bucket/:key", requireAdmin, asyncHandler((req, res) => {
     const bucket = req.params.bucket as string;
     const key = req.params.key as string;
     dataStore.delete(bucket, key);
@@ -222,26 +262,26 @@ export function createDataStoreRoutes(dataStore: DataStore): Router {
 
   // ─── Config, Stats, Enable/Disable Endpoints ────────────────────────────────
 
-  /** GET /config — return current DataStoreConfig */
-  router.get("/config", (_req, res) => {
+  /** GET /config — return current DataStoreConfig (admin-only) */
+  router.get("/config", requireAdmin, (_req, res) => {
     const config = dataStore.getConfig();
     res.json(config);
   });
 
-  /** PUT /config — update config (positive-number constraints enforced by the schema) */
-  router.put("/config", validate({ body: dataStoreConfigBodySchema }), asyncHandler((req, res) => {
+  /** PUT /config — update config (admin-only; positive-number constraints enforced by the schema) */
+  router.put("/config", requireAdmin, validate({ body: dataStoreConfigBodySchema }), asyncHandler((req, res) => {
     dataStore.updateConfig(req.body);
     res.json({ success: true });
   }));
 
-  /** GET /stats — return DataStoreStats */
-  router.get("/stats", (_req, res) => {
+  /** GET /stats — return DataStoreStats (admin-only) */
+  router.get("/stats", requireAdmin, (_req, res) => {
     const stats = dataStore.getStats();
     res.json(stats);
   });
 
-  /** POST /enable — enable DataStore with provided config (constraints enforced by the schema) */
-  router.post("/enable", validate({ body: enableDataStoreBodySchema }), asyncHandler((req, res) => {
+  /** POST /enable — enable DataStore with provided config (admin-only; constraints enforced by the schema) */
+  router.post("/enable", requireAdmin, validate({ body: enableDataStoreBodySchema }), asyncHandler((req, res) => {
     const { maxStorageMb, maxRecordsPerCollection, maxCollections } = req.body;
     dataStore.enable({
       enabled: true,
@@ -252,17 +292,21 @@ export function createDataStoreRoutes(dataStore: DataStore): Router {
     res.json({ success: true });
   }));
 
-  /** POST /disable — disable DataStore */
-  router.post("/disable", (_req, res) => {
+  /** POST /disable — disable DataStore (admin-only) */
+  router.post("/disable", requireAdmin, (_req, res) => {
     dataStore.disable();
     res.json({ success: true });
   });
 
   // ─── Export Endpoints ──────────────────────────────────────────────────────
 
-  /** GET /collections/:name/export — export all records as CSV */
+  /** GET /collections/:name/export — export all records as CSV (requires collection read access) */
   router.get("/collections/:name/export", asyncHandler((req, res) => {
     const name = req.params.name as string;
+    if (!canReadCollection(req, name)) {
+      res.status(403).json({ error: "Forbidden" });
+      return;
+    }
 
     // Query all records (no limit)
     const result = dataStore.query(name, {});

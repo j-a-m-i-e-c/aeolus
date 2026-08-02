@@ -93,15 +93,23 @@ current threat model until trigger→automation/tab ownership is persisted and
 authorized server-side (the deferred longer-term fix). Covered by an admin-only
 assertion in `src/__integration__/resource-authorization.integration.test.ts`.
 
-### 4. Data Store REST access is global for every authenticated user 🟠 (R4)
-`createDataStoreRoutes()` has no admin/collection guards — any authenticated
-user can create/delete collections, write/export records, modify buckets,
-change quotas and enable/disable the Data Store. `collection_tab_assignments`
-already exists for WebSocket visibility but is not applied to REST. Short-term:
-admin-gate Data Store management and mutations; filter reads by collection→tab
-assignment if non-admin viewing is needed; treat shared buckets as admin/trusted.
-Alternatively document the Data Store as installation-global and ensure the UI
-does not imply otherwise.
+### 4. Data Store REST access is global for every authenticated user ✅ (R4) — DONE
+**Resolved by the `data-store-access-control` spec** (see
+`.kiro/specs/data-store-access-control/`). The Data Store REST API now enforces
+authorization by reusing `requireAdmin`, `PermissionResolver.accessibleTabIds`,
+and the `Collection_Ownership_Store` — no new tables, no migration:
+- management + lifecycle (create/update/delete collection, config get/put, stats,
+  enable, disable), all record writes, and all shared key/value bucket routes are
+  `requireAdmin`;
+- `GET /collections` is filtered to the collections surfaced on tabs a non-admin
+  can reach (admins see all);
+- `GET /collections/:name/records` and `/export` require the collection to be
+  accessible (surfaced by a reachable tab) — non-admins get 403 otherwise,
+  including for unsurfaced or non-existent collections (fail-closed, no existence
+  probing).
+
+The scoping rule matches the live WebSocket Data Store visibility. Covered by
+`src/__integration__/data-store-access-control.integration.test.ts`.
 
 ### 5. Connector status can leak raw connector secrets ✅ (R5) — DONE
 `GET /api/connectors/:id/status` now applies the same config-schema redaction as

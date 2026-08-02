@@ -5,12 +5,40 @@ import express from "express";
 import { createDataStoreRoutes } from "./data-store.routes.js";
 import { errorHandler } from "../middleware/error-handler.js";
 import type { DataStore } from "../../data-store/data-store.js";
+import type { PermissionResolver } from "../../auth/permission-resolver.js";
+import type { CollectionOwnershipStore } from "../../auth/collection-ownership-store.js";
 
 // Mock auth middleware to pass through — these tests focus on route logic, not auth
 vi.mock("../../auth/auth-middleware.js", () => ({
   authenticate: (_req: any, _res: any, next: any) => next(),
   requireAdmin: (_req: any, _res: any, next: any) => next(),
 }));
+
+// These tests focus on route logic, so they run as an admin (full access, no
+// per-collection filtering). The stubs are only consulted for non-admins;
+// non-admin Data Store access control is covered via the fully-wired test app.
+const stubResolver = {
+  effectivePermission: () => "none",
+  hasResourcePermission: () => false,
+  filterByPermission: () => [],
+  accessibleTabIds: () => [],
+} as unknown as PermissionResolver;
+
+const stubOwnership = {
+  getExposingTabs: () => [],
+  getCollectionsForTab: () => [],
+  reconcileAll: () => {},
+} as unknown as CollectionOwnershipStore;
+
+const setAdminUser: express.RequestHandler = (req, _res, next) => {
+  (req as express.Request).user = {
+    userId: "admin-1",
+    username: "admin",
+    role: "admin",
+    groupId: null,
+  };
+  next();
+};
 
 /** Minimal HTTP helper — sends a request to an Express app and returns status + body */
 async function request(
@@ -98,7 +126,8 @@ describe("data-store.routes", () => {
 
     app = express();
     app.use(express.json());
-    app.use("/api/data-store", createDataStoreRoutes(mockDataStore as unknown as DataStore));
+    app.use(setAdminUser);
+    app.use("/api/data-store", createDataStoreRoutes(mockDataStore as unknown as DataStore, stubResolver, stubOwnership));
     app.use(errorHandler);
   });
 
