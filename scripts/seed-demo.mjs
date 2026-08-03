@@ -26,6 +26,8 @@ import {
   seedCollection,
   buildLayout,
   fireAutomations,
+  applyDemoAccess,
+  provisionDemoIdentity,
 } from "./seed/lib.mjs";
 import { tabModules } from "./seed/tabs/index.mjs";
 
@@ -54,6 +56,9 @@ console.log("\n3. Creating automations...");
 const allAutomations = tabModules.flatMap((m) => m.automations);
 const idMap = await createAutomations(api, allAutomations);
 
+// 3b. Apply per-rule public-demo access allowlists (writableStateKeys / fireEvents).
+await applyDemoAccess(api, allAutomations, idMap);
+
 // 4. Publish devices (triggers matching automations → populates live state)
 console.log("\n4. Publishing devices...");
 const allDevices = tabModules.flatMap((m) => m.devices);
@@ -74,6 +79,13 @@ await buildLayout(api, tabModules, idMap);
 // 7. Generate execution history
 console.log("\n7. Generating execution history...");
 await fireAutomations(api, Object.values(idMap), 4);
+
+// 8. Public demo identity — only when building the public demo (opt-in), so a
+// normal `make seed` on a personal install does not create a demo user/group.
+if (process.env.AEOLUS_PUBLIC_DEMO === "true") {
+  console.log("\n8. Provisioning public demo identity...");
+  await provisionDemoIdentity(api, tabModules.map((m) => m.tab.id), "interact");
+}
 
 // Done
 console.log(`

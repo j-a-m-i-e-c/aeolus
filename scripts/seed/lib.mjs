@@ -300,18 +300,23 @@ export async function provisionDemoIdentity(api, tabIds, level = "interact") {
 }
 
 /**
- * Attach per-rule public-demo access metadata (writableStateKeys / fireEvents)
- * to seeded automations, so demo visitors can only write declared state keys
- * and fire declared events. Expects a map of { ruleId → demoAccess }.
+ * Apply per-rule public-demo access allowlists. For each automation that
+ * declares `demoAccess: { writableStateKeys?, fireEvents? }`, PATCH the rule's
+ * demo_access via the admin endpoint so public-demo visitors can only write
+ * declared state keys and fire declared events.
  *
- * NOTE: there is no REST field for demo_access yet; this writes via the same
- * admin update path only if the backend accepts it. Until an authoring field
- * exists, seed demo_access directly in the golden DB build step.
- *
- * @param {Record<string, {writableStateKeys?:string[], fireEvents?:string[]}>} accessByRuleId
+ * @param {(m:string,p:string,b?:object)=>Promise<any>} api - authed admin API caller
+ * @param {{key:string, demoAccess?:{writableStateKeys?:string[], fireEvents?:string[]}}[]} automations
+ * @param {Record<string,string>} idMap - automation key → ruleId
  */
-export function describeDemoAccess(accessByRuleId) {
-  // Placeholder describer used by the golden-DB build to know which rules need
-  // demo_access rows written. Kept as data so the build step stays declarative.
-  return Object.entries(accessByRuleId).map(([ruleId, access]) => ({ ruleId, access }));
+export async function applyDemoAccess(api, automations, idMap) {
+  let count = 0;
+  for (const a of automations) {
+    if (!a.demoAccess) continue;
+    const ruleId = idMap[a.key];
+    if (!ruleId) continue;
+    await api("PATCH", `/api/automations/${ruleId}/demo-access`, a.demoAccess);
+    count++;
+  }
+  if (count > 0) console.log(`  ✓ Applied demo access to ${count} automations`);
 }
