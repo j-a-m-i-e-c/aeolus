@@ -86,12 +86,14 @@ describe("Public demo mode (integration)", () => {
       .send({ name: "Hidden", ruleType: "script", scriptSource: "function automation(context) {}" });
     unexposedRuleId = unexposed.body.id;
 
-    // Expose only the first rule to the demo tab, and declare its demo access.
+    // Expose only the first rule to the demo tab.
     db.prepare("INSERT INTO automation_tab_assignments (automation_id, tab_id) VALUES (?, ?)").run(ruleId, "tab-demo");
-    db.prepare("UPDATE automation_rules SET demo_access = ? WHERE id = ?").run(
-      JSON.stringify({ writableStateKeys: ["master"], fireEvents: ["pause"] }),
-      ruleId,
-    );
+    // Declare its demo access via the admin endpoint (exercises PATCH demo-access).
+    const patched = await request(app)
+      .patch(`/api/automations/${ruleId}/demo-access`)
+      .set("Authorization", `Bearer ${adminToken()}`)
+      .send({ writableStateKeys: ["master"], fireEvents: ["pause"] });
+    expect(patched.status).toBe(200);
   });
 
   afterEach(() => {
@@ -205,6 +207,14 @@ describe("Public demo mode (integration)", () => {
         .post(`/api/automations/${ruleId}/fire`)
         .set("Authorization", `Bearer ${demoToken()}`)
         .send({ context: { topic: "arbitrary/topic", deviceId: "x", state: {} } });
+      expect(res.status).toBe(403);
+    });
+
+    it("set its own demo-access allowlist (admin-only, not allowlisted)", async () => {
+      const res = await request(app)
+        .patch(`/api/automations/${ruleId}/demo-access`)
+        .set("Authorization", `Bearer ${demoToken()}`)
+        .send({ fireEvents: ["pause", "detonate"] });
       expect(res.status).toBe(403);
     });
   });

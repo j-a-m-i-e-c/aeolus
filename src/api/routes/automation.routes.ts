@@ -21,7 +21,7 @@ import type { ConnectorRegistry } from "../../connectors/connector-registry.js";
 import { BadRequestError, NotFoundError, ForbiddenError } from "../middleware/error-handler.js";
 import { validate } from "../middleware/validate.js";
 import { asyncHandler } from "../middleware/async-handler.js";
-import { createAutomationBodySchema, updateAutomationBodySchema, automationIdParamsSchema, toggleAutomationBodySchema, automationStateBodySchema } from "../schemas/automation.schemas.js";
+import { createAutomationBodySchema, updateAutomationBodySchema, automationIdParamsSchema, toggleAutomationBodySchema, automationStateBodySchema, demoAccessBodySchema } from "../schemas/automation.schemas.js";
 import { requireTabPermission, requireAdmin } from "../../auth/auth-middleware.js";
 import type { RequestHandler } from "express";
 import type { PermissionLevel } from "../../auth/permission-service.js";
@@ -637,6 +637,25 @@ export function createAutomationRoutes(
     if (stateStore) {
       stateStore.delete(id, key);
     }
+    res.json({ success: true });
+  }));
+
+  /**
+   * PATCH /api/automations/:id/demo-access — set the per-rule public-demo
+   * allowlist (public-demo-mode spec). Admin-only: this is demo configuration
+   * authored by the Aeolus project (used by the demo seed), not runtime user
+   * data. Stores the JSON on automation_rules.demo_access; passing an empty body
+   * clears it.
+   */
+  router.patch("/:id/demo-access", requireAdmin, validate({ body: demoAccessBodySchema, params: automationIdParamsSchema }), asyncHandler((req, res) => {
+    const id = req.params.id as string;
+    if (!automationExists(db, id)) {
+      throw new NotFoundError(`Automation rule ${id} not found`);
+    }
+    const { writableStateKeys, fireEvents } = req.body;
+    const hasAny = writableStateKeys !== undefined || fireEvents !== undefined;
+    const value = hasAny ? JSON.stringify({ writableStateKeys, fireEvents }) : null;
+    db.prepare("UPDATE automation_rules SET demo_access = ? WHERE id = ?").run(value, id);
     res.json({ success: true });
   }));
 

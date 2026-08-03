@@ -48,3 +48,13 @@ export const automationStateBodySchema = z.object({
   key: z.string().min(1).max(200),
   value: z.unknown(),
 });
+
+/**
+ * Per-rule public-demo access allowlist (public-demo-mode spec). Authored by the
+ * Aeolus project (admin-only) — declares which state keys a public-demo visitor
+ * may write and which fire event names they may send for this automation.
+ */
+export const demoAccessBodySchema = z.object({
+  writableStateKeys: z.array(z.string().min(1).max(64)).max(100).optional(),
+  fireEvents: z.array(z.string().min(1).max(64)).max(100).optional(),
+});
