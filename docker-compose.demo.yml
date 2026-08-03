@@ -1,0 +1,37 @@
+# docker-compose.demo.yml — Public demo overlay.
+#
+# Flips the existing stack into public demo mode. Use it as an overlay on top of
+# the base compose file:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.demo.yml up -d --build
+#
+# It (1) turns on the backend AEOLUS_PUBLIC_DEMO flag so /api/auth/demo-session
+# is live and the fail-closed PublicDemoGuard constrains public-demo sessions,
+# and (2) rebuilds the frontend with VITE_PUBLIC_DEMO baked in, so visitors get
+# an anonymous demo session (no login screen), the demo banner, and the
+# admin/authoring surfaces hidden.
+#
+# The seeded `demo` user/group must exist — seed with the same overlay:
+#   docker compose -f docker-compose.yml -f docker-compose.demo.yml \
+#     --profile seed run --rm -e SEED_USER=admin -e SEED_PASS=<pass> seed
+#
+# NOTE: this is the testing overlay for validating demo mode. The hardened
+# public deployment (Cloudflare Tunnel, resource limits, golden/active DB split,
+# nightly reset, no exposed ports) is the remaining Phase B work.
+
+services:
+  backend:
+    environment:
+      AEOLUS_PUBLIC_DEMO: "true"
+      DEMO_SESSION_MINUTES: "120"
+      DEMO_RESET_TIME: "03:30"
+
+  frontend:
+    build:
+      args:
+        VITE_PUBLIC_DEMO: "true"
+
+  # When seeding through this overlay, provision the public demo identity too.
+  seed:
+    environment:
+      AEOLUS_PUBLIC_DEMO: "true"
