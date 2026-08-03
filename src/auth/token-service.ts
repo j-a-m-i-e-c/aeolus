@@ -106,9 +106,12 @@ export function generateAccessToken(
   if (payload.sessionType && payload.sessionType !== "normal") {
     claims.sessionType = payload.sessionType;
   }
-  const expiresIn =
-    options?.expiresInMinutes !== undefined ? `${options.expiresInMinutes}m` : ACCESS_TOKEN_EXPIRY;
-  return jwt.sign(claims, secret, { algorithm: "HS256", expiresIn });
+  const signOptions: jwt.SignOptions = { algorithm: "HS256", expiresIn: ACCESS_TOKEN_EXPIRY };
+  if (options?.expiresInMinutes !== undefined) {
+    // jwt accepts a number of seconds for expiresIn.
+    signOptions.expiresIn = options.expiresInMinutes * 60;
+  }
+  return jwt.sign(claims, secret, signOptions);
 }
 
 /**
