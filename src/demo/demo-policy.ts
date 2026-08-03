@@ -108,6 +108,29 @@ export function buildDemoPolicy(deps: DemoValidatorDeps): DemoPolicyEntry[] {
     { method: "GET", pattern: "/api/health" },
     { method: "GET", pattern: "/api/system/version" },
 
+    // ── Admin read-only surfaces (public-demo visibility) ───────────────────
+    // These are normally admin-only. A public-demo session is granted read-only
+    // visibility so the demo showcases the whole platform (System, Data Store,
+    // Security, Connectors). Two additive safeguards make this safe on the
+    // throwaway demo box: (1) requireAdmin only relaxes for demo GET/HEAD, so
+    // writes stay blocked; (2) the demo-scrub layer masks sensitive fields
+    // (host/network identifiers, credentials, usernames, log contents) before
+    // the response leaves the process. Reads only — no mutating admin routes.
+    { method: "GET", pattern: "/api/system" },
+    { method: "GET", pattern: "/api/system/logs" },
+    { method: "GET", pattern: "/api/connectors" },
+    { method: "GET", pattern: "/api/connectors/available" },
+    { method: "GET", pattern: "/api/connectors/:id/status" },
+    { method: "GET", pattern: "/api/data-store/config" },
+    { method: "GET", pattern: "/api/data-store/stats" },
+    { method: "GET", pattern: "/api/data-store/buckets" },
+    { method: "GET", pattern: "/api/data-store/buckets/:bucket" },
+    { method: "GET", pattern: "/api/auth/users" },
+    { method: "GET", pattern: "/api/auth/groups" },
+    { method: "GET", pattern: "/api/auth/mqtt-credentials" },
+    { method: "GET", pattern: "/api/mqtt/provisioning/status" },
+    { method: "GET", pattern: "/api/mqtt/private-topics" },
+
     // ── Approved bounded mutations ──
     { method: "PUT", pattern: "/api/automations/:id/state", validate: validateDemoStateWrite },
     { method: "POST", pattern: "/api/automations/:id/fire", validate: validateDemoFire },

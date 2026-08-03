@@ -14,10 +14,12 @@ import { CollectionList } from "./CollectionList";
 import { CollectionDetail } from "./CollectionDetail";
 import { BucketList } from "./BucketList";
 import { SettingsPanel } from "./SettingsPanel";
+import { useReadOnlyDemo } from "../../hooks/useReadOnlyDemo";
 
 type Tab = "collections" | "buckets" | "settings";
 
 export function DataExplorer() {
+  const readOnly = useReadOnlyDemo();
   const [activeTab, setActiveTab] = useState<Tab>("collections");
 
   const fetchStats = useDataStoreStore((s) => s.fetchStats);
@@ -44,7 +46,9 @@ export function DataExplorer() {
   const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
     { id: "collections", label: "Collections", icon: <Layers size={14} /> },
     { id: "buckets", label: "Buckets", icon: <Archive size={14} /> },
-    { id: "settings", label: "Settings", icon: <Settings size={14} /> },
+    // The Settings tab is the Data Store config-mutation surface — hidden in the
+    // read-only public demo.
+    ...(readOnly ? [] : [{ id: "settings" as Tab, label: "Settings", icon: <Settings size={14} /> }]),
   ];
 
   return (

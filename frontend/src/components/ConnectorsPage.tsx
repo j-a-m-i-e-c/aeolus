@@ -14,6 +14,7 @@ import {
   fetchSetupSteps,
   patchConnectorConfig,
 } from "../lib/api-client";
+import { useReadOnlyDemo } from "../hooks/useReadOnlyDemo";
 
 // ---------------------------------------------------------------------------
 // Types (matching backend API response shapes)
@@ -465,6 +466,7 @@ function SetupWizard({
 // ---------------------------------------------------------------------------
 
 export function ConnectorsPage() {
+  const readOnly = useReadOnlyDemo();
   const [available, setAvailable] = useState<ConnectorType[]>([]);
   const [enabled, setEnabled] = useState<EnabledConnector[]>([]);
   const [loading, setLoading] = useState(true);
@@ -684,26 +686,28 @@ export function ConnectorsPage() {
                   <p className="text-[10px] text-[#EF4444] bg-[#EF4444]/10 px-2 py-1 rounded">{conn.health.errorMessage}</p>
                 )}
 
-                <div className="flex gap-2">
-                  {conn.health.status === "disconnected" && (
+                {!readOnly && (
+                  <div className="flex gap-2">
+                    {conn.health.status === "disconnected" && (
+                      <button
+                        onClick={() => handleRetry(conn.id)}
+                        disabled={actionLoading === conn.id}
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-[#F59E0B]/20 text-[#F59E0B] border border-[#F59E0B]/30 hover:bg-[#F59E0B]/30 transition-colors disabled:opacity-50"
+                      >
+                        <RotateCcw size={12} />
+                        Retry
+                      </button>
+                    )}
                     <button
-                      onClick={() => handleRetry(conn.id)}
+                      onClick={() => handleDisable(conn.id)}
                       disabled={actionLoading === conn.id}
-                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-[#F59E0B]/20 text-[#F59E0B] border border-[#F59E0B]/30 hover:bg-[#F59E0B]/30 transition-colors disabled:opacity-50"
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-[#EF4444]/10 text-[#EF4444] border border-[#EF4444]/20 hover:bg-[#EF4444]/20 transition-colors disabled:opacity-50"
                     >
-                      <RotateCcw size={12} />
-                      Retry
+                      <PowerOff size={12} />
+                      Disable
                     </button>
-                  )}
-                  <button
-                    onClick={() => handleDisable(conn.id)}
-                    disabled={actionLoading === conn.id}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-[#EF4444]/10 text-[#EF4444] border border-[#EF4444]/20 hover:bg-[#EF4444]/20 transition-colors disabled:opacity-50"
-                  >
-                    <PowerOff size={12} />
-                    Disable
-                  </button>
-                </div>
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -750,7 +754,11 @@ export function ConnectorsPage() {
                     </div>
                   </div>
                   <div className="shrink-0">
-                  {isIncompleteSetup ? (
+                  {readOnly ? (
+                    isEnabled && !isIncompleteSetup && (
+                      <span className="text-[10px] px-2 py-0.5 rounded bg-[#22C55E]/20 text-[#22C55E]">Active</span>
+                    )
+                  ) : isIncompleteSetup ? (
                     <button
                       onClick={handleResumeSetup}
                       disabled={actionLoading === connType.metadata.id}

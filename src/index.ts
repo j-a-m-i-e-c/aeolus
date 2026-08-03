@@ -49,6 +49,7 @@ import { corsMiddleware } from "./api/middleware/cors-config.js";
 import { apiRateLimiter } from "./api/middleware/rate-limiter.js";
 import { authenticate } from "./auth/auth-middleware.js";
 import { createPublicDemoGuard } from "./demo/public-demo-guard.js";
+import { createDemoScrubMiddleware } from "./demo/demo-scrub.js";
 import { createDemoRuleAccessReader } from "./demo/demo-rule-access.js";
 import { createAuthRoutes } from "./api/routes/auth.routes.js";
 import { ensureBackendCredential } from "./auth/mqtt-credential-service.js";
@@ -291,6 +292,14 @@ async function main(): Promise<void> {
       stateStore,
     }),
   );
+
+  // Response-masking for public-demo sessions. Demo sessions are granted
+  // read-only visibility into admin surfaces (guard allowlist +
+  // requireAdmin relaxation); this masks sensitive fields (host/network
+  // identifiers, credentials, usernames, log contents) before the response is
+  // serialised. Inert for every non-demo session. Mounted directly after the
+  // guard so it wraps `res.json` before any route handler runs.
+  app.use(createDemoScrubMiddleware());
 
   // Resource-level authorization wiring. A single ownership store (automations),
   // a live device-exposure resolver, and a permission resolver that routes

@@ -33,6 +33,7 @@ import { AutomationStateStore } from "../automations/automation-state-store.js";
 import { DataStore } from "../data-store/data-store.js";
 import { _resetSecretCache } from "../auth/token-service.js";
 import { createPublicDemoGuard } from "../demo/public-demo-guard.js";
+import { createDemoScrubMiddleware } from "../demo/demo-scrub.js";
 import { createDemoRuleAccessReader } from "../demo/demo-rule-access.js";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -147,6 +148,7 @@ export function createTestApp(
         stateStore,
       }),
     );
+    app.use(createDemoScrubMiddleware({ enabled: true }));
   }
 
   // ─── Routes ──────────────────────────────────────────────────────────────

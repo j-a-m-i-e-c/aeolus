@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { useDataStoreStore } from "../../store/data-store-store";
 import { authFetch } from "../../lib/auth-fetch";
+import { useReadOnlyDemo } from "../../hooks/useReadOnlyDemo";
 
 /** Collections with this prefix are system/internal (observability) */
 const SYSTEM_COLLECTION_PREFIX = "_metrics:";
@@ -35,6 +36,7 @@ function formatRetention(retentionDays: number | null): string {
 }
 
 export function CollectionList() {
+  const readOnly = useReadOnlyDemo();
   const collections = useDataStoreStore((s) => s.collections);
   const selectCollection = useDataStoreStore((s) => s.selectCollection);
   const fetchCollections = useDataStoreStore((s) => s.fetchCollections);
@@ -123,13 +125,15 @@ export function CollectionList() {
         <p className="text-sm text-[#6B7785]">
           Time-series collections store timestamped records that accumulate over time. Use them to log sensor readings, track energy usage, or record any data you want to query and chart by time range.
         </p>
-        <button
-          onClick={() => setShowCreate(true)}
-          className="flex items-center gap-1.5 bg-primary hover:bg-primary/90 text-white rounded-lg px-3 py-1.5 text-xs font-medium transition-colors"
-        >
-          <Plus size={14} />
-          New Collection
-        </button>
+        {!readOnly && (
+          <button
+            onClick={() => setShowCreate(true)}
+            className="flex items-center gap-1.5 bg-primary hover:bg-primary/90 text-white rounded-lg px-3 py-1.5 text-xs font-medium transition-colors"
+          >
+            <Plus size={14} />
+            New Collection
+          </button>
+        )}
       </div>
 
       {/* Creation form */}

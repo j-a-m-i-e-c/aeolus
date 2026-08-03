@@ -66,6 +66,30 @@ describe("buildDemoPolicy", () => {
     expect(has("POST", "/api/automations/:id/fire")).toBe(true);
   });
 
+  it("allowlists the read-only admin surfaces (masked downstream by demo-scrub)", () => {
+    const policy = buildDemoPolicy(deps());
+    const has = (m: string, p: string) => policy.some((e) => e.method === m && e.pattern === p);
+
+    for (const p of [
+      "/api/system",
+      "/api/system/logs",
+      "/api/connectors",
+      "/api/connectors/available",
+      "/api/connectors/:id/status",
+      "/api/data-store/config",
+      "/api/data-store/stats",
+      "/api/data-store/buckets",
+      "/api/data-store/buckets/:bucket",
+      "/api/auth/users",
+      "/api/auth/groups",
+      "/api/auth/mqtt-credentials",
+      "/api/mqtt/provisioning/status",
+      "/api/mqtt/private-topics",
+    ]) {
+      expect(has("GET", p)).toBe(true);
+    }
+  });
+
   it("attaches validators only to the mutating entries", () => {
     const policy = buildDemoPolicy(deps());
     for (const e of policy) {
@@ -84,7 +108,11 @@ describe("buildDemoPolicy", () => {
       ["POST", "/api/mqtt/publish"],
       ["POST", "/api/connectors"],
       ["POST", "/api/data-store/collections"],
-      ["GET", "/api/auth/users"],
+      // Admin *writes* remain forbidden even though the matching reads are now
+      // allowlisted (see the read-only admin surfaces test above).
+      ["POST", "/api/auth/users"],
+      ["DELETE", "/api/auth/users/:id"],
+      ["PUT", "/api/mqtt/provisioning/level"],
     ];
     for (const [m, p] of forbidden) {
       expect(policy.some((e) => e.method === m && e.pattern === p)).toBe(false);

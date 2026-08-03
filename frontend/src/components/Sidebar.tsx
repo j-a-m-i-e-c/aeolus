@@ -11,6 +11,7 @@ import * as icons from "lucide-react";
 import { Plus, Trash2, GripVertical, LogOut } from "lucide-react";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { fetchHealth } from "../lib/api-client";
+import { PUBLIC_DEMO } from "../lib/env";
 import type { HealthStatus } from "../store/device-store";
 
 // ---------------------------------------------------------------------------
@@ -76,8 +77,12 @@ export function Sidebar() {
   const [dragTabId, setDragTabId] = useState<string | null>(null);
   const [dragOverTabId, setDragOverTabId] = useState<string | null>(null);
 
-  // Derived tab lists — filtered by user permissions
-  const pinnedTabs = tabs.filter((t) => t.pinned && (isAdmin || hasTabAccess(t.id)) && (t.id !== "default-security" || isAdmin)).sort((a, b) => a.order - b.order);
+  // Derived tab lists — filtered by user permissions. In public-demo mode every
+  // pinned/admin tab (System, Connectors, Data Store, Security) is shown so the
+  // demo can present the whole platform; the backend serves those reads scrubbed
+  // and blocks writes, and the admin pages render read-only (useReadOnlyDemo).
+  const canSeeAdminTabs = isAdmin || PUBLIC_DEMO;
+  const pinnedTabs = tabs.filter((t) => t.pinned && (canSeeAdminTabs || hasTabAccess(t.id)) && (t.id !== "default-security" || canSeeAdminTabs)).sort((a, b) => a.order - b.order);
   const customTabs = tabs.filter((t) => !t.pinned && (isAdmin || hasTabAccess(t.id))).sort((a, b) => a.order - b.order);
 
   // Route helpers

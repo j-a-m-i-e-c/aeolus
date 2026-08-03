@@ -277,11 +277,50 @@ These operations require additional demo-specific validation described below.
 
 Simulated device actions may be enabled later if explicitly declared safe.
 
+## 7.3 Admin read-only visibility (masked)
+
+To let the public demo showcase the whole platform, demo sessions are granted
+**read-only** visibility into the admin/pinned surfaces (System, Data Store,
+Security, Connectors). This is only safe under two conditions, both of which the
+demo box satisfies:
+
+1. The demo box is a throwaway instance with **no real credentials or devices**
+   configured, reset on a schedule.
+2. A server-side masking layer (`src/demo/demo-scrub.ts`) redacts sensitive
+   fields from these responses before they leave the process — host/network
+   identifiers, credentials, real usernames, and raw log contents become `•••`.
+
+Allowlisted admin **reads** (GET only):
+
+```text
+GET /api/system                       (hostname + network addresses masked)
+GET /api/system/logs                  (IPs / long tokens scrubbed from messages)
+GET /api/connectors                   (config secrets masked)
+GET /api/connectors/available
+GET /api/connectors/:id/status        (config secrets masked)
+GET /api/data-store/config
+GET /api/data-store/stats
+GET /api/data-store/buckets
+GET /api/data-store/buckets/:bucket
+GET /api/auth/users                   (usernames pseudonymised)
+GET /api/auth/groups
+GET /api/auth/mqtt-credentials        (credential fields masked)
+GET /api/mqtt/provisioning/status     (shared credential already stripped for non-admins)
+GET /api/mqtt/private-topics
+```
+
+Enforcement: `requireAdmin` relaxes only for public-demo sessions on read-only
+methods (GET/HEAD); the fail-closed guard remains the authoritative allowlist,
+so no mutating admin route becomes reachable. On the frontend these pages render
+without their mutating controls (`useReadOnlyDemo`).
+
 ---
 
 # 8. Explicitly Forbidden Capabilities
 
-Public demo sessions must never be able to perform the following.
+Public demo sessions must never be able to perform the following. Note: several
+admin surfaces are now **viewable read-only with masking** per §7.3 — the items
+below concern the *mutations* and *unmasked/raw* access that remain forbidden.
 
 ## Authentication and administration
 
@@ -353,13 +392,15 @@ Only explicitly approved seeded state interactions should be writable.
 
 ## System administration
 
+Host diagnostics and application logs are **viewable read-only but masked** per
+§7.3 (hostname/network addresses redacted; IPs and long tokens scrubbed from log
+messages). Still forbidden:
+
 ```text
-system logs
-host diagnostics
-network information
-disk information
+unmasked host / network / disk identifiers
 environment/config values
 metrics administration
+any system mutation
 ```
 
 ## Device administration

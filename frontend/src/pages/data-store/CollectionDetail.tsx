@@ -13,12 +13,14 @@ import { useDataStoreStore } from "../../store/data-store-store";
 import { TimeSeriesChart } from "./TimeSeriesChart";
 import { RecordTable } from "./RecordTable";
 import { authFetch } from "../../lib/auth-fetch";
+import { useReadOnlyDemo } from "../../hooks/useReadOnlyDemo";
 
 const API_URL =
   import.meta.env.VITE_API_URL ||
   `http://${window.location.hostname}:3001`;
 
 export function CollectionDetail() {
+  const readOnly = useReadOnlyDemo();
   const selectedCollection = useDataStoreStore((s) => s.selectedCollection);
   const collections = useDataStoreStore((s) => s.collections);
   const selectCollection = useDataStoreStore((s) => s.selectCollection);
@@ -139,29 +141,31 @@ export function CollectionDetail() {
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          <button
-            onClick={handleExportCsv}
-            className="flex items-center gap-1.5 text-[#9AA6B2] hover:text-[#E6EDF3] border border-[#30363D] rounded-lg px-3 py-1.5 text-xs transition-colors"
-          >
-            <Download size={12} />
-            Export CSV
-          </button>
-          <button
-            onClick={() => setShowEdit(!showEdit)}
-            className="flex items-center gap-1.5 text-[#9AA6B2] hover:text-[#E6EDF3] border border-[#30363D] rounded-lg px-3 py-1.5 text-xs transition-colors"
-          >
-            <Pencil size={12} />
-            Edit
-          </button>
-          <button
-            onClick={() => setShowDeleteConfirm(true)}
-            className="flex items-center gap-1.5 text-[#EF4444] hover:text-[#EF4444]/80 border border-[#30363D] rounded-lg px-3 py-1.5 text-xs transition-colors"
-          >
-            <Trash2 size={12} />
-            Delete
-          </button>
-        </div>
+        {!readOnly && (
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleExportCsv}
+              className="flex items-center gap-1.5 text-[#9AA6B2] hover:text-[#E6EDF3] border border-[#30363D] rounded-lg px-3 py-1.5 text-xs transition-colors"
+            >
+              <Download size={12} />
+              Export CSV
+            </button>
+            <button
+              onClick={() => setShowEdit(!showEdit)}
+              className="flex items-center gap-1.5 text-[#9AA6B2] hover:text-[#E6EDF3] border border-[#30363D] rounded-lg px-3 py-1.5 text-xs transition-colors"
+            >
+              <Pencil size={12} />
+              Edit
+            </button>
+            <button
+              onClick={() => setShowDeleteConfirm(true)}
+              className="flex items-center gap-1.5 text-[#EF4444] hover:text-[#EF4444]/80 border border-[#30363D] rounded-lg px-3 py-1.5 text-xs transition-colors"
+            >
+              <Trash2 size={12} />
+              Delete
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Edit panel */}

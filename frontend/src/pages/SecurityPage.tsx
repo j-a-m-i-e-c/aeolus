@@ -3,6 +3,7 @@
 import { useState, useCallback } from "react";
 import { Shield, Users } from "lucide-react";
 import { useAuthStore } from "../store/auth-store";
+import { PUBLIC_DEMO } from "../lib/env";
 import MqttSecurityPage from "./MqttSecurityPage";
 import { GroupManagementPage } from "./GroupManagementPage";
 import { UserManagementPage } from "./UserManagementPage";
@@ -24,7 +25,10 @@ export default function SecurityPage() {
     setGroupVersion((v) => v + 1);
   }, []);
 
-  if (!isAdmin) {
+  // Public-demo sessions get a read-only view of the security model; the
+  // underlying pages render without mutating controls (useReadOnlyDemo) and the
+  // backend serves the reads scrubbed (real usernames/credentials masked).
+  if (!isAdmin && !PUBLIC_DEMO) {
     return (
       <div className="flex items-center justify-center h-full min-h-[60vh]">
         <div className="text-[#6B7785] text-sm">Access denied — admin only</div>

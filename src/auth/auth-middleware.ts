@@ -118,11 +118,34 @@ export function requireAdmin(
     throw new UnauthorizedError();
   }
 
-  if (req.user.role !== "admin") {
-    throw new ForbiddenError();
+  if (req.user.role === "admin") {
+    next();
+    return;
   }
 
-  next();
+  // Public-demo sessions are granted read-only visibility into admin surfaces so
+  // the demo can showcase the whole platform (System, Data Store, Security,
+  // Connectors). This relaxation is deliberately limited to safe (read-only)
+  // methods. It is additive and safe because:
+  //   1. The PublicDemoGuard (fail-closed allowlist) already restricts a demo
+  //      session to a fixed set of paths — it is the authoritative gate, so a
+  //      demo GET only reaches here for explicitly allowlisted admin reads.
+  //   2. The demo-scrub layer masks sensitive fields (host/network identifiers,
+  //      credentials, usernames, log contents) before the response is sent.
+  // Mutations remain blocked: the guard denies any non-allowlisted method, and
+  // no mutating admin route is on the allowlist.
+  if (req.user.sessionType === "public-demo" && isReadOnlyMethod(req.method)) {
+    next();
+    return;
+  }
+
+  throw new ForbiddenError();
+}
+
+/** Read-only HTTP methods — the only methods a demo session may use on admin routes. */
+function isReadOnlyMethod(method: string): boolean {
+  const m = method.toUpperCase();
+  return m === "GET" || m === "HEAD";
 }
 
 /**

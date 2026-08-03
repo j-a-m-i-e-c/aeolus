@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { FolderKey, Plus, Pencil, Trash2, X, Loader2, Eye, MousePointer, PenTool } from "lucide-react";
 import { authFetch } from "../lib/auth-fetch";
 import { useDashboardStore } from "../store/dashboard-store";
+import { useReadOnlyDemo } from "../hooks/useReadOnlyDemo";
 
 const API_URL = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:3001`;
 
@@ -157,6 +158,7 @@ function TabAssignmentPicker({
 // ---------------------------------------------------------------------------
 
 export function GroupManagementPage({ onGroupsChanged }: { onGroupsChanged?: () => void }) {
+  const readOnly = useReadOnlyDemo();
   const [groups, setGroups] = useState<GroupRecord[]>([]);
   const [users, setUsers] = useState<UserRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -365,13 +367,15 @@ export function GroupManagementPage({ onGroupsChanged }: { onGroupsChanged?: () 
           <FolderKey size={16} className="text-primary" />
           <h2 className="text-sm font-semibold text-[#9AA6B2] uppercase tracking-wider">Groups</h2>
         </div>
-        <button
-          onClick={() => setShowCreateForm(!showCreateForm)}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-primary/20 text-primary border border-primary/30 hover:bg-primary/30 transition-colors"
-        >
-          <Plus size={12} />
-          Add Group
-        </button>
+        {!readOnly && (
+          <button
+            onClick={() => setShowCreateForm(!showCreateForm)}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-primary/20 text-primary border border-primary/30 hover:bg-primary/30 transition-colors"
+          >
+            <Plus size={12} />
+            Add Group
+          </button>
+        )}
       </div>
 
       {/* Create group form */}
@@ -448,22 +452,24 @@ export function GroupManagementPage({ onGroupsChanged }: { onGroupsChanged?: () 
                       </span>
                     )}
                   </div>
-                  <div className="flex items-center gap-1">
-                    <button
-                      onClick={() => openEditModal(group)}
-                      className="p-1.5 rounded-lg text-[#6B7785] hover:text-primary hover:bg-primary/10 transition-colors"
-                      title="Edit group"
-                    >
-                      <Pencil size={14} />
-                    </button>
-                    <button
-                      onClick={() => setDeleteGroup(group)}
-                      className="p-1.5 rounded-lg text-[#6B7785] hover:text-[#EF4444] hover:bg-[#EF4444]/10 transition-colors"
-                      title="Delete group"
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
+                  {!readOnly && (
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => openEditModal(group)}
+                        className="p-1.5 rounded-lg text-[#6B7785] hover:text-primary hover:bg-primary/10 transition-colors"
+                        title="Edit group"
+                      >
+                        <Pencil size={14} />
+                      </button>
+                      <button
+                        onClick={() => setDeleteGroup(group)}
+                        className="p-1.5 rounded-lg text-[#6B7785] hover:text-[#EF4444] hover:bg-[#EF4444]/10 transition-colors"
+                        title="Delete group"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 {/* Tab assignments visual indicator */}

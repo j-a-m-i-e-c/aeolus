@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Users, Plus, Pencil, Trash2, X, Loader2, Shield, User } from "lucide-react";
 import { authFetch } from "../lib/auth-fetch";
+import { useReadOnlyDemo } from "../hooks/useReadOnlyDemo";
 
 const API_URL = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:3001`;
 
@@ -28,6 +29,7 @@ interface GroupRecord {
 // ---------------------------------------------------------------------------
 
 export function UserManagementPage() {
+  const readOnly = useReadOnlyDemo();
   const [users, setUsers] = useState<UserRecord[]>([]);
   const [groups, setGroups] = useState<GroupRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -264,13 +266,15 @@ export function UserManagementPage() {
           <Users size={16} className="text-primary" />
           <h2 className="text-sm font-semibold text-[#9AA6B2] uppercase tracking-wider">Users</h2>
         </div>
-        <button
-          onClick={() => { fetchGroups(); setShowCreateForm(!showCreateForm); }}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-primary/20 text-primary border border-primary/30 hover:bg-primary/30 transition-colors"
-        >
-          <Plus size={12} />
-          Add User
-        </button>
+        {!readOnly && (
+          <button
+            onClick={() => { fetchGroups(); setShowCreateForm(!showCreateForm); }}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-primary/20 text-primary border border-primary/30 hover:bg-primary/30 transition-colors"
+          >
+            <Plus size={12} />
+            Add User
+          </button>
+        )}
       </div>
 
       {/* Create user form */}
@@ -373,7 +377,7 @@ export function UserManagementPage() {
                 <th className="text-left px-4 py-3 text-[10px] text-[#6B7785] uppercase font-semibold tracking-wider">Role</th>
                 <th className="text-left px-4 py-3 text-[10px] text-[#6B7785] uppercase font-semibold tracking-wider">Group</th>
                 <th className="text-left px-4 py-3 text-[10px] text-[#6B7785] uppercase font-semibold tracking-wider">Created</th>
-                <th className="text-right px-4 py-3 text-[10px] text-[#6B7785] uppercase font-semibold tracking-wider">Actions</th>
+                {!readOnly && <th className="text-right px-4 py-3 text-[10px] text-[#6B7785] uppercase font-semibold tracking-wider">Actions</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-[#2A3441]/50">
@@ -406,24 +410,26 @@ export function UserManagementPage() {
                     )}
                   </td>
                   <td className="px-4 py-3 text-[#6B7785]">{formatDate(u.createdAt)}</td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center justify-end gap-1">
-                      <button
-                        onClick={() => openEditModal(u)}
-                        className="p-1.5 rounded-lg text-[#6B7785] hover:text-primary hover:bg-primary/10 transition-colors"
-                        title="Edit user"
-                      >
-                        <Pencil size={14} />
-                      </button>
-                      <button
-                        onClick={() => setDeleteUser(u)}
-                        className="p-1.5 rounded-lg text-[#6B7785] hover:text-[#EF4444] hover:bg-[#EF4444]/10 transition-colors"
-                        title="Delete user"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  </td>
+                  {!readOnly && (
+                    <td className="px-4 py-3">
+                      <div className="flex items-center justify-end gap-1">
+                        <button
+                          onClick={() => openEditModal(u)}
+                          className="p-1.5 rounded-lg text-[#6B7785] hover:text-primary hover:bg-primary/10 transition-colors"
+                          title="Edit user"
+                        >
+                          <Pencil size={14} />
+                        </button>
+                        <button
+                          onClick={() => setDeleteUser(u)}
+                          className="p-1.5 rounded-lg text-[#6B7785] hover:text-[#EF4444] hover:bg-[#EF4444]/10 transition-colors"
+                          title="Delete user"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>

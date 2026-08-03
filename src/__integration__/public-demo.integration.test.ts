@@ -150,6 +150,41 @@ describe("Public demo mode (integration)", () => {
     });
   });
 
+  // ── Read-only admin visibility (requirements §7.3) ──
+  describe("a demo session CAN read admin surfaces (scrubbed)", () => {
+    it("read /api/system/logs (normally admin-only)", async () => {
+      const res = await request(app).get("/api/system/logs").set("Authorization", `Bearer ${demoToken()}`);
+      expect(res.status).toBe(200);
+      expect(Array.isArray(res.body)).toBe(true);
+    });
+
+    it("read /api/auth/users with usernames pseudonymised", async () => {
+      const res = await request(app).get("/api/auth/users").set("Authorization", `Bearer ${demoToken()}`);
+      expect(res.status).toBe(200);
+      // The seeded demo user's real username ("demo") must not be disclosed;
+      // the role structure is preserved.
+      const usernames = (res.body as Array<{ username: string; role: string }>).map((u) => u.username);
+      expect(usernames).not.toContain("demo");
+      expect(res.body[0]).toHaveProperty("role", "user");
+    });
+
+    it("read /api/system with host/network identifiers masked", async () => {
+      const res = await request(app).get("/api/system").set("Authorization", `Bearer ${demoToken()}`);
+      expect(res.status).toBe(200);
+      // hostname is a sensitive key → masked; numeric metrics survive.
+      expect(res.body.hostname).toBe("•••");
+      for (const iface of res.body.network ?? []) {
+        expect(iface.address).toBe("•••");
+      }
+    });
+
+    it("does NOT relax admin reads for a normal (non-demo) non-admin session", async () => {
+      const normalUser = createAuthToken({ userId: "u-demo", username: "demo", role: "user", groupId: "g-demo" });
+      const res = await request(app).get("/api/auth/users").set("Authorization", `Bearer ${normalUser}`);
+      expect(res.status).toBe(403);
+    });
+  });
+
   // ── Deny matrix (Req 8, 16.2, 16.3) ──
   describe("a demo session CANNOT", () => {
     const denied403: Array<[string, string, unknown?]> = [
@@ -157,8 +192,6 @@ describe("Public demo mode (integration)", () => {
       ["put", "/api/layout", { tabs: [], panes: [] }],
       ["post", "/api/mqtt/publish", { topic: "x", payload: "{}" }],
       ["post", "/api/data-store/collections", { name: "x" }],
-      ["get", "/api/auth/users", undefined],
-      ["get", "/api/system/logs", undefined],
       ["get", "/api/definitely/not/a/route", undefined],
     ];
 

@@ -39,6 +39,21 @@ optional test tasks; the non-`*` tasks are the feature. Every task keeps normal
 > - The 16 KB demo body cap is enforced via a `Content-Length` check in the
 >   validators rather than a second `express.json` instance.
 
+### Phase A follow-on — read-only admin visibility (masked)
+
+> **STATUS: COMPLETE.** Enhancement so the demo showcases the whole platform:
+> public-demo sessions may now *view* the admin/pinned tabs (System, Data Store,
+> Security, Connectors) read-only, with sensitive data masked server-side. See
+> `docs/AEOLUS_PUBLIC_DEMO_REQUIREMENTS.md` §7.3 for the allowlisted admin reads
+> and masking contract. Implementation: admin GET patterns added to
+> `buildDemoPolicy`; `requireAdmin` relaxes for demo GET/HEAD (guard stays the
+> authoritative allowlist); new `src/demo/demo-scrub.ts` wraps `res.json` for
+> demo sessions and redacts host/network identifiers, credentials, usernames,
+> and log contents; frontend un-hides the pinned/security tabs in `PUBLIC_DEMO`
+> and renders the admin pages without mutating controls (`useReadOnlyDemo`).
+> Safe because the demo box is throwaway with no real credentials and is reset
+> on a schedule. Writes remain fail-closed.
+
 - [ ] 1. Demo configuration flags
   - [ ] 1.1 Add `config.publicDemo { enabled, sessionMinutes, resetTime }` to
     `src/config.ts` (env: `AEOLUS_PUBLIC_DEMO` default false,
