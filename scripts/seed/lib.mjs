@@ -251,3 +251,67 @@ export async function buildLayout(api, tabModules, idMap) {
   await api("PUT", "/api/layout", { tabs, panes });
   console.log(`  ✓ Layout: ${tabs.length} tabs, ${panes.length} panes`);
 }
+
+// ─── Public demo identity ────────────────────────────────────────────────────
+
+/**
+ * Provision the public-demo identity: a `Public Demo` group holding only
+ * read/interact on the given demo tabs, and a `demo` user in that group.
+ *
+ * The public demo authenticates via POST /api/auth/demo-session (token minted
+ * server-side), so the demo user's password is never used for login — a strong
+ * random password is set purely to satisfy user creation. Idempotent: skips
+ * creation when the group/user already exist.
+ *
+ * @param {(m:string,p:string,b?:object)=>Promise<any>} api - authed admin API caller
+ * @param {string[]} tabIds - demo tab ids the group may read/interact
+ * @param {"read"|"interact"} [level="interact"] - permission level per tab
+ */
+export async function provisionDemoIdentity(api, tabIds, level = "interact") {
+  const groups = (await api("GET", "/api/auth/groups")) || [];
+  let group = Array.isArray(groups) ? groups.find((g) => g.name === "Public Demo") : null;
+
+  const tabAssignments = tabIds.map((tabId) => ({ tabId, permission: level }));
+
+  if (!group) {
+    group = await api("POST", "/api/auth/groups", { name: "Public Demo", tabAssignments });
+    console.log("  ✓ Created 'Public Demo' group");
+  } else {
+    await api("PUT", `/api/auth/groups/${group.id}`, { name: "Public Demo", tabAssignments });
+    console.log("  ✓ Updated 'Public Demo' group tab permissions");
+  }
+
+  const groupId = group?.id;
+  const users = (await api("GET", "/api/auth/users")) || [];
+  const existing = Array.isArray(users) ? users.find((u) => u.username === "demo") : null;
+  if (!existing) {
+    // Random, unused password — the demo signs in via the demo-session endpoint.
+    const randomPassword = `demo-${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`;
+    await api("POST", "/api/auth/users", {
+      username: "demo",
+      password: randomPassword,
+      groupId,
+      role: "user",
+    });
+    console.log("  ✓ Created 'demo' user (role: user)");
+  } else {
+    console.log("  ✓ 'demo' user already exists");
+  }
+}
+
+/**
+ * Attach per-rule public-demo access metadata (writableStateKeys / fireEvents)
+ * to seeded automations, so demo visitors can only write declared state keys
+ * and fire declared events. Expects a map of { ruleId → demoAccess }.
+ *
+ * NOTE: there is no REST field for demo_access yet; this writes via the same
+ * admin update path only if the backend accepts it. Until an authoring field
+ * exists, seed demo_access directly in the golden DB build step.
+ *
+ * @param {Record<string, {writableStateKeys?:string[], fireEvents?:string[]}>} accessByRuleId
+ */
+export function describeDemoAccess(accessByRuleId) {
+  // Placeholder describer used by the golden-DB build to know which rules need
+  // demo_access rows written. Kept as data so the build step stays declarative.
+  return Object.entries(accessByRuleId).map(([ruleId, access]) => ({ ruleId, access }));
+}
