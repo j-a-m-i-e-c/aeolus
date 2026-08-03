@@ -3,6 +3,7 @@
 import { Router } from "express";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
+import { demoWriteRateLimiter, demoFireRateLimiter } from "../middleware/rate-limiter.js";
 import type { Database as DatabaseType } from "better-sqlite3";
 import type { AutomationEngine } from "../../automations/automation-engine.js";
 import type { DeviceRegistry } from "../../core/device-registry.js";
@@ -552,7 +553,7 @@ export function createAutomationRoutes(
   }));
 
   /** POST /api/automations/:id/fire — manually fire a specific automation rule */
-  router.post("/:id/fire", requireAutomation("interact"), asyncHandler(async (req, res) => {
+  router.post("/:id/fire", demoFireRateLimiter, requireAutomation("interact"), asyncHandler(async (req, res) => {
     const id = req.params.id as string;
     const rule = engine.getRule(id);
     if (!rule) {
@@ -615,7 +616,7 @@ export function createAutomationRoutes(
   });
 
   /** PUT /api/automations/:id/state — upsert a key-value pair, persist + broadcast */
-  router.put("/:id/state", requireAutomation("interact"), validate({ body: automationStateBodySchema, params: automationIdParamsSchema }), asyncHandler((req, res) => {
+  router.put("/:id/state", demoWriteRateLimiter, requireAutomation("interact"), validate({ body: automationStateBodySchema, params: automationIdParamsSchema }), asyncHandler((req, res) => {
     const id = req.params.id as string;
     const { key, value } = req.body;
     if (!key || typeof key !== "string") {

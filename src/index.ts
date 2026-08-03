@@ -48,6 +48,8 @@ import { errorHandler } from "./api/middleware/error-handler.js";
 import { corsMiddleware } from "./api/middleware/cors-config.js";
 import { apiRateLimiter } from "./api/middleware/rate-limiter.js";
 import { authenticate } from "./auth/auth-middleware.js";
+import { createPublicDemoGuard } from "./demo/public-demo-guard.js";
+import { createDemoRuleAccessReader } from "./demo/demo-rule-access.js";
 import { createAuthRoutes } from "./api/routes/auth.routes.js";
 import { ensureBackendCredential } from "./auth/mqtt-credential-service.js";
 
@@ -277,6 +279,18 @@ async function main(): Promise<void> {
   app.use(metricsMiddleware());
 
   app.use(authenticate);
+
+  // Public demo capability envelope (public-demo-mode spec). Inert unless
+  // AEOLUS_PUBLIC_DEMO is on AND the session is a public-demo token. Placed after
+  // `authenticate` and before all route mounts so an allowlisted demo request
+  // still passes through its route's normal resource authorization — the guard
+  // is strictly additive and can only further restrict.
+  app.use(
+    createPublicDemoGuard({
+      getDemoRuleAccess: createDemoRuleAccessReader(db),
+      stateStore,
+    }),
+  );
 
   // Resource-level authorization wiring. A single ownership store (automations),
   // a live device-exposure resolver, and a permission resolver that routes

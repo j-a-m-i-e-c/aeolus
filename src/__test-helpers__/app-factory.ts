@@ -32,6 +32,8 @@ import { ExecutionLog } from "../automations/execution-log.js";
 import { AutomationStateStore } from "../automations/automation-state-store.js";
 import { DataStore } from "../data-store/data-store.js";
 import { _resetSecretCache } from "../auth/token-service.js";
+import { createPublicDemoGuard } from "../demo/public-demo-guard.js";
+import { createDemoRuleAccessReader } from "../demo/demo-rule-access.js";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -53,6 +55,7 @@ export const TEST_JWT_SECRET = "aeolus-test-secret-do-not-use-in-production";
 export function createTestApp(
   db: DatabaseType,
   eventBus: EventEmitter,
+  options?: { publicDemo?: boolean },
 ): Express {
   // Set the JWT secret so the token service uses our known test secret
   process.env.JWT_SECRET = TEST_JWT_SECRET;
@@ -132,6 +135,20 @@ export function createTestApp(
       exists: (id) => automationExists(db, id),
     });
 
+  // ─── Public demo guard (opt-in; mirrors index.ts placement) ───────────────
+  // Registered after `authenticate` (mounted above) and before the routes, so
+  // it is additive. Inert for every non-demo session. Off unless requested, so
+  // existing integration tests are unaffected.
+  if (options?.publicDemo) {
+    app.use(
+      createPublicDemoGuard({
+        enabled: true,
+        getDemoRuleAccess: createDemoRuleAccessReader(db),
+        stateStore,
+      }),
+    );
+  }
+
   // ─── Routes ──────────────────────────────────────────────────────────────
 
   app.use("/api/auth", createAuthRoutes());
@@ -174,13 +191,17 @@ export function createAuthToken(options?: {
   username?: string;
   role?: "admin" | "user";
   groupId?: string | null;
+  sessionType?: "normal" | "public-demo";
 }): string {
-  const payload = {
+  const payload: Record<string, unknown> = {
     userId: options?.userId ?? "test-user-id",
     username: options?.username ?? "testuser",
     role: options?.role ?? "admin",
     groupId: options?.groupId ?? null,
   };
+  if (options?.sessionType && options.sessionType !== "normal") {
+    payload.sessionType = options.sessionType;
+  }
   return jwt.sign(payload, TEST_JWT_SECRET, { expiresIn: "15m" });
 }
 
