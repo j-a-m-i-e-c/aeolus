@@ -9,3 +9,8 @@ export const API_URL =
 
 export const WS_URL =
   import.meta.env.VITE_WS_URL || `ws://${window.location.hostname}:3001/ws`;
+
+// Public demo mode. When true the frontend runs as the public demo: it
+// auto-requests a demo session, shows a demo banner, and hides admin/authoring
+// surfaces. Off unless VITE_PUBLIC_DEMO is exactly "true".
+export const PUBLIC_DEMO = import.meta.env.VITE_PUBLIC_DEMO === "true";

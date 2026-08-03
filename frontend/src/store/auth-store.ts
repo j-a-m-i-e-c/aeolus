@@ -1,7 +1,7 @@
 // frontend/src/store/auth-store.ts — Zustand store for authentication state
 
 import { create } from "zustand";
-import { API_URL } from "../lib/env";
+import { API_URL, PUBLIC_DEMO } from "../lib/env";
 
 export interface AuthUser {
   id: string;
@@ -22,6 +22,8 @@ interface AuthState {
   refresh: () => Promise<boolean>;
   setup: (username: string, password: string) => Promise<void>;
   checkSetupNeeded: () => Promise<void>;
+  /** Obtain (or renew) an anonymous public-demo session. Only used when PUBLIC_DEMO. */
+  initDemoSession: () => Promise<boolean>;
 }
 
 /** Interval ID for silent refresh timer */
@@ -187,7 +189,42 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     startRefreshTimer(get().refresh);
   },
 
+  initDemoSession: async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/auth/demo-session`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      if (!res.ok) {
+        set({ isAuthenticated: false, loading: false });
+        return false;
+      }
+      const data = await res.json();
+      const user = decodeTokenPayload(data.accessToken);
+      set({
+        accessToken: data.accessToken,
+        user,
+        isAuthenticated: true,
+        needsSetup: false,
+        loading: false,
+      });
+      // Demo tokens carry no refresh; re-request a fresh session on the timer so
+      // it never expires mid-visit (Req 2.7, 10.4).
+      startRefreshTimer(get().initDemoSession);
+      return true;
+    } catch {
+      set({ isAuthenticated: false, loading: false });
+      return false;
+    }
+  },
+
   checkSetupNeeded: async () => {
+    // Public demo: skip the login/refresh/setup flow entirely and obtain an
+    // anonymous demo session on load (Req 10.1).
+    if (PUBLIC_DEMO) {
+      await get().initDemoSession();
+      return;
+    }
     try {
       // Try to refresh first — if we have a valid refresh cookie, we're authenticated
       const refreshRes = await fetch(`${API_URL}/api/auth/refresh`, {
