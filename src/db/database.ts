@@ -79,6 +79,10 @@ export function initSchema(database: DatabaseType): void {
   // deleted (fail-closed for scoped rows, never unrestricted).
   addColumn("authored_unrestricted", "INTEGER NOT NULL DEFAULT 0");
   addColumn("owner_tab_id", "TEXT DEFAULT NULL REFERENCES tabs(id) ON DELETE SET NULL");
+  // Per-automation public-demo access metadata (public-demo-mode). JSON:
+  // { writableStateKeys?: string[]; fireEvents?: string[] }. NULL ⇒ no per-rule
+  // demo allowlist. Only consulted for public-demo sessions.
+  addColumn("demo_access", "TEXT DEFAULT NULL");
 
   // Backfill existing rows that lack a rule_type value
   database.exec(`UPDATE automation_rules SET rule_type = 'form' WHERE rule_type IS NULL;`);

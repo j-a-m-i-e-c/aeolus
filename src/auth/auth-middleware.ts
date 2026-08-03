@@ -23,6 +23,7 @@ declare global {
         username: string;
         role: "admin" | "user";
         groupId: string | null;
+        sessionType?: "normal" | "public-demo";
       };
     }
   }
@@ -42,6 +43,7 @@ export const PUBLIC_ROUTES: { method: string; path: string }[] = [
   { method: "POST", path: "/api/auth/login" },
   { method: "POST", path: "/api/auth/refresh" },
   { method: "POST", path: "/api/auth/setup" },
+  { method: "POST", path: "/api/auth/demo-session" },
   { method: "GET", path: "/metrics" },
 ];
 
@@ -94,6 +96,7 @@ export function authenticate(
       username: payload.username,
       role: payload.role,
       groupId: payload.groupId,
+      sessionType: payload.sessionType ?? "normal",
     };
     next();
   } catch {

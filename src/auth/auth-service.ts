@@ -16,6 +16,7 @@ import {
   revokeRefreshToken,
 } from "./token-service.js";
 import { getUserByUsername, getUser, verifyPassword } from "./user-service.js";
+import { config } from "../config.js";
 import logger from "../logger.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -216,4 +217,48 @@ export function refresh(refreshToken: string): string {
  */
 export function logout(refreshToken: string): void {
   revokeRefreshToken(refreshToken);
+}
+
+// ─── Public Demo (public-demo-mode spec) ─────────────────────────────────────
+
+/** Username of the single seeded public-demo identity. */
+export const DEMO_USERNAME = "demo";
+
+export interface DemoSessionResult {
+  accessToken: string;
+  user: { id: string; username: string; role: string };
+}
+
+/**
+ * Mint a short-lived public-demo session for the seeded `demo` user.
+ *
+ * Unlike {@link login} this takes no credentials, issues NO refresh token, and
+ * stamps the access token with `sessionType: "public-demo"` so the
+ * PublicDemoGuard confines it. The lifetime is `config.publicDemo.sessionMinutes`.
+ *
+ * Fails closed if the demo identity is missing or has been misconfigured as an
+ * admin — the public demo must never be handed an admin token.
+ */
+export function createDemoSession(): DemoSessionResult {
+  const user = getUserByUsername(DEMO_USERNAME);
+  if (!user) {
+    throw new UnauthorizedError("Public demo user is not provisioned");
+  }
+  if (user.role !== "user") {
+    logger.error({ role: user.role }, "Public demo user must have role 'user' — refusing to mint token");
+    throw new UnauthorizedError("Public demo identity is misconfigured");
+  }
+
+  const accessToken = generateAccessToken(
+    {
+      userId: user.id,
+      username: user.username,
+      role: "user",
+      groupId: user.groupId,
+      sessionType: "public-demo",
+    },
+    { expiresInMinutes: config.publicDemo.sessionMinutes },
+  );
+
+  return { accessToken, user: { id: user.id, username: user.username, role: user.role } };
 }

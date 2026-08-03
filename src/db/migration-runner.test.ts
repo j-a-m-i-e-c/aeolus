@@ -135,7 +135,7 @@ describe("runMigrations", () => {
     const db = freshDb();
     const result = runMigrations(db, realMigrations, { skipCheckpoint: true });
     expect(result.toVersion).toBe(getExpectedVersion(realMigrations));
-    expect(result.applied).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+    expect(result.applied).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
     expect(result.adoptedLegacy).toBe(false);
     db.close();
   });
@@ -147,7 +147,7 @@ describe("runMigrations", () => {
     expect(result.adoptedLegacy).toBe(true);
     expect(result.toVersion).toBe(getExpectedVersion(realMigrations));
     // Baseline was adopted (not applied), so only 002 onward applied
-    expect(result.applied).toEqual([2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+    expect(result.applied).toEqual([2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
     db.close();
   });
 

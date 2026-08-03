@@ -24,6 +24,8 @@ import * as userService from "../../auth/user-service.js";
 import * as groupService from "../../auth/group-service.js";
 import * as mqttCredentialService from "../../auth/mqtt-credential-service.js";
 import { getUserAccessibleTabs } from "../../auth/permission-service.js";
+import { config } from "../../config.js";
+import { NotFoundError } from "../middleware/error-handler.js";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -42,6 +44,19 @@ const loginRateLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: "Too many login attempts, please try again later" },
+});
+
+/**
+ * Rate limiter for public-demo session creation: 10 requests per minute per IP,
+ * independent of login. Bounds anonymous session churn (public-demo-mode spec,
+ * Req 2.8, 9.1).
+ */
+const demoSessionRateLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many demo session requests, please try again later" },
 });
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -115,6 +130,25 @@ export function createAuthRoutes(): Router {
         accessToken: result.accessToken,
         user: result.user,
       });
+    }),
+  );
+
+  /**
+   * POST /api/auth/demo-session — Mint a short-lived public-demo session.
+   *
+   * Inert (404) unless AEOLUS_PUBLIC_DEMO is enabled. Requires no credentials,
+   * returns only a short-lived access token stamped `sessionType: "public-demo"`
+   * and NO refresh token/cookie (public-demo-mode spec, Req 2.1, 2.4, 2.5, 1.5).
+   */
+  router.post(
+    "/demo-session",
+    demoSessionRateLimiter,
+    asyncHandler((_req, res) => {
+      if (!config.publicDemo.enabled) {
+        throw new NotFoundError("Not found");
+      }
+      const result = authService.createDemoSession();
+      res.json({ accessToken: result.accessToken, user: result.user });
     }),
   );
 

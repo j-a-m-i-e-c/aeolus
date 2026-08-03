@@ -14,6 +14,12 @@ export interface AccessTokenPayload {
   username: string;
   role: "admin" | "user";
   groupId: string | null;
+  /**
+   * Session kind. Absent ⇒ treated as "normal" everywhere (backward
+   * compatible). "public-demo" sessions are constrained by the PublicDemoGuard
+   * (public-demo-mode spec).
+   */
+  sessionType?: "normal" | "public-demo";
 }
 
 export interface RefreshTokenRecord {
@@ -80,21 +86,29 @@ export function getSecret(): string {
 
 /**
  * Generate a signed JWT access token with HS256.
- * Payload includes userId, username, role, groupId claims.
- * Expires in 15 minutes.
+ * Payload includes userId, username, role, groupId and (when present)
+ * sessionType claims. Expires in 15 minutes by default; `expiresInMinutes`
+ * overrides this (used for longer-lived public-demo sessions).
  */
-export function generateAccessToken(payload: AccessTokenPayload): string {
+export function generateAccessToken(
+  payload: AccessTokenPayload,
+  options?: { expiresInMinutes?: number },
+): string {
   const secret = getSecret();
-  return jwt.sign(
-    {
-      userId: payload.userId,
-      username: payload.username,
-      role: payload.role,
-      groupId: payload.groupId,
-    },
-    secret,
-    { algorithm: "HS256", expiresIn: ACCESS_TOKEN_EXPIRY },
-  );
+  const claims: Record<string, unknown> = {
+    userId: payload.userId,
+    username: payload.username,
+    role: payload.role,
+    groupId: payload.groupId,
+  };
+  // Only include the claim when it is a demo session, so normal tokens are
+  // byte-for-byte identical to the pre-feature output.
+  if (payload.sessionType && payload.sessionType !== "normal") {
+    claims.sessionType = payload.sessionType;
+  }
+  const expiresIn =
+    options?.expiresInMinutes !== undefined ? `${options.expiresInMinutes}m` : ACCESS_TOKEN_EXPIRY;
+  return jwt.sign(claims, secret, { algorithm: "HS256", expiresIn });
 }
 
 /**
@@ -112,6 +126,7 @@ export function verifyAccessToken(token: string): AccessTokenPayload {
     username: decoded.username,
     role: decoded.role,
     groupId: decoded.groupId,
+    sessionType: decoded.sessionType === "public-demo" ? "public-demo" : "normal",
   };
 }
 
@@ -135,6 +150,7 @@ export function verifyAccessTokenWithExpiry(token: string): {
       username: decoded.username,
       role: decoded.role,
       groupId: decoded.groupId,
+      sessionType: decoded.sessionType === "public-demo" ? "public-demo" : "normal",
     },
     expiresAt: decoded.exp * 1000,
   };

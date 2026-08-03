@@ -58,6 +58,20 @@ export interface Config {
     /** Maximum serialized publish payload size in bytes. Default 262144 (256 KiB). */
     maxPayloadBytes: number;
   };
+  /**
+   * Public demo mode (public-demo-mode spec). When enabled, anonymous visitors
+   * receive a short-lived `public-demo` session constrained to a fail-closed
+   * allowlist. OFF by default and never inferred from hostname/NODE_ENV — a
+   * normal Aeolus install must never behave as a public demo.
+   */
+  publicDemo: {
+    /** Master switch. Default false. */
+    enabled: boolean;
+    /** Demo access-token lifetime in minutes. Default 120. */
+    sessionMinutes: number;
+    /** Local time (HH:MM) the nightly reset runs, for display/scheduling. Default "03:30". */
+    resetTime: string;
+  };
 }
 
 export const config: Config = {
@@ -92,6 +106,11 @@ export const config: Config = {
   mqttPublish: {
     userNamespacePrefix: process.env.MQTT_PUBLISH_USER_NAMESPACE || "aeolus/pub/",
     maxPayloadBytes: parseInt(process.env.MQTT_PUBLISH_MAX_BYTES || "262144", 10),
+  },
+  publicDemo: {
+    enabled: process.env.AEOLUS_PUBLIC_DEMO === "true",
+    sessionMinutes: parseInt(process.env.DEMO_SESSION_MINUTES || "120", 10),
+    resetTime: process.env.DEMO_RESET_TIME || "03:30",
   },
 };
 
