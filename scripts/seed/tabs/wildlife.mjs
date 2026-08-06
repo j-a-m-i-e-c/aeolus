@@ -1,465 +1,353 @@
-// scripts/seed/tabs/wildlife.mjs — Wildlife & Conservation station.
+// scripts/seed/tabs/wildlife.mjs — Offline wildlife edge station.
 //
-// The "cause" tab: an on-device AI trail camera (vision inference runs locally
-// on a Pi AI accelerator — a detection is just another event), a nest-box
-// monitor, a humane predator deterrent, and a biodiversity log. Solar-powered,
-// offline-first, nothing leaves the site. Simulated, no keys, works offline.
+// The visual centre is an on-device AI trail-camera pipeline. Visitors can
+// inject bounded native/predator detections; trusted Logic classifies them,
+// writes shared state and triggers a humane deterrent when armed. Smooth camera
+// movement, scan lines and deterrent waves are local presentation only.
 
 import { genSeries, noise } from "../lib.mjs";
 
 const tab = { id: "tab-wildlife", name: "Wildlife", icon: "paw-print" };
 
 const devices = [
-  { topic: "camera/trailcam-01/status", payload: { online: true, npu: "Hailo-8L", fps: 30 } },
-  { topic: "camera/trailcam-01/detection", payload: { species: "ringtail-possum", confidence: 0.88 } },
-  { topic: "sensor/nestbox-01", payload: { temp: 34.4, humidity: 56, occupied: true, chicks: 3 } },
-  { topic: "switch/deterrent-01", payload: { on: false, mode: "ultrasonic" } },
-  { topic: "sensor/site-power", payload: { solar: 41, battery: 87 } },
+  { topic: "camera/trailcam-01/status", payload: { online: true, npu: "Hailo-8L", fps: 30, latencyMs: 17 } },
+  { topic: "sensor/nestbox-01", payload: { temp: 34.4, humidity: 56, occupied: true, chicks: 3, visitsToday: 11 } },
+  { topic: "switch/deterrent-01", payload: { on: false, armed: true, mode: "ultrasonic-light" } },
+  { topic: "sensor/site-power", payload: { solarW: 41, battery: 87 } },
 ];
 
-// AI Trail Camera logic — the on-device NPU publishes detections to MQTT; this
-// rule classifies them and fires a deterrent when an introduced predator appears.
-// Mirrors the pipeline described in docs/WHY_AEOLUS.md — a detection is just an event.
-const detectionLogic = `automation({
-  conditions: [
-    function hasDetection(context) {
-      return !!(context && context.state && context.state.species);
-    },
-  ],
+const logic = `automation({
   actions: [
-    function classify(context) {
-      const evt = context.state || {};
-      const species = evt.species;
-      const confidence = typeof evt.confidence === "number" ? evt.confidence : 0;
-      state.set("lastSpecies", species);
-      state.set("lastConfidence", confidence);
-      if (confidence < 0.6) { return; }
-      const predators = ["fox", "red-fox", "feral-cat", "wild-dog"];
-      const isPredator = predators.indexOf(String(species).toLowerCase()) !== -1;
-      state.set("lastPredator", isPredator);
-      if (isPredator) {
-        const dts = devices.filter(function (d) {
-          return typeof d.id === "string" && d.id.indexOf("deterrent") !== -1;
-        });
-        for (let i = 0; i < dts.length; i++) { devices.action(dts[i].id, "on"); }
-        mqtt.publish("alerts/predator", JSON.stringify({ species: species, ts: Date.now() }));
+    function wildlife(context) {
+      function init(key, value) {
+        if (state.get(key) === undefined) state.set(key, value);
+      }
+      var now = Date.now();
+      init("speciesKey", "ringtail-possum");
+      init("speciesLabel", "Ringtail Possum");
+      init("confidence", 0.91);
+      init("category", "native");
+      init("detectedAt", now - 16000);
+      init("armed", true);
+      init("deterrentUntil", 0);
+      init("nativeIndex", 0);
+      init("detectionsToday", 47);
+      init("nativeToday", 39);
+      init("threatsToday", 8);
+      init("nestTemp", 34.4);
+      init("nestHumidity", 56);
+      init("chicks", 3);
+      init("nestVisits", 11);
+      init("battery", 87);
+      init("lastAction", { label: "Edge station scanning locally", at: now });
+
+      function record(key, label, category, confidence) {
+        state.set("speciesKey", key);
+        state.set("speciesLabel", label);
+        state.set("category", category);
+        state.set("confidence", confidence);
+        state.set("detectedAt", now);
+        state.set("detectionsToday", Number(state.get("detectionsToday") || 0) + 1);
+        if (category === "native") state.set("nativeToday", Number(state.get("nativeToday") || 0) + 1);
+        if (category === "predator") state.set("threatsToday", Number(state.get("threatsToday") || 0) + 1);
+        var armed = Boolean(state.get("armed"));
+        if (category === "predator" && armed) {
+          state.set("deterrentUntil", now + 7000);
+          mqtt.publish("switch/deterrent-01", JSON.stringify({ on: true, armed: true, mode: "ultrasonic-light", species: label }));
+          mqtt.publish("alerts/predator", JSON.stringify({ species: label, confidence: confidence, ts: now }));
+          state.set("lastAction", { label: label + " detected — humane deterrent active", at: now });
+        } else {
+          state.set("lastAction", { label: label + " classified on-device", at: now });
+        }
+        try { if (db) db.write("wildlife-events", { species: label, category: category, confidence: confidence }); } catch (e) {}
+      }
+
+      var evt = String(context.topic || "").split("/").pop();
+      if (evt === "native-detection") {
+        var natives = [
+          ["ringtail-possum", "Ringtail Possum", 0.94],
+          ["echidna", "Short-beaked Echidna", 0.89],
+          ["lyrebird", "Superb Lyrebird", 0.96]
+        ];
+        var idx = (Number(state.get("nativeIndex") || 0) + 1) % natives.length;
+        state.set("nativeIndex", idx);
+        record(natives[idx][0], natives[idx][1], "native", natives[idx][2]);
+      } else if (evt === "fox-detection") {
+        record("red-fox", "Red Fox", "predator", 0.97);
+      } else if (evt === "cat-detection") {
+        record("feral-cat", "Feral Cat", "predator", 0.93);
+      } else if (evt === "arm-deterrent") {
+        state.set("armed", true);
+        state.set("lastAction", { label: "Predator deterrent armed", at: now });
+        mqtt.publish("switch/deterrent-01", JSON.stringify({ on: false, armed: true, mode: "ultrasonic-light" }));
+      } else if (evt === "disarm-deterrent") {
+        state.set("armed", false);
+        state.set("deterrentUntil", 0);
+        state.set("lastAction", { label: "Predator deterrent disarmed", at: now });
+        mqtt.publish("switch/deterrent-01", JSON.stringify({ on: false, armed: false, mode: "ultrasonic-light" }));
+      } else if (evt === "nest-visit") {
+        state.set("nestVisits", Number(state.get("nestVisits") || 0) + 1);
+        state.set("nestTemp", Math.min(36, Number(state.get("nestTemp") || 34.4) + 0.2));
+        state.set("lastAction", { label: "Nest-box visit recorded", at: now });
+        mqtt.publish("sensor/nestbox-01", JSON.stringify({ temp: state.get("nestTemp"), humidity: 56, occupied: true, chicks: 3, visitsToday: state.get("nestVisits") }));
+      } else if (evt === "reset-wildlife") {
+        state.set("speciesKey", "ringtail-possum");
+        state.set("speciesLabel", "Ringtail Possum");
+        state.set("confidence", 0.91);
+        state.set("category", "native");
+        state.set("detectedAt", now - 16000);
+        state.set("armed", true);
+        state.set("deterrentUntil", 0);
+        state.set("detectionsToday", 47);
+        state.set("nativeToday", 39);
+        state.set("threatsToday", 8);
+        state.set("nestTemp", 34.4);
+        state.set("nestVisits", 11);
+        state.set("lastAction", { label: "Edge station reset to dawn state", at: now });
       }
     },
   ],
 });`;
 
-// Monitoring consoles simulated in the UI. Manual no-op logic.
-const simLogic = `automation({
-  conditions: [
-    function ready(context) {
-      return true;
-    },
-  ],
-  actions: [
-    function sim(context) {
-      state.set("lastUpdate", Date.now());
-    },
-  ],
-});`;
-
-// ─── AI Trail Camera — on-device vision detections ───────────────────────────
-const trailcamUi = `import { useState, useEffect } from "react";
+const ui = `import { useEffect, useState } from "react";
 import type { CustomComponentProps } from "./types";
 
-const SPECIES = [
-  { name: "Eastern Quoll", kind: "native", emoji: "🐾" },
-  { name: "Ringtail Possum", kind: "native", emoji: "🐾" },
-  { name: "Short-beaked Echidna", kind: "native", emoji: "🦔" },
-  { name: "Superb Lyrebird", kind: "bird", emoji: "🐦" },
-  { name: "Laughing Kookaburra", kind: "bird", emoji: "🐦" },
-  { name: "Red Fox", kind: "predator", emoji: "🦊" },
-  { name: "Feral Cat", kind: "predator", emoji: "🐈" },
-  { name: "European Rabbit", kind: "feral", emoji: "🐇" },
-];
-const COL = { native: "#22C55E", bird: "#5CE1E6", predator: "#EF4444", feral: "#F59E0B" };
-const TAG = { native: "Native", bird: "Native bird", predator: "Predator", feral: "Feral" };
-
-function hhmmss(ts) {
-  const d = new Date(ts);
-  const p = (n) => (n < 10 ? "0" + n : "" + n);
-  return p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds());
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
 }
 
-export default function TrailCamera(aeolus: CustomComponentProps) {
-  const [cur, setCur] = useState<any>(null);
-  const [feed, setFeed] = useState<any[]>([]);
-  const [count, setCount] = useState(0);
-  const [latency, setLatency] = useState(17);
+function Animal(props: { kind: string; x: number; y: number; color: string; opacity: number }) {
+  const k = props.kind;
+  const x = props.x;
+  const y = props.y;
+  if (k === "red-fox") return <g transform={"translate(" + x + " " + y + ")"} fill={props.color} stroke={props.color} opacity={props.opacity}>
+    <ellipse cx="0" cy="0" rx="29" ry="12" />
+    <circle cx="26" cy="-8" r="10" />
+    <path d="M21 -16 L24 -28 L30 -17 M29 -17 L36 -27 L36 -13" fill={props.color} />
+    <path d="M-25 -2 Q-55 -20 -64 -2 Q-49 4 -28 7" fill="none" strokeWidth="10" strokeLinecap="round" />
+    <line x1="-15" y1="9" x2="-18" y2="25" strokeWidth="5" strokeLinecap="round" />
+    <line x1="15" y1="9" x2="18" y2="25" strokeWidth="5" strokeLinecap="round" />
+  </g>;
+  if (k === "feral-cat") return <g transform={"translate(" + x + " " + y + ")"} fill={props.color} stroke={props.color} opacity={props.opacity}>
+    <ellipse cx="0" cy="0" rx="23" ry="10" />
+    <circle cx="20" cy="-8" r="8" />
+    <path d="M15 -14 L17 -24 L22 -15 M22 -15 L28 -23 L28 -11" />
+    <path d="M-21 -4 Q-45 -17 -43 -36" fill="none" strokeWidth="5" strokeLinecap="round" />
+    <line x1="-11" y1="8" x2="-13" y2="23" strokeWidth="4" /><line x1="12" y1="8" x2="14" y2="23" strokeWidth="4" />
+  </g>;
+  if (k === "echidna") return <g transform={"translate(" + x + " " + y + ")"} fill={props.color} stroke={props.color} opacity={props.opacity}>
+    <path d="M-29 7 Q-23 -17 5 -18 Q25 -17 30 3 Q20 15 -5 15 Q-21 15 -29 7 Z" />
+    {[-20,-12,-4,4,12,20].map((v) => <line key={v} x1={v} y1="-11" x2={v - 5} y2="-27" strokeWidth="2" />)}
+    <path d="M27 0 L43 5 L29 8" />
+  </g>;
+  if (k === "lyrebird") return <g transform={"translate(" + x + " " + y + ")"} fill={props.color} stroke={props.color} opacity={props.opacity}>
+    <ellipse cx="0" cy="0" rx="15" ry="11" /><circle cx="14" cy="-8" r="6" /><path d="M18 -9 L28 -6 L18 -4" />
+    <path d="M-13 -3 Q-38 -25 -49 -15 M-13 -1 Q-41 -8 -52 4 M-13 2 Q-38 13 -47 24" fill="none" strokeWidth="3" strokeLinecap="round" />
+    <line x1="-3" y1="9" x2="-5" y2="23" strokeWidth="2" /><line x1="5" y1="9" x2="8" y2="23" strokeWidth="2" />
+  </g>;
+  return <g transform={"translate(" + x + " " + y + ")"} fill={props.color} stroke={props.color} opacity={props.opacity}>
+    <ellipse cx="0" cy="0" rx="24" ry="13" /><circle cx="22" cy="-9" r="8" /><circle cx="18" cy="-17" r="4" /><circle cx="26" cy="-17" r="4" />
+    <path d="M-22 -3 Q-48 -18 -52 -2 Q-53 13 -40 13" fill="none" strokeWidth="4" strokeLinecap="round" />
+    <line x1="-10" y1="10" x2="-11" y2="24" strokeWidth="4" /><line x1="12" y1="10" x2="13" y2="24" strokeWidth="4" />
+  </g>;
+}
 
+export default function WildlifeEdgeStation(aeolus: CustomComponentProps) {
+  const speciesKey = String(aeolus.read("speciesKey") ?? "ringtail-possum");
+  const speciesLabel = String(aeolus.read("speciesLabel") ?? "Ringtail Possum");
+  const confidence = Number(aeolus.read("confidence") ?? .91);
+  const category = String(aeolus.read("category") ?? "native");
+  const detectedAt = Number(aeolus.read("detectedAt") ?? 0);
+  const armed = Boolean(aeolus.read("armed") ?? true);
+  const deterrentUntil = Number(aeolus.read("deterrentUntil") ?? 0);
+  const detectionsToday = Number(aeolus.read("detectionsToday") ?? 47);
+  const nativeToday = Number(aeolus.read("nativeToday") ?? 39);
+  const threatsToday = Number(aeolus.read("threatsToday") ?? 8);
+  const nestTemp = Number(aeolus.read("nestTemp") ?? 34.4);
+  const nestHumidity = Number(aeolus.read("nestHumidity") ?? 56);
+  const chicks = Number(aeolus.read("chicks") ?? 3);
+  const nestVisits = Number(aeolus.read("nestVisits") ?? 11);
+  const battery = Number(aeolus.read("battery") ?? 87);
+  const lastAction = aeolus.read("lastAction") as any;
+
+  const [now, setNow] = useState(Date.now());
+  const [phase, setPhase] = useState(0);
   useEffect(() => {
-    let n = 0;
-    const id = setInterval(() => {
-      setLatency(14 + Math.round(Math.random() * 9));
-      const hit = Math.random() < 0.72;
-      if (!hit) { setCur(null); return; }
-      const sp = SPECIES[Math.floor(Math.random() * SPECIES.length)];
-      const conf = 0.62 + Math.random() * 0.37;
-      const w = 24 + Math.random() * 20;
-      const h = 20 + Math.random() * 15;
-      const x = 8 + Math.random() * (76 - w);
-      const y = 28 + Math.random() * (48 - h);
-      setCur({ name: sp.name, kind: sp.kind, emoji: sp.emoji, conf, x, y, w, h });
-      n += 1;
-      setFeed((f) => [{ id: n, name: sp.name, kind: sp.kind, emoji: sp.emoji, conf, ts: Date.now() }, ...f].slice(0, 6));
-      setCount((c) => c + 1);
-      aeolus.save("lastSpecies", sp.name);
-    }, 2600);
+    const id = setInterval(() => { setNow(Date.now()); setPhase((v) => (v + 1) % 100000); }, 90);
     return () => clearInterval(id);
   }, []);
 
-  const native = feed.filter((f) => f.kind === "native" || f.kind === "bird").length;
-  const threats = feed.filter((f) => f.kind === "predator" || f.kind === "feral").length;
+  const age = detectedAt ? Math.max(0, now - detectedAt) : 999999;
+  const active = age < 12000;
+  const travel = clamp(age / 9000, 0, 1);
+  const animalX = 105 + travel * 380;
+  const animalY = 260 + Math.sin(travel * Math.PI * 3) * 5;
+  const predator = category === "predator";
+  const deterrentActive = now < deterrentUntil;
+  const boxColor = predator ? "#FF766D" : "#71E6A0";
+  const animalColor = predator ? "#E96C61" : "#9ED8B1";
+  const actionLabel = lastAction && lastAction.label ? String(lastAction.label) : "Edge station scanning locally";
+  const pipelinePulse = (phase * 3.2) % 420;
 
   return (
-    <div className="p-4 space-y-3">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-semibold text-[#E6EDF3]">📷 AI Trail Camera</span>
-          <span className="text-[8px] font-bold tracking-wide px-1.5 py-0.5 rounded-full bg-[#22C55E] text-[#05070A]">● HAILO-8L · ON-DEVICE</span>
+    <div style={{ minHeight: "100%", padding: 14, color: "#E8EEF5", background: "linear-gradient(180deg,#07100C 0%,#050A08 100%)" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 10 }}>
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 15, fontWeight: 850, letterSpacing: "0.025em" }}>WILDLIFE EDGE STATION</span>
+            <span style={{ fontSize: 8, border: "1px solid #285B3B", background: "#0C2115", borderRadius: 999, padding: "2px 7px", color: "#72E09A", letterSpacing: "0.1em" }}>HAILO-8L · OFFLINE AI</span>
+          </div>
+          <div style={{ color: "#66786C", fontSize: 9, marginTop: 3 }}>Trail-camera inference · biodiversity logging · nest telemetry · non-lethal predator response</div>
         </div>
-        <span className="text-[9px] font-mono text-[#6B7785]">30 FPS · {latency} ms · offline</span>
+        <div style={{ textAlign: "right" }}>
+          <div style={{ color: predator && active ? "#FF776D" : "#77E39B", fontSize: 10, fontWeight: 850 }}>{predator && active ? "INTRODUCED PREDATOR" : "SITE MONITORING"}</div>
+          <div style={{ color: "#637167", fontSize: 8, marginTop: 2 }}>{actionLabel}</div>
+        </div>
       </div>
 
-      <div className="relative rounded-xl overflow-hidden border border-[#2A3441] bg-[#05070A]">
-        <svg width="100%" height="200" viewBox="0 0 100 66" preserveAspectRatio="xMidYMid slice">
-          <defs>
-            <linearGradient id="wnight" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0" stopColor="#0a1a10" />
-              <stop offset="1" stopColor="#04120a" />
-            </linearGradient>
-          </defs>
-          <rect x="0" y="0" width="100" height="66" fill="url(#wnight)" />
-          <rect x="0" y="49" width="100" height="17" fill="#07160c" />
-          <line x1="0" y1="49" x2="100" y2="49" stroke="#1b3b26" strokeWidth="0.4" />
-          {[9, 22, 38, 55, 70, 86, 94].map((gx, i) => (
-            <path key={i} d={"M" + gx + " 51 l-1.4 -4 M" + gx + " 51 l0 -5 M" + gx + " 51 l1.4 -4"} stroke="#1f4d2c" strokeWidth="0.4" fill="none" />
-          ))}
-          {[1, 2, 3, 4, 5, 6].map((r) => (
-            <line key={"sl" + r} x1="0" y1={r * 10} x2="100" y2={r * 10} stroke="#ffffff" strokeOpacity="0.02" strokeWidth="1" />
-          ))}
-          {cur && (
-            <g>
-              <rect x={cur.x} y={cur.y} width={cur.w} height={cur.h} fill="none" stroke={COL[cur.kind]} strokeWidth="0.7" />
-              <line x1={cur.x} y1={cur.y} x2={cur.x + 4} y2={cur.y} stroke={COL[cur.kind]} strokeWidth="1.1" />
-              <line x1={cur.x} y1={cur.y} x2={cur.x} y2={cur.y + 4} stroke={COL[cur.kind]} strokeWidth="1.1" />
-              <text x={cur.x + cur.w / 2} y={cur.y + cur.h / 2 + 2.5} textAnchor="middle" fontSize="7">{cur.emoji}</text>
-              <rect x={cur.x} y={cur.y - 5} width={Math.max(cur.w, 26)} height="4.6" fill={COL[cur.kind]} />
-              <text x={cur.x + 1} y={cur.y - 1.7} fontSize="3" fill="#05070A" fontWeight="bold">{cur.name + "  " + Math.round(cur.conf * 100) + "%"}</text>
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1.6fr) minmax(215px,.72fr)", gap: 10 }}>
+        <div style={{ border: "1px solid #28372D", borderRadius: 14, overflow: "hidden", background: "#030805" }}>
+          <svg width="100%" height="400" viewBox="0 0 530 400" preserveAspectRatio="xMidYMid meet">
+            <defs>
+              <linearGradient id="forestNight" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#0B1A12"/><stop offset="1" stopColor="#041008"/></linearGradient>
+              <linearGradient id="irCone" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stopColor="#8CDDA6" stopOpacity=".18"/><stop offset="1" stopColor="#8CDDA6" stopOpacity="0"/></linearGradient>
+              <filter id="wildGlow"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+            </defs>
+            <rect width="530" height="400" fill="url(#forestNight)" />
+            <circle cx="444" cy="50" r="27" fill="#C8E5D1" opacity=".12" />
+
+            {/* Distant forest layers. */}
+            {[20,72,130,188,245,315,390,462,510].map((x, i) => <g key={i} opacity={.34 + (i % 3) * .08}>
+              <rect x={x} y={110 + (i % 4) * 13} width={7 + (i % 3) * 3} height={185} fill="#102A18" />
+              <circle cx={x + 4} cy={116 + (i % 4) * 13} r={28 + (i % 2) * 9} fill="#12371E" />
+              <circle cx={x - 12} cy={135 + (i % 3) * 9} r={18} fill="#102E1A" />
+            </g>)}
+            <path d="M0 297 Q90 277 175 300 T350 293 T530 298 V400 H0 Z" fill="#07170C" />
+            <path d="M0 322 Q115 296 230 325 T530 316" fill="none" stroke="#173720" strokeWidth="2" />
+
+            {/* Trail camera and its detection cone. */}
+            <path d="M54 237 L430 177 L430 335 Z" fill="url(#irCone)" />
+            <rect x="35" y="213" width="35" height="48" rx="5" fill="#101A14" stroke="#568868" strokeWidth="1.3" />
+            <circle cx="53" cy="228" r="7" fill="#020603" stroke="#72AD80" />
+            <circle cx="53" cy="228" r="2.5" fill="#72E09A" opacity={.55 + Math.sin(phase * .2) * .25} />
+            <rect x="43" y="243" width="20" height="7" rx="2" fill="#233B2A" />
+            <text x="52" y="274" textAnchor="middle" fill="#62816B" fontSize="6">CAM-01</text>
+
+            {/* Animal rendered as a silhouette, not an emoji. */}
+            {active && <Animal kind={speciesKey} x={animalX} y={animalY} color={animalColor} opacity={.84} />}
+
+            {/* Detection box tracks the moving animal. */}
+            {active && <g>
+              <rect x={animalX - 70} y={animalY - 52} width="140" height="91" fill="none" stroke={boxColor} strokeWidth="1.2" />
+              <path d={"M" + (animalX - 70) + " " + (animalY - 40) + " V" + (animalY - 52) + " H" + (animalX - 58)} fill="none" stroke={boxColor} strokeWidth="2.2" />
+              <path d={"M" + (animalX + 70) + " " + (animalY + 27) + " V" + (animalY + 39) + " H" + (animalX + 58)} fill="none" stroke={boxColor} strokeWidth="2.2" />
+              <rect x={animalX - 70} y={animalY - 68} width="140" height="16" rx="2" fill={boxColor} />
+              <text x={animalX - 64} y={animalY - 57} fill="#051008" fontSize="7" fontWeight="800">{speciesLabel.toUpperCase()} · {Math.round(confidence * 100)}%</text>
+            </g>}
+
+            {/* Humane deterrent on the far side of the trail. */}
+            <g transform="translate(476 248)">
+              <rect x="-15" y="-23" width="30" height="46" rx="5" fill="#101914" stroke={armed ? "#63B97D" : "#4C5750"} />
+              <circle cx="0" cy="-8" r="7" fill={deterrentActive ? "#FF6D63" : "#25352B"} stroke={deterrentActive ? "#FF9A92" : "#577061"} />
+              <rect x="-7" y="6" width="14" height="8" rx="2" fill="#26382D" />
+              <text x="0" y="35" textAnchor="middle" fill="#66786B" fontSize="6">DETERRENT</text>
+              {deterrentActive && [1,2,3,4].map((i) => <path key={i} d={"M" + (-16 - i * 9) + " " + (-18 - i * 4) + " Q" + (-28 - i * 10) + " 0 " + (-16 - i * 9) + " " + (18 + i * 4)} fill="none" stroke="#FF756B" strokeOpacity={1 - i * .16} strokeWidth="1.6" />)}
             </g>
-          )}
-        </svg>
-        <div className="absolute top-2 left-3 text-[10px] font-bold text-[#EF4444] tracking-wider">● REC</div>
-        <div className="absolute top-2 right-3 text-[9px] font-mono text-[#9fd6b0]">CAM-01 · IR</div>
-        <div className="absolute bottom-2 left-3 text-[9px] font-mono text-[#bfe6cf]">{hhmmss(Date.now())}</div>
-        {!cur && <div className="absolute bottom-2 right-3 text-[9px] text-[#6B7785] animate-pulse">scanning…</div>}
-      </div>
 
-      <div className="grid grid-cols-3 gap-1.5">
-        <div className="bg-[#0B0F14] rounded-lg border border-[#2A3441] p-2 flex flex-col items-center">
-          <span className="text-[13px] font-mono font-bold text-[#E6EDF3]">{count + 42}</span>
-          <span className="text-[7px] text-[#6B7785]">Detections today</span>
-        </div>
-        <div className="bg-[#0B0F14] rounded-lg border border-[#2A3441] p-2 flex flex-col items-center">
-          <span className="text-[13px] font-mono font-bold text-[#22C55E]">{native}</span>
-          <span className="text-[7px] text-[#6B7785]">Native (recent)</span>
-        </div>
-        <div className="bg-[#0B0F14] rounded-lg border border-[#2A3441] p-2 flex flex-col items-center">
-          <span className="text-[13px] font-mono font-bold" style={{ color: threats > 0 ? "#EF4444" : "#22C55E" }}>{threats}</span>
-          <span className="text-[7px] text-[#6B7785]">Threats (recent)</span>
-        </div>
-      </div>
+            {/* Scan lines / camera overlay. */}
+            {Array.from({ length: 18 }).map((_, i) => <line key={i} x1="0" y1={i * 22 + (phase % 22)} x2="530" y2={i * 22 + (phase % 22)} stroke="#DDFCE6" strokeOpacity=".018" />)}
+            <text x="15" y="20" fill="#FF766D" fontSize="8" fontWeight="800">● REC</text>
+            <text x="514" y="20" textAnchor="end" fill="#83A78C" fontFamily="monospace" fontSize="7">30 FPS · 17 ms · IR</text>
+            {!active && <text x="265" y="197" textAnchor="middle" fill="#5D7765" fontSize="9" letterSpacing="1.2">SCANNING TRAIL CORRIDOR…</text>}
+          </svg>
 
-      <div className="space-y-1">
-        {feed.length === 0 && <div className="text-[10px] text-[#6B7785]">Waiting for first detection…</div>}
-        {feed.map((f) => (
-          <div key={f.id} className="flex items-center gap-2 bg-[#0B0F14] rounded-md border border-[#1c2530] px-2.5 py-1.5">
-            <span className="text-[14px]">{f.emoji}</span>
-            <span className="text-[11px] font-medium text-[#E6EDF3] flex-1">{f.name}</span>
-            <span className="text-[8px] font-semibold px-1.5 py-0.5 rounded-full" style={{ color: COL[f.kind], border: "1px solid " + COL[f.kind] + "66" }}>{TAG[f.kind]}</span>
-            <span className="text-[10px] font-mono text-[#9AA6B2]">{Math.round(f.conf * 100)}%</span>
-            <span className="text-[9px] font-mono text-[#6B7785]">{hhmmss(f.ts)}</span>
+          {/* Edge pipeline lives visually underneath the camera, not as generic metric cards. */}
+          <div style={{ height: 52, borderTop: "1px solid #1F3025", background: "#07100B", position: "relative", display: "flex", alignItems: "center", justifyContent: "space-around", padding: "0 14px" }}>
+            {[{n:"CAMERA",s:"30 FPS"},{n:"HAILO-8L",s:"17 ms inference"},{n:"AEOLUS",s:"local Logic"},{n:"RESPONSE",s:armed ? "armed" : "disarmed"}].map((n, i) => <div key={n.n} style={{ zIndex: 2, textAlign: "center", width: "22%" }}><div style={{ color: i === 2 ? "#77DDA0" : "#9AABA0", fontSize: 8, fontWeight: 800, letterSpacing: ".08em" }}>{n.n}</div><div style={{ color: "#536459", fontSize: 6.5, marginTop: 2 }}>{n.s}</div></div>)}
+            <div style={{ position: "absolute", left: "11%", right: "11%", top: 22, height: 1, background: "#254331" }} />
+            <div style={{ position: "absolute", left: "calc(11% + " + pipelinePulse + "px)", top: 19, width: 7, height: 7, borderRadius: 99, background: predator && active ? "#FF756B" : "#6BE09A", boxShadow: "0 0 12px currentColor", opacity: pipelinePulse < 410 ? .85 : 0 }} />
           </div>
-        ))}
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ border: "1px solid #28372D", borderRadius: 12, background: "#07100B", padding: 11 }}>
+            <div style={{ color: "#788A7E", fontSize: 8, letterSpacing: ".12em", marginBottom: 8 }}>TODAY AT THE EDGE</div>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}><span style={{ color: "#E5EFE8", fontSize: 28, fontFamily: "monospace", fontWeight: 850 }}>{detectionsToday}</span><span style={{ color: "#617167", fontSize: 8 }}>detections</span></div>
+            <div style={{ height: 5, background: "#142019", borderRadius: 99, overflow: "hidden", marginTop: 8 }}><div style={{ width: (nativeToday / Math.max(1,detectionsToday) * 100) + "%", height: "100%", background: "#66D990" }} /></div>
+            <div style={{ display: "flex", justifyContent: "space-between", color: "#66776C", fontSize: 7, marginTop: 5 }}><span>{nativeToday} native</span><span style={{ color: threatsToday > 0 ? "#C47A70" : "#66776C" }}>{threatsToday} introduced</span></div>
+          </div>
+
+          <div style={{ flex: 1, border: "1px solid #28372D", borderRadius: 12, background: "#07100B", padding: 11, position: "relative", minHeight: 205 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}><span style={{ color: "#788A7E", fontSize: 8, letterSpacing: ".12em" }}>NEST BOX 01</span><span style={{ color: "#6FD997", fontSize: 8, fontWeight: 800 }}>OCCUPIED</span></div>
+            <svg width="100%" height="105" viewBox="0 0 190 105">
+              <rect x="67" y="18" width="58" height="69" rx="4" fill="#17251B" stroke="#4A7658" />
+              <circle cx="96" cy="44" r="13" fill="#050B07" stroke="#3D634A" />
+              <rect x="77" y="67" width="38" height="12" rx="5" fill="#293C2D" />
+              {[0,1,2].map((i) => <g key={i}><circle cx={87 + i * 9} cy="66" r="4" fill="#A9C796" /><path d={"M" + (84 + i * 9) + " 63 L" + (87 + i * 9) + " 57 L" + (90 + i * 9) + " 63"} fill="#A9C796" /></g>)}
+              <line x1="96" y1="87" x2="96" y2="103" stroke="#405A46" strokeWidth="3" />
+              <text x="12" y="31" fill="#677A6C" fontSize="7">BROOD</text><text x="12" y="46" fill="#E1ECE4" fontFamily="monospace" fontSize="12">{nestTemp.toFixed(1)}°C</text>
+              <text x="141" y="31" fill="#677A6C" fontSize="7">HUMID</text><text x="141" y="46" fill="#E1ECE4" fontFamily="monospace" fontSize="12">{nestHumidity}%</text>
+            </svg>
+            <div style={{ display: "flex", justifyContent: "space-between", color: "#66776C", fontSize: 7 }}><span>{chicks} chicks</span><span>{nestVisits} visits today</span></div>
+          </div>
+
+          <div style={{ border: "1px solid #28372D", borderRadius: 12, background: "#07100B", padding: "9px 11px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div><div style={{ color: "#788A7E", fontSize: 7, letterSpacing: ".1em" }}>SOLAR NODE</div><div style={{ color: "#E1ECE4", fontFamily: "monospace", fontSize: 11, marginTop: 3 }}>41 W · {battery}%</div></div>
+            <div style={{ width: 42, height: 7, background: "#17231B", borderRadius: 99, overflow: "hidden" }}><div style={{ width: battery + "%", height: "100%", background: battery > 40 ? "#67D991" : "#F1B551" }} /></div>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1.15fr .9fr", gap: 7, marginTop: 9 }}>
+        <button onClick={() => aeolus.fire("native-detection")} style={{ padding: "8px 6px", borderRadius: 8, border: "1px solid #31563D", background: "#0A1710", color: "#78D99A", fontSize: 9, fontWeight: 800 }}>SIMULATE NATIVE</button>
+        <button onClick={() => aeolus.fire("fox-detection")} style={{ padding: "8px 6px", borderRadius: 8, border: "1px solid #673A36", background: "#180C0C", color: "#E9847A", fontSize: 9, fontWeight: 800 }}>RED FOX</button>
+        <button onClick={() => aeolus.fire("cat-detection")} style={{ padding: "8px 6px", borderRadius: 8, border: "1px solid #5B4433", background: "#15100B", color: "#D6A46C", fontSize: 9, fontWeight: 800 }}>FERAL CAT</button>
+        <button onClick={() => aeolus.fire(armed ? "disarm-deterrent" : "arm-deterrent")} style={{ padding: "8px 6px", borderRadius: 8, border: "1px solid " + (armed ? "#3D6849" : "#4A4F4B"), background: armed ? "#0B1810" : "#0D100E", color: armed ? "#72D993" : "#858E88", fontSize: 9, fontWeight: 800 }}>{armed ? "DETERRENT · ARMED" : "ARM DETERRENT"}</button>
+        <button onClick={() => aeolus.fire("nest-visit")} style={{ padding: "8px 6px", borderRadius: 8, border: "1px solid #33473A", background: "#0B120D", color: "#9BB4A3", fontSize: 9, fontWeight: 800 }}>NEST VISIT</button>
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8, color: "#5D6B61", fontSize: 8 }}>
+        <span>Detection and response state is shared · all inference is represented as local edge events</span>
+        <button onClick={() => aeolus.fire("reset-wildlife")} style={{ border: 0, background: "transparent", color: "#6F7F74", cursor: "pointer", fontSize: 8 }}>RESET STATION</button>
       </div>
     </div>
   );
 }`;
 
-// ─── Nest Box Monitor — brooding temperature, humidity, visits ───────────────
-const nestUi = `import { useState, useEffect } from "react";
-import type { CustomComponentProps } from "./types";
-
-export default function NestBox(aeolus: CustomComponentProps) {
-  const [temp, setTemp] = useState(34.6);
-  const [hum, setHum] = useState(56);
-  const [occupied, setOccupied] = useState(true);
-  const [visits, setVisits] = useState(28);
-  const chicks = 3, eggs = 1;
-
-  useEffect(() => {
-    const id = setInterval(() => {
-      setOccupied((o) => (Math.random() < 0.12 ? !o : o));
-      setTemp((t) => {
-        const target = occupied ? 35.4 : 30.5;
-        const nt = t + (target - t) * 0.12 + (Math.random() - 0.5) * 0.5;
-        return Math.max(27, Math.min(38, nt));
-      });
-      setHum((h) => Math.max(45, Math.min(70, h + (Math.random() - 0.5) * 1.6)));
-      if (Math.random() < 0.18) setVisits((v) => v + 1);
-    }, 1600);
-    return () => clearInterval(id);
-  }, [occupied]);
-
-  const tempOk = temp >= 33 && temp <= 37;
-  const tempCol = tempOk ? "#22C55E" : temp < 33 ? "#3BA4FF" : "#F59E0B";
-  const warmthPct = Math.max(0, Math.min(100, ((temp - 27) / 11) * 100));
-
-  return (
-    <div className="p-4 space-y-3">
-      <div className="flex items-center justify-between">
-        <span className="text-sm font-semibold text-[#E6EDF3]">🪺 Nest Box Monitor</span>
-        <span className="text-[9px] px-2 py-0.5 rounded-full font-semibold" style={{ backgroundColor: occupied ? "#22C55E20" : "#6B778520", color: occupied ? "#22C55E" : "#9AA6B2" }}>
-          {occupied ? "● Brooding" : "Parent away"}
-        </span>
-      </div>
-
-      <div className="bg-[#0B0F14] rounded-xl border border-[#2A3441] p-3 flex items-center gap-4">
-        <div className="text-4xl">🐣</div>
-        <div className="flex-1">
-          <div className="flex items-baseline gap-1">
-            <span className="text-3xl font-mono font-bold" style={{ color: tempCol }}>{temp.toFixed(1)}</span>
-            <span className="text-sm text-[#6B7785]">°C</span>
-          </div>
-          <div className="text-[9px] text-[#6B7785]">nest temperature · {tempOk ? "ideal for brooding" : temp < 33 ? "cooling — parent away" : "warm"}</div>
-          <div className="mt-1.5 h-1.5 rounded-full bg-[#1A2330] overflow-hidden">
-            <div className="h-full rounded-full transition-all duration-700" style={{ width: warmthPct + "%", backgroundColor: tempCol }} />
-          </div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-3 gap-1.5">
-        <div className="bg-[#0B0F14] rounded-lg border border-[#2A3441] p-2 flex flex-col items-center">
-          <span className="text-[13px] font-mono font-bold text-[#5CE1E6]">{Math.round(hum)}%</span>
-          <span className="text-[7px] text-[#6B7785]">Humidity</span>
-        </div>
-        <div className="bg-[#0B0F14] rounded-lg border border-[#2A3441] p-2 flex flex-col items-center">
-          <span className="text-[13px] font-mono font-bold text-[#F59E0B]">{chicks} 🐤</span>
-          <span className="text-[7px] text-[#6B7785]">{eggs} egg · {chicks} chicks</span>
-        </div>
-        <div className="bg-[#0B0F14] rounded-lg border border-[#2A3441] p-2 flex flex-col items-center">
-          <span className="text-[13px] font-mono font-bold text-[#22C55E]">{visits}</span>
-          <span className="text-[7px] text-[#6B7785]">Feeding visits</span>
-        </div>
-      </div>
-
-      <div className="text-[8px] text-[#6B7785] text-center">on-device camera counts feeding visits — no clip ever leaves the nest box</div>
-    </div>
-  );
-}`;
-
-// ─── Predator Deterrent — humane, non-lethal, auto-triggered ─────────────────
-const deterrentUi = `import { useState, useEffect } from "react";
-import type { CustomComponentProps } from "./types";
-
-const MODES = ["Ultrasonic", "Strobe light", "Misting"];
-
-function hhmm(ts) {
-  const d = new Date(ts);
-  const p = (n) => (n < 10 ? "0" + n : "" + n);
-  return p(d.getHours()) + ":" + p(d.getMinutes());
-}
-
-export default function PredatorDeterrent(aeolus: CustomComponentProps) {
-  const [armed, setArmed] = useState<boolean>(() => (aeolus.read("armed") as boolean) ?? true);
-  const [mode, setMode] = useState<string>(() => (aeolus.read("mode") as string) ?? "Ultrasonic");
-  const [firing, setFiring] = useState(false);
-  const [cooldown, setCooldown] = useState(0);
-  const [count, setCount] = useState(4);
-  const [log, setLog] = useState<any[]>(() => [
-    { id: 1, sp: "Red Fox", ts: Date.now() - 1000 * 60 * 42 },
-    { id: 2, sp: "Feral Cat", ts: Date.now() - 1000 * 60 * 133 },
-  ]);
-
-  const fire = (sp) => {
-    if (!armed) return;
-    setFiring(true);
-    setCooldown(6);
-    setCount((c) => c + 1);
-    setLog((l) => [{ id: Date.now(), sp, ts: Date.now() }, ...l].slice(0, 5));
-  };
-
-  useEffect(() => { aeolus.save("armed", armed); }, [armed]);
-  useEffect(() => { aeolus.save("mode", mode); }, [mode]);
-
-  useEffect(() => {
-    const id = setInterval(() => {
-      setCooldown((c) => {
-        if (c > 1) return c - 1;
-        if (c === 1) { setFiring(false); return 0; }
-        return 0;
-      });
-      if (armed && Math.random() < 0.05) {
-        const sp = Math.random() < 0.6 ? "Red Fox" : "Feral Cat";
-        setFiring(true);
-        setCooldown(6);
-        setCount((c) => c + 1);
-        setLog((l) => [{ id: Date.now(), sp, ts: Date.now() }, ...l].slice(0, 5));
-      }
-    }, 1000);
-    return () => clearInterval(id);
-  }, [armed]);
-
-  return (
-    <div className="p-4 space-y-3">
-      <div className="flex items-center justify-between">
-        <span className="text-sm font-semibold text-[#E6EDF3]">🚨 Predator Deterrent</span>
-        <button onClick={() => setArmed((a) => !a)} className="text-[9px] px-2.5 py-1 rounded-full font-semibold border transition-all" style={{ backgroundColor: armed ? "#22C55E15" : "#6B778515", color: armed ? "#22C55E" : "#9AA6B2", borderColor: armed ? "#22C55E4D" : "#2A3441" }}>
-          {armed ? "● Armed" : "Disarmed"}
-        </button>
-      </div>
-
-      <div className="rounded-xl border p-3 flex items-center gap-3 transition-all" style={{ backgroundColor: firing ? "#EF444418" : "#0B0F14", borderColor: firing ? "#EF4444" : "#2A3441" }}>
-        <div className="text-3xl" style={{ opacity: firing ? 1 : 0.45 }}>{firing ? "📢" : "🛡️"}</div>
-        <div className="flex-1">
-          <div className="text-[13px] font-bold" style={{ color: firing ? "#EF4444" : "#E6EDF3" }}>{firing ? "DETERRENT ACTIVE" : armed ? "Armed & watching" : "Disarmed"}</div>
-          <div className="text-[9px] text-[#6B7785]">{firing ? mode + " · cooldown " + cooldown + "s" : "triggers automatically on predator detection"}</div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-3 gap-1.5">
-        {MODES.map((m) => (
-          <button key={m} onClick={() => setMode(m)} className="py-1.5 rounded-md text-[9px] font-medium border transition-all" style={{ backgroundColor: mode === m ? "#3BA4FF20" : "#0B0F14", color: mode === m ? "#3BA4FF" : "#9AA6B2", borderColor: mode === m ? "#3BA4FF4D" : "#2A3441" }}>{m}</button>
-        ))}
-      </div>
-
-      <div className="flex items-center gap-2">
-        <button onClick={() => fire("Manual test")} disabled={!armed} className="flex-1 py-1.5 rounded-md text-[10px] font-semibold border transition-all" style={{ backgroundColor: armed ? "#F59E0B15" : "#6B778510", color: armed ? "#F59E0B" : "#6B7785", borderColor: armed ? "#F59E0B4D" : "#2A3441" }}>▶ Test deterrent</button>
-        <div className="bg-[#0B0F14] rounded-md border border-[#2A3441] px-3 py-1.5 text-center">
-          <div className="text-[12px] font-mono font-bold text-[#EF4444]">{count}</div>
-          <div className="text-[7px] text-[#6B7785]">today</div>
-        </div>
-      </div>
-
-      <div className="space-y-1">
-        <div className="text-[8px] text-[#6B7785] uppercase tracking-wider">Recent activations</div>
-        {log.map((e) => (
-          <div key={e.id} className="flex items-center gap-2 text-[10px] text-[#9AA6B2]">
-            <span className="text-[#EF4444]">▲</span>
-            <span className="flex-1">{e.sp}</span>
-            <span className="font-mono text-[#6B7785]">{hhmm(e.ts)}</span>
-          </div>
-        ))}
-      </div>
-
-      <div className="text-[8px] text-[#6B7785] text-center">non-lethal — deters, never harms</div>
-    </div>
-  );
-}`;
-
-// ─── Biodiversity Log — species tally, native/introduced, activity by hour ───
-const biodiversityUi = `import { useState, useEffect } from "react";
-import type { CustomComponentProps } from "./types";
-
-const TALLY = [
-  { name: "Brushtail Possum", emoji: "🐾", kind: "native", n: 142 },
-  { name: "Sugar Glider", emoji: "🐿️", kind: "native", n: 86 },
-  { name: "Superb Lyrebird", emoji: "🐦", kind: "bird", n: 41 },
-  { name: "Eastern Quoll", emoji: "🐆", kind: "native", n: 23 },
-  { name: "European Rabbit", emoji: "🐇", kind: "feral", n: 58 },
-  { name: "Red Fox", emoji: "🦊", kind: "predator", n: 29 },
-  { name: "Feral Cat", emoji: "🐈", kind: "predator", n: 15 },
-];
-const COL = { native: "#22C55E", bird: "#5CE1E6", predator: "#EF4444", feral: "#F59E0B" };
-const HOURS = [6, 5, 4, 3, 2, 1, 1, 1, 2, 3, 2, 2, 1, 1, 2, 2, 3, 5, 9, 14, 17, 15, 11, 8];
-
-export default function BiodiversityLog(aeolus: CustomComponentProps) {
-  const max = Math.max.apply(null, TALLY.map((t) => t.n));
-  const total = TALLY.reduce((a, t) => a + t.n, 0);
-  const nativeN = TALLY.filter((t) => t.kind === "native" || t.kind === "bird").reduce((a, t) => a + t.n, 0);
-  const introN = total - nativeN;
-  const nativePct = Math.round((nativeN / total) * 100);
-  const hmax = Math.max.apply(null, HOURS);
-
-  return (
-    <div className="p-4 space-y-3">
-      <div className="flex items-center justify-between">
-        <span className="text-sm font-semibold text-[#E6EDF3]">📊 Biodiversity Log</span>
-        <span className="text-[9px] text-[#6B7785]">last 7 days · on-device</span>
-      </div>
-
-      <div className="grid grid-cols-3 gap-1.5">
-        <div className="bg-[#0B0F14] rounded-lg border border-[#2A3441] p-2 flex flex-col items-center">
-          <span className="text-[15px] font-mono font-bold text-[#E6EDF3]">{TALLY.length}</span>
-          <span className="text-[7px] text-[#6B7785]">Species</span>
-        </div>
-        <div className="bg-[#0B0F14] rounded-lg border border-[#2A3441] p-2 flex flex-col items-center">
-          <span className="text-[15px] font-mono font-bold text-[#22C55E]">{nativePct}%</span>
-          <span className="text-[7px] text-[#6B7785]">Native</span>
-        </div>
-        <div className="bg-[#0B0F14] rounded-lg border border-[#2A3441] p-2 flex flex-col items-center">
-          <span className="text-[15px] font-mono font-bold text-[#3BA4FF]">{total}</span>
-          <span className="text-[7px] text-[#6B7785]">Detections</span>
-        </div>
-      </div>
-
-      <div className="flex h-2 rounded-full overflow-hidden bg-[#1A2330]">
-        <div className="h-full" style={{ width: (nativeN / total) * 100 + "%", backgroundColor: "#22C55E" }} />
-        <div className="h-full" style={{ width: (introN / total) * 100 + "%", backgroundColor: "#EF4444" }} />
-      </div>
-      <div className="flex justify-between text-[8px]">
-        <span style={{ color: "#22C55E" }}>native {nativeN}</span>
-        <span style={{ color: "#EF4444" }}>introduced {introN}</span>
-      </div>
-
-      <div className="space-y-1">
-        {TALLY.map((t) => (
-          <div key={t.name} className="flex items-center gap-2">
-            <span className="text-[13px] w-5">{t.emoji}</span>
-            <span className="text-[10px] text-[#E6EDF3] w-32 shrink-0">{t.name}</span>
-            <div className="flex-1 h-2.5 rounded-full bg-[#121821] overflow-hidden">
-              <div className="h-full rounded-full transition-all duration-700" style={{ width: (t.n / max) * 100 + "%", backgroundColor: COL[t.kind] }} />
-            </div>
-            <span className="text-[10px] font-mono text-[#9AA6B2] w-8 text-right">{t.n}</span>
-          </div>
-        ))}
-      </div>
-
-      <div>
-        <div className="text-[8px] text-[#6B7785] uppercase tracking-wider mb-1">Activity by hour — detections peak after dark</div>
-        <div className="flex items-end gap-0.5 h-12">
-          {HOURS.map((v, i) => (
-            <div key={i} className="flex-1 rounded-t" style={{ height: (v / hmax) * 100 + "%", backgroundColor: (i >= 19 || i < 6) ? "#5CE1E6" : "#2A3441" }} />
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}`;
-
-// ─── Assembly ────────────────────────────────────────────────────────────────
 const automations = [
-  { key: "trailcam", name: "AI Trail Camera", triggerTopic: "camera/trailcam-01/detection", scriptSource: detectionLogic, uiSource: trailcamUi },
-  { key: "nest", name: "Nest Box Monitor", triggerTopic: "none", scriptSource: simLogic, uiSource: nestUi },
-  { key: "deterrent", name: "Predator Deterrent", triggerTopic: "none", scriptSource: simLogic, uiSource: deterrentUi },
-  { key: "biodiversity", name: "Biodiversity Log", triggerTopic: "none", scriptSource: simLogic, uiSource: biodiversityUi },
+  {
+    key: "wildlife",
+    name: "Wildlife Edge Station",
+    triggerTopic: "none",
+    scriptSource: logic,
+    uiSource: ui,
+    demoAccess: {
+      fireEvents: ["native-detection", "fox-detection", "cat-detection", "arm-deterrent", "disarm-deterrent", "nest-visit", "reset-wildlife"],
+    },
+  },
 ];
 
 const panes = [
-  { kind: "automation", ref: "trailcam", x: 0, y: 0, w: 12, h: 15 },
-  { kind: "automation", ref: "nest", x: 0, y: 15, w: 6, h: 12 },
-  { kind: "automation", ref: "deterrent", x: 6, y: 15, w: 6, h: 12 },
-  { kind: "automation", ref: "biodiversity", x: 0, y: 27, w: 12, h: 13 },
+  { kind: "automation", ref: "wildlife", x: 0, y: 0, w: 12, h: 17 },
+  { kind: "device-grid", x: 0, y: 17, w: 12, h: 5 },
 ];
 
 const dataStore = [
   {
+    name: "wildlife-events",
+    description: "Classified on-device wildlife detections",
+    retentionDays: 90,
+    // Seeded history so the collection is populated on first load; the seeded
+    // Logic appends live rows (same shape) as visitors trigger detections.
+    records: [
+      { payload: { species: "Ringtail Possum", category: "native", confidence: 0.94 }, timestamp: Date.now() - 5_400_000 },
+      { payload: { species: "Superb Lyrebird", category: "native", confidence: 0.96 }, timestamp: Date.now() - 3_600_000 },
+      { payload: { species: "Red Fox", category: "predator", confidence: 0.97 }, timestamp: Date.now() - 1_800_000 },
+      { payload: { species: "Short-beaked Echidna", category: "native", confidence: 0.89 }, timestamp: Date.now() - 600_000 },
+    ],
+  },
+  {
     name: "wildlife-detections",
-    description: "On-device AI trail-cam detections by category (7 days, hourly)",
+    description: "Hourly native and introduced-animal detection totals (7 days)",
     retentionDays: 90,
     records: genSeries({
       count: 168,
@@ -475,7 +363,6 @@ const dataStore = [
           const noct = (h >= 20 || h < 6) ? 1.1 : 0.15;
           return Math.max(0, Math.round(noct + noise(0.5)));
         },
-        feral: () => Math.max(0, Math.round(1 + noise(0.9))),
       },
     }),
   },
