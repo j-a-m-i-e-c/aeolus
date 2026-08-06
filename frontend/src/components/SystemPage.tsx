@@ -6,6 +6,7 @@ import { useDeviceStore } from "../store/device-store";
 import { fetchHealth } from "../lib/api-client";
 import { authFetch } from "../lib/auth-fetch";
 import { useAuthStore } from "../store/auth-store";
+import { PUBLIC_DEMO } from "../lib/env";
 import type { HealthStatus } from "../store/device-store";
 
 const API_URL = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:3001`;
@@ -59,8 +60,12 @@ function UsageBar({ percent, color = "#3BA4FF" }: { percent: number; color?: str
 
 export function SystemPage() {
   // Host diagnostics and application logs are admin-only on the backend; a
-  // non-admin sees the health summary and version only, without failed requests.
+  // normal non-admin sees the health summary and version only, without failed
+  // requests. Public-demo sessions are the exception: they get a read-only,
+  // server-side-masked view of diagnostics + logs (see demo-scrub.ts), so they
+  // load the same data an admin does.
   const isAdmin = useAuthStore((s) => s.user?.role === "admin");
+  const canViewDiagnostics = isAdmin || PUBLIC_DEMO;
   const [info, setInfo] = useState<SystemInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -71,9 +76,10 @@ export function SystemPage() {
   const setHealth = useDeviceStore((s) => s.setHealth);
 
   const fetchInfo = useCallback(async () => {
-    // Non-admins are not permitted to read host diagnostics; skip the request
-    // so their dashboard shows health + version without an error.
-    if (!isAdmin) {
+    // Normal non-admins are not permitted to read host diagnostics; skip the
+    // request so their dashboard shows health + version without an error.
+    // Public-demo sessions are permitted (masked), so they proceed.
+    if (!canViewDiagnostics) {
       setLoading(false);
       return;
     }
@@ -89,7 +95,7 @@ export function SystemPage() {
       setError("Failed to load system information");
     }
     setLoading(false);
-  }, [isAdmin]);
+  }, [canViewDiagnostics]);
 
   const fetchVersion = useCallback(async () => {
     try {
@@ -147,7 +153,7 @@ export function SystemPage() {
 
   // Only admins load host diagnostics; a non-admin proceeds with info === null
   // and sees the health + version summary below.
-  if (isAdmin && !info) {
+  if (canViewDiagnostics && !info) {
     return <div className="text-center py-12 text-[#6B7785]">Loading system info...</div>;
   }
 
@@ -346,8 +352,8 @@ export function SystemPage() {
       </>
       )}
 
-      {/* Application Logs (admin only) */}
-      {isAdmin && <LogViewer />}
+      {/* Application Logs (admin + masked public-demo) */}
+      {canViewDiagnostics && <LogViewer />}
     </div>
   );
 }
