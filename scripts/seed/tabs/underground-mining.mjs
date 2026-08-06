@@ -1,7 +1,9 @@
 // scripts/seed/tabs/underground-mining.mjs — Underground mine operations demo.
 //
-// Gas safety, ventilation-on-demand, personnel muster, and dewatering — modelled
-// on real industry systems (Howden/ABB ventilation, Newtrax/MST tag tracking).
+// Public-demo flagship: atmospheric safety, ventilation-on-demand and personnel
+// muster are presented as one live mine cross-section. Shared incident state is
+// held by Aeolus; airflow particles, fan rotation and personnel movement are
+// browser-side presentation derived from that shared state.
 
 import { genSeries, round, noise } from "../lib.mjs";
 
@@ -9,405 +11,351 @@ const tab = { id: "tab-mining", name: "Underground Mining", icon: "mountain" };
 
 const devices = [
   { topic: "sensor/mine/gas-l3", payload: { ch4: 0.3, co: 12, o2: 20.8, no2: 1.2 } },
-  { topic: "sensor/mine/gas-d7", payload: { ch4: 0.9, co: 28, o2: 20.6, no2: 2.1 } },
-  { topic: "switch/mine/primary-fan", payload: { on: true, rpm: 1450, airflow: 280, mode: "auto" } },
-  { topic: "switch/mine/booster-fan-l3", payload: { on: true, rpm: 980, airflow: 110 } },
+  { topic: "sensor/mine/gas-d7", payload: { ch4: 0.42, co: 16, o2: 20.7, no2: 1.6 } },
+  { topic: "switch/mine/primary-fan", payload: { on: true, rpm: 1136, airflow: 258, mode: "auto" } },
+  { topic: "switch/mine/booster-fan-l3", payload: { on: true, rpm: 820, airflow: 94 } },
   { topic: "sensor/mine/personnel", payload: { underground: 14, l1: 3, l2: 6, l3: 5 } },
   { topic: "sensor/mine/refuge", payload: { occupancy: 0, capacity: 20, sealed: false, o2: 20.9 } },
   { topic: "sensor/mine/sump-deep", payload: { level: 1.8, flow: 45, on: true } },
-  { topic: "sensor/mine/sump-surface", payload: { level: 0.6, flow: 0, on: false } },
 ];
 
-// ─── Atmospheric Monitoring — multi-gas safety with statutory thresholds ─────
-const gasLogic = `automation({
-  conditions: [
-    function hasGas(context) {
-      return context.state && context.state.ch4 !== undefined;
-    },
-  ],
+const logic = `automation({
   actions: [
-    function monitor(context) {
-      var s = context.state;
-      var loc = context.topic.indexOf("d7") >= 0 ? "d7" : "l3";
-      state.set(loc + "_ch4", s.ch4);
-      state.set(loc + "_co", s.co);
-      state.set(loc + "_o2", s.o2);
-      state.set(loc + "_no2", s.no2);
-      state.set("lastUpdate", Date.now());
+    function mineops(context) {
+      function init(key, value) {
+        if (state.get(key) === undefined) state.set(key, value);
+      }
 
-      var ch4 = Math.max(state.get("l3_ch4") || 0, state.get("d7_ch4") || 0);
-      var co = Math.max(state.get("l3_co") || 0, state.get("d7_co") || 0);
-      var o2 = Math.min(state.get("l3_o2") || 21, state.get("d7_o2") || 21);
-      var alarm = ch4 >= 1.0 || co >= 30 || o2 < 19.5;
-      state.set("alarm", alarm);
-      if (alarm) {
-        mqtt.publish("switch/mine/primary-fan/command", JSON.stringify({ boost: true }));
-        log.warn("Gas alarm — CH4 " + ch4 + "% / CO " + co + "ppm / O2 " + o2 + "%");
+      init("ch4", 0.42);
+      init("co", 16);
+      init("o2", 20.7);
+      init("no2", 1.6);
+      init("demand", 48);
+      init("primaryRpm", 1136);
+      init("boosterRpm", 840);
+      init("airflow", 258);
+      init("gasIncident", false);
+      init("alarm", false);
+      init("mustering", false);
+      init("musterStart", 0);
+      init("ventOverride", false);
+      init("lastAction", { label: "Mine operating normally", at: Date.now() });
+
+      var evt = String(context.topic || "").split("/").pop();
+
+      function publishAtmosphere() {
+        mqtt.publish("sensor/mine/gas-d7", JSON.stringify({
+          ch4: Number(state.get("ch4") || 0),
+          co: Number(state.get("co") || 0),
+          o2: Number(state.get("o2") || 20.9),
+          no2: Number(state.get("no2") || 0)
+        }));
+      }
+
+      function publishFan() {
+        mqtt.publish("switch/mine/primary-fan", JSON.stringify({
+          on: true,
+          rpm: Number(state.get("primaryRpm") || 0),
+          airflow: Number(state.get("airflow") || 0),
+          mode: state.get("ventOverride") ? "boost" : "auto"
+        }));
+      }
+
+      if (evt === "gas-rise") {
+        state.set("ch4", 1.12);
+        state.set("co", 34);
+        state.set("o2", 20.3);
+        state.set("no2", 3.1);
+        state.set("demand", 100);
+        state.set("primaryRpm", 1500);
+        state.set("boosterRpm", 1100);
+        state.set("airflow", 330);
+        state.set("gasIncident", true);
+        state.set("alarm", true);
+        state.set("lastAction", { label: "CH4 threshold exceeded — ventilation boosted", at: Date.now() });
+        publishAtmosphere();
+        publishFan();
+        log.warn("Demo gas incident: CH4 1.12% at Drift 7");
+      } else if (evt === "clear-air") {
+        state.set("ch4", 0.36);
+        state.set("co", 13);
+        state.set("o2", 20.8);
+        state.set("no2", 1.3);
+        state.set("demand", state.get("ventOverride") ? 100 : 42);
+        state.set("primaryRpm", state.get("ventOverride") ? 1500 : 1094);
+        state.set("boosterRpm", state.get("ventOverride") ? 1100 : 810);
+        state.set("airflow", state.get("ventOverride") ? 330 : 250);
+        state.set("gasIncident", false);
+        state.set("alarm", false);
+        state.set("lastAction", { label: "Atmosphere returned below alarm thresholds", at: Date.now() });
+        publishAtmosphere();
+        publishFan();
+      } else if (evt === "vent-boost") {
+        var nextBoost = !Boolean(state.get("ventOverride"));
+        state.set("ventOverride", nextBoost);
+        state.set("demand", nextBoost ? 100 : (state.get("gasIncident") ? 100 : 48));
+        state.set("primaryRpm", nextBoost ? 1500 : (state.get("gasIncident") ? 1500 : 1136));
+        state.set("boosterRpm", nextBoost ? 1100 : (state.get("gasIncident") ? 1100 : 840));
+        state.set("airflow", nextBoost ? 330 : (state.get("gasIncident") ? 330 : 258));
+        state.set("lastAction", { label: nextBoost ? "Manual ventilation boost enabled" : "Ventilation returned to automatic demand", at: Date.now() });
+        publishFan();
+      } else if (evt === "muster") {
+        state.set("mustering", true);
+        state.set("musterStart", Date.now());
+        state.set("lastAction", { label: "Emergency muster initiated", at: Date.now() });
+        mqtt.publish("sensor/mine/refuge", JSON.stringify({ occupancy: 0, capacity: 20, sealed: false, muster: true }));
+        log.warn("MUSTER initiated — all personnel to refuge chamber");
+      } else if (evt === "clear-muster") {
+        state.set("mustering", false);
+        state.set("musterStart", 0);
+        state.set("lastAction", { label: "Muster cleared — personnel returned to work areas", at: Date.now() });
+        mqtt.publish("sensor/mine/refuge", JSON.stringify({ occupancy: 0, capacity: 20, sealed: false, muster: false }));
+      } else if (evt === "reset-mine") {
+        state.set("ch4", 0.42);
+        state.set("co", 16);
+        state.set("o2", 20.7);
+        state.set("no2", 1.6);
+        state.set("demand", 48);
+        state.set("primaryRpm", 1136);
+        state.set("boosterRpm", 840);
+        state.set("airflow", 258);
+        state.set("gasIncident", false);
+        state.set("alarm", false);
+        state.set("mustering", false);
+        state.set("musterStart", 0);
+        state.set("ventOverride", false);
+        state.set("lastAction", { label: "Mine reset to normal operations", at: Date.now() });
+        publishAtmosphere();
+        publishFan();
       }
     },
   ],
 });`;
 
-const gasUi = `import type { CustomComponentProps } from "./types";
+const ui = `import { useEffect, useMemo, useState } from "react";
+import type { CustomComponentProps } from "./types";
 
-export default function AtmosphericMonitoring(aeolus: CustomComponentProps) {
-  const alarm = aeolus.read("alarm") as boolean ?? false;
-  const locations = [
-    { key: "l3", label: "Level 3" },
-    { key: "d7", label: "Drift 7" },
-  ];
-  // gas: [value, warn, danger, max, unit, invert(O2 low is bad)]
-  const gasDefs = [
-    { k: "ch4", label: "CH₄", warn: 0.5, danger: 1.0, max: 1.5, unit: "%", invert: false, defs: { l3: 0.3, d7: 0.9 } },
-    { k: "co", label: "CO", warn: 25, danger: 30, max: 50, unit: "ppm", invert: false, defs: { l3: 12, d7: 28 } },
-    { k: "o2", label: "O₂", warn: 19.5, danger: 19.0, max: 21, unit: "%", invert: true, defs: { l3: 20.8, d7: 20.6 } },
-    { k: "no2", label: "NO₂", warn: 3, danger: 5, max: 8, unit: "ppm", invert: false, defs: { l3: 1.2, d7: 2.1 } },
-  ];
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
 
-  const Bar = ({ value, def }: { value: number; def: any }) => {
-    const pct = Math.max(0, Math.min(100, (value / def.max) * 100));
-    const danger = def.invert ? value <= def.danger : value >= def.danger;
-    const warn = def.invert ? value <= def.warn : value >= def.warn;
-    const color = danger ? "#EF4444" : warn ? "#F59E0B" : "#22C55E";
-    return (
-      <div>
-        <div className="flex items-center justify-between mb-0.5">
-          <span className="text-[9px] text-[#9AA6B2]">{def.label}</span>
-          <span className="text-[9px] font-mono font-bold" style={{ color }}>{value}{def.unit}</span>
-        </div>
-        <div className="h-2 bg-[#1A2330] rounded-full overflow-hidden">
-          <div className="h-full rounded-full transition-all duration-700" style={{ width: pct + "%", background: color }} />
-        </div>
-      </div>
-    );
-  };
+function lerp(a: number, b: number, t: number) {
+  return a + (b - a) * t;
+}
+
+export default function MineOperations(aeolus: CustomComponentProps) {
+  const ch4 = Number(aeolus.read("ch4") ?? 0.42);
+  const co = Number(aeolus.read("co") ?? 16);
+  const o2 = Number(aeolus.read("o2") ?? 20.7);
+  const no2 = Number(aeolus.read("no2") ?? 1.6);
+  const demand = clamp(Number(aeolus.read("demand") ?? 48), 0, 100);
+  const primaryRpm = Number(aeolus.read("primaryRpm") ?? 1136);
+  const boosterRpm = Number(aeolus.read("boosterRpm") ?? 840);
+  const airflow = Number(aeolus.read("airflow") ?? 258);
+  const gasIncident = Boolean(aeolus.read("gasIncident"));
+  const alarm = Boolean(aeolus.read("alarm"));
+  const mustering = Boolean(aeolus.read("mustering"));
+  const musterStart = Number(aeolus.read("musterStart") ?? 0);
+  const ventOverride = Boolean(aeolus.read("ventOverride"));
+  const lastAction = aeolus.read("lastAction") as any;
+
+  const [phase, setPhase] = useState(0);
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const id = setInterval(() => { setPhase((v) => (v + 1) % 100000); setNow(Date.now()); }, 90);
+    return () => clearInterval(id);
+  }, []);
+
+  const personnel = useMemo(() => [
+    { x: 177, y: 128 }, { x: 239, y: 129 }, { x: 318, y: 128 },
+    { x: 173, y: 199 }, { x: 219, y: 199 }, { x: 270, y: 199 }, { x: 331, y: 199 }, { x: 384, y: 199 }, { x: 430, y: 199 },
+    { x: 198, y: 270 }, { x: 250, y: 270 }, { x: 306, y: 270 }, { x: 369, y: 270 }, { x: 423, y: 270 },
+  ], []);
+
+  const rawMusterProgress = mustering && musterStart > 0 ? (now - musterStart) / 11000 : 0;
+  const musterProgress = mustering ? clamp(rawMusterProgress, 0, 1) : 0;
+  const inRefuge = mustering ? Math.min(14, Math.floor(musterProgress * 16)) : 0;
+  const atmosphereColor = alarm ? "#FF5A52" : ch4 >= 0.5 ? "#F6A84B" : "#73E39A";
+  const fanColor = demand >= 80 ? "#F0B44B" : "#63D5EF";
+  const actionLabel = lastAction && lastAction.label ? String(lastAction.label) : "Mine operating normally";
+
+  const airflowParticles = Array.from({ length: 18 });
 
   return (
-    <div className="p-4 space-y-3">
-      <div className="flex items-center justify-between">
-        <div className="text-sm font-semibold text-[#E6EDF3]">⛏️ Atmospheric Monitoring</div>
-        <span className="text-[9px] px-2 py-0.5 rounded-full font-semibold" style={{ backgroundColor: alarm ? "#EF444420" : "#22C55E20", color: alarm ? "#EF4444" : "#22C55E" }}>
-          {alarm ? "⚠ Gas Alarm" : "● Safe"}
-        </span>
-      </div>
-      <div className="grid grid-cols-2 gap-2">
-        {locations.map((loc) => (
-          <div key={loc.key} className="bg-[#0B0F14] rounded-xl border border-[#2A3441] p-3 space-y-2">
-            <div className="text-[10px] font-semibold text-[#E6EDF3] mb-1">{loc.label}</div>
-            {gasDefs.map((def) => (
-              <Bar key={def.k} value={aeolus.read(loc.key + "_" + def.k) as number ?? def.defs[loc.key]} def={def} />
-            ))}
+    <div style={{ minHeight: "100%", padding: 14, color: "#E8EEF5", background: "linear-gradient(180deg,#0B0D10 0%,#080A0C 100%)" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 10 }}>
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 15, fontWeight: 850, letterSpacing: "0.02em" }}>UNDERGROUND OPERATIONS</span>
+            <span style={{ fontSize: 8, border: "1px solid #343A42", borderRadius: 999, padding: "2px 7px", color: "#818B97", letterSpacing: "0.1em" }}>LEVELS 1–3</span>
           </div>
-        ))}
-      </div>
-    </div>
-  );
-}`;
-
-// ─── Ventilation on Demand ⭐ — fans ramp to gas + crew location ──────────────
-const ventLogic = `automation({
-  conditions: [
-    function hasGas(context) {
-      return context.state && context.state.ch4 !== undefined;
-    },
-  ],
-  actions: [
-    function ventilate(context) {
-      var s = context.state;
-      var loc = context.topic.indexOf("d7") >= 0 ? "d7" : "l3";
-      state.set(loc + "_ch4", s.ch4);
-
-      var ch4 = Math.max(state.get("l3_ch4") || 0.3, state.get("d7_ch4") || 0.9);
-      var demand = Math.min(100, Math.round((ch4 / 1.0) * 100));
-      state.set("demand", demand);
-
-      var primaryRpm = 800 + Math.round(demand * 7);
-      var boosterRpm = 600 + Math.round(demand * 5);
-      state.set("primaryRpm", primaryRpm);
-      state.set("boosterRpm", boosterRpm);
-      state.set("intakeFlow", Math.round(200 + demand * 1.2));
-      state.set("returnFlow", Math.round(180 + demand * 1.1));
-      state.set("lastUpdate", Date.now());
-
-      mqtt.publish("switch/mine/primary-fan/command", JSON.stringify({ rpm: primaryRpm }));
-      log.info("Ventilation demand " + demand + "% — primary fan " + primaryRpm + " rpm");
-    },
-  ],
-});`;
-
-const ventUi = `import type { CustomComponentProps } from "./types";
-
-export default function VentilationOnDemand(aeolus: CustomComponentProps) {
-  const demand = aeolus.read("demand") as number ?? 90;
-  const primaryRpm = aeolus.read("primaryRpm") as number ?? 1430;
-  const boosterRpm = aeolus.read("boosterRpm") as number ?? 1050;
-  const intakeFlow = aeolus.read("intakeFlow") as number ?? 308;
-  const returnFlow = aeolus.read("returnFlow") as number ?? 279;
-
-  const flowColor = demand > 70 ? "#F59E0B" : demand > 40 ? "#5CE1E6" : "#3BA4FF";
-  // intake (downcast) left shaft, return (upcast) right shaft, 3 levels between
-  const levels = [
-    { y: 86, label: "L1" },
-    { y: 132, label: "L2" },
-    { y: 178, label: "L3" },
-  ];
-  const dots = [0, 1, 2];
-
-  return (
-    <div className="p-4 space-y-3">
-      <div className="flex items-center justify-between">
-        <div className="text-sm font-semibold text-[#E6EDF3]">🌬️ Ventilation on Demand</div>
-        <span className="text-[9px] px-2 py-0.5 rounded-full font-semibold" style={{ backgroundColor: flowColor + "20", color: flowColor }}>
-          Demand {demand}%
-        </span>
+          <div style={{ color: "#6D747E", fontSize: 9, marginTop: 3 }}>Atmosphere · ventilation-on-demand · personnel tracking</div>
+        </div>
+        <div style={{ textAlign: "right" }}>
+          <div style={{ color: alarm ? "#FF7168" : "#75E29A", fontSize: 10, fontWeight: 850 }}>{alarm ? "GAS ALARM" : "ATMOSPHERE SAFE"}</div>
+          <div style={{ color: "#656D76", fontSize: 8, marginTop: 2 }}>{actionLabel}</div>
+        </div>
       </div>
 
-      <div className="bg-[#0B0F14] rounded-xl border border-[#2A3441] p-2">
-        <svg width="100%" height="220" viewBox="0 0 280 220" preserveAspectRatio="xMidYMid meet">
-          {/* Surface line */}
-          <line x1="10" y1="40" x2="270" y2="40" stroke="#2A3441" strokeWidth="1" strokeDasharray="2 2" />
-          <text x="14" y="34" fill="#6B7785" fontSize="7">surface</text>
+      <div style={{ border: "1px solid #2B3037", borderRadius: 14, overflow: "hidden", background: "#07090B" }}>
+        <svg width="100%" height="400" viewBox="0 0 720 400" preserveAspectRatio="xMidYMid meet">
+          <defs>
+            <linearGradient id="rock" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#1B1C1D"/><stop offset="1" stopColor="#0D0E0F"/></linearGradient>
+            <radialGradient id="gas"><stop offset="0" stopColor="#FFB43A" stopOpacity="0.38"/><stop offset="1" stopColor="#FF7A31" stopOpacity="0"/></radialGradient>
+            <filter id="fanGlow"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+          </defs>
 
-          {/* Downcast (intake) + upcast (return) shafts */}
-          <rect x="40" y="40" width="14" height="150" fill="#121821" stroke="#3BA4FF" strokeWidth="1" strokeOpacity="0.4" />
-          <rect x="226" y="40" width="14" height="150" fill="#121821" stroke={flowColor} strokeWidth="1" strokeOpacity="0.5" />
-          <text x="47" y="205" textAnchor="middle" fill="#3BA4FF" fontSize="7">intake</text>
-          <text x="233" y="205" textAnchor="middle" fill={flowColor} fontSize="7">return</text>
+          <rect width="720" height="400" fill="url(#rock)" />
+          <rect x="0" y="0" width="720" height="55" fill="#111417" />
+          <line x1="0" y1="55" x2="720" y2="55" stroke="#3A3E43" strokeWidth="1" />
+          <text x="20" y="34" fill="#6E7780" fontSize="8" letterSpacing="1.5">SURFACE</text>
 
-          {/* Level tunnels */}
-          {levels.map((lv, i) => (
+          {/* Shafts */}
+          <rect x="82" y="55" width="34" height="290" fill="#10161A" stroke="#315765" strokeWidth="1.2" />
+          <rect x="603" y="55" width="34" height="290" fill="#151313" stroke={alarm ? "#7B3934" : "#5C5140"} strokeWidth="1.2" />
+          <text x="99" y="365" textAnchor="middle" fill="#53879B" fontSize="7">INTAKE</text>
+          <text x="620" y="365" textAnchor="middle" fill={alarm ? "#BF6258" : "#928067"} fontSize="7">RETURN</text>
+
+          {/* Mine levels */}
+          {[{ y: 128, label: "LEVEL 1" }, { y: 199, label: "LEVEL 2" }, { y: 270, label: "LEVEL 3" }].map((lv) => (
             <g key={lv.label}>
-              <line x1="54" y1={lv.y} x2="226" y2={lv.y} stroke="#1A2330" strokeWidth="8" />
-              <line x1="54" y1={lv.y} x2="226" y2={lv.y} stroke={flowColor} strokeWidth="1.5" strokeOpacity="0.5" />
-              <text x="140" y={lv.y - 6} textAnchor="middle" fill="#6B7785" fontSize="7">{lv.label}</text>
-              {dots.map((d) => (
-                <circle key={d} cx={70 + d * 55} cy={lv.y} r="2" fill={flowColor} className="animate-pulse" style={{ animationDelay: (i * 0.2 + d * 0.3) + "s" }} />
-              ))}
+              <path d={"M116 " + lv.y + " H603"} stroke="#202327" strokeWidth="24" />
+              <path d={"M116 " + lv.y + " H603"} stroke="#353A40" strokeWidth="2" />
+              <text x="128" y={lv.y - 15} fill="#717982" fontSize="7" letterSpacing="1">{lv.label}</text>
             </g>
           ))}
 
-          {/* Airflow direction arrows: down intake, up return */}
-          <polygon points="47,150 43,142 51,142" fill="#3BA4FF" />
-          <polygon points="233,80 229,88 237,88" fill={flowColor} />
+          {/* Production drift and refuge */}
+          <path d="M448 270 H557 V323 H498" fill="none" stroke="#202327" strokeWidth="24" />
+          <path d="M448 270 H557 V323 H498" fill="none" stroke="#3A3E43" strokeWidth="2" />
+          <rect x="463" y="303" width="73" height="42" rx="6" fill={mustering ? "#12261A" : "#131719"} stroke={mustering ? "#52C777" : "#4B545A"} strokeWidth="1.2" />
+          <text x="499" y="319" textAnchor="middle" fill="#98A4AA" fontSize="7">REFUGE CHAMBER</text>
+          <text x="499" y="335" textAnchor="middle" fill={mustering ? "#6DE28F" : "#708087"} fontSize="11" fontFamily="monospace" fontWeight="700">{inRefuge} / 14</text>
 
-          {/* Primary fan at return head */}
-          <circle cx="233" cy="40" r="11" fill="#1A2330" stroke={flowColor} strokeWidth="1.5" />
-          <g transform="translate(233 40)" className="animate-spin" style={{ transformOrigin: "233px 40px" }}>
-            <line x1="-7" y1="0" x2="7" y2="0" stroke={flowColor} strokeWidth="1.5" />
-            <line x1="0" y1="-7" x2="0" y2="7" stroke={flowColor} strokeWidth="1.5" />
+          {/* Gas plume in Drift 7 */}
+          {gasIncident && <g opacity={0.65 + Math.sin(phase * 0.1) * 0.12}>
+            <ellipse cx="452" cy="270" rx="88" ry="48" fill="url(#gas)" />
+            <ellipse cx="500" cy="270" rx="53" ry="31" fill="url(#gas)" />
+          </g>}
+          <text x="451" y="248" textAnchor="middle" fill={atmosphereColor} fontSize="8" fontWeight="700">DRIFT 7 · CH₄ {ch4.toFixed(2)}%</text>
+
+          {/* Air particles: move down intake, across levels, up return. */}
+          {airflowParticles.map((_, i) => {
+            const t = ((phase * (0.005 + demand * 0.000055) + i / airflowParticles.length) % 1);
+            let x = 99, y = 65;
+            if (t < 0.28) {
+              y = 65 + (t / 0.28) * 274;
+            } else if (t < 0.8) {
+              const p = (t - 0.28) / 0.52;
+              x = 99 + p * 521;
+              y = 270 - Math.sin(p * Math.PI * 3) * 71;
+            } else {
+              x = 620;
+              y = 339 - ((t - 0.8) / 0.2) * 274;
+            }
+            return <circle key={i} cx={x} cy={y} r={i % 4 === 0 ? 2.2 : 1.5} fill={i % 3 === 0 ? "#81E4FA" : fanColor} opacity={0.4 + demand / 170} />;
+          })}
+
+          {/* Primary fan */}
+          <circle cx="620" cy="55" r="23" fill="#121619" stroke={fanColor} strokeWidth="1.5" filter="url(#fanGlow)" />
+          <g style={{ transform: "rotate(" + (phase * (4 + demand * 0.11)) + "deg)", transformOrigin: "620px 55px" }}>
+            {[0, 90, 180, 270].map((a) => <path key={a} d="M620 55 C627 47 632 47 635 50 C632 56 627 59 620 55 Z" fill={fanColor} transform={"rotate(" + a + " 620 55)"} />)}
           </g>
-          {/* Booster fan at L3 */}
-          <circle cx="140" cy="178" r="7" fill="#1A2330" stroke="#F59E0B" strokeWidth="1.2" />
-          <text x="140" y="181" textAnchor="middle" fill="#F59E0B" fontSize="7">B</text>
+          <text x="620" y="28" textAnchor="middle" fill="#A4ADB6" fontSize="7">PRIMARY {primaryRpm} RPM</text>
+
+          {/* Booster fan */}
+          <circle cx="345" cy="270" r="13" fill="#121619" stroke="#E7A844" strokeWidth="1.2" />
+          <g style={{ transform: "rotate(" + (phase * (3 + demand * 0.08)) + "deg)", transformOrigin: "345px 270px" }}>
+            <line x1="337" y1="270" x2="353" y2="270" stroke="#E7A844" strokeWidth="2" />
+            <line x1="345" y1="262" x2="345" y2="278" stroke="#E7A844" strokeWidth="2" />
+          </g>
+          <text x="345" y="291" textAnchor="middle" fill="#7D725C" fontSize="6">BOOSTER {boosterRpm}</text>
+
+          {/* Personnel interpolate toward refuge during muster. */}
+          {personnel.map((p, i) => {
+            const delay = (i % 5) * 0.06 + Math.floor(i / 5) * 0.035;
+            const t = mustering ? clamp((musterProgress - delay) / 0.68, 0, 1) : 0;
+            const eased = t * t * (3 - 2 * t);
+            const targetX = 478 + (i % 5) * 9;
+            const targetY = 324 + Math.floor(i / 5) * 7;
+            const x = lerp(p.x, targetX, eased);
+            const y = lerp(p.y, targetY, eased);
+            return (
+              <g key={i}>
+                <circle cx={x} cy={y - 3.5} r="2.5" fill={mustering ? "#F5C24D" : "#D8E1E8"} />
+                <line x1={x} y1={y - 1} x2={x} y2={y + 5} stroke={mustering ? "#F5C24D" : "#AEB8C0"} strokeWidth="1.5" />
+                <line x1={x - 3} y1={y + 1} x2={x + 3} y2={y + 1} stroke={mustering ? "#F5C24D" : "#AEB8C0"} strokeWidth="1" />
+              </g>
+            );
+          })}
+
+          {/* Atmosphere card */}
+          <g transform="translate(145 18)">
+            <rect width="305" height="48" rx="8" fill="#0B0E10" stroke="#2E343A" />
+            <text x="12" y="14" fill="#68717A" fontSize="7" letterSpacing="1">DRIFT 7 ATMOSPHERE</text>
+            <text x="12" y="34" fill={atmosphereColor} fontSize="14" fontFamily="monospace" fontWeight="700">CH₄ {ch4.toFixed(2)}%</text>
+            <text x="111" y="34" fill={co >= 30 ? "#FF7168" : "#D2DAE0"} fontSize="10" fontFamily="monospace">CO {Math.round(co)}ppm</text>
+            <text x="188" y="34" fill={o2 < 19.5 ? "#FF7168" : "#D2DAE0"} fontSize="10" fontFamily="monospace">O₂ {o2.toFixed(1)}%</text>
+            <text x="259" y="34" fill="#9AA3AA" fontSize="9" fontFamily="monospace">NO₂ {no2.toFixed(1)}</text>
+          </g>
+
+          <g transform="translate(468 18)">
+            <rect width="120" height="48" rx="8" fill="#0B0E10" stroke="#2E343A" />
+            <text x="12" y="14" fill="#68717A" fontSize="7">VENT DEMAND</text>
+            <text x="12" y="35" fill={fanColor} fontSize="18" fontFamily="monospace" fontWeight="700">{Math.round(demand)}%</text>
+            <text x="67" y="34" fill="#75818A" fontSize="8">{airflow} m³/s</text>
+          </g>
         </svg>
       </div>
 
-      <div className="grid grid-cols-4 gap-1.5">
-        <div className="bg-[#0B0F14] rounded-lg border border-[#2A3441] p-2 flex flex-col items-center">
-          <span className="text-[10px] font-mono font-bold" style={{ color: flowColor }}>{primaryRpm}</span>
-          <span className="text-[7px] text-[#6B7785]">Primary rpm</span>
-        </div>
-        <div className="bg-[#0B0F14] rounded-lg border border-[#2A3441] p-2 flex flex-col items-center">
-          <span className="text-[10px] font-mono font-bold text-[#F59E0B]">{boosterRpm}</span>
-          <span className="text-[7px] text-[#6B7785]">Booster rpm</span>
-        </div>
-        <div className="bg-[#0B0F14] rounded-lg border border-[#2A3441] p-2 flex flex-col items-center">
-          <span className="text-[10px] font-mono font-bold text-[#3BA4FF]">{intakeFlow}</span>
-          <span className="text-[7px] text-[#6B7785]">Intake m³/s</span>
-        </div>
-        <div className="bg-[#0B0F14] rounded-lg border border-[#2A3441] p-2 flex flex-col items-center">
-          <span className="text-[10px] font-mono font-bold" style={{ color: flowColor }}>{returnFlow}</span>
-          <span className="text-[7px] text-[#6B7785]">Return m³/s</span>
-        </div>
-      </div>
-    </div>
-  );
-}`;
-
-// ─── Personnel Muster — tag tracking + refuge muster ─────────────────────────
-const musterLogic = `automation({
-  conditions: [
-    function hasData(context) {
-      return context.state !== undefined;
-    },
-  ],
-  actions: [
-    function muster(context) {
-      var s = context.state;
-      if (s.underground !== undefined) {
-        state.set("underground", s.underground);
-        state.set("l1", s.l1);
-        state.set("l2", s.l2);
-        state.set("l3", s.l3);
-      }
-      if (context.topic && context.topic.indexOf("muster") >= 0) {
-        state.set("mustering", true);
-        state.set("musterStart", Date.now());
-        mqtt.publish("sensor/mine/refuge/command", JSON.stringify({ muster: true }));
-        log.warn("MUSTER initiated — all personnel to refuge chamber");
-      }
-      state.set("lastUpdate", Date.now());
-    },
-  ],
-});`;
-
-const musterUi = `import type { CustomComponentProps } from "./types";
-
-export default function PersonnelMuster(aeolus: CustomComponentProps) {
-  const underground = aeolus.read("underground") as number ?? 14;
-  const l1 = aeolus.read("l1") as number ?? 3;
-  const l2 = aeolus.read("l2") as number ?? 6;
-  const l3 = aeolus.read("l3") as number ?? 5;
-  const mustering = aeolus.read("mustering") as boolean ?? false;
-
-  const levels = [
-    { label: "Level 1", count: l1 },
-    { label: "Level 2", count: l2 },
-    { label: "Level 3", count: l3 },
-  ];
-
-  return (
-    <div className="p-4 space-y-3">
-      <div className="flex items-center justify-between">
-        <div className="text-sm font-semibold text-[#E6EDF3]">👷 Personnel Muster</div>
-        <span className="text-[9px] px-2 py-0.5 rounded-full font-semibold" style={{ backgroundColor: mustering ? "#EF444420" : "#3BA4FF20", color: mustering ? "#EF4444" : "#3BA4FF" }}>
-          {mustering ? "⚠ Mustering" : underground + " underground"}
-        </span>
-      </div>
-
-      <div className="space-y-1.5">
-        {levels.map((lv) => (
-          <div key={lv.label} className="flex items-center gap-2 bg-[#0B0F14] rounded-lg border border-[#2A3441] px-3 py-2">
-            <span className="text-[10px] text-[#9AA6B2] w-16">{lv.label}</span>
-            <div className="flex-1 flex gap-1">
-              {Array.from({ length: lv.count }).map((_, i) => (
-                <span key={i} className="text-[12px]">🧍</span>
-              ))}
-            </div>
-            <span className="text-[11px] font-mono font-bold text-[#E6EDF3]">{lv.count}</span>
+      <div style={{ display: "grid", gridTemplateColumns: "1.25fr 1fr 1fr", gap: 8, marginTop: 9 }}>
+        <div style={{ border: "1px solid " + (alarm ? "#67322E" : "#293036"), background: alarm ? "#17100F" : "#0C0F11", borderRadius: 11, padding: 10 }}>
+          <div style={{ color: atmosphereColor, fontSize: 8, letterSpacing: "0.12em", marginBottom: 7 }}>ATMOSPHERE SCENARIO</div>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button onClick={() => aeolus.fire(gasIncident ? "clear-air" : "gas-rise")} style={{ flex: 1, background: gasIncident ? "#13251B" : "#2A1713", color: gasIncident ? "#83E3A1" : "#FF927E", border: "1px solid " + (gasIncident ? "#315C3E" : "#723B32"), borderRadius: 7, padding: "7px 8px", fontSize: 9, cursor: "pointer", fontWeight: 750 }}>{gasIncident ? "Clear atmosphere" : "Simulate CH₄ rise"}</button>
+            <button onClick={() => aeolus.fire("vent-boost")} style={{ background: ventOverride ? "#322714" : "#15191C", color: ventOverride ? "#F5C65E" : "#92A0AA", border: "1px solid " + (ventOverride ? "#6B5428" : "#343B41"), borderRadius: 7, padding: "7px 9px", fontSize: 9, cursor: "pointer" }}>{ventOverride ? "Boost ON" : "Vent boost"}</button>
           </div>
-        ))}
-      </div>
-
-      <div className="flex items-center justify-between bg-[#0B0F14] rounded-lg border border-[#2A3441] px-3 py-2">
-        <span className="text-[10px] text-[#9AA6B2]">Refuge Chamber</span>
-        <span className="text-[10px] font-mono text-[#22C55E]">0 / 20</span>
-      </div>
-
-      <button
-        onClick={() => aeolus.fire("muster", {})}
-        className="w-full py-2.5 rounded-lg text-xs font-medium bg-[#EF4444]/15 text-[#EF4444] border border-[#EF4444]/30 hover:bg-[#EF4444]/25 transition-all"
-      >
-        Trigger Emergency Muster
-      </button>
-    </div>
-  );
-}`;
-
-// ─── Dewatering Cascade — stage pumps lift water deep→surface ────────────────
-const dewaterLogic = `automation({
-  conditions: [
-    function hasSump(context) {
-      return context.state && context.state.level !== undefined;
-    },
-  ],
-  actions: [
-    function dewater(context) {
-      var s = context.state;
-      var which = context.topic.indexOf("surface") >= 0 ? "surface" : "deep";
-      state.set(which + "_level", s.level);
-      state.set(which + "_flow", s.flow);
-
-      var deepLevel = state.get("deep_level") || 1.8;
-      var surfaceLevel = state.get("surface_level") || 0.6;
-      var deepPump = deepLevel > 1.5;
-      var surfacePump = surfaceLevel > 1.0;
-      state.set("deepPump", deepPump);
-      state.set("surfacePump", surfacePump);
-      state.set("lastUpdate", Date.now());
-      if (deepPump) mqtt.publish("switch/mine/sump-deep/command", JSON.stringify({ on: true }));
-    },
-  ],
-});`;
-
-const dewaterUi = `import type { CustomComponentProps } from "./types";
-
-export default function DewateringCascade(aeolus: CustomComponentProps) {
-  const deepLevel = aeolus.read("deep_level") as number ?? 1.8;
-  const surfaceLevel = aeolus.read("surface_level") as number ?? 0.6;
-  const deepFlow = aeolus.read("deep_flow") as number ?? 45;
-  const deepPump = aeolus.read("deepPump") as boolean ?? true;
-  const surfacePump = aeolus.read("surfacePump") as boolean ?? false;
-
-  const sump = (level: number, max: number, active: boolean) => {
-    const pct = Math.min(100, (level / max) * 100);
-    const color = pct > 75 ? "#EF4444" : pct > 50 ? "#F59E0B" : "#3BA4FF";
-    return { pct, color, active };
-  };
-  const deep = sump(deepLevel, 2.5, deepPump);
-  const surf = sump(surfaceLevel, 2.0, surfacePump);
-
-  return (
-    <div className="p-4 space-y-3">
-      <div className="flex items-center justify-between">
-        <div className="text-sm font-semibold text-[#E6EDF3]">💧 Dewatering Cascade</div>
-        <span className="text-[9px] px-2 py-0.5 rounded bg-[#3BA4FF]/15 text-[#3BA4FF] font-mono">{deepFlow} L/s</span>
-      </div>
-
-      <div className="bg-[#0B0F14] rounded-xl border border-[#2A3441] p-3">
-        <svg width="100%" height="190" viewBox="0 0 240 190" preserveAspectRatio="xMidYMid meet">
-          {/* Surface discharge */}
-          <text x="120" y="14" textAnchor="middle" fill="#6B7785" fontSize="7">surface discharge</text>
-          <polygon points="120,18 114,28 126,28" fill={surf.active ? "#22C55E" : "#2A3441"} />
-
-          {/* Surface sump */}
-          <rect x="80" y="40" width="80" height="40" rx="4" fill="#121821" stroke={surf.color} strokeWidth="1" strokeOpacity="0.5" />
-          <rect x="80" y={80 - (surf.pct / 100) * 40} width="80" height={(surf.pct / 100) * 40} rx="2" fill={surf.color} fillOpacity="0.4" />
-          <text x="120" y="64" textAnchor="middle" fill="#E6EDF3" fontSize="9" fontFamily="monospace">{surfaceLevel.toFixed(1)}m</text>
-          <text x="166" y="62" fill="#6B7785" fontSize="6">surface sump</text>
-
-          {/* Riser pipe deep→surface */}
-          <line x1="120" y1="150" x2="120" y2="80" stroke={deep.active ? "#3BA4FF" : "#2A3441"} strokeWidth="3" strokeLinecap="round" />
-          {deep.active && [0, 1, 2].map((d) => (
-            <circle key={d} cx="120" cy={135 - d * 22} r="2" fill="#3BA4FF" className="animate-pulse" style={{ animationDelay: (d * 0.3) + "s" }} />
-          ))}
-          {/* Deep pump */}
-          <circle cx="120" cy="150" r="9" fill="#1A2330" stroke={deep.active ? "#3BA4FF" : "#6B7785"} strokeWidth="1.5" />
-          <text x="120" y="153" textAnchor="middle" fill={deep.active ? "#3BA4FF" : "#6B7785"} fontSize="8">⚙</text>
-
-          {/* Deep sump */}
-          <rect x="80" y="150" width="80" height="34" rx="4" fill="#121821" stroke={deep.color} strokeWidth="1" strokeOpacity="0.5" />
-          <rect x="80" y={184 - (deep.pct / 100) * 34} width="80" height={(deep.pct / 100) * 34} rx="2" fill={deep.color} fillOpacity="0.4" />
-          <text x="120" y="172" textAnchor="middle" fill="#E6EDF3" fontSize="9" fontFamily="monospace">{deepLevel.toFixed(1)}m</text>
-          <text x="166" y="170" fill="#6B7785" fontSize="6">deep sump</text>
-        </svg>
-      </div>
-
-      <div className="grid grid-cols-2 gap-2">
-        <div className="flex items-center justify-center gap-1.5 bg-[#0B0F14] rounded-lg border border-[#2A3441] py-2 text-[10px]" style={{ color: deepPump ? "#3BA4FF" : "#6B7785" }}>
-          <span className="w-2 h-2 rounded-full" style={{ background: deepPump ? "#3BA4FF" : "#6B7785" }} /> Deep Pump {deepPump ? "ON" : "OFF"}
+          <div style={{ color: "#626A71", fontSize: 8, marginTop: 7 }}>Aeolus ramps ventilation from atmospheric demand and publishes fan targets locally.</div>
         </div>
-        <div className="flex items-center justify-center gap-1.5 bg-[#0B0F14] rounded-lg border border-[#2A3441] py-2 text-[10px]" style={{ color: surfacePump ? "#22C55E" : "#6B7785" }}>
-          <span className="w-2 h-2 rounded-full" style={{ background: surfacePump ? "#22C55E" : "#6B7785" }} /> Surface Pump {surfacePump ? "ON" : "OFF"}
+
+        <div style={{ border: "1px solid " + (mustering ? "#654723" : "#293036"), background: mustering ? "#17130C" : "#0C0F11", borderRadius: 11, padding: 10 }}>
+          <div style={{ color: mustering ? "#F0BD53" : "#8E99A2", fontSize: 8, letterSpacing: "0.12em", marginBottom: 7 }}>PERSONNEL MUSTER</div>
+          <button onClick={() => aeolus.fire(mustering ? "clear-muster" : "muster")} style={{ width: "100%", background: mustering ? "#1B211A" : "#2A1713", color: mustering ? "#B8D2BE" : "#FF8D79", border: "1px solid " + (mustering ? "#38463B" : "#6D382F"), borderRadius: 7, padding: "7px 8px", fontSize: 9, cursor: "pointer", fontWeight: 750 }}>{mustering ? "Clear muster" : "Emergency muster"}</button>
+          <div style={{ color: "#626A71", fontSize: 8, marginTop: 7 }}>{mustering ? inRefuge + " of 14 moving to refuge" : "14 personnel underground · all tags online"}</div>
         </div>
+
+        <div style={{ border: "1px solid #293036", background: "#0C0F11", borderRadius: 11, padding: 10 }}>
+          <div style={{ color: "#7693A1", fontSize: 8, letterSpacing: "0.12em", marginBottom: 7 }}>DEWATERING</div>
+          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}><span style={{ color: "#6FD2EA", fontFamily: "monospace", fontSize: 17, fontWeight: 750 }}>1.8 m</span><span style={{ color: "#6A747B", fontSize: 8 }}>deep sump</span></div>
+          <div style={{ height: 4, background: "#182126", borderRadius: 99, marginTop: 6, overflow: "hidden" }}><div style={{ width: "72%", height: "100%", background: "#3CA9C9" }} /></div>
+          <div style={{ color: "#626A71", fontSize: 8, marginTop: 7 }}>Pump ON · 45 L/s to surface</div>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 9, color: "#5E666C", fontSize: 8 }}>
+        <span>Simulated mine · shared incident state · locally-rendered motion</span>
+        <button onClick={() => aeolus.fire("reset-mine")} style={{ background: "transparent", border: 0, color: "#747D84", fontSize: 8, cursor: "pointer" }}>Reset mine</button>
       </div>
     </div>
   );
 }`;
 
-// ─── Assembly ────────────────────────────────────────────────────────────────
 const automations = [
-  { key: "gas", name: "Atmospheric Monitoring", triggerTopic: "sensor/mine/gas-+", scriptSource: gasLogic, uiSource: gasUi },
-  { key: "vent", name: "Ventilation on Demand", triggerTopic: "sensor/mine/gas-+", scriptSource: ventLogic, uiSource: ventUi },
-  { key: "muster", name: "Personnel Muster", triggerTopic: "sensor/mine/personnel", scriptSource: musterLogic, uiSource: musterUi },
-  { key: "dewater", name: "Dewatering Cascade", triggerTopic: "sensor/mine/sump-+", scriptSource: dewaterLogic, uiSource: dewaterUi },
+  {
+    key: "mine-ops",
+    name: "Underground Operations",
+    triggerTopic: "none",
+    scriptSource: logic,
+    uiSource: ui,
+    demoAccess: {
+      fireEvents: ["gas-rise", "clear-air", "vent-boost", "muster", "clear-muster", "reset-mine"],
+    },
+  },
 ];
 
 const panes = [
-  { kind: "automation", ref: "vent", x: 0, y: 0, w: 6, h: 12 },
-  { kind: "automation", ref: "gas", x: 6, y: 0, w: 6, h: 10 },
-  { kind: "automation", ref: "muster", x: 0, y: 12, w: 6, h: 10 },
-  { kind: "automation", ref: "dewater", x: 6, y: 10, w: 6, h: 11 },
+  { kind: "automation", ref: "mine-ops", x: 0, y: 0, w: 12, h: 17 },
+  { kind: "device-grid", x: 0, y: 17, w: 12, h: 6 },
 ];
 
 const dataStore = [
@@ -419,23 +367,11 @@ const dataStore = [
       count: 96,
       intervalMs: 30 * 60_000,
       fields: {
-        ch4_l3: () => round(0.3 + noise(0.1), 2),
-        ch4_d7: (i) => round(0.6 + Math.max(0, Math.sin(i / 10)) * 0.5 + noise(0.1), 2),
-        co_d7: () => round(22 + noise(6), 0),
-        o2_l3: () => round(20.8 + noise(0.15), 1),
-      },
-    }),
-  },
-  {
-    name: "dewatering-log",
-    description: "Deep sump pump cycles + volume pumped (72h)",
-    retentionDays: 90,
-    records: genSeries({
-      count: 72,
-      intervalMs: 3_600_000,
-      fields: {
-        deepLevel: (i) => round(1.2 + Math.abs(Math.sin(i / 6)) * 0.9 + noise(0.1), 2),
-        flow: (i) => (Math.sin(i / 6) > 0 ? round(40 + noise(8), 0) : 0),
+        location: (i) => (i % 2 === 0 ? "Level 3" : "Drift 7"),
+        ch4: (i) => round(0.25 + Math.sin(i / 8) * 0.11 + noise(0.05), 2),
+        co: (i) => round(13 + Math.sin(i / 11) * 6 + noise(2), 0),
+        o2: (i) => round(20.8 + noise(0.08), 1),
+        no2: (i) => round(1.4 + Math.sin(i / 13) * 0.6 + noise(0.18), 1),
       },
     }),
   },

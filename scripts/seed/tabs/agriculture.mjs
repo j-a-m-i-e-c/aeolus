@@ -1,337 +1,375 @@
-// scripts/seed/tabs/agriculture.mjs — Connected farm demo (flagship agritech tab).
+// scripts/seed/tabs/agriculture.mjs — Connected property operations demo.
 //
-// Water management (dam→header + shed→house pump consoles in one pane), a 20-trough
-// cattle watering grid, and GPS herd tracking with a virtual fence. Simulated,
-// no keys, works offline.
+// Public-demo flagship: one spatial operator surface ties together water transfer,
+// livestock containment and distributed trough monitoring. Shared operational
+// state lives in Aeolus; cattle motion, water particles and other smooth scene
+// animation stay browser-side.
 
 import { genSeries, round, noise } from "../lib.mjs";
 
 const tab = { id: "tab-agriculture", name: "Agriculture", icon: "sprout" };
 
 const devices = [
-  { topic: "sensor/farm/dam", payload: { value: 82 } },
-  { topic: "sensor/farm/header-tank", payload: { value: 65 } },
-  { topic: "sensor/farm/shed-tank", payload: { value: 78 } },
-  { topic: "sensor/farm/house-tank", payload: { value: 55 } },
-  { topic: "switch/farm/dam-pump", payload: { on: false } },
-  { topic: "switch/farm/house-pump", payload: { on: false } },
+  { topic: "sensor/farm/dam", payload: { value: 82, litres: 49200 } },
+  { topic: "sensor/farm/header-tank", payload: { value: 65, litres: 3250 } },
+  { topic: "sensor/farm/shed-tank", payload: { value: 78, litres: 17160 } },
+  { topic: "sensor/farm/house-tank", payload: { value: 55, litres: 2200 } },
+  { topic: "switch/farm/dam-pump", payload: { on: false, flow: 0 } },
   { topic: "sensor/fence/energiser", payload: { voltage: 7.2, current: 0.4, fault: false } },
   { topic: "sensor/fence/collars", payload: { herd: 30, tracked: 30, strays: 2, avgBattery: 74 } },
+  { topic: "sensor/farm/troughs", payload: { total: 20, low: 3, refilling: 2, average: 71 } },
 ];
 
-// All three panes are operator/monitoring consoles simulated in the UI and
-// persisted via aeolus.save() where relevant. Manual no-op logic.
-const simLogic = `automation({
-  conditions: [
-    function ready(context) {
-      return true;
-    },
-  ],
+const logic = `automation({
   actions: [
-    function sim(context) {
-      state.set("lastUpdate", Date.now());
+    function farmops(context) {
+      function init(key, value) {
+        if (state.get(key) === undefined) state.set(key, value);
+      }
+
+      init("damPct", 82);
+      init("headerPct", 65);
+      init("shedPct", 78);
+      init("housePct", 55);
+      init("strays", 2);
+      init("troughAverage", 71);
+      init("troughLow", 3);
+      init("troughRefilling", 2);
+      init("pumpOn", false);
+      init("flow", 0);
+      init("lastTransferLitres", 0);
+      init("lastAction", { label: "Property online", at: Date.now() });
+
+      var evt = String(context.topic || "").split("/").pop();
+
+      function publishWater() {
+        var dam = Number(state.get("damPct") || 0);
+        var header = Number(state.get("headerPct") || 0);
+        mqtt.publish("sensor/farm/dam", JSON.stringify({ value: dam, litres: Math.round(dam * 600) }));
+        mqtt.publish("sensor/farm/header-tank", JSON.stringify({ value: header, litres: Math.round(header * 50) }));
+      }
+
+      function transfer(litres) {
+        var dam = Number(state.get("damPct") || 0);
+        var header = Number(state.get("headerPct") || 0);
+        var actual = Math.max(0, Math.min(litres, dam * 600, (100 - header) * 50));
+        if (actual <= 0) return;
+        var nextDam = Math.max(0, dam - actual / 600);
+        var nextHeader = Math.min(100, header + actual / 50);
+        state.set("damPct", nextDam);
+        state.set("headerPct", nextHeader);
+        state.set("pumpOn", true);
+        state.set("flow", 120);
+        state.set("lastTransferLitres", Math.round(actual));
+        state.set("lastAction", { label: "Transferred " + Math.round(actual) + " L uphill", at: Date.now() });
+        publishWater();
+        mqtt.publish("switch/farm/dam-pump", JSON.stringify({ on: true, flow: 120 }));
+        log.info("Farm transfer: " + Math.round(actual) + " L dam to header");
+      }
+
+      if (evt === "transfer-500") {
+        transfer(500);
+      } else if (evt === "transfer-1000") {
+        transfer(1000);
+      } else if (evt === "pump-stop") {
+        state.set("pumpOn", false);
+        state.set("flow", 0);
+        state.set("lastAction", { label: "Transfer pump stopped", at: Date.now() });
+        mqtt.publish("switch/farm/dam-pump", JSON.stringify({ on: false, flow: 0 }));
+      } else if (evt === "recall-strays") {
+        state.set("strays", 0);
+        state.set("lastAction", { label: "Virtual fence recall complete", at: Date.now() });
+        mqtt.publish("sensor/fence/collars", JSON.stringify({ herd: 30, tracked: 30, strays: 0, avgBattery: 74 }));
+        log.info("Virtual fence recall: herd contained");
+      } else if (evt === "simulate-strays") {
+        state.set("strays", 2);
+        state.set("lastAction", { label: "2 collars crossed boundary", at: Date.now() });
+        mqtt.publish("sensor/fence/collars", JSON.stringify({ herd: 30, tracked: 30, strays: 2, avgBattery: 74 }));
+      } else if (evt === "refill-troughs") {
+        state.set("troughAverage", 88);
+        state.set("troughLow", 0);
+        state.set("troughRefilling", 4);
+        state.set("lastAction", { label: "Trough refill cycle started", at: Date.now() });
+        mqtt.publish("sensor/farm/troughs", JSON.stringify({ total: 20, low: 0, refilling: 4, average: 88 }));
+      } else if (evt === "reset-farm") {
+        state.set("damPct", 82);
+        state.set("headerPct", 65);
+        state.set("shedPct", 78);
+        state.set("housePct", 55);
+        state.set("strays", 2);
+        state.set("troughAverage", 71);
+        state.set("troughLow", 3);
+        state.set("troughRefilling", 2);
+        state.set("pumpOn", false);
+        state.set("flow", 0);
+        state.set("lastTransferLitres", 0);
+        state.set("lastAction", { label: "Property reset to morning state", at: Date.now() });
+        publishWater();
+        mqtt.publish("sensor/fence/collars", JSON.stringify({ herd: 30, tracked: 30, strays: 2, avgBattery: 74 }));
+        mqtt.publish("sensor/farm/troughs", JSON.stringify({ total: 20, low: 3, refilling: 2, average: 71 }));
+      }
     },
   ],
 });`;
 
-// ─── Water Management — two pump consoles in one pane ────────────────────────
-const waterUi = `import { useState, useEffect } from "react";
+const ui = `import { useEffect, useMemo, useState } from "react";
 import type { CustomComponentProps } from "./types";
 
-function WaterSystem(props: any) {
-  const aeolus = props.aeolus, cfg = props.cfg;
-  const SRC_CAP = cfg.srcCap, DST_CAP = cfg.dstCap, RATE = 120;
-  const [s, setS] = useState({
-    src: (aeolus.read(cfg.srcKey) as number) ?? cfg.srcDef,
-    dst: (aeolus.read(cfg.dstKey) as number) ?? cfg.dstDef,
-    pumpOn: false, mode: "idle", xfer: 0, status: "Idle",
-  });
-
-  useEffect(() => {
-    if (!s.pumpOn) return;
-    const id = setInterval(() => {
-      setS((p) => {
-        if (!p.pumpOn) return p;
-        let v = RATE;
-        if (p.mode === "transfer") v = Math.min(v, p.xfer);
-        v = Math.min(v, ((100 - p.dst) / 100) * DST_CAP, (p.src / 100) * SRC_CAP);
-        if (v <= 0) return { ...p, pumpOn: false, mode: "idle", xfer: 0, status: cfg.dstName + " full" };
-        const dst = Math.min(100, p.dst + (v / DST_CAP) * 100);
-        const src = Math.max(0, p.src - (v / SRC_CAP) * 100);
-        let xfer = p.xfer, pumpOn = true, mode = p.mode, status = "Pumping";
-        if (mode === "transfer") { xfer = p.xfer - v; if (xfer <= 0) { xfer = 0; pumpOn = false; mode = "idle"; status = "Transfer complete"; } }
-        if (dst >= 100) { pumpOn = false; mode = "idle"; status = cfg.dstName + " full"; }
-        if (src <= 0) { pumpOn = false; mode = "idle"; status = "Source empty"; }
-        return { dst, src, xfer, pumpOn, mode, status };
-      });
-    }, 150);
-    return () => clearInterval(id);
-  }, [s.pumpOn]);
-
-  useEffect(() => { aeolus.save(cfg.srcKey, s.src); aeolus.save(cfg.dstKey, s.dst); }, [s.pumpOn]);
-
-  const srcL = Math.round((s.src / 100) * SRC_CAP);
-  const dstL = Math.round((s.dst / 100) * DST_CAP);
-  const fh = (pct: number) => (pct / 100) * 72;
-  const srcFill = s.src < 20 ? "#F59E0B" : cfg.accent;
-  const dstFill = s.dst < 15 ? "#F59E0B" : cfg.accent;
-  const toggle = () => setS((p) => ({ ...p, pumpOn: !p.pumpOn, mode: p.pumpOn ? "idle" : "manual" }));
-  const fill = () => setS((p) => ({ ...p, pumpOn: true, mode: "fill" }));
-  const xf = (n: number) => setS((p) => ({ ...p, pumpOn: true, mode: "transfer", xfer: p.xfer + n }));
-
-  return (
-    <div className="bg-[#0B0F14] rounded-xl border border-[#2A3441] p-2.5 space-y-2">
-      <div className="flex items-center justify-between">
-        <span className="text-[11px] font-semibold text-[#E6EDF3]">{cfg.title}</span>
-        <span className="text-[8px] px-1.5 py-0.5 rounded" style={{ backgroundColor: s.pumpOn ? cfg.accent + "20" : "#6B778520", color: s.pumpOn ? cfg.accent : "#9AA6B2" }}>{s.pumpOn ? "● Pumping" : s.status}</span>
-      </div>
-      <svg width="100%" height="96" viewBox="0 0 360 96" preserveAspectRatio="xMidYMid meet">
-        <rect x="18" y="12" width="86" height="72" rx="5" fill="#121821" stroke={srcFill} strokeWidth="1" strokeOpacity="0.4" />
-        <rect x="18" y={84 - fh(s.src)} width="86" height={fh(s.src)} rx="2" fill={srcFill} fillOpacity="0.35" className="transition-all duration-300" />
-        <text x="61" y="44" textAnchor="middle" fill="#E6EDF3" fontSize="12" fontFamily="monospace" fontWeight="bold">{Math.round(s.src)}%</text>
-        <text x="61" y="57" textAnchor="middle" fill="#6B7785" fontSize="6.5" fontFamily="monospace">{srcL.toLocaleString()} L</text>
-        <text x="61" y="78" textAnchor="middle" fill="#9AA6B2" fontSize="7">{cfg.srcLabel}</text>
-
-        <line x1="104" y1="48" x2="150" y2="48" stroke={s.pumpOn ? cfg.accent : "#2A3441"} strokeWidth="2.5" strokeLinecap="round" />
-        <line x1="210" y1="48" x2="256" y2="48" stroke={s.pumpOn ? cfg.accent : "#2A3441"} strokeWidth="2.5" strokeLinecap="round" />
-        {s.pumpOn && [0, 1, 2].map((d) => <circle key={"a" + d} cx={112 + d * 13} cy="48" r="1.8" fill={cfg.accent} className="animate-pulse" style={{ animationDelay: (d * 0.2) + "s" }} />)}
-        {s.pumpOn && [0, 1, 2].map((d) => <circle key={"b" + d} cx={218 + d * 13} cy="48" r="1.8" fill={cfg.accent} className="animate-pulse" style={{ animationDelay: (d * 0.2) + "s" }} />)}
-        <circle cx="180" cy="48" r="15" fill={s.pumpOn ? cfg.accent + "20" : "#1A2330"} stroke={s.pumpOn ? cfg.accent : "#2A3441"} strokeWidth="1.5" />
-        <g className={s.pumpOn ? "animate-spin" : ""} style={{ transformOrigin: "180px 48px" }}>
-          <line x1="173" y1="48" x2="187" y2="48" stroke={s.pumpOn ? cfg.accent : "#6B7785"} strokeWidth="2" />
-          <line x1="180" y1="41" x2="180" y2="55" stroke={s.pumpOn ? cfg.accent : "#6B7785"} strokeWidth="2" />
-        </g>
-
-        <rect x="256" y="12" width="86" height="72" rx="5" fill="#121821" stroke={dstFill} strokeWidth="1" strokeOpacity="0.4" />
-        <rect x="256" y={84 - fh(s.dst)} width="86" height={fh(s.dst)} rx="2" fill={dstFill} fillOpacity="0.35" className="transition-all duration-300" />
-        <text x="299" y="44" textAnchor="middle" fill="#E6EDF3" fontSize="12" fontFamily="monospace" fontWeight="bold">{Math.round(s.dst)}%</text>
-        <text x="299" y="57" textAnchor="middle" fill="#6B7785" fontSize="6.5" fontFamily="monospace">{dstL.toLocaleString()} L</text>
-        <text x="299" y="78" textAnchor="middle" fill="#9AA6B2" fontSize="7">{cfg.dstLabel}</text>
-      </svg>
-      <div className="grid grid-cols-4 gap-1.5">
-        <button onClick={toggle} className="py-1.5 rounded-md text-[9px] font-medium border transition-all" style={{ background: s.pumpOn ? "#EF444415" : "#22C55E15", color: s.pumpOn ? "#EF4444" : "#22C55E", borderColor: s.pumpOn ? "#EF44444D" : "#22C55E4D" }}>{s.pumpOn ? "■ Off" : "▶ On"}</button>
-        <button onClick={fill} className="py-1.5 rounded-md text-[9px] font-medium border transition-all" style={{ background: cfg.accent + "15", color: cfg.accent, borderColor: cfg.accent + "4D" }}>Fill</button>
-        <button onClick={() => xf(500)} className="py-1.5 rounded-md text-[9px] font-medium bg-[#0B0F14] text-[#9AA6B2] border border-[#2A3441] hover:text-[#E6EDF3]">+500L</button>
-        <button onClick={() => xf(1000)} className="py-1.5 rounded-md text-[9px] font-medium bg-[#0B0F14] text-[#9AA6B2] border border-[#2A3441] hover:text-[#E6EDF3]">+1000L</button>
-      </div>
-    </div>
-  );
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
 }
 
-export default function WaterManagement(aeolus: CustomComponentProps) {
-  const dam = { title: "💧 Dam → Header Tank", srcLabel: "DAM", dstLabel: "HEADER", dstName: "Header", srcKey: "damPct", dstKey: "headerPct", srcDef: 82, dstDef: 65, srcCap: 60000, dstCap: 5000, accent: "#3BA4FF" };
-  const drink = { title: "🚰 Shed → House (Drinking)", srcLabel: "SHED", dstLabel: "HOUSE", dstName: "House", srcKey: "shedPct", dstKey: "housePct", srcDef: 78, dstDef: 55, srcCap: 22000, dstCap: 4000, accent: "#22C55E" };
-  return (
-    <div className="p-4 space-y-3">
-      <div className="text-sm font-semibold text-[#E6EDF3]">💧 Water Management</div>
-      <WaterSystem aeolus={aeolus} cfg={dam} />
-      <WaterSystem aeolus={aeolus} cfg={drink} />
-    </div>
-  );
-}`;
+function lerp(a: number, b: number, t: number) {
+  return a + (b - a) * t;
+}
 
-// ─── Cattle Troughs — 20 troughs with drain + float-valve refill ─────────────
-const troughsUi = `import { useState, useEffect } from "react";
-import type { CustomComponentProps } from "./types";
+export default function PropertyOperations(aeolus: CustomComponentProps) {
+  const sharedDam = clamp(Number(aeolus.read("damPct") ?? 82), 0, 100);
+  const sharedHeader = clamp(Number(aeolus.read("headerPct") ?? 65), 0, 100);
+  const strays = clamp(Number(aeolus.read("strays") ?? 2), 0, 30);
+  const troughAverage = clamp(Number(aeolus.read("troughAverage") ?? 71), 0, 100);
+  const troughLow = clamp(Number(aeolus.read("troughLow") ?? 3), 0, 20);
+  const troughRefilling = clamp(Number(aeolus.read("troughRefilling") ?? 2), 0, 20);
+  const pumpOn = Boolean(aeolus.read("pumpOn"));
+  const flow = Number(aeolus.read("flow") ?? 0);
+  const lastAction = aeolus.read("lastAction") as any;
 
-export default function CattleTroughs(aeolus: CustomComponentProps) {
-  const COUNT = 20;
-  const [levels, setLevels] = useState<number[]>(() => {
-    const arr: number[] = [];
-    for (let i = 0; i < COUNT; i++) arr.push(Math.round(28 + Math.random() * 68));
-    return arr;
-  });
-  const [refill, setRefill] = useState<boolean[]>(() => new Array(COUNT).fill(false));
+  const [dam, setDam] = useState(sharedDam);
+  const [header, setHeader] = useState(sharedHeader);
+  const [phase, setPhase] = useState(0);
+  const [selectedCow, setSelectedCow] = useState<number | null>(null);
 
   useEffect(() => {
+    let frame = 0;
+    const fromDam = dam;
+    const fromHeader = header;
     const id = setInterval(() => {
-      setLevels((prev) => {
-        const nextR: boolean[] = [];
-        const next = prev.map((l, i) => {
-          let r = refill[i];
-          if (l <= 22) r = true;
-          if (l >= 96) r = false;
-          nextR[i] = r;
-          const delta = r ? 4 : -(0.4 + Math.random() * 0.7);
-          return Math.max(6, Math.min(100, l + delta));
-        });
-        setRefill(nextR);
-        return next;
-      });
-    }, 1000);
+      frame += 1;
+      const t = Math.min(1, frame / 24);
+      const eased = 1 - Math.pow(1 - t, 3);
+      setDam(lerp(fromDam, sharedDam, eased));
+      setHeader(lerp(fromHeader, sharedHeader, eased));
+      if (t >= 1) clearInterval(id);
+    }, 45);
     return () => clearInterval(id);
-  }, [refill]);
-
-  const color = (l: number) => l < 20 ? "#EF4444" : l < 40 ? "#F59E0B" : "#3BA4FF";
-  const refilling = refill.filter(Boolean).length;
-  const low = levels.filter((l) => l < 40).length;
-  const avg = Math.round(levels.reduce((a, b) => a + b, 0) / levels.length);
-
-  return (
-    <div className="p-4 space-y-3">
-      <div className="flex items-center justify-between">
-        <div className="text-sm font-semibold text-[#E6EDF3]">🐮 Cattle Troughs</div>
-        <span className="text-[9px] text-[#6B7785]">{COUNT} troughs</span>
-      </div>
-
-      <div className="grid grid-cols-5 gap-1.5">
-        {levels.map((l, i) => {
-          const c = color(l);
-          return (
-            <div key={i} className="bg-[#0B0F14] rounded-lg border border-[#2A3441] p-1.5 flex flex-col items-center" style={{ borderColor: l < 20 ? "#EF44444D" : "#2A3441" }}>
-              <span className="text-[7px] text-[#6B7785]">T{i + 1}</span>
-              <svg width="22" height="32" viewBox="0 0 22 32">
-                <rect x="3" y="2" width="16" height="28" rx="2" fill="#121821" stroke={c} strokeWidth="0.8" strokeOpacity="0.5" />
-                <rect x="3" y={30 - (l / 100) * 28} width="16" height={(l / 100) * 28} rx="1" fill={c} fillOpacity="0.4" className="transition-all duration-700" />
-              </svg>
-              <span className="text-[8px] font-mono font-bold" style={{ color: c }}>{Math.round(l)}%</span>
-              {refill[i] && <span className="text-[6px] text-[#22C55E] animate-pulse">▲ fill</span>}
-            </div>
-          );
-        })}
-      </div>
-
-      <div className="grid grid-cols-3 gap-1.5">
-        <div className="bg-[#0B0F14] rounded-lg border border-[#2A3441] p-2 flex flex-col items-center">
-          <span className="text-[11px] font-mono font-bold text-[#22C55E]">{refilling}</span>
-          <span className="text-[7px] text-[#6B7785]">Refilling</span>
-        </div>
-        <div className="bg-[#0B0F14] rounded-lg border border-[#2A3441] p-2 flex flex-col items-center">
-          <span className="text-[11px] font-mono font-bold" style={{ color: low > 0 ? "#F59E0B" : "#22C55E" }}>{low}</span>
-          <span className="text-[7px] text-[#6B7785]">{"Low <40%"}</span>
-        </div>
-        <div className="bg-[#0B0F14] rounded-lg border border-[#2A3441] p-2 flex flex-col items-center">
-          <span className="text-[11px] font-mono font-bold text-[#3BA4FF]">{avg}%</span>
-          <span className="text-[7px] text-[#6B7785]">Average</span>
-        </div>
-      </div>
-    </div>
-  );
-}`;
-
-// ─── Smart Fencing — GPS herd tracking + virtual fence ───────────────────────
-const fenceUi = `import { useState, useEffect } from "react";
-import type { CustomComponentProps } from "./types";
-
-const PAD = { x: 16, y: 30, w: 448, h: 196 };
-const VF = { x: 40, y: 48, w: 400, h: 160 };
-const HERD = 30, VOLT = 7.2;
-
-export default function SmartFencing(aeolus: CustomComponentProps) {
-  const [cows, setCows] = useState(() => {
-    const list: any[] = [];
-    for (let i = 0; i < HERD; i++) {
-      const stray = i < 2;
-      list.push({
-        id: "#" + String(1001 + i).slice(1),
-        x: stray ? VF.x - 16 - Math.random() * 14 : VF.x + 14 + Math.random() * (VF.w - 28),
-        y: stray ? VF.y + 40 + Math.random() * 80 : VF.y + 14 + Math.random() * (VF.h - 28),
-        vx: (Math.random() - 0.5) * 1.2,
-        vy: (Math.random() - 0.5) * 1.2,
-        battery: Math.round(55 + Math.random() * 44),
-        stray,
-      });
-    }
-    return list;
-  });
-  const [sel, setSel] = useState<string | null>(null);
+  }, [sharedDam, sharedHeader]);
 
   useEffect(() => {
-    const id = setInterval(() => {
-      setCows((prev) => prev.map((c) => {
-        let nx = c.x + c.vx, ny = c.y + c.vy, vx = c.vx, vy = c.vy;
-        const minX = c.stray ? PAD.x + 4 : VF.x + 6;
-        const maxX = c.stray ? VF.x - 8 : VF.x + VF.w - 6;
-        const minY = c.stray ? PAD.y + 6 : VF.y + 6;
-        const maxY = VF.y + VF.h - 6;
-        if (nx < minX || nx > maxX) { vx = -vx; nx = c.x + vx; }
-        if (ny < minY || ny > maxY) { vy = -vy; ny = c.y + vy; }
-        if (Math.random() < 0.06) { vx = (Math.random() - 0.5) * 1.2; vy = (Math.random() - 0.5) * 1.2; }
-        return { ...c, x: nx, y: ny, vx, vy };
-      }));
-    }, 400);
+    const id = setInterval(() => setPhase((v) => (v + 1) % 100000), 90);
     return () => clearInterval(id);
   }, []);
 
-  const strays = cows.filter((c) => c.stray).length;
-  const inZone = cows.length - strays;
-  const avgBatt = Math.round(cows.reduce((a, c) => a + c.battery, 0) / cows.length);
-  const selected = cows.find((c) => c.id === sel);
+  const cattle = useMemo(() => {
+    const list: Array<{ x: number; y: number; r: number; p: number }> = [];
+    for (let i = 0; i < 30; i++) {
+      const col = i % 6;
+      const row = Math.floor(i / 6);
+      list.push({ x: 210 + col * 35 + (row % 2) * 10, y: 118 + row * 22, r: 2.8 + (i % 3) * 0.25, p: i * 0.74 });
+    }
+    return list;
+  }, []);
+
+  const actionLabel = lastAction && lastAction.label ? String(lastAction.label) : "Property online";
+  const fenceAlert = strays > 0;
+  const headerY = 112 + (1 - header / 100) * 63;
+  const damY = 244 + (1 - dam / 100) * 54;
+  const pumpGlow = pumpOn ? "#48C6FF" : "#485563";
 
   return (
-    <div className="p-4 space-y-3">
-      <div className="flex items-center justify-between">
-        <div className="text-sm font-semibold text-[#E6EDF3]">🐄 Smart Fencing — Herd Tracking</div>
-        <span className="text-[9px] px-2 py-0.5 rounded-full font-semibold" style={{ backgroundColor: strays > 0 ? "#EF444420" : "#22C55E20", color: strays > 0 ? "#EF4444" : "#22C55E" }}>
-          {strays > 0 ? strays + " stray" : "Contained"}
-        </span>
+    <div style={{ padding: 14, minHeight: "100%", color: "#E8EEF5", background: "linear-gradient(180deg,#0B1110 0%,#09100D 54%,#080C0A 100%)" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", marginBottom: 10 }}>
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontWeight: 850, fontSize: 15, letterSpacing: "0.02em" }}>PROPERTY OPERATIONS</span>
+            <span style={{ border: "1px solid #284031", background: "#122319", color: "#78D99A", borderRadius: 999, padding: "2px 7px", fontSize: 8, letterSpacing: "0.1em" }}>EDGE ONLINE</span>
+          </div>
+          <div style={{ color: "#718077", fontSize: 9, marginTop: 3 }}>Water · livestock · distributed infrastructure · local-first control</div>
+        </div>
+        <div style={{ textAlign: "right" }}>
+          <div style={{ color: fenceAlert ? "#FF7A6A" : "#77E69B", fontSize: 10, fontWeight: 800 }}>{fenceAlert ? strays + " COLLARS OUTSIDE" : "HERD CONTAINED"}</div>
+          <div style={{ color: "#657269", fontSize: 8, marginTop: 2 }}>{actionLabel}</div>
+        </div>
       </div>
 
-      <div className="bg-[#070A0E] rounded-xl border border-[#2A3441] p-2">
-        <svg width="100%" height="236" viewBox="0 0 480 250" preserveAspectRatio="xMidYMid meet">
-          <rect x={PAD.x} y={PAD.y} width={PAD.w} height={PAD.h} rx="6" fill="#0B140C" stroke="#2A3441" strokeWidth="1" />
-          <rect x={VF.x} y={VF.y} width={VF.w} height={VF.h} rx="4" fill="none" stroke="#22C55E" strokeWidth="1.5" strokeDasharray="6 4" strokeOpacity="0.7" />
-          <text x={VF.x + 4} y={VF.y - 4} fill="#22C55E" fontSize="8" fillOpacity="0.8">virtual fence</text>
-          {cows.map((c) => {
-            const isSel = c.id === sel;
-            const col = c.stray ? "#EF4444" : "#22C55E";
+      <div style={{ border: "1px solid #25352B", borderRadius: 14, overflow: "hidden", background: "#07100B", boxShadow: "inset 0 0 60px rgba(30,80,45,.08)" }}>
+        <svg width="100%" height="390" viewBox="0 0 720 390" preserveAspectRatio="xMidYMid meet">
+          <defs>
+            <linearGradient id="field" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stopColor="#19371E" />
+              <stop offset="1" stopColor="#0D2113" />
+            </linearGradient>
+            <linearGradient id="water" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stopColor="#4DD7FF" />
+              <stop offset="1" stopColor="#1767C7" />
+            </linearGradient>
+            <linearGradient id="tankFill" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stopColor="#66DEFF" stopOpacity="0.85" />
+              <stop offset="1" stopColor="#237BC8" stopOpacity="0.65" />
+            </linearGradient>
+            <filter id="glow"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+          </defs>
+
+          <rect width="720" height="390" fill="#09130D" />
+          <path d="M0 205 C105 165 170 176 251 155 C350 129 430 111 520 126 C610 141 659 101 720 82 L720 390 L0 390 Z" fill="url(#field)" />
+          <path d="M0 251 C120 214 176 232 284 205 C398 176 512 170 720 145" fill="none" stroke="#31543B" strokeWidth="1" strokeOpacity="0.55" />
+          <path d="M0 292 C123 256 199 277 322 246 C454 213 582 220 720 187" fill="none" stroke="#31543B" strokeWidth="1" strokeOpacity="0.4" />
+          <path d="M10 339 C128 311 219 320 324 300 C486 270 591 274 710 244" fill="none" stroke="#31543B" strokeWidth="1" strokeOpacity="0.26" />
+
+          {/* Virtual paddock */}
+          <path d="M175 87 L463 74 L500 221 L190 236 Z" fill="#112A17" fillOpacity="0.45" stroke={fenceAlert ? "#FF7A6A" : "#62DB84"} strokeWidth="1.4" strokeDasharray="7 5" />
+          <text x="186" y="81" fill={fenceAlert ? "#FF8B7E" : "#73E494"} fontSize="8" letterSpacing="1.3">VIRTUAL PADDOCK A</text>
+
+          {/* Cattle: deterministic base positions with local organic motion. */}
+          {cattle.map((cow, i) => {
+            const isStray = i < strays;
+            const wanderX = Math.sin(phase * 0.07 + cow.p) * 5 + Math.sin(phase * 0.021 + cow.p * 2) * 3;
+            const wanderY = Math.cos(phase * 0.052 + cow.p) * 3;
+            const x = isStray ? 155 - i * 15 + wanderX : cow.x + wanderX;
+            const y = isStray ? 143 + i * 38 + wanderY : cow.y + wanderY;
+            const selected = selectedCow === i;
             return (
-              <g key={c.id} onClick={() => setSel(c.id)} style={{ cursor: "pointer" }}>
-                {isSel && <circle cx={c.x} cy={c.y} r="9" fill="none" stroke="#5CE1E6" strokeWidth="1.5" />}
-                {c.stray && <circle cx={c.x} cy={c.y} r="8" fill="none" stroke="#EF4444" strokeWidth="1" className="animate-pulse" />}
-                <circle cx={c.x} cy={c.y} r="4" fill={col} stroke="#05070A" strokeWidth="1" className="transition-all duration-300" />
+              <g key={i} onClick={() => setSelectedCow(selected ? null : i)} style={{ cursor: "pointer" }}>
+                {isStray && <circle cx={x} cy={y} r="10" fill="none" stroke="#FF6659" strokeOpacity={0.35 + (Math.sin(phase * 0.15 + i) * 0.5 + 0.5) * 0.5} />}
+                {selected && <circle cx={x} cy={y} r="8" fill="none" stroke="#77E9FF" strokeWidth="1.2" />}
+                <ellipse cx={x} cy={y} rx={cow.r * 1.6} ry={cow.r} fill={isStray ? "#FF7467" : "#D3BE8D"} />
+                <circle cx={x + cow.r * 1.5} cy={y - 0.4} r={cow.r * 0.62} fill={isStray ? "#FF7467" : "#D3BE8D"} />
+                <line x1={x - 2} y1={y + 2} x2={x - 2} y2={y + 5} stroke="#8A7B59" strokeWidth="1" />
+                <line x1={x + 2} y1={y + 2} x2={x + 2} y2={y + 5} stroke="#8A7B59" strokeWidth="1" />
               </g>
             );
           })}
+
+          {/* Dam */}
+          <path d="M30 280 C55 249 129 240 174 270 C184 286 171 320 126 329 C76 337 34 321 30 280 Z" fill="#0A2F43" stroke="#327BA2" strokeWidth="1.3" />
+          <path d={"M34 " + damY + " C67 " + (damY - 14) + " 130 " + (damY - 18) + " 170 " + (damY + 2) + " L169 313 C124 331 61 329 38 310 Z"} fill="url(#water)" opacity="0.8" />
+          <text x="96" y="272" textAnchor="middle" fill="#B4DFF3" fontSize="8" letterSpacing="1">LOWER DAM</text>
+          <text x="96" y="291" textAnchor="middle" fill="#FFFFFF" fontSize="18" fontFamily="monospace" fontWeight="700">{Math.round(dam)}%</text>
+          <text x="96" y="305" textAnchor="middle" fill="#79A5B9" fontSize="7">{Math.round(dam * 600).toLocaleString()} L</text>
+
+          {/* Pump and rising main */}
+          <path d="M171 281 C218 273 243 256 271 227 C310 187 343 167 410 153 C465 142 494 120 540 98" fill="none" stroke="#24373B" strokeWidth="8" strokeLinecap="round" />
+          <path d="M171 281 C218 273 243 256 271 227 C310 187 343 167 410 153 C465 142 494 120 540 98" fill="none" stroke={pumpOn ? "#41BFEA" : "#36525D"} strokeWidth="2.5" strokeLinecap="round" />
+          {pumpOn && Array.from({ length: 8 }).map((_, i) => {
+            const t = ((phase * 0.012 + i / 8) % 1);
+            const x = 171 + t * 369;
+            const y = 281 - t * 183 - Math.sin(t * Math.PI) * 24;
+            return <circle key={i} cx={x} cy={y} r="2.2" fill="#7EE6FF" filter="url(#glow)" />;
+          })}
+          <circle cx="184" cy="272" r="15" fill="#0C1B20" stroke={pumpGlow} strokeWidth="1.6" />
+          <g transform="translate(184 272)" style={{ transform: "rotate(" + (pumpOn ? phase * 12 : 0) + "deg)", transformOrigin: "184px 272px" }}>
+            <path d="M0 -9 L3 -2 L9 0 L3 2 L0 9 L-3 2 L-9 0 L-3 -2 Z" fill={pumpGlow} />
+          </g>
+          <text x="184" y="296" textAnchor="middle" fill="#6F8790" fontSize="7">TRANSFER PUMP</text>
+
+          {/* Header tank on hill */}
+          <rect x="526" y="64" width="70" height="112" rx="10" fill="#111B1F" stroke="#78939D" strokeWidth="1.1" />
+          <rect x="530" y={headerY} width="62" height={172 - headerY} rx="6" fill="url(#tankFill)" />
+          <ellipse cx="561" cy="65" rx="35" ry="8" fill="#19252A" stroke="#78939D" strokeWidth="1" />
+          <text x="561" y="91" textAnchor="middle" fill="#AFC2CA" fontSize="8" letterSpacing="1">HEADER</text>
+          <text x="561" y="116" textAnchor="middle" fill="#FFFFFF" fontSize="20" fontFamily="monospace" fontWeight="700">{Math.round(header)}%</text>
+          <text x="561" y="132" textAnchor="middle" fill="#8BABB8" fontSize="7">{Math.round(header * 50).toLocaleString()} L</text>
+
+          {/* Shed and house */}
+          <path d="M531 228 L568 207 L606 228 V267 H531 Z" fill="#16211E" stroke="#526960" strokeWidth="1" />
+          <rect x="547" y="239" width="15" height="28" fill="#0B1311" />
+          <rect x="575" y="236" width="15" height="12" fill="#3A686A" opacity="0.75" />
+          <text x="568" y="282" textAnchor="middle" fill="#788A82" fontSize="7">SHED / SOLAR</text>
+
+          <path d="M621 199 L650 181 L680 199 V236 H621 Z" fill="#17201C" stroke="#66786F" strokeWidth="1" />
+          <rect x="644" y="215" width="11" height="21" fill="#0B1311" />
+          <text x="650" y="250" textAnchor="middle" fill="#788A82" fontSize="7">HOUSE</text>
+
+          {/* Trough line */}
+          <path d="M425 235 C472 259 504 278 548 307" fill="none" stroke="#294A56" strokeWidth="2" strokeDasharray="5 5" />
+          {Array.from({ length: 5 }).map((_, i) => {
+            const x = 444 + i * 29;
+            const y = 248 + i * 14;
+            const low = i < Math.min(5, troughLow);
+            return <g key={i}><ellipse cx={x} cy={y} rx="10" ry="4" fill="#10191A" stroke={low ? "#F6A84B" : "#4AAFD0"} strokeWidth="1"/><ellipse cx={x} cy={y} rx="7" ry="2.2" fill={low ? "#6D4821" : "#227598"}/></g>;
+          })}
+          <text x="499" y="333" textAnchor="middle" fill="#71837B" fontSize="7">20 NETWORKED TROUGHS</text>
+
+          {/* Status chips inside scene */}
+          <g transform="translate(23 18)">
+            <rect width="160" height="32" rx="7" fill="#0B1410" stroke="#294234" />
+            <text x="12" y="12" fill="#6E8177" fontSize="7">FENCE ENERGISER</text>
+            <text x="12" y="24" fill="#7CEB9B" fontSize="11" fontFamily="monospace" fontWeight="700">7.2 kV</text>
+            <text x="90" y="24" fill={fenceAlert ? "#FF7165" : "#7CEB9B"} fontSize="8">{fenceAlert ? strays + " stray" : "contained"}</text>
+          </g>
+          <g transform="translate(542 18)">
+            <rect width="155" height="32" rx="7" fill="#0B1410" stroke="#294234" />
+            <text x="12" y="12" fill="#6E8177" fontSize="7">TROUGHS</text>
+            <text x="12" y="24" fill="#55CAE8" fontSize="11" fontFamily="monospace" fontWeight="700">{Math.round(troughAverage)}%</text>
+            <text x="64" y="24" fill={troughLow > 0 ? "#F6A84B" : "#7CEB9B"} fontSize="8">{troughLow} low · {troughRefilling} filling</text>
+          </g>
+
+          {selectedCow !== null && (
+            <g transform="translate(238 250)">
+              <rect width="180" height="44" rx="8" fill="#08110D" stroke="#4B7560" />
+              <text x="12" y="16" fill="#E4EEE8" fontSize="9" fontWeight="700">Collar #{String(1001 + selectedCow).slice(1)}</text>
+              <text x="12" y="30" fill={selectedCow < strays ? "#FF776B" : "#7BDD98"} fontSize="8">{selectedCow < strays ? "Outside virtual fence" : "Grazing in Paddock A"}</text>
+              <text x="128" y="30" fill="#769087" fontSize="7">battery {68 + (selectedCow % 23)}%</text>
+            </g>
+          )}
         </svg>
       </div>
 
-      {selected ? (
-        <div className="bg-[#0B0F14] rounded-lg border border-[#5CE1E6]/30 p-2.5 flex items-center gap-3">
-          <div className="text-2xl">🐄</div>
-          <div className="flex-1">
-            <div className="text-[12px] font-mono font-bold text-[#E6EDF3]">Tag {selected.id}</div>
-            <div className="text-[8px] text-[#9AA6B2]">{selected.stray ? "⚠ Outside virtual fence" : "Grazing — in zone"} · collar {selected.battery}%</div>
+      <div style={{ display: "grid", gridTemplateColumns: "1.35fr 1fr 1fr", gap: 8, marginTop: 9 }}>
+        <div style={{ border: "1px solid #24362B", borderRadius: 11, background: "#0B120E", padding: 10 }}>
+          <div style={{ color: "#718077", fontSize: 8, letterSpacing: "0.12em", marginBottom: 7 }}>WATER TRANSFER</div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            <button onClick={() => aeolus.fire("transfer-500")} style={{ background: "#0E2A34", color: "#78DEFF", border: "1px solid #245F72", borderRadius: 7, padding: "7px 10px", fontSize: 9, cursor: "pointer" }}>+500 L uphill</button>
+            <button onClick={() => aeolus.fire("transfer-1000")} style={{ background: "#10313B", color: "#84E5FF", border: "1px solid #2B7186", borderRadius: 7, padding: "7px 10px", fontSize: 9, cursor: "pointer", fontWeight: 700 }}>+1000 L</button>
+            <button onClick={() => aeolus.fire("pump-stop")} style={{ background: "#171B19", color: "#87948D", border: "1px solid #313A35", borderRadius: 7, padding: "7px 9px", fontSize: 9, cursor: "pointer" }}>Stop</button>
           </div>
-          <button onClick={() => setSel(null)} className="text-[10px] text-[#6B7785] hover:text-[#E6EDF3] px-2 py-1">✕</button>
+          <div style={{ color: "#60706A", fontSize: 8, marginTop: 7 }}>{pumpOn ? "Pump running · " + flow + " L/min" : "Pump idle · local automation available without cloud"}</div>
         </div>
-      ) : (
-        <div className="text-center text-[8px] text-[#6B7785]">tap a tag to inspect · whole herd ({HERD}) tracked</div>
-      )}
 
-      <div className="grid grid-cols-4 gap-1.5">
-        <div className="bg-[#0B0F14] rounded-lg border border-[#2A3441] p-2 flex flex-col items-center">
-          <span className="text-[11px] font-mono font-bold text-[#22C55E]">{inZone}</span>
-          <span className="text-[7px] text-[#6B7785]">In Zone</span>
+        <div style={{ border: "1px solid " + (fenceAlert ? "#6B342F" : "#24422D"), borderRadius: 11, background: fenceAlert ? "#17100E" : "#0B120E", padding: 10 }}>
+          <div style={{ color: fenceAlert ? "#F38C7E" : "#7BDC98", fontSize: 8, letterSpacing: "0.12em", marginBottom: 7 }}>VIRTUAL FENCE</div>
+          <button onClick={() => aeolus.fire(fenceAlert ? "recall-strays" : "simulate-strays")} style={{ width: "100%", background: fenceAlert ? "#2A1714" : "#11241A", color: fenceAlert ? "#FF9588" : "#8DE9A8", border: "1px solid " + (fenceAlert ? "#713B34" : "#31573C"), borderRadius: 7, padding: "7px 8px", fontSize: 9, cursor: "pointer", fontWeight: 700 }}>{fenceAlert ? "Recall 2 strays" : "Simulate boundary breach"}</button>
+          <div style={{ color: "#60706A", fontSize: 8, marginTop: 7 }}>30 / 30 collars tracked</div>
         </div>
-        <div className="bg-[#0B0F14] rounded-lg border border-[#2A3441] p-2 flex flex-col items-center">
-          <span className="text-[11px] font-mono font-bold" style={{ color: strays > 0 ? "#EF4444" : "#22C55E" }}>{strays}</span>
-          <span className="text-[7px] text-[#6B7785]">Strays</span>
+
+        <div style={{ border: "1px solid #24362B", borderRadius: 11, background: "#0B120E", padding: 10 }}>
+          <div style={{ color: "#73BBD0", fontSize: 8, letterSpacing: "0.12em", marginBottom: 7 }}>TROUGHS</div>
+          <button onClick={() => aeolus.fire("refill-troughs")} style={{ width: "100%", background: "#10262D", color: "#7BDAF2", border: "1px solid #2A5965", borderRadius: 7, padding: "7px 8px", fontSize: 9, cursor: "pointer", fontWeight: 700 }}>Start refill cycle</button>
+          <div style={{ color: "#60706A", fontSize: 8, marginTop: 7 }}>Avg {Math.round(troughAverage)}% · {troughLow} low</div>
         </div>
-        <div className="bg-[#0B0F14] rounded-lg border border-[#2A3441] p-2 flex flex-col items-center">
-          <span className="text-[11px] font-mono font-bold text-[#3BA4FF]">{VOLT}kV</span>
-          <span className="text-[7px] text-[#6B7785]">Energiser</span>
-        </div>
-        <div className="bg-[#0B0F14] rounded-lg border border-[#2A3441] p-2 flex flex-col items-center">
-          <span className="text-[11px] font-mono font-bold text-[#5CE1E6]">{avgBatt}%</span>
-          <span className="text-[7px] text-[#6B7785]">Avg Collar</span>
-        </div>
+      </div>
+
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 9, color: "#59675F", fontSize: 8 }}>
+        <span>Simulated property · shared demo state · motion rendered locally</span>
+        <button onClick={() => aeolus.fire("reset-farm")} style={{ background: "transparent", border: 0, color: "#708078", fontSize: 8, cursor: "pointer" }}>Reset property</button>
       </div>
     </div>
   );
 }`;
 
-// ─── Assembly ────────────────────────────────────────────────────────────────
 const automations = [
-  { key: "fence", name: "Smart Fencing", triggerTopic: "none", scriptSource: simLogic, uiSource: fenceUi },
-  { key: "water", name: "Water Management", triggerTopic: "none", scriptSource: simLogic, uiSource: waterUi },
-  { key: "troughs", name: "Cattle Troughs", triggerTopic: "none", scriptSource: simLogic, uiSource: troughsUi },
+  {
+    key: "farm-ops",
+    name: "Property Operations",
+    triggerTopic: "none",
+    scriptSource: logic,
+    uiSource: ui,
+    demoAccess: {
+      fireEvents: [
+        "transfer-500",
+        "transfer-1000",
+        "pump-stop",
+        "recall-strays",
+        "simulate-strays",
+        "refill-troughs",
+        "reset-farm",
+      ],
+    },
+  },
 ];
 
 const panes = [
-  { kind: "automation", ref: "fence", x: 0, y: 0, w: 12, h: 14 },
-  { kind: "automation", ref: "water", x: 0, y: 14, w: 6, h: 15 },
-  { kind: "automation", ref: "troughs", x: 6, y: 14, w: 6, h: 13 },
+  { kind: "automation", ref: "farm-ops", x: 0, y: 0, w: 12, h: 17 },
+  { kind: "device-grid", x: 0, y: 17, w: 12, h: 6 },
 ];
 
 const dataStore = [

@@ -1,7 +1,8 @@
-// scripts/seed/tabs/escape-room.mjs — Commercial escape room control demo.
+// scripts/seed/tabs/escape-room.mjs — Commercial escape-room operations demo.
 //
-// Escape-room control software is a real product category; makers already build
-// rigs on Raspberry Pi + relays + MQTT. A dev could run Aeolus here today.
+// Public-demo flagship: a top-down room schematic makes puzzle state, maglocks,
+// timer, hints and effects spatially understandable. All public interactions are
+// bounded named events; no free-text or arbitrary scene payloads are accepted.
 
 import { genSeries } from "../lib.mjs";
 
@@ -15,346 +16,330 @@ const devices = [
   { topic: "switch/escape/maglock-exit", payload: { locked: true } },
   { topic: "switch/escape/hint-screen", payload: { on: true, hintsSent: 1 } },
   { topic: "switch/escape/smoke", payload: { on: false } },
+  { topic: "light/escape/dmx", payload: { scene: "puzzle" } },
 ];
 
-// ─── Puzzle Sequencer — prop state machine + sequential maglocks ─────────────
-const puzzleLogic = `automation({
-  conditions: [
-    function hasPuzzle(context) {
-      return context.state && context.state.solved !== undefined;
-    },
-  ],
+const logic = `automation({
   actions: [
-    function sequence(context) {
-      var topic = context.topic || "";
-      var s = context.state;
-      var n = topic.indexOf("puzzle1") >= 0 ? 1 : topic.indexOf("puzzle2") >= 0 ? 2 : topic.indexOf("puzzle3") >= 0 ? 3 : 0;
-      if (n) state.set("p" + n + "_solved", s.solved);
-
-      var p1 = state.get("p1_solved");
-      var p2 = state.get("p2_solved");
-      var p3 = state.get("p3_solved");
-      if (p1 === undefined) p1 = true;
-      if (p2 === undefined) p2 = false;
-      if (p3 === undefined) p3 = false;
-
-      var solvedCount = (p1 ? 1 : 0) + (p2 ? 1 : 0) + (p3 ? 1 : 0);
-      state.set("solvedCount", solvedCount);
-      state.set("progress", Math.round((solvedCount / 3) * 100));
-
-      if (p1) mqtt.publish("switch/escape/maglock-1/command", JSON.stringify({ locked: false }));
-      var exitOpen = p1 && p2 && p3;
-      state.set("exitUnlocked", exitOpen);
-      if (exitOpen) {
-        mqtt.publish("switch/escape/maglock-exit/command", JSON.stringify({ locked: false }));
-        log.info("All puzzles solved — exit unlocked!");
+    function roomcontrol(context) {
+      function init(key, value) {
+        if (state.get(key) === undefined) state.set(key, value);
       }
-      state.set("lastUpdate", Date.now());
+
+      init("p1", true);
+      init("p2", false);
+      init("p3", false);
+      init("remaining", 2340);
+      init("timerStartedAt", Date.now());
+      init("paused", false);
+      init("scene", "puzzle");
+      init("smoke", false);
+      init("hintsSent", 1);
+      init("lastHint", "Look closer at the bookshelf.");
+      init("lastAction", { label: "Game in progress", at: Date.now() });
+
+      var evt = String(context.topic || "").split("/").pop();
+
+      function syncPuzzleDevices() {
+        var p1 = Boolean(state.get("p1"));
+        var p2 = Boolean(state.get("p2"));
+        var p3 = Boolean(state.get("p3"));
+        mqtt.publish("sensor/escape/puzzle1", JSON.stringify({ solved: p1, attempts: 3 }));
+        mqtt.publish("sensor/escape/puzzle2", JSON.stringify({ solved: p2, beamsBroken: p2 ? 0 : 2 }));
+        mqtt.publish("sensor/escape/puzzle3", JSON.stringify({ solved: p3, weight: p3 ? 3.1 : 2.4, target: 3.1 }));
+        mqtt.publish("switch/escape/maglock-exit", JSON.stringify({ locked: !(p1 && p2 && p3) }));
+      }
+
+      function setHint(id, text) {
+        var count = Number(state.get("hintsSent") || 0) + 1;
+        state.set("hintsSent", count);
+        state.set("lastHint", text);
+        state.set("lastAction", { label: "Hint " + id + " delivered to room", at: Date.now() });
+        mqtt.publish("switch/escape/hint-screen", JSON.stringify({ on: true, hintId: id, message: text, hintsSent: count }));
+        log.info("Escape room preset hint " + id + " sent");
+      }
+
+      function setScene(name) {
+        state.set("scene", name);
+        state.set("lastAction", { label: "Lighting scene: " + name, at: Date.now() });
+        mqtt.publish("light/escape/dmx", JSON.stringify({ scene: name }));
+      }
+
+      if (evt === "solve-next") {
+        if (!state.get("p1")) state.set("p1", true);
+        else if (!state.get("p2")) state.set("p2", true);
+        else if (!state.get("p3")) state.set("p3", true);
+        var solved = (state.get("p1") ? 1 : 0) + (state.get("p2") ? 1 : 0) + (state.get("p3") ? 1 : 0);
+        state.set("lastAction", { label: solved === 3 ? "All puzzles solved — exit unlocked" : "Puzzle " + solved + " solved", at: Date.now() });
+        syncPuzzleDevices();
+      } else if (evt === "add-time" || evt === "sub-time" || evt === "pause") {
+        var current = Number(context.state && context.state.remaining);
+        if (isNaN(current)) current = Number(state.get("remaining") || 0);
+        current = Math.min(7200, Math.max(0, Math.round(current)));
+        if (evt === "add-time") current = Math.min(7200, current + 60);
+        if (evt === "sub-time") current = Math.max(0, current - 60);
+        state.set("remaining", current);
+        state.set("timerStartedAt", Date.now());
+        if (evt === "pause") {
+          var nextPaused = !Boolean(state.get("paused"));
+          state.set("paused", nextPaused);
+          state.set("lastAction", { label: nextPaused ? "Game timer paused" : "Game timer resumed", at: Date.now() });
+        } else {
+          state.set("lastAction", { label: evt === "add-time" ? "Game master added one minute" : "Game master removed one minute", at: Date.now() });
+        }
+      } else if (evt === "hint-1") {
+        setHint(1, "Look closer at the bookshelf.");
+      } else if (evt === "hint-2") {
+        setHint(2, "The portrait frame is not fixed to the wall.");
+      } else if (evt === "hint-3") {
+        setHint(3, "The three brass weights must balance the scale.");
+      } else if (evt === "scene-calm") {
+        setScene("calm");
+      } else if (evt === "scene-puzzle") {
+        setScene("puzzle");
+      } else if (evt === "scene-tension") {
+        setScene("tension");
+      } else if (evt === "scene-victory") {
+        setScene("victory");
+      } else if (evt === "smoke") {
+        var on = !Boolean(state.get("smoke"));
+        state.set("smoke", on);
+        state.set("lastAction", { label: on ? "Atmospheric effect enabled" : "Atmospheric effect cleared", at: Date.now() });
+        mqtt.publish("switch/escape/smoke", JSON.stringify({ on: on }));
+      } else if (evt === "reset-room") {
+        state.set("p1", true);
+        state.set("p2", false);
+        state.set("p3", false);
+        state.set("remaining", 2340);
+        state.set("timerStartedAt", Date.now());
+        state.set("paused", false);
+        state.set("scene", "puzzle");
+        state.set("smoke", false);
+        state.set("hintsSent", 1);
+        state.set("lastHint", "Look closer at the bookshelf.");
+        state.set("lastAction", { label: "Room reset for next team", at: Date.now() });
+        syncPuzzleDevices();
+        mqtt.publish("switch/escape/smoke", JSON.stringify({ on: false }));
+        mqtt.publish("light/escape/dmx", JSON.stringify({ scene: "puzzle" }));
+      }
     },
   ],
 });`;
 
-const puzzleUi = `import type { CustomComponentProps } from "./types";
+const ui = `import { useEffect, useState } from "react";
+import type { CustomComponentProps } from "./types";
 
-export default function PuzzleSequencer(aeolus: CustomComponentProps) {
-  const p1 = aeolus.read("p1_solved") as boolean ?? true;
-  const p2 = aeolus.read("p2_solved") as boolean ?? false;
-  const p3 = aeolus.read("p3_solved") as boolean ?? false;
-  const progress = aeolus.read("progress") as number ?? 33;
-  const exitUnlocked = aeolus.read("exitUnlocked") as boolean ?? false;
+function clamp(value: number, min: number, max: number) { return Math.min(max, Math.max(min, value)); }
 
-  const stages = [
-    { label: "Cipher Lock", solved: p1 },
-    { label: "Laser Grid", solved: p2 },
-    { label: "Weight Scale", solved: p3 },
-  ];
-  // active = first unsolved
-  const activeIdx = stages.findIndex((s) => !s.solved);
+const SCENE_COLORS: Record<string, { room: string; accent: string; glow: string }> = {
+  calm: { room: "#132333", accent: "#4BB8FF", glow: "rgba(75,184,255,.19)" },
+  puzzle: { room: "#21162C", accent: "#B26BFF", glow: "rgba(178,107,255,.20)" },
+  tension: { room: "#2A1213", accent: "#FF625C", glow: "rgba(255,98,92,.22)" },
+  victory: { room: "#12261A", accent: "#63DF8B", glow: "rgba(99,223,139,.22)" },
+};
 
-  return (
-    <div className="p-4 space-y-3">
-      <div className="flex items-center justify-between">
-        <div className="text-sm font-semibold text-[#E6EDF3]">🧩 Puzzle Sequencer</div>
-        <span className="text-[9px] px-2 py-0.5 rounded-full font-semibold bg-[#4B0082]/30 text-[#C8A2FF]">{progress}%</span>
-      </div>
+export default function GameMaster(aeolus: CustomComponentProps) {
+  const p1 = Boolean(aeolus.read("p1") ?? true);
+  const p2 = Boolean(aeolus.read("p2") ?? false);
+  const p3 = Boolean(aeolus.read("p3") ?? false);
+  const baseRemaining = clamp(Number(aeolus.read("remaining") ?? 2340), 0, 7200);
+  const startedAt = Number(aeolus.read("timerStartedAt") ?? Date.now());
+  const paused = Boolean(aeolus.read("paused"));
+  const scene = String(aeolus.read("scene") || "puzzle");
+  const smoke = Boolean(aeolus.read("smoke"));
+  const hintsSent = Number(aeolus.read("hintsSent") ?? 1);
+  const lastHint = String(aeolus.read("lastHint") || "Look closer at the bookshelf.");
+  const lastAction = aeolus.read("lastAction") as any;
 
-      <div className="bg-[#0B0F14] rounded-xl border border-[#2A3441] p-4">
-        <div className="flex items-center justify-between">
-          {stages.map((st, i) => {
-            const isActive = i === activeIdx;
-            const color = st.solved ? "#22C55E" : isActive ? "#F59E0B" : "#6B7785";
-            return (
-              <div key={st.label} className="flex items-center flex-1 last:flex-none">
-                <div className="flex flex-col items-center">
-                  <div className="w-9 h-9 rounded-full flex items-center justify-center border-2 transition-all duration-500" style={{ borderColor: color, background: color + "20" }}>
-                    <span className="text-[13px]">{st.solved ? "✓" : isActive ? "◐" : "🔒"}</span>
-                  </div>
-                  <span className="text-[8px] mt-1 text-center w-14" style={{ color }}>{st.label}</span>
-                </div>
-                {i < stages.length - 1 && (
-                  <div className="flex-1 h-0.5 mx-1" style={{ background: st.solved ? "#22C55E" : "#2A3441" }} />
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </div>
+  const [now, setNow] = useState(Date.now());
+  const [phase, setPhase] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => { setNow(Date.now()); setPhase((v) => (v + 1) % 100000); }, 200);
+    return () => clearInterval(id);
+  }, []);
 
-      <div className="flex items-center justify-between rounded-lg border px-3 py-2.5" style={{ background: exitUnlocked ? "#22C55E15" : "#0B0F14", borderColor: exitUnlocked ? "#22C55E4D" : "#2A3441" }}>
-        <span className="text-[11px] font-medium" style={{ color: exitUnlocked ? "#22C55E" : "#9AA6B2" }}>
-          {exitUnlocked ? "🚪 Exit Unlocked" : "🔒 Final Exit Locked"}
-        </span>
-        <span className="text-[9px] font-mono" style={{ color: exitUnlocked ? "#22C55E" : "#6B7785" }}>
-          {stages.filter((s) => s.solved).length}/3 solved
-        </span>
-      </div>
-    </div>
-  );
-}`;
-
-// ─── Game Master Console ⭐ — master timer + transport controls ──────────────
-const gmLogic = `automation({
-  conditions: [
-    function ready(context) {
-      return true;
-    },
-  ],
-  actions: [
-    function gm(context) {
-      var s = context.state || {};
-      var t = context.topic || "";
-      if (s.remaining !== undefined) state.set("remaining", s.remaining);
-
-      var current = state.get("remaining");
-      if (current === undefined) current = 2340;
-
-      if (t.indexOf("add-time") >= 0) { state.set("remaining", current + 60); log.info("GM +60s"); }
-      else if (t.indexOf("sub-time") >= 0) { state.set("remaining", Math.max(0, current - 60)); log.info("GM -60s"); }
-      else if (t.indexOf("pause") >= 0) { state.set("paused", !state.get("paused")); }
-      else if (t.indexOf("reset") >= 0) { state.set("remaining", 3600); state.set("paused", false); log.info("Room reset — 60:00"); }
-
-      var rem = state.get("remaining") || 0;
-      state.set("danger", rem < 300);
-      state.set("lastUpdate", Date.now());
-    },
-  ],
-});`;
-
-const gmUi = `import type { CustomComponentProps } from "./types";
-
-export default function GameMasterConsole(aeolus: CustomComponentProps) {
-  const remaining = aeolus.read("remaining") as number ?? 2340;
-  const paused = aeolus.read("paused") as boolean ?? false;
-  const danger = aeolus.read("danger") as boolean ?? false;
-  const solvedCount = aeolus.read("solvedCount") as number ?? 1;
-
+  const elapsed = paused ? 0 : Math.max(0, Math.floor((now - startedAt) / 1000));
+  const remaining = Math.max(0, baseRemaining - elapsed);
   const mm = Math.floor(remaining / 60);
   const ss = remaining % 60;
-  const clock = (mm < 10 ? "0" : "") + mm + ":" + (ss < 10 ? "0" : "") + ss;
-  const timeColor = danger ? "#EF4444" : remaining < 600 ? "#F59E0B" : "#22C55E";
-  const total = 3600;
-  const pct = Math.max(0, Math.min(100, (remaining / total) * 100));
+  const clock = String(mm).padStart(2, "0") + ":" + String(ss).padStart(2, "0");
+  const solved = [p1, p2, p3].filter(Boolean).length;
+  const exitUnlocked = p1 && p2 && p3;
+  const active = !p1 ? 1 : !p2 ? 2 : !p3 ? 3 : 4;
+  const palette = SCENE_COLORS[scene] || SCENE_COLORS.puzzle;
+  const timeColor = remaining < 300 ? "#FF665D" : remaining < 600 ? "#F0B351" : "#76E29B";
+  const actionLabel = lastAction && lastAction.label ? String(lastAction.label) : "Game in progress";
+
+  const fireWithTime = (evt: string) => aeolus.fire(evt, { remaining });
 
   return (
-    <div className="p-4 space-y-3">
-      <div className="flex items-center justify-between">
-        <div className="text-sm font-semibold text-[#E6EDF3]">🎮 Game Master Console</div>
-        <span className="text-[9px] px-2 py-0.5 rounded-full font-semibold" style={{ backgroundColor: paused ? "#F59E0B20" : "#22C55E20", color: paused ? "#F59E0B" : "#22C55E" }}>
-          {paused ? "⏸ Paused" : "● Running"}
-        </span>
-      </div>
-
-      {/* Big countdown */}
-      <div className="bg-[#0B0F14] rounded-xl border border-[#2A3441] p-4 flex flex-col items-center">
-        <div className="text-5xl font-mono font-bold tracking-wider" style={{ color: timeColor }}>{clock}</div>
-        <div className="w-full h-1.5 bg-[#1A2330] rounded-full overflow-hidden mt-3">
-          <div className="h-full rounded-full transition-all duration-700" style={{ width: pct + "%", background: timeColor }} />
+    <div style={{ minHeight: "100%", padding: 14, color: "#ECE9F2", background: "linear-gradient(180deg,#0D0B10 0%,#09080B 100%)" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 10 }}>
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 15, fontWeight: 850, letterSpacing: "0.02em" }}>GAME MASTER</span>
+            <span style={{ color: palette.accent, border: "1px solid " + palette.accent + "55", background: palette.glow, borderRadius: 999, padding: "2px 7px", fontSize: 8, letterSpacing: "0.1em" }}>{scene.toUpperCase()}</span>
+          </div>
+          <div style={{ color: "#766D7C", fontSize: 9, marginTop: 3 }}>Puzzle state · room effects · hints · physical locks</div>
         </div>
-        <div className="text-[9px] text-[#6B7785] mt-1.5">{solvedCount}/3 puzzles solved</div>
+        <div style={{ textAlign: "right" }}>
+          <div style={{ color: exitUnlocked ? "#72E298" : timeColor, fontSize: 20, fontWeight: 850, fontFamily: "monospace", letterSpacing: "0.05em" }}>{clock}</div>
+          <div style={{ color: "#6C6571", fontSize: 8 }}>{paused ? "PAUSED" : solved + "/3 puzzles solved"} · {actionLabel}</div>
+        </div>
       </div>
 
-      {/* Transport controls */}
-      <div className="grid grid-cols-4 gap-1.5">
-        <button onClick={() => aeolus.fire("add-time", {})} className="py-2 rounded-lg text-[11px] font-medium bg-[#22C55E]/15 text-[#22C55E] border border-[#22C55E]/30 hover:bg-[#22C55E]/25 transition-all">+1:00</button>
-        <button onClick={() => aeolus.fire("sub-time", {})} className="py-2 rounded-lg text-[11px] font-medium bg-[#F59E0B]/15 text-[#F59E0B] border border-[#F59E0B]/30 hover:bg-[#F59E0B]/25 transition-all">−1:00</button>
-        <button onClick={() => aeolus.fire("pause", {})} className="py-2 rounded-lg text-[11px] font-medium bg-[#3BA4FF]/15 text-[#3BA4FF] border border-[#3BA4FF]/30 hover:bg-[#3BA4FF]/25 transition-all">{paused ? "Resume" : "Pause"}</button>
-        <button onClick={() => aeolus.fire("reset", {})} className="py-2 rounded-lg text-[11px] font-medium bg-[#EF4444]/15 text-[#EF4444] border border-[#EF4444]/30 hover:bg-[#EF4444]/25 transition-all">Reset</button>
+      <div style={{ border: "1px solid #302A34", borderRadius: 14, overflow: "hidden", background: "#0A090B" }}>
+        <svg width="100%" height="395" viewBox="0 0 720 395" preserveAspectRatio="xMidYMid meet">
+          <defs>
+            <filter id="roomGlow"><feGaussianBlur stdDeviation="7"/></filter>
+            <linearGradient id="floor" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor={palette.room}/><stop offset="1" stopColor="#0C0B0E"/></linearGradient>
+            <radialGradient id="hintGlow"><stop offset="0" stopColor={palette.accent} stopOpacity="0.18"/><stop offset="1" stopColor={palette.accent} stopOpacity="0"/></radialGradient>
+          </defs>
+
+          <rect width="720" height="395" fill="#09080A" />
+          <rect x="42" y="35" width="504" height="322" rx="5" fill="url(#floor)" stroke="#4B424E" strokeWidth="2" />
+          <rect x="42" y="35" width="504" height="322" fill={palette.glow} opacity="0.45" />
+
+          {/* Bookshelf / cipher puzzle */}
+          <g>
+            <rect x="63" y="61" width="128" height="55" rx="4" fill="#251B18" stroke={p1 ? "#5ACB7D" : active === 1 ? palette.accent : "#5B453A"} strokeWidth={active === 1 ? 2 : 1} />
+            {Array.from({ length: 11 }).map((_, i) => <rect key={i} x={70 + i * 10} y={72 + (i % 3) * 3} width="6" height={30 - (i % 3) * 3} fill={["#8F5E46","#5F7892","#8D7450","#6E4A74"][i % 4]} opacity="0.8" />)}
+            <circle cx="175" cy="91" r="8" fill="#111" stroke={p1 ? "#5ACB7D" : palette.accent} />
+            <text x="127" y="130" textAnchor="middle" fill={p1 ? "#6EDC8C" : "#A99DAA"} fontSize="8">1 · CIPHER BOOKCASE {p1 ? "✓" : ""}</text>
+          </g>
+
+          {/* Laser grid */}
+          <g>
+            <rect x="231" y="63" width="133" height="112" rx="5" fill="#0D1012" stroke={p2 ? "#5ACB7D" : active === 2 ? palette.accent : "#3B4045"} strokeWidth={active === 2 ? 2 : 1} />
+            {!p2 && Array.from({ length: 7 }).map((_, i) => {
+              const y = 76 + i * 14;
+              const wobble = Math.sin(phase * .08 + i) * 2;
+              return <line key={i} x1="239" y1={y} x2="356" y2={y + wobble} stroke={i % 2 ? "#FF3E50" : "#F34B64"} strokeWidth="1" opacity={0.58 + Math.sin(phase * .07 + i) * .16} />;
+            })}
+            {p2 && <path d="M248 116 L283 145 L346 84" fill="none" stroke="#5ACB7D" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />}
+            <text x="297" y="189" textAnchor="middle" fill={p2 ? "#6EDC8C" : "#A99DAA"} fontSize="8">2 · LASER GRID {p2 ? "✓" : ""}</text>
+          </g>
+
+          {/* Weight table */}
+          <g>
+            <rect x="386" y="73" width="121" height="88" rx="6" fill="#171519" stroke={p3 ? "#5ACB7D" : active === 3 ? palette.accent : "#454048"} strokeWidth={active === 3 ? 2 : 1} />
+            <ellipse cx="447" cy="111" rx="38" ry="12" fill="#232026" stroke="#5D5661" />
+            {[0,1,2].map((i) => <rect key={i} x={426 + i * 18} y={91 - (p3 ? 0 : i * 4)} width="12" height={18 + i * 4} rx="2" fill="#A77842" stroke="#D0A05C" />)}
+            <line x1="447" y1="123" x2="447" y2="139" stroke="#766C77" strokeWidth="2" />
+            <path d="M420 141 H474" stroke={p3 ? "#5ACB7D" : "#766C77"} strokeWidth="3" />
+            <text x="447" y="176" textAnchor="middle" fill={p3 ? "#6EDC8C" : "#A99DAA"} fontSize="8">3 · BALANCE SCALE {p3 ? "✓" : ""}</text>
+          </g>
+
+          {/* Central table / prop */}
+          <ellipse cx="281" cy="256" rx="67" ry="35" fill="#171319" stroke="#3E3741" />
+          <ellipse cx="281" cy="251" rx="52" ry="25" fill="#211A24" />
+          <circle cx="281" cy="247" r="8" fill={palette.accent} opacity={0.25 + Math.sin(phase * .06) * .1} />
+          <text x="281" y="315" textAnchor="middle" fill="#615967" fontSize="7">CENTRAL PROP TABLE</text>
+
+          {/* Hint screen */}
+          <rect x="63" y="218" width="126" height="77" rx="5" fill="#070A0C" stroke="#394852" />
+          <rect x="70" y="225" width="112" height="58" rx="2" fill="#0E1A20" />
+          <text x="126" y="239" textAnchor="middle" fill="#5F9AAC" fontSize="6">HINT DISPLAY</text>
+          <foreignObject x="76" y="245" width="100" height="32"><div style={{ color: "#B9DCE5", fontSize: 7, lineHeight: 1.25, textAlign: "center" }}>{lastHint}</div></foreignObject>
+
+          {/* Exit door */}
+          <g transform="translate(507 224)">
+            <rect x="0" y="0" width="39" height="91" fill="#111" stroke={exitUnlocked ? "#67DA8C" : "#6B3E42"} strokeWidth="2" />
+            <g style={{ transform: exitUnlocked ? "perspective(100px) rotateY(-48deg)" : "none", transformOrigin: "0px 45px", transition: "transform .7s ease" }}>
+              <rect x="2" y="3" width="35" height="85" fill={exitUnlocked ? "#183824" : "#27171A"} stroke={exitUnlocked ? "#67DA8C" : "#75464B"} />
+              <circle cx="30" cy="47" r="2" fill="#D6B45D" />
+            </g>
+            <text x="20" y="106" textAnchor="middle" fill={exitUnlocked ? "#75E298" : "#A47176"} fontSize="8">{exitUnlocked ? "EXIT OPEN" : "MAGLOCKED"}</text>
+          </g>
+
+          {/* Smoke */}
+          {smoke && Array.from({ length: 8 }).map((_, i) => {
+            const x = 380 + ((phase * 2 + i * 53) % 145);
+            const y = 314 - ((phase * .8 + i * 19) % 75);
+            return <ellipse key={i} cx={x} cy={y} rx={18 + i % 3 * 7} ry={8 + i % 2 * 4} fill="#DCE2E8" opacity={0.035 + (i % 3) * .018} />;
+          })}
+
+          {/* Game flow line */}
+          <path d="M190 90 C210 90 218 100 231 115 M364 116 C378 116 382 113 386 113 M507 115 C532 126 542 162 526 224" fill="none" stroke={palette.accent} strokeWidth="1.3" strokeDasharray="4 5" opacity="0.45" />
+
+          {/* GM-side status rail */}
+          <rect x="570" y="35" width="127" height="322" rx="7" fill="#0D0B0F" stroke="#302A34" />
+          <text x="585" y="57" fill="#706777" fontSize="7" letterSpacing="1.2">ROOM STATE</text>
+          <text x="585" y="87" fill={timeColor} fontSize="25" fontFamily="monospace" fontWeight="800">{clock}</text>
+          <text x="585" y="102" fill="#675F6B" fontSize="7">{paused ? "timer paused" : "countdown running"}</text>
+
+          {[{ n: 1, ok: p1, label: "Cipher" }, { n: 2, ok: p2, label: "Lasers" }, { n: 3, ok: p3, label: "Scale" }].map((p, i) => <g key={p.n} transform={"translate(585 " + (129 + i * 32) + ")"}><circle cx="7" cy="7" r="6" fill={p.ok ? "#183A23" : active === p.n ? palette.glow : "#18151A"} stroke={p.ok ? "#63D986" : active === p.n ? palette.accent : "#39333D"}/><text x="7" y="10" textAnchor="middle" fill={p.ok ? "#72E394" : "#847A87"} fontSize="7">{p.ok ? "✓" : p.n}</text><text x="21" y="10" fill={p.ok ? "#86C697" : "#8E8492"} fontSize="8">{p.label}</text></g>)}
+
+          <line x1="585" y1="230" x2="682" y2="230" stroke="#2C2730" />
+          <text x="585" y="248" fill="#706777" fontSize="7">HINTS SENT</text>
+          <text x="672" y="248" textAnchor="end" fill="#C6A6EA" fontSize="12" fontFamily="monospace" fontWeight="700">{hintsSent}</text>
+          <text x="585" y="277" fill="#706777" fontSize="7">EXIT</text>
+          <text x="672" y="277" textAnchor="end" fill={exitUnlocked ? "#72E394" : "#CB7777"} fontSize="9" fontWeight="700">{exitUnlocked ? "UNLOCKED" : "LOCKED"}</text>
+          <text x="585" y="309" fill="#706777" fontSize="7">ATMOSPHERE</text>
+          <text x="672" y="309" textAnchor="end" fill={smoke ? "#CFD6DA" : "#7A737C"} fontSize="9">{smoke ? "SMOKE ON" : "CLEAR"}</text>
+          <text x="585" y="339" fill="#706777" fontSize="7">SCENE</text>
+          <text x="672" y="339" textAnchor="end" fill={palette.accent} fontSize="9" fontWeight="700">{scene.toUpperCase()}</text>
+        </svg>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr 1fr", gap: 8, marginTop: 9 }}>
+        <div style={{ border: "1px solid #302A34", background: "#0E0C10", borderRadius: 11, padding: 10 }}>
+          <div style={{ color: palette.accent, fontSize: 8, letterSpacing: "0.12em", marginBottom: 7 }}>GAME CONTROL</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1.25fr repeat(3,.75fr)", gap: 5 }}>
+            <button onClick={() => aeolus.fire("solve-next")} disabled={exitUnlocked} style={{ background: exitUnlocked ? "#151318" : palette.glow, color: exitUnlocked ? "#5E5961" : palette.accent, border: "1px solid " + (exitUnlocked ? "#302C33" : palette.accent + "77"), borderRadius: 7, padding: "7px", fontSize: 9, cursor: exitUnlocked ? "default" : "pointer", fontWeight: 750 }}>{exitUnlocked ? "Room solved" : "Solve next"}</button>
+            <button onClick={() => fireWithTime("add-time")} style={{ background: "#102018", color: "#78DA96", border: "1px solid #31503B", borderRadius: 7, fontSize: 9, cursor: "pointer" }}>+1m</button>
+            <button onClick={() => fireWithTime("sub-time")} style={{ background: "#241C10", color: "#E3B55B", border: "1px solid #564321", borderRadius: 7, fontSize: 9, cursor: "pointer" }}>−1m</button>
+            <button onClick={() => fireWithTime("pause")} style={{ background: "#111A23", color: "#71BCEB", border: "1px solid #2C4A5F", borderRadius: 7, fontSize: 9, cursor: "pointer" }}>{paused ? "Resume" : "Pause"}</button>
+          </div>
+          <div style={{ color: "#665F69", fontSize: 8, marginTop: 7 }}>All controls are bounded demo events driving trusted room Logic.</div>
+        </div>
+
+        <div style={{ border: "1px solid #302A34", background: "#0E0C10", borderRadius: 11, padding: 10 }}>
+          <div style={{ color: "#B99AD8", fontSize: 8, letterSpacing: "0.12em", marginBottom: 7 }}>PRESET HINTS</div>
+          <div style={{ display: "flex", gap: 5 }}>
+            {[1,2,3].map((id) => <button key={id} onClick={() => aeolus.fire("hint-" + id)} style={{ flex: 1, background: "#17121D", color: "#BFA8D4", border: "1px solid #3D3048", borderRadius: 7, padding: "7px 4px", fontSize: 9, cursor: "pointer" }}>Hint {id}</button>)}
+          </div>
+          <div style={{ color: "#665F69", fontSize: 8, marginTop: 7, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>Screen: {lastHint}</div>
+        </div>
+
+        <div style={{ border: "1px solid #302A34", background: "#0E0C10", borderRadius: 11, padding: 10 }}>
+          <div style={{ color: palette.accent, fontSize: 8, letterSpacing: "0.12em", marginBottom: 7 }}>ROOM LOOK</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 4 }}>
+            {[{e:"scene-calm",l:"Calm",c:"#4BB8FF"},{e:"scene-puzzle",l:"Puzzle",c:"#B26BFF"},{e:"scene-tension",l:"Tension",c:"#FF625C"},{e:"scene-victory",l:"Victory",c:"#63DF8B"}].map((s) => <button key={s.e} onClick={() => aeolus.fire(s.e)} title={s.l} style={{ height: 27, background: s.c + (scene === s.l.toLowerCase() ? "44" : "18"), border: "1px solid " + s.c + (scene === s.l.toLowerCase() ? "AA" : "44"), borderRadius: 6, cursor: "pointer" }} />)}
+          </div>
+          <button onClick={() => aeolus.fire("smoke")} style={{ width: "100%", marginTop: 6, background: smoke ? "#24272A" : "#151519", color: smoke ? "#E1E5E7" : "#918B94", border: "1px solid #37363A", borderRadius: 7, padding: "5px", fontSize: 8, cursor: "pointer" }}>{smoke ? "Clear smoke" : "Atmosphere"}</button>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", justifyContent: "space-between", color: "#625C65", fontSize: 8, marginTop: 9 }}>
+        <span>Simulated commercial room · shared game state · no free-form public inputs</span>
+        <button onClick={() => aeolus.fire("reset-room")} style={{ background: "transparent", border: 0, color: "#7B737D", fontSize: 8, cursor: "pointer" }}>Reset room</button>
       </div>
     </div>
   );
 }`;
 
-// ─── Hint System — deliver hints to in-room screen, track budget ─────────────
-const hintLogic = `automation({
-  conditions: [
-    function ready(context) {
-      return true;
-    },
-  ],
-  actions: [
-    function hint(context) {
-      var t = context.topic || "";
-      if (t.indexOf("send-hint") >= 0) {
-        var count = (state.get("hintsSent") || 0) + 1;
-        state.set("hintsSent", count);
-        var msg = (context.state && context.state.text) ? context.state.text : "Look closer at the bookshelf.";
-        state.set("lastHint", msg);
-        state.set("lastHintAt", Date.now());
-        mqtt.publish("switch/escape/hint-screen/command", JSON.stringify({ message: msg }));
-        log.info("Hint #" + count + " sent: " + msg);
-      }
-      state.set("lastUpdate", Date.now());
-    },
-  ],
-});`;
-
-const hintUi = `import type { CustomComponentProps } from "./types";
-
-export default function HintSystem(aeolus: CustomComponentProps) {
-  const hintsSent = aeolus.read("hintsSent") as number ?? 1;
-  const lastHint = aeolus.read("lastHint") as string || "—";
-
-  const presets = [
-    "Look closer at the bookshelf.",
-    "The painting hides something.",
-    "Combine the two halves.",
-    "Check under the rug.",
-  ];
-  const budget = 3;
-  const overBudget = hintsSent > budget;
-
-  return (
-    <div className="p-4 space-y-3">
-      <div className="flex items-center justify-between">
-        <div className="text-sm font-semibold text-[#E6EDF3]">💡 Hint System</div>
-        <span className="text-[9px] px-2 py-0.5 rounded-full font-semibold" style={{ backgroundColor: overBudget ? "#EF444420" : "#3BA4FF20", color: overBudget ? "#EF4444" : "#3BA4FF" }}>
-          {hintsSent} sent
-        </span>
-      </div>
-
-      {/* Last hint on screen */}
-      <div className="bg-[#0B0F14] rounded-xl border border-[#2A3441] p-3">
-        <div className="text-[9px] text-[#6B7785] mb-1">On Room Screen</div>
-        <div className="text-[11px] text-[#E6EDF3] font-medium min-h-[16px]">{lastHint}</div>
-      </div>
-
-      {/* Hint budget dots */}
-      <div className="flex items-center gap-1.5">
-        <span className="text-[9px] text-[#6B7785]">Budget</span>
-        {[0, 1, 2].map((i) => (
-          <span key={i} className="w-2.5 h-2.5 rounded-full" style={{ background: i < (budget - Math.min(hintsSent, budget)) ? "#22C55E" : "#2A3441" }} />
-        ))}
-        <span className="text-[9px] text-[#6B7785] ml-auto">{Math.max(0, budget - hintsSent)} free left</span>
-      </div>
-
-      {/* Preset hint buttons */}
-      <div className="space-y-1.5">
-        {presets.map((p) => (
-          <button
-            key={p}
-            onClick={() => aeolus.fire("send-hint", { text: p })}
-            className="w-full text-left px-3 py-2 rounded-lg text-[10px] text-[#9AA6B2] bg-[#0B0F14] border border-[#2A3441] hover:border-[#3BA4FF]/40 hover:text-[#E6EDF3] transition-all"
-          >
-            {p}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}`;
-
-// ─── Effects & Lighting — DMX scene control synced to game phase ─────────────
-const fxLogic = `automation({
-  conditions: [
-    function ready(context) {
-      return true;
-    },
-  ],
-  actions: [
-    function effects(context) {
-      var s = context.state || {};
-      var t = context.topic || "";
-      if (s.scene !== undefined) state.set("scene", s.scene);
-
-      if (t.indexOf("scene") >= 0 && s.name) {
-        state.set("scene", s.name);
-        mqtt.publish("light/escape/dmx/command", JSON.stringify({ scene: s.name }));
-        log.info("DMX scene → " + s.name);
-      }
-      if (t.indexOf("smoke") >= 0) {
-        var on = !state.get("smoke");
-        state.set("smoke", on);
-        mqtt.publish("switch/escape/smoke/command", JSON.stringify({ on: on }));
-      }
-      state.set("lastUpdate", Date.now());
-    },
-  ],
-});`;
-
-const fxUi = `import type { CustomComponentProps } from "./types";
-
-export default function EffectsLighting(aeolus: CustomComponentProps) {
-  const scene = aeolus.read("scene") as string || "puzzle";
-  const smoke = aeolus.read("smoke") as boolean ?? false;
-
-  const scenes = [
-    { name: "calm", label: "Calm", colour: "#3BA4FF" },
-    { name: "puzzle", label: "Puzzle", colour: "#4B0082" },
-    { name: "tension", label: "Tension", colour: "#EF4444" },
-    { name: "victory", label: "Victory", colour: "#22C55E" },
-    { name: "blackout", label: "Blackout", colour: "#1A2330" },
-    { name: "strobe", label: "Strobe", colour: "#F59E0B" },
-  ];
-
-  return (
-    <div className="p-4 space-y-3">
-      <div className="flex items-center justify-between">
-        <div className="text-sm font-semibold text-[#E6EDF3]">🎭 Effects & Lighting</div>
-        <span className="text-[9px] px-2 py-0.5 rounded-full font-semibold capitalize bg-[#4B0082]/30 text-[#C8A2FF]">{scene}</span>
-      </div>
-
-      {/* Scene selector grid */}
-      <div className="grid grid-cols-3 gap-2">
-        {scenes.map((sc) => {
-          const active = sc.name === scene;
-          return (
-            <button
-              key={sc.name}
-              onClick={() => aeolus.fire("scene", { name: sc.name })}
-              className="flex flex-col items-center gap-1.5 py-3 rounded-xl border transition-all"
-              style={{ background: active ? sc.colour + "25" : "#0B0F14", borderColor: active ? sc.colour : "#2A3441" }}
-            >
-              <span className="w-6 h-6 rounded-full border" style={{ background: sc.colour, borderColor: active ? "#E6EDF3" : "transparent" }} />
-              <span className="text-[9px]" style={{ color: active ? "#E6EDF3" : "#9AA6B2" }}>{sc.label}</span>
-            </button>
-          );
-        })}
-      </div>
-
-      <button
-        onClick={() => aeolus.fire("smoke", {})}
-        className="w-full py-2.5 rounded-lg text-xs font-medium border transition-all"
-        style={{ background: smoke ? "#9AA6B225" : "#0B0F14", color: smoke ? "#E6EDF3" : "#9AA6B2", borderColor: "#2A3441" }}
-      >
-        {smoke ? "💨 Smoke Machine ON" : "Smoke Machine OFF"}
-      </button>
-    </div>
-  );
-}`;
-
-// ─── Assembly ────────────────────────────────────────────────────────────────
 const automations = [
-  { key: "puzzle", name: "Puzzle Sequencer", triggerTopic: "sensor/escape/puzzle+", scriptSource: puzzleLogic, uiSource: puzzleUi },
-  { key: "gm", name: "Game Master Console", triggerTopic: "none", scriptSource: gmLogic, uiSource: gmUi },
-  { key: "hint", name: "Hint System", triggerTopic: "none", scriptSource: hintLogic, uiSource: hintUi },
-  { key: "fx", name: "Effects & Lighting", triggerTopic: "none", scriptSource: fxLogic, uiSource: fxUi },
+  {
+    key: "room-ops",
+    name: "Game Master",
+    triggerTopic: "none",
+    scriptSource: logic,
+    uiSource: ui,
+    demoAccess: {
+      fireEvents: [
+        "solve-next", "add-time", "sub-time", "pause",
+        "hint-1", "hint-2", "hint-3",
+        "scene-calm", "scene-puzzle", "scene-tension", "scene-victory",
+        "smoke", "reset-room",
+      ],
+    },
+  },
 ];
 
 const panes = [
-  { kind: "automation", ref: "gm", x: 0, y: 0, w: 6, h: 10 },
-  { kind: "automation", ref: "puzzle", x: 6, y: 0, w: 6, h: 8 },
-  { kind: "automation", ref: "hint", x: 0, y: 10, w: 6, h: 11 },
-  { kind: "automation", ref: "fx", x: 6, y: 8, w: 6, h: 11 },
+  { kind: "automation", ref: "room-ops", x: 0, y: 0, w: 12, h: 17 },
+  { kind: "device-grid", x: 0, y: 17, w: 12, h: 6 },
 ];
 
 const dataStore = [
