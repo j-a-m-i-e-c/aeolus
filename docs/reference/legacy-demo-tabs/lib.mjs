@@ -255,14 +255,8 @@ export async function buildLayout(api, tabModules, idMap) {
 // ─── Public demo identity ────────────────────────────────────────────────────
 
 /**
- * Provision the public-demo identity: a `Public Demo` group holding per-tab
- * `read`/`interact` grants, and a `demo` user in that group.
- *
- * The hybrid demo mixes look-only tabs (`read`) with a few interactive flagship
- * tabs (`interact`). Interactivity is enforced by RBAC: `POST /:id/fire` and
- * `PUT /:id/state` require `interact`, so a `read` tab is view-only server-side
- * regardless of the frontend. Callers pass the per-tab assignments directly
- * (derive `interact` for tabs whose automations declare `demoAccess`).
+ * Provision the public-demo identity: a `Public Demo` group holding only
+ * read/interact on the given demo tabs, and a `demo` user in that group.
  *
  * The public demo authenticates via POST /api/auth/demo-session (token minted
  * server-side), so the demo user's password is never used for login — a strong
@@ -270,11 +264,14 @@ export async function buildLayout(api, tabModules, idMap) {
  * creation when the group/user already exist.
  *
  * @param {(m:string,p:string,b?:object)=>Promise<any>} api - authed admin API caller
- * @param {{tabId:string, permission:"read"|"interact"|"write"}[]} tabAssignments - per-tab grants
+ * @param {string[]} tabIds - demo tab ids the group may read/interact
+ * @param {"read"|"interact"} [level="interact"] - permission level per tab
  */
-export async function provisionDemoIdentity(api, tabAssignments) {
+export async function provisionDemoIdentity(api, tabIds, level = "interact") {
   const groups = (await api("GET", "/api/auth/groups")) || [];
   let group = Array.isArray(groups) ? groups.find((g) => g.name === "Public Demo") : null;
+
+  const tabAssignments = tabIds.map((tabId) => ({ tabId, permission: level }));
 
   if (!group) {
     group = await api("POST", "/api/auth/groups", { name: "Public Demo", tabAssignments });
@@ -303,23 +300,18 @@ export async function provisionDemoIdentity(api, tabAssignments) {
 }
 
 /**
- * Apply per-rule public-demo access allowlists. For each automation that
- * declares `demoAccess: { writableStateKeys?, fireEvents? }`, PATCH the rule's
- * demo_access via the admin endpoint so public-demo visitors can only write
- * declared state keys and fire declared events.
+ * Attach per-rule public-demo access metadata (writableStateKeys / fireEvents)
+ * to seeded automations, so demo visitors can only write declared state keys
+ * and fire declared events. Expects a map of { ruleId → demoAccess }.
  *
- * @param {(m:string,p:string,b?:object)=>Promise<any>} api - authed admin API caller
- * @param {{key:string, demoAccess?:{writableStateKeys?:string[], fireEvents?:string[]}}[]} automations
- * @param {Record<string,string>} idMap - automation key → ruleId
+ * NOTE: there is no REST field for demo_access yet; this writes via the same
+ * admin update path only if the backend accepts it. Until an authoring field
+ * exists, seed demo_access directly in the golden DB build step.
+ *
+ * @param {Record<string, {writableStateKeys?:string[], fireEvents?:string[]}>} accessByRuleId
  */
-export async function applyDemoAccess(api, automations, idMap) {
-  let count = 0;
-  for (const a of automations) {
-    if (!a.demoAccess) continue;
-    const ruleId = idMap[a.key];
-    if (!ruleId) continue;
-    await api("PATCH", `/api/automations/${ruleId}/demo-access`, a.demoAccess);
-    count++;
-  }
-  if (count > 0) console.log(`  ✓ Applied demo access to ${count} automations`);
+export function describeDemoAccess(accessByRuleId) {
+  // Placeholder describer used by the golden-DB build to know which rules need
+  // demo_access rows written. Kept as data so the build step stays declarative.
+  return Object.entries(accessByRuleId).map(([ruleId, access]) => ({ ruleId, access }));
 }

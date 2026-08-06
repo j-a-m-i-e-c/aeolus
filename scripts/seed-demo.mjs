@@ -84,7 +84,19 @@ await fireAutomations(api, Object.values(idMap), 4);
 // normal `make seed` on a personal install does not create a demo user/group.
 if (process.env.AEOLUS_PUBLIC_DEMO === "true") {
   console.log("\n8. Provisioning public demo identity...");
-  await provisionDemoIdentity(api, tabModules.map((m) => m.tab.id), "interact");
+  // Hybrid demo: a tab is interactive (`interact`) when any of its automations
+  // declares a demo_access allowlist; otherwise it is look-only (`read`). This
+  // keeps the RBAC grant in lock-step with what a tab actually exposes to demo
+  // visitors — revived rich tabs (no demoAccess) are view-only, while the
+  // engine-driven flagships (stage-show, spacecraft, space) allow their bounded
+  // fire/state interactions.
+  const tabAssignments = tabModules.map((m) => ({
+    tabId: m.tab.id,
+    permission: (m.automations || []).some((a) => a.demoAccess) ? "interact" : "read",
+  }));
+  await provisionDemoIdentity(api, tabAssignments);
+  const interactive = tabAssignments.filter((t) => t.permission === "interact").map((t) => t.tabId);
+  console.log(`  ✓ Interactive tabs: ${interactive.join(", ") || "(none)"}`);
 }
 
 // Done
