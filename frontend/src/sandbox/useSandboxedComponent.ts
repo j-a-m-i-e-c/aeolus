@@ -74,10 +74,16 @@ export function useSandboxedComponent(
   props: PropsPayload,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars -- threaded for Req 8/9; must NOT alter v1 isolation
   mode: SandboxMode = "untrusted",
+  readOnly = false,
 ): UseSandboxedComponentResult {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [status, setStatus] = useState<SandboxStatus>(hasUiSource ? "loading" : "idle");
   const [error, setError] = useState<string | null>(null);
+
+  // Kept current so the grant reflects the live permission at frame creation
+  // without forcing a frame rebuild when it changes (it is static per session).
+  const readOnlyRef = useRef(readOnly);
+  readOnlyRef.current = readOnly;
 
   // Live frame id for prop-patch forwarding; null when no frame is active.
   const frameIdRef = useRef<string | null>(null);
@@ -128,7 +134,7 @@ export function useSandboxedComponent(
       const framePort = channel.port2;
 
       // Register the host side with the shared broker (immutable grant).
-      sandboxBroker.register({ frameId, entityType, entityId, port: hostPort });
+      sandboxBroker.register({ frameId, entityType, entityId, port: hostPort, readOnly: readOnlyRef.current });
 
       // Hand the frame its dedicated port via an ack (opaque origin → targetOrigin "*").
       const ack: RpcAck = { channel: RPC_CHANNEL, kind: "ack" };
@@ -221,9 +227,11 @@ export function useSandboxedComponent(
       cancelled = true;
       teardown();
     };
-    // Re-create the frame only when the target entity or its UI presence changes;
-    // live prop updates flow through sendPropsPatch, not a frame rebuild.
-  }, [entityType, entityId, hasUiSource]);
+    // Re-create the frame when the target entity or its UI presence changes, or
+    // when the read-only grant flips (e.g. permissions resolve after first
+    // render) so the broker grant reflects the correct capability. Live prop
+    // updates flow through sendPropsPatch, not a frame rebuild.
+  }, [entityType, entityId, hasUiSource, readOnly]);
 
   const sendPropsPatch = useCallback((patch: Partial<PropsPayload>) => {
     const frameId = frameIdRef.current;

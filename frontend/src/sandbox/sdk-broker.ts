@@ -38,6 +38,14 @@ export interface FrameGrant {
   /** The ONLY rule/panel id this frame may act on. Frame-supplied ids are ignored. */
   entityId: string;
   port: MessagePort;
+  /**
+   * When true, mutating ops (save/saveAndFire/fire/control/publish) are
+   * neutralised — the broker returns without performing the effect. Used for
+   * public-demo tabs the visitor holds only `read` on: the backend already
+   * rejects these writes (they require `interact`), so this simply avoids firing
+   * doomed requests from a shared public box. Reads/subscriptions are unaffected.
+   */
+  readOnly?: boolean;
 }
 
 /**
@@ -218,6 +226,20 @@ export class SdkBroker {
     params: Record<string, unknown>,
   ): Promise<unknown> {
     const { entityType, entityId } = grant;
+
+    // Read-only grant: neutralise mutating ops. Reads and subscriptions still
+    // work so the UI renders and animates from seeded/live state.
+    if (grant.readOnly) {
+      switch (op) {
+        case "save":
+        case "saveAndFire":
+        case "fire":
+        case "publish":
+          return undefined;
+        case "control":
+          return { success: false, error: "Read-only in the public demo" } satisfies CommandResult;
+      }
+    }
 
     switch (op) {
       case "read":

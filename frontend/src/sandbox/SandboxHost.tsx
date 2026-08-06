@@ -20,6 +20,8 @@ export interface SandboxHostProps {
   props: PropsPayload;
   /** v1: both modes are isolated identically; threaded for Req 8/9. */
   mode?: SandboxMode;
+  /** When true, the frame's mutating SDK ops are neutralised (read-only tab). */
+  readOnly?: boolean;
   className?: string;
 }
 
@@ -29,6 +31,7 @@ export function SandboxHost({
   hasUiSource,
   props,
   mode = "untrusted",
+  readOnly = false,
   className,
 }: SandboxHostProps) {
   const { status, error, containerRef, sendPropsPatch } = useSandboxedComponent(
@@ -37,6 +40,7 @@ export function SandboxHost({
     hasUiSource,
     props,
     mode,
+    readOnly,
   );
 
   const [hostFallback, setHostFallback] = useState(false);

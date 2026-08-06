@@ -233,3 +233,68 @@ describe("SdkBroker", () => {
     });
   });
 });
+
+// ─── Read-only grant (public-demo look-only tabs) ────────────────────────────
+
+describe("SdkBroker — read-only grant", () => {
+  let deps: BrokerDeps;
+  let broker: SdkBroker;
+
+  beforeEach(() => {
+    deps = createSpyDeps();
+    broker = new SdkBroker(deps);
+  });
+
+  const req = (op: string, params: Record<string, unknown>) => ({
+    channel: RPC_CHANNEL,
+    kind: "request" as const,
+    id: `req-${op}`,
+    op,
+    params,
+  });
+
+  it("neutralises save / saveAndFire / fire / publish (deps never invoked)", async () => {
+    const grant = makeGrant({ readOnly: true });
+    broker.register(grant);
+
+    await broker.handleMessage(grant, req("save", { key: "master", value: true }));
+    await broker.handleMessage(grant, req("saveAndFire", { key: "master", value: true }));
+    await broker.handleMessage(grant, req("fire", { eventName: "arm" }));
+    await broker.handleMessage(grant, req("publish", { topic: "t", payload: "{}" }));
+
+    expect(deps.save).not.toHaveBeenCalled();
+    expect(deps.saveAndFire).not.toHaveBeenCalled();
+    expect(deps.fire).not.toHaveBeenCalled();
+    expect(deps.publish).not.toHaveBeenCalled();
+  });
+
+  it("returns a failure result for control without invoking the device action", async () => {
+    const grant = makeGrant({ readOnly: true });
+    broker.register(grant);
+
+    await broker.handleMessage(grant, req("control", { deviceId: "d1", actionType: "on" }));
+
+    expect(deps.control).not.toHaveBeenCalled();
+    const post = (grant.port.postMessage as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0];
+    expect(post.ok).toBe(true); // op completes (no throw); result carries the refusal
+    expect(post.result).toEqual({ success: false, error: "Read-only in the public demo" });
+  });
+
+  it("still serves reads", async () => {
+    const grant = makeGrant({ readOnly: true });
+    broker.register(grant);
+
+    await broker.handleMessage(grant, req("read", { key: "master" }));
+
+    expect(deps.readState).toHaveBeenCalledWith("automation", "rule-42", "master");
+  });
+
+  it("does NOT neutralise writes for a normal (interactive) grant", async () => {
+    const grant = makeGrant(); // readOnly undefined → interactive
+    broker.register(grant);
+
+    await broker.handleMessage(grant, req("fire", { eventName: "arm" }));
+
+    expect(deps.fire).toHaveBeenCalledWith("automation", "rule-42", "arm", undefined);
+  });
+});

@@ -27,6 +27,7 @@ import type { PropsPayload } from "../../sandbox/rpc-types";
 import type { ExecutionEntry } from "./custom/types";
 import { useDashboardStore } from "../../store/dashboard-store";
 import { useAuthStore } from "../../store/auth-store";
+import { usePermissionsStore } from "../../store/permissions-store";
 import { useDeviceStore } from "../../store/device-store";
 import { useAutomationStateStore } from "../../store/automation-state-store";
 import type { PaneConfig } from "../../types/dashboard";
@@ -138,6 +139,14 @@ export function AutomationPane({ config, paneId }: Props) {
   const panes = useDashboardStore((s) => s.panes);
   const activeTabId = useDashboardStore((s) => s.activeTabId);
   const isAdmin = useAuthStore((s) => s.user?.role) === "admin";
+
+  // Custom-UI interactivity is gated by the tab's RBAC level: a visitor holding
+  // only `read` on the pane's tab (e.g. a look-only public-demo tab) gets a
+  // view-only sandbox — the broker neutralises its mutating ops, matching the
+  // server (fire/state require `interact`). Admins always interact.
+  const paneTabId = panes.find((p) => p.id === paneId)?.tabId ?? activeTabId ?? null;
+  const canInteract = usePermissionsStore((s) => (paneTabId ? s.canPerform(paneTabId, "interact") : false));
+  const customUiReadOnly = !(isAdmin || canInteract);
 
   // Mode state
   const [mode, setMode] = useState<PaneMode>(ruleId ? "status" : "setup");
@@ -570,6 +579,7 @@ export function AutomationPane({ config, paneId }: Props) {
             devices={devices}
             history={executionHistory}
             state={ruleState}
+            readOnly={customUiReadOnly}
           />
         </div>
       </div>
@@ -960,6 +970,8 @@ interface DynamicCustomSectionProps {
   history: ExecutionEntry[];
   /** Initial per-rule state snapshot passed to the sandbox at init. */
   state: Record<string, unknown>;
+  /** When true, neutralise the frame's mutating SDK ops (view-only tab). */
+  readOnly: boolean;
 }
 
 function DynamicCustomSection({
@@ -970,6 +982,7 @@ function DynamicCustomSection({
   devices,
   history,
   state,
+  readOnly,
 }: DynamicCustomSectionProps) {
   // Custom UI runs inside an opaque-origin sandbox iframe. All privileged calls
   // (control/publish/save/saveAndFire/fire/read) are handled by the shared host
@@ -991,6 +1004,7 @@ function DynamicCustomSection({
         entityId={ruleId}
         hasUiSource={hasUiSource}
         props={propsPayload}
+        readOnly={readOnly}
         className="h-full w-full"
       />
     );
