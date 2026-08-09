@@ -27,6 +27,10 @@ import type { PermissionLevel } from "../auth/permission-service.js";
 import { DeviceRegistry } from "../core/device-registry.js";
 import { AutomationEngine } from "../automations/automation-engine.js";
 import { CommandService, handlePublish, handleToggle, handleDeviceAction, handleLog, handleDelay, handleWebhook, type CommandServiceDeps } from "../automations/command-service.js";
+import { CommandHistoryStore } from "../automations/command-history-store.js";
+import { currentExecutionContext } from "../automations/execution-context.js";
+import { createCommandRoutes } from "../api/routes/command.routes.js";
+import { COMMAND_LIFECYCLE_TRANSITION } from "../core/event-bus.js";
 import { ConditionRegistry } from "../automations/condition-registry.js";
 import { ExecutionLog } from "../automations/execution-log.js";
 import { AutomationStateStore } from "../automations/automation-state-store.js";
@@ -91,11 +95,24 @@ export function createTestApp(
     db,
   );
 
+  // Durable command history + execution-context provider so REST-issued device
+  // commands produce queryable history in tests, mirroring production wiring.
+  const commandHistoryStore = new CommandHistoryStore(db, (event) => {
+    eventBus.emit(COMMAND_LIFECYCLE_TRANSITION, event);
+  });
+
   const actionExecutor = new CommandService({
     mqttService: createStubMqttService(),
-    connectorManager: undefined,
+    // CommandService may hold a ConnectorManager (routes must not). A minimal
+    // stub lets device actions resolve so command history is exercised in tests.
+    connectorManager: {
+      getAcknowledgementCapability: () => undefined,
+      executeAction: async () => ({ success: true }),
+    },
     logger: createSilentLogger(),
     scopeResolver: automationScopeResolver,
+    commandHistoryStore,
+    executionContext: { current: () => currentExecutionContext() },
   } as unknown as CommandServiceDeps);
   actionExecutor.registerHandler("publish", handlePublish);
   actionExecutor.registerHandler("toggle", handleToggle);
@@ -170,6 +187,7 @@ export function createTestApp(
     stateStore,
     conditionRegistry,
   ));
+  app.use("/api/commands", createCommandRoutes(commandHistoryStore));
   app.use("/api/system", createSystemRoutes());
   app.use("/api/layout", createLayoutRoutes(db, permissionResolver));
   app.use("/api/data-store", createDataStoreRoutes(dataStore, permissionResolver, collectionOwnershipStore));

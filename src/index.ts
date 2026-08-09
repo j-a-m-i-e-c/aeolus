@@ -7,7 +7,7 @@ import path from "node:path";
 import { config } from "./config.js";
 import logger from "./logger.js";
 import { getDatabase, closeDatabase } from "./db/database.js";
-import { eventBus, DEVICE_STATE_CHANGE, AUTOMATION_STATE_CHANGE, WS_STATE_CHANGE, MQTT_RAW_MESSAGE, AUTOMATION_FIRED, AUTOMATION_COMPLETED, DATA_STORE_WRITE, DATA_STORE_COLLECTION_DELETED } from "./core/event-bus.js";
+import { eventBus, DEVICE_STATE_CHANGE, AUTOMATION_STATE_CHANGE, WS_STATE_CHANGE, MQTT_RAW_MESSAGE, AUTOMATION_FIRED, AUTOMATION_COMPLETED, DATA_STORE_WRITE, DATA_STORE_COLLECTION_DELETED, COMMAND_LIFECYCLE_TRANSITION, AUTOMATION_EVENT } from "./core/event-bus.js";
 import { DeviceRegistry } from "./core/device-registry.js";
 import { MqttService } from "./mqtt/mqtt-service.js";
 import { createPrivateTopicStore } from "./mqtt/private-topic-store.js";
@@ -24,11 +24,15 @@ import { ExecutionLog } from "./automations/execution-log.js";
 import { ExecutionRecorder } from "./automations/execution-recorder.js";
 import { CommandResultCollector } from "./automations/command-result-collector.js";
 import { PendingCommandTracker } from "./automations/pending-command-tracker.js";
+import { CommandHistoryStore } from "./automations/command-history-store.js";
+import { currentExecutionContext } from "./automations/execution-context.js";
+import { AutomationEventService } from "./automations/automation-event-service.js";
 import { Sandbox } from "./automations/sandbox.js";
 import { AutomationStateStore } from "./automations/automation-state-store.js";
 import { WsServer } from "./websocket/ws-server.js";
 import type { WsEventMapping, BroadcastEnvelope } from "./websocket/ws-server.js";
 import { createDeviceRoutes } from "./api/routes/device.routes.js";
+import { createCommandRoutes } from "./api/routes/command.routes.js";
 import { createStateRoutes } from "./api/routes/state.routes.js";
 import { createHealthRoutes } from "./api/routes/health.routes.js";
 import { createMqttRoutes } from "./api/routes/mqtt.routes.js";
@@ -94,10 +98,68 @@ async function main(): Promise<void> {
   // namespace cannot drift from the forged-ack surface the ingestion path trusts.
   const ackTopicFilter = "aeolus/acks/#";
 
+  // Durable command history (phase-1). Sole owner of command_records /
+  // command_transitions. The tracker below stays DB-free and reports transitions
+  // through the composition adapter, which owns the store write.
+  const commandHistoryStore = new CommandHistoryStore(db, (event) => {
+    // Forwarded only after the durable write commits (Req 7.5); the WS server
+    // maps it to the "command-lifecycle" client message.
+    eventBus.emit(COMMAND_LIFECYCLE_TRANSITION, event);
+  });
+
+  // Restart reconciliation: a command still non-terminal in durable history
+  // cannot have a live in-memory tracker entry after a restart. Mark such
+  // records terminally FAILED/interrupted — never replay a physical command.
+  // Runs after migrations (already applied by getDatabase) and before serving.
+  // Idempotent across repeated startups.
+  const reconciledInterrupted = commandHistoryStore.reconcileInterrupted(Date.now());
+  if (reconciledInterrupted > 0) {
+    logger.warn(
+      { reconciledInterrupted },
+      "Reconciled interrupted commands from a prior run (no physical replay)",
+    );
+  }
+
+  // Per-execution Command_Result sink; also the source of the active execution
+  // context that stamps command provenance. Created early so CommandService can
+  // read it through the narrow ExecutionContextProvider boundary (design §2.3).
+  const collector = new CommandResultCollector();
+
   // Tracker correlates MQTT acknowledgements/observations back to dispatched
   // commands; injected into both the CommandService (register) and the MQTT
-  // ingestion path (route/observeState).
-  const pendingCommandTracker = new PendingCommandTracker();
+  // ingestion path (route/observeState). Its intermediate ACKNOWLEDGED milestone
+  // is persisted via this composition adapter (the tracker never touches SQLite).
+  const pendingCommandTracker = new PendingCommandTracker({
+    onTransition: (ev) => {
+      if (!ev.commandId) return;
+      try {
+        // An ack proves the device received the command, so if the durable
+        // record is still at REQUESTED (the ack raced ahead of the CommandService
+        // DISPATCHED write), record the implied DISPATCHED first so ACKNOWLEDGED
+        // is a valid transition regardless of ordering (Req 3.5). The store's
+        // idempotency guard drops any duplicate DISPATCHED written later.
+        if (commandHistoryStore.currentState(ev.commandId) === "REQUESTED") {
+          commandHistoryStore.transition({
+            commandId: ev.commandId,
+            toState: "DISPATCHED",
+            timestamp: ev.timestamp,
+            terminal: false,
+          });
+        }
+        commandHistoryStore.transition({
+          commandId: ev.commandId,
+          toState: ev.toState,
+          timestamp: ev.timestamp,
+          terminal: false,
+        });
+      } catch (err) {
+        logger.error(
+          { commandId: ev.commandId, error: (err as Error).message },
+          "Failed to persist intermediate command transition",
+        );
+      }
+    },
+  });
 
   const mqttService = new MqttService(
     {
@@ -105,6 +167,9 @@ async function main(): Promise<void> {
       topics: config.mqttTopics,
       ackTopicFilter,
       discoveryIgnoredTopicSuffixes: config.mqttDiscoveryIgnoredTopicSuffixes,
+      // Reserved Automation Event namespace (phase-1 Req 6.1, 6.7). Ingested as
+      // versioned envelopes, never device discovery.
+      automationEventTopicFilter: "aeolus/events/#",
     },
     eventBus,
     { deviceRegistry: registry, ackRouter: pendingCommandTracker },
@@ -167,6 +232,12 @@ async function main(): Promise<void> {
     deviceRegistry: registry,
     pendingCommandTracker,
     scopeResolver: automationScopeResolver,
+    commandHistoryStore,
+    // Narrow, read-only view of the active automation execution (design §2.3).
+    // Reads the execution-context ALS set by the AutomationEngine; commands
+    // outside an automation see undefined. CommandService never couples to the
+    // automation runtime.
+    executionContext: { current: () => currentExecutionContext() },
   });
 
   // Register built-in action handlers
@@ -217,9 +288,14 @@ async function main(): Promise<void> {
 
   // 7. Automation Engine (with sandbox, command service, collector, and the
   // single Execution_Owner that records history/metrics/completion/audit).
-  const collector = new CommandResultCollector();
+  // `collector` is created earlier (it also backs the execution-context provider).
 
-  const sandbox = new Sandbox({ actionExecutor, deviceRegistry: registry, stateStore, dataStore, collector, scopeResolver: automationScopeResolver, onStateChange: (ruleId, key, value) => {
+  // Safe automation-to-automation event emitter over the reserved MQTT namespace
+  // (phase-1 Req 6). Publishes only inside aeolus/events/<ruleId>/...; never a
+  // Verified Command.
+  const automationEventService = new AutomationEventService({ mqttService, logger });
+
+  const sandbox = new Sandbox({ actionExecutor, deviceRegistry: registry, stateStore, dataStore, collector, scopeResolver: automationScopeResolver, automationEventService, onStateChange: (ruleId, key, value) => {
     eventBus.emit(AUTOMATION_STATE_CHANGE, { ruleId, key, value });
   } });
 
@@ -361,6 +437,7 @@ async function main(): Promise<void> {
   app.use("/api/automations", createAutomationRoutes(engine, db, registry, actionExecutor, executionLog, sandboxTypesPath, requireAutomation, permissionResolver, connectorRegistry, stateStore, conditionRegistry, (deviceId) => connectorManager.getCompletionTierCapability(deviceId)));
   app.use("/api/connectors", createConnectorRoutes(connectorManager, connectorRegistry));
   app.use("/api/metrics", createMetricsSummaryRoute(metricsService));
+  app.use("/api/commands", createCommandRoutes(commandHistoryStore));
   app.use("/api/system", createSystemRoutes());
   app.use("/api/layout", createLayoutRoutes(db, permissionResolver));
   app.use("/api/data-store", createDataStoreRoutes(dataStore, permissionResolver, collectionOwnershipStore));
@@ -423,6 +500,11 @@ async function main(): Promise<void> {
     // surface the collection; a collection no pane surfaces stays admin-only.
     { eventName: DATA_STORE_WRITE, messageType: "data-store-write", visibility: dataStoreVisibility },
     { eventName: DATA_STORE_COLLECTION_DELETED, messageType: "data-store-collection-deleted", visibility: dataStoreVisibility },
+    // Phase-1 backend observability for later UI. Command history can disclose
+    // device names/behaviour, so both stay admin-only (no visibility resolver ⇒
+    // fail-closed admin-only). No frontend rendering belongs in Phase 1.
+    { eventName: COMMAND_LIFECYCLE_TRANSITION, messageType: "command-lifecycle" },
+    { eventName: AUTOMATION_EVENT, messageType: "automation-event" },
   ];
 
   const wsServer = new WsServer(server, registry, eventBus, WS_MAPPINGS, deviceExposureResolver);
