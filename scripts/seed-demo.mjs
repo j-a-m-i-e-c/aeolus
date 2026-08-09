@@ -30,6 +30,11 @@ import {
   provisionDemoIdentity,
 } from "./seed/lib.mjs";
 import { tabModules } from "./seed/tabs/index.mjs";
+import {
+  createBootstrapClient,
+  configureSimulatedCommandProfiles,
+  REFERENCE_WATER_ACTUATOR_SPECS,
+} from "./seed/simulator-bootstrap.mjs";
 
 const API = process.argv[2] || "http://localhost:3001";
 const USER = process.argv[3] || "admin";
@@ -97,6 +102,27 @@ if (process.env.AEOLUS_PUBLIC_DEMO === "true") {
   await provisionDemoIdentity(api, tabAssignments);
   const interactive = tabAssignments.filter((t) => t.permission === "interact").map((t) => t.tabId);
   console.log(`  ✓ Interactive tabs: ${interactive.join(", ") || "(none)"}`);
+}
+
+// 9. Phase 2 simulator bootstrap — configure the simulated actuators' MQTT
+// command profiles through the normal API once the simulator has published its
+// devices. Opt-in (only when a simulator is running alongside), so a normal
+// `make seed` on a personal install is unaffected.
+if (process.env.AEOLUS_SIMULATOR_BOOTSTRAP === "true") {
+  console.log("\n9. Configuring simulated-hardware command profiles...");
+  try {
+    const bootstrapClient = createBootstrapClient(api);
+    const { configured, skipped } = await configureSimulatedCommandProfiles(
+      bootstrapClient,
+      REFERENCE_WATER_ACTUATOR_SPECS,
+      { timeoutMs: 30000, pollMs: 1000 },
+    );
+    console.log(`  ✓ Simulated actuators — configured: ${configured.length}, already-current: ${skipped.length}`);
+  } catch (err) {
+    console.error(`  ✗ Simulator bootstrap failed: ${err.message}`);
+    console.error("    Ensure the simulator service is running and has published its devices.");
+    process.exitCode = 1;
+  }
 }
 
 // Done
