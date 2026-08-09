@@ -449,12 +449,26 @@ export class MqttService {
       return;
     }
 
+    // A settled observation is only present when the device explicitly supplies
+    // a dedicated `state` object on the ack channel. A plain `{ success: true }`
+    // ack carries NO observation: treating the whole ack body as observed state
+    // would mismatch an observed-tier predicate before the real sensor reports.
+    const explicitObservation =
+      typeof payloadObject.state === "object" &&
+      payloadObject.state !== null &&
+      !Array.isArray(payloadObject.state)
+        ? (payloadObject.state as Record<string, unknown>)
+        : undefined;
+
     const message: AckMessage = {
       correlationId,
       ...(typeof payloadObject.success === "boolean" ? { success: payloadObject.success } : {}),
       ...(typeof payloadObject.error === "string" ? { error: payloadObject.error } : {}),
       ...(typeof payloadObject.status === "string" ? { status: payloadObject.status } : {}),
-      state: payloadObject,
+      // The full parsed body, so the tracker can read a device-configured
+      // acknowledgement indicator field (e.g. `ackIndicatorField: "result"`).
+      payload: payloadObject,
+      ...(explicitObservation ? { state: explicitObservation } : {}),
     };
     this.ackRouter.route(message);
   }

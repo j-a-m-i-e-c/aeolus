@@ -426,6 +426,7 @@ export class CommandService {
       requiredTier: tier === "acknowledged" ? "acknowledged" : "observed",
       ...(confirm ? { condition: confirm.condition } : {}),
       timeoutMs,
+      ...(ackCapability?.ackIndicatorField ? { ackIndicatorField: ackCapability.ackIndicatorField } : {}),
       ...(ackCapability?.ackIndicatorValues ? { ackIndicatorValues: ackCapability.ackIndicatorValues } : {}),
     });
 
@@ -462,10 +463,14 @@ export class CommandService {
 
     const dispatchData = dispatchResult && dispatchResult.success ? dispatchResult.data : undefined;
 
-    // Dispatch accepted → DISPATCHED (non-terminal for a tracked command). The
-    // intermediate ACKNOWLEDGED (when waiting for OBSERVED) is recorded by the
-    // tracker's transition hook in Task 4; store idempotency dedupes overlap.
-    recordTransition("DISPATCHED", false, { success: true });
+    // Dispatch accepted → DISPATCHED (non-terminal for a tracked command).
+    // `success` is deliberately left UNSET here: the command has not terminated
+    // (terminal_at is still null), so recording success=true would let a Phase 4
+    // UI read an in-flight command as already succeeded. Success is stamped only
+    // by the terminal transition below. The intermediate ACKNOWLEDGED (when
+    // waiting for OBSERVED) is recorded by the tracker's transition hook; store
+    // idempotency dedupes overlap.
+    recordTransition("DISPATCHED", false);
 
     // Await the terminal resolution (ack and/or observe). A fast ack may have
     // already resolved this promise during dispatch above.

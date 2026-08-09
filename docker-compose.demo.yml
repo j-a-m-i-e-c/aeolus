@@ -45,24 +45,24 @@ services:
   # never runs it (the base compose has no simulator service and the process is
   # off unless AEOLUS_SIMULATOR_ENABLED=true — Req 10.1, 10.8).
   #
-  # Runs from source via tsx (the same mounted-repo pattern as the seed job) so
-  # no separate build image is required for the demo/testing overlay.
+  # Runs the SAME built image as the backend (aeolus-app:local, produced by the
+  # backend build) with a different command: the compiled `dist/simulator/index.js`.
+  # This makes the simulator a real deployable component — production dependencies
+  # are already installed in the image and nothing is fetched or transpiled at
+  # runtime (no mounted source, no `npx tsx`).
   simulator:
-    image: node:22.22.1-slim
+    image: aeolus-app:local
     container_name: aeolus-simulator
     restart: unless-stopped
     # Host networking so the simulator reaches the broker on localhost:1883, the
     # same way the host-networked backend does. It publishes no ports of its own.
     network_mode: host
-    working_dir: /repo
-    volumes:
-      - .:/repo
     environment:
       AEOLUS_SIMULATOR_ENABLED: "true"
       AEOLUS_SIMULATOR_SCENARIOS: "reference-water"
       MQTT_BROKER_URL: mqtt://localhost:1883
       AEOLUS_SIMULATOR_LOG_LEVEL: ${AEOLUS_SIMULATOR_LOG_LEVEL:-info}
-    entrypoint: ["npx", "tsx", "src/simulator/index.ts"]
+    command: ["node", "dist/simulator/index.js"]
     depends_on:
       - mosquitto
       - backend

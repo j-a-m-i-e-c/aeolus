@@ -147,10 +147,13 @@ async function startDockerBroker(): Promise<DockerBroker> {
 }
 
 /**
- * Create a fully wired simulator E2E environment. `ackDelayMs` delays the pump
- * ACK so the flow observation reliably precedes it for OBSERVED-tier tests.
+ * Create a fully wired simulator E2E environment. `observationDelayMs` delays
+ * the pump's flow observation so it is published strictly AFTER the ACK, making
+ * the observed-tier lifecycle (DISPATCHED → ACKNOWLEDGED → OBSERVED) genuine
+ * rather than reached off an ack that carried the state. Defaults to the
+ * scenario's own default when omitted.
  */
-export async function createSimulatorE2E(options: { ackDelayMs?: number } = {}): Promise<SimulatorE2E> {
+export async function createSimulatorE2E(options: { observationDelayMs?: number } = {}): Promise<SimulatorE2E> {
   const broker = await startDockerBroker();
   const brokerUrl = `mqtt://127.0.0.1:${broker.port}`;
   const logger = createSimulatorLogger("silent");
@@ -214,7 +217,11 @@ export async function createSimulatorE2E(options: { ackDelayMs?: number } = {}):
 
   const simConfig = loadSimulatorConfig({ AEOLUS_SIMULATOR_ENABLED: "true", MQTT_BROKER_URL: brokerUrl, AEOLUS_SIMULATOR_CLIENT_ID: "sim-e2e" });
   const simulator = new SimulatorRuntime(simConfig, logger);
-  simulator.loadScenario(createReferenceWaterScenario({ ackDelayMs: options.ackDelayMs ?? 0 }));
+  simulator.loadScenario(
+    createReferenceWaterScenario(
+      options.observationDelayMs !== undefined ? { observationDelayMs: options.observationDelayMs } : {},
+    ),
+  );
   await simulator.start();
 
   const controlClient = await new Promise<MqttClient>((resolve, reject) => {

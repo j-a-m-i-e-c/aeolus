@@ -30,7 +30,9 @@ function setup() {
     maxDelayMs: 5000,
   });
   const faults = new FaultController({ maxDelayMs: 5000, logger: stubLogger() });
-  const scenario = createReferenceWaterScenario();
+  // Publish the flow observation synchronously in these unit tests — ordering
+  // relative to the ACK is exercised by the vertical E2E, not here.
+  const scenario = createReferenceWaterScenario({ observationDelayMs: 0 });
   for (const def of scenario.devices) registry.register(def);
 
   const fire = async (name: string): Promise<void> => {

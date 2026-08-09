@@ -41,7 +41,7 @@ describeE2E("Phase 2 reference-water vertical E2E", () => {
   let env: SimulatorE2E;
 
   beforeEach(async () => {
-    env = await createSimulatorE2E({ ackDelayMs: 40 });
+    env = await createSimulatorE2E();
   }, 30000);
 
   afterEach(async () => {
@@ -97,7 +97,17 @@ describeE2E("Phase 2 reference-water vertical E2E", () => {
     // Exactly one durable command for this rule, ending OBSERVED.
     const forRule = env.store.list({ ruleId: RULE_ID });
     expect(forRule).toHaveLength(1);
-    expect(record?.transitions.at(-1)?.toState).toBe("OBSERVED");
+
+    // The command genuinely walked the full observed-tier lifecycle: the ACK
+    // advanced it to ACKNOWLEDGED and only the later, independent flow report
+    // advanced it to OBSERVED. A plain ack no longer smuggles the observation,
+    // so ACKNOWLEDGED is a real, recorded step (not skipped).
+    expect(record?.transitions.map((t) => t.toState)).toEqual([
+      "REQUESTED",
+      "DISPATCHED",
+      "ACKNOWLEDGED",
+      "OBSERVED",
+    ]);
 
     // The physical world really moved: the flow sensor reported a transfer.
     expect(Number(env.registry.getById(FLOW)?.state.litresPerMinute)).toBeGreaterThan(0);

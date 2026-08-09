@@ -20,9 +20,28 @@ export interface AckMessage {
   success?: boolean;
   /** Device-supplied reason when {@link success} is `false`. */
   error?: string;
-  /** Acknowledgement_Indicator value (e.g. status="executed"). Non-empty = ack. */
+  /**
+   * Convenience extraction of the default acknowledgement indicator
+   * (`payload.status`). Non-empty counts as an ack when no explicit
+   * {@link PendingCommand.ackIndicatorField} is configured. For an arbitrary
+   * configured indicator field the tracker reads {@link payload} directly.
+   */
   status?: string;
-  /** Observation_Indicator payload / device state (e.g. { state: "running" }). */
+  /**
+   * The full parsed JSON ack body, when the reply was a JSON object. Used to
+   * read a device-configured acknowledgement indicator field (e.g.
+   * `ackIndicatorField: "result"`). Never itself treated as an observation.
+   */
+  payload?: Record<string, unknown>;
+  /**
+   * A settled observation the device explicitly supplied alongside its ack, in
+   * a dedicated `state` object (e.g. `{ correlationId, success, state: { running: true } }`).
+   *
+   * This is ONLY set when the device deliberately reports observed state on the
+   * ack channel — a plain `{ success: true }` ack carries no observation and must
+   * NOT be evaluated against an observation predicate. Ambient observation still
+   * arrives through {@link PendingCommandTracker.observeState} from device state.
+   */
   state?: Record<string, unknown>;
 }
 
@@ -47,8 +66,14 @@ export interface PendingCommand {
   /** Timeout in ms before the command transitions to TIMED_OUT. */
   timeoutMs: number;
   /**
+   * Name of the ack-payload field whose value confirms receipt. Defaults to
+   * `"status"`. Lets arbitrary MQTT hardware acknowledge through a custom field
+   * (e.g. `{ result: "executed" }` with `ackIndicatorField: "result"`).
+   */
+  ackIndicatorField?: string;
+  /**
    * Acknowledgement_Indicator values that count as an ack. When omitted, any
-   * non-empty {@link AckMessage.status} counts as acknowledgement.
+   * non-empty indicator-field value counts as acknowledgement.
    */
   ackIndicatorValues?: string[];
 }
@@ -282,14 +307,32 @@ export class PendingCommandTracker {
   /** True when the message's acknowledgement indicator confirms receipt. */
   private isAcknowledgement(message: AckMessage, command: PendingCommand): boolean {
     // `success: true` is Aeolus' documented acknowledgement protocol. It is
-    // independent of connector-specific legacy status values.
+    // independent of connector-specific/custom indicator-field values.
     if (message.success === true) return true;
 
-    if (message.status === undefined || message.status === "") return false;
+    const indicator = this.ackIndicatorValue(message, command);
+    if (indicator === undefined || indicator === "") return false;
     if (command.ackIndicatorValues && command.ackIndicatorValues.length > 0) {
-      return command.ackIndicatorValues.includes(message.status);
+      return command.ackIndicatorValues.includes(indicator);
     }
     return true;
+  }
+
+  /**
+   * Read the acknowledgement indicator value from the ack message using the
+   * command's configured {@link PendingCommand.ackIndicatorField} (default
+   * `"status"`). Prefers the value carried in the full parsed {@link
+   * AckMessage.payload}; falls back to the pre-extracted {@link
+   * AckMessage.status} for the default field (so callers that build an
+   * AckMessage with only `status` still work). Only string indicator values are
+   * honoured.
+   */
+  private ackIndicatorValue(message: AckMessage, command: PendingCommand): string | undefined {
+    const field = command.ackIndicatorField ?? "status";
+    const fromPayload = message.payload?.[field];
+    if (typeof fromPayload === "string") return fromPayload;
+    if (field === "status" && typeof message.status === "string") return message.status;
+    return undefined;
   }
 
   /** Resolve an entry to a terminal state (guarded by the transition table). */

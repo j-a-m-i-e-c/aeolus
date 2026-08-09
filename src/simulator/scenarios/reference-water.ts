@@ -92,7 +92,16 @@ export interface ReferenceWaterOptions {
   refillPct?: number;
   /** Source-tank level percentage points removed per pump-on command. */
   drainPct?: number;
-  /** ACK delay (ms) so the flow observation reliably precedes the ACK. */
+  /**
+   * Delay (ms) applied to the flow observation so it is published strictly
+   * AFTER the (immediate) ACK. This models real hardware — a pump acknowledges
+   * the command first, and the independent flow sensor only reports the physical
+   * transfer a moment later — and makes the observed-tier lifecycle genuine:
+   * DISPATCHED → ACKNOWLEDGED (on the ack) → OBSERVED (on the later flow report),
+   * rather than reaching OBSERVED off an ack that smuggled the state.
+   */
+  observationDelayMs?: number;
+  /** Optional ACK delay (ms), used by fault/timeout tests. Default 0 (immediate ACK). */
   ackDelayMs?: number;
 }
 
@@ -126,7 +135,7 @@ class ReferenceWaterEnvironment {
   }
 
   /** Apply the pump's physical effect to the flow and tank sensors. */
-  applyPump(on: boolean, options: Required<Pick<ReferenceWaterOptions, "flowRateLpm" | "refillPct" | "drainPct">>): void {
+  applyPump(on: boolean, options: Required<Pick<ReferenceWaterOptions, "flowRateLpm" | "refillPct" | "drainPct" | "observationDelayMs">>): void {
     const flow = this.controller(DEVICE_KEYS.flow);
     if (!on) {
       flow?.update({ litresPerMinute: 0 });
@@ -153,7 +162,15 @@ class ReferenceWaterEnvironment {
       this.suppressNextFlow = false;
       return;
     }
-    flow?.update({ litresPerMinute: options.flowRateLpm });
+    // Publish the flow report AFTER the ACK: the command router publishes the
+    // (immediate) ACK as soon as onCommand returns, while this observation is
+    // delayed, so Aeolus reaches ACKNOWLEDGED on the ack and only then OBSERVED
+    // on the flow report. The scenario no longer depends on state-before-ACK
+    // ordering to smuggle an observation onto the ack channel.
+    flow?.update(
+      { litresPerMinute: options.flowRateLpm },
+      options.observationDelayMs > 0 ? { delayMs: options.observationDelayMs } : {},
+    );
   }
 }
 
@@ -168,6 +185,7 @@ export function createReferenceWaterScenario(options: ReferenceWaterOptions = {}
     flowRateLpm: options.flowRateLpm ?? 120,
     refillPct: options.refillPct ?? 40,
     drainPct: options.drainPct ?? 10,
+    observationDelayMs: options.observationDelayMs ?? 50,
   };
   const ackDelayMs = options.ackDelayMs ?? 0;
   const env = new ReferenceWaterEnvironment();
@@ -212,8 +230,10 @@ export function createReferenceWaterScenario(options: ReferenceWaterOptions = {}
           if (typeof on !== "boolean") {
             return { accepted: false, error: "transfer-pump command requires a boolean 'on' parameter" };
           }
-          // Apply the physical effect first so the flow observation is published
-          // before the ACK (deterministic ordering for OBSERVED-tier tests).
+          // Schedule the physical effect. The flow observation is published on a
+          // delay (see applyPump) so it lands AFTER the ACK the router is about
+          // to publish — the ACK is a plain acknowledgement and the flow sensor
+          // is the independent observation, exactly as real hardware behaves.
           env.applyPump(on, settings);
           return {
             accepted: true,

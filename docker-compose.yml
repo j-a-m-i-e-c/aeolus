@@ -72,6 +72,10 @@ services:
       args:
         BUILD_COMMIT: ${BUILD_COMMIT:-unknown}
         BUILD_DATE: ${BUILD_DATE:-unknown}
+    # Tagged so other services (e.g. the demo simulator overlay) can run the same
+    # built artifact with a different command instead of rebuilding or running
+    # from source.
+    image: aeolus-app:local
     container_name: aeolus-backend
     restart: unless-stopped
     # Host networking allows UDP broadcast for Kasa device discovery

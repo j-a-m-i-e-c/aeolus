@@ -84,13 +84,20 @@ export class SimulatorRuntime {
     return this.client;
   }
 
-  /** Load the scenarios named in the configuration (AEOLUS_SIMULATOR_SCENARIOS). */
+  /**
+   * Load the scenarios named in the configuration (AEOLUS_SIMULATOR_SCENARIOS).
+   *
+   * An explicitly requested scenario that does not exist is a configuration
+   * error: startup fails loudly rather than silently running an empty simulator
+   * that would leave every dependent automation timing out (Req 6.4).
+   */
   loadConfiguredScenarios(): void {
     for (const key of this.config.scenarios) {
       const scenario = createScenario(key);
       if (!scenario) {
-        this.logger.warn({ scenario: key }, "Unknown simulator scenario; skipping");
-        continue;
+        throw new Error(
+          `Unknown simulator scenario "${key}". Set AEOLUS_SIMULATOR_SCENARIOS to known scenario keys.`,
+        );
       }
       this.loadScenario(scenario);
       this.logger.info({ scenario: key, devices: scenario.devices.length }, "Loaded simulator scenario");

@@ -12,6 +12,7 @@ import {
 interface FakeDevice {
   id: string;
   integration: string;
+  topic?: string;
   mqttCommandProfile?: unknown;
 }
 
@@ -59,15 +60,25 @@ describe("profileMatches", () => {
 
 describe("configureSimulatedCommandProfiles", () => {
   it("configures a device that has no profile yet", async () => {
-    const { client, set } = fakeClient([[{ id: PUMP_ID, integration: "mqtt" }]]);
+    const { client, set } = fakeClient([[{ id: PUMP_ID, integration: "mqtt", topic: PUMP_STATE }]]);
     const result = await configureSimulatedCommandProfiles(client, [{ stateTopic: PUMP_STATE, profile: ackProfile }], silentOpts);
     expect(result.configured).toEqual([PUMP_ID]);
     expect(result.skipped).toEqual([]);
     expect(set).toEqual([{ id: PUMP_ID, profile: ackProfile }]);
   });
 
+  it("resolves the device by its persisted state topic, not a reconstructed id (collision-safe)", async () => {
+    // Aeolus assigned a collision-suffixed id that a naive segment-join would
+    // never produce. Resolution must still find it via the exact persisted topic.
+    const collisionId = `mqtt-${PUMP_ID}-deadbeefcafe`;
+    const { client, set } = fakeClient([[{ id: collisionId, integration: "mqtt", topic: PUMP_STATE }]]);
+    const result = await configureSimulatedCommandProfiles(client, [{ stateTopic: PUMP_STATE, profile: ackProfile }], silentOpts);
+    expect(result.configured).toEqual([collisionId]);
+    expect(set).toEqual([{ id: collisionId, profile: ackProfile }]);
+  });
+
   it("is idempotent: skips a device whose profile already matches", async () => {
-    const { client, set } = fakeClient([[{ id: PUMP_ID, integration: "mqtt", mqttCommandProfile: ackProfile }]]);
+    const { client, set } = fakeClient([[{ id: PUMP_ID, integration: "mqtt", topic: PUMP_STATE, mqttCommandProfile: ackProfile }]]);
     const result = await configureSimulatedCommandProfiles(client, [{ stateTopic: PUMP_STATE, profile: ackProfile }], silentOpts);
     expect(result.skipped).toEqual([PUMP_ID]);
     expect(result.configured).toEqual([]);
@@ -76,7 +87,7 @@ describe("configureSimulatedCommandProfiles", () => {
 
   it("polls until the device is discovered", async () => {
     // First list has no devices; second reveals the pump.
-    const { client, set, calls } = fakeClient([[], [{ id: PUMP_ID, integration: "mqtt" }]]);
+    const { client, set, calls } = fakeClient([[], [{ id: PUMP_ID, integration: "mqtt", topic: PUMP_STATE }]]);
     const sleep = vi.fn(async () => undefined);
     let clock = 0;
     const result = await configureSimulatedCommandProfiles(client, [{ stateTopic: PUMP_STATE, profile: ackProfile }], {
@@ -102,14 +113,14 @@ describe("configureSimulatedCommandProfiles", () => {
         now: () => (clock += 100), // jumps past the deadline immediately
         sleep: async () => undefined,
       }),
-    ).rejects.toThrow(new RegExp(PUMP_ID));
+    ).rejects.toThrow(new RegExp(PUMP_STATE));
   });
 
   it("only touches devices named in the specs", async () => {
     const { client, set } = fakeClient([
       [
-        { id: PUMP_ID, integration: "mqtt" },
-        { id: "sensor-unrelated-thing", integration: "mqtt" },
+        { id: PUMP_ID, integration: "mqtt", topic: PUMP_STATE },
+        { id: "sensor-unrelated-thing", integration: "mqtt", topic: "sensor/unrelated/thing" },
       ],
     ]);
     await configureSimulatedCommandProfiles(client, [{ stateTopic: PUMP_STATE, profile: ackProfile }], silentOpts);
@@ -117,7 +128,7 @@ describe("configureSimulatedCommandProfiles", () => {
   });
 
   it("throws when a resolved device is not an MQTT device", async () => {
-    const { client } = fakeClient([[{ id: PUMP_ID, integration: "hue" }]]);
+    const { client } = fakeClient([[{ id: PUMP_ID, integration: "hue", topic: PUMP_STATE }]]);
     await expect(
       configureSimulatedCommandProfiles(client, [{ stateTopic: PUMP_STATE, profile: ackProfile }], silentOpts),
     ).rejects.toThrow(/not an MQTT device/i);

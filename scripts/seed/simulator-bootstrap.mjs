@@ -77,7 +77,7 @@ export function profileMatches(existing, desired) {
 
 /**
  * @typedef {Object} BootstrapClient
- * @property {() => Promise<Array<{id: string, integration: string, mqttCommandProfile?: any}>>} listDevices
+ * @property {() => Promise<Array<{id: string, integration: string, topic?: string, mqttCommandProfile?: any}>>} listDevices
  * @property {(id: string, profile: any) => Promise<void>} setCommandProfile
  */
 
@@ -103,13 +103,13 @@ export async function configureSimulatedCommandProfiles(client, specs, options =
   const sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
   const logger = options.logger ?? console;
 
-  /** @type {Map<string, ActuatorSpec & {id: string}>} */
-  const pending = new Map(
-    specs.map((spec) => {
-      const id = deviceIdFromStateTopic(spec.stateTopic);
-      return [id, { ...spec, id }];
-    }),
-  );
+  // Key pending work by the canonical state topic. Aeolus derives an MQTT
+  // device id from the topic but applies collision handling (a hash suffix on a
+  // slug clash), so the persisted id is authoritative and may differ from a
+  // naive segment-join. We therefore resolve each device by its EXACT persisted
+  // `topic` and use the id Aeolus actually assigned — never a reconstructed one.
+  /** @type {Map<string, ActuatorSpec>} */
+  const pending = new Map(specs.map((spec) => [spec.stateTopic, spec]));
 
   const configured = [];
   const skipped = [];
@@ -117,26 +117,30 @@ export async function configureSimulatedCommandProfiles(client, specs, options =
 
   while (pending.size > 0) {
     const devices = await client.listDevices();
-    const byId = new Map(devices.map((device) => [device.id, device]));
+    const byTopic = new Map(
+      devices.filter((device) => typeof device.topic === "string").map((device) => [device.topic, device]),
+    );
 
-    for (const [id, spec] of [...pending]) {
-      const device = byId.get(id);
+    for (const [stateTopic, spec] of [...pending]) {
+      const device = byTopic.get(stateTopic);
       if (!device) continue; // not discovered yet
 
       if (device.integration !== "mqtt") {
-        throw new Error(`Simulator bootstrap: device "${id}" is not an MQTT device (integration=${device.integration})`);
+        throw new Error(
+          `Simulator bootstrap: device for topic "${stateTopic}" is not an MQTT device (id=${device.id}, integration=${device.integration})`,
+        );
       }
 
       if (profileMatches(device.mqttCommandProfile, spec.profile)) {
-        skipped.push(id);
-        pending.delete(id);
+        skipped.push(device.id);
+        pending.delete(stateTopic);
         continue;
       }
 
-      await client.setCommandProfile(id, spec.profile);
-      configured.push(id);
-      pending.delete(id);
-      logger.info?.(`  ✓ Simulator command profile configured: ${id}`);
+      await client.setCommandProfile(device.id, spec.profile);
+      configured.push(device.id);
+      pending.delete(stateTopic);
+      logger.info?.(`  ✓ Simulator command profile configured: ${device.id} (${stateTopic})`);
     }
 
     if (pending.size === 0) break;

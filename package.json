@@ -19,7 +19,7 @@
   },
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsup src/index.ts --format esm --target node22 --external isolated-vm --external better-sqlite3 --external bcrypt --external esbuild",
+    "build": "tsup src/index.ts src/simulator/index.ts --format esm --target node22 --external isolated-vm --external better-sqlite3 --external bcrypt --external esbuild",
     "start": "node dist/index.js",
     "sim": "tsx src/simulator/index.ts",
     "sim:watch": "tsx watch src/simulator/index.ts",

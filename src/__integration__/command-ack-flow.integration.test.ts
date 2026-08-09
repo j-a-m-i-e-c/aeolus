@@ -176,6 +176,52 @@ describe("Command → Ack Flow Integration (Req 13)", () => {
     });
   });
 
+  it("acknowledges through a device-configured ackIndicatorField ({ result: 'executed' })", async () => {
+    // Arbitrary MQTT hardware that confirms via a custom field/value rather than
+    // the documented `success: true`. The profile names the field and the values
+    // that count as an ack; the ack body carries NO `success` field.
+    const connectorManager = {
+      executeAction: vi.fn().mockResolvedValue({ success: true }),
+      getAcknowledgementCapability: vi.fn().mockReturnValue({
+        supported: true,
+        responseTopic: "aeolus/acks/dev-1",
+        ackIndicatorField: "result",
+        ackIndicatorValues: ["executed"],
+      }),
+    };
+    const svc = new CommandService({
+      mqttService,
+      connectorManager: connectorManager as unknown as CommandServiceDeps["connectorManager"],
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } as unknown as CommandServiceDeps["logger"],
+      pendingCommandTracker: tracker,
+      ackResponseTopicBase: "aeolus/acks",
+    });
+
+    svc.registerHandler("device_action", (action: ActionDescriptor) => {
+      process.nextTick(() => {
+        const messageHandler = fakeClient.listeners("message")[0] as (
+          topic: string,
+          payload: Buffer,
+          packet: unknown,
+        ) => void;
+        messageHandler(
+          "aeolus/acks/dev-1",
+          Buffer.from(JSON.stringify({ correlationId: action.correlation?.correlationId, result: "executed" })),
+          { properties: {} },
+        );
+      });
+      return { success: true };
+    });
+
+    const result = await svc.execute(
+      { type: "device_action", target: "dev-1", params: { command: "turn_on" } },
+      "rule-ack-indicator-field",
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.lifecycleState).toBe("ACKNOWLEDGED");
+  });
+
   it("tracked command resolves as TIMED_OUT when no ack arrives (Req 13.4)", async () => {
     vi.useFakeTimers();
 
