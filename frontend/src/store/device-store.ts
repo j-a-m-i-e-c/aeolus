@@ -10,6 +10,10 @@ export interface Device {
   state: Record<string, unknown>;
   integration: string;
   lastSeen: number;
+  /** MQTT state topic, present for MQTT-sourced devices. */
+  topic?: string;
+  /** MQTT command topic, when explicitly known. */
+  commandTopic?: string;
 }
 
 export interface HealthStatus {

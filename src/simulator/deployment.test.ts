@@ -44,7 +44,7 @@ describe("simulator deployment guardrails", () => {
     const block = serviceBlock(demoCompose, "simulator");
     expect(block).toBeDefined();
     expect(block).toContain('AEOLUS_SIMULATOR_ENABLED: "true"');
-    expect(block).toContain("reference-water");
+    expect(block).toContain("agriculture");
   });
 
   it("never publishes a port for the simulator (no public exposure)", () => {

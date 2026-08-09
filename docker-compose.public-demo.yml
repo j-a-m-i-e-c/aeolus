@@ -135,7 +135,7 @@ services:
       - demo
     environment:
       AEOLUS_SIMULATOR_ENABLED: "true"
-      AEOLUS_SIMULATOR_SCENARIOS: ${AEOLUS_SIMULATOR_SCENARIOS:-reference-water}
+      AEOLUS_SIMULATOR_SCENARIOS: ${AEOLUS_SIMULATOR_SCENARIOS:-agriculture}
       MQTT_BROKER_URL: mqtt://mosquitto:1883
       AEOLUS_SIMULATOR_LOG_LEVEL: ${AEOLUS_SIMULATOR_LOG_LEVEL:-info}
     command: ["node", "dist/simulator/index.js"]

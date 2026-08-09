@@ -33,8 +33,8 @@ import { tabModules } from "./seed/tabs/index.mjs";
 import {
   createBootstrapClient,
   configureSimulatedCommandProfiles,
-  REFERENCE_WATER_ACTUATOR_SPECS,
 } from "./seed/simulator-bootstrap.mjs";
+import { AGRICULTURE_ACTUATOR_SPECS } from "./seed/agriculture-simulator-bootstrap.mjs";
 
 const API = process.argv[2] || "http://localhost:3001";
 const USER = process.argv[3] || "admin";
@@ -114,7 +114,7 @@ if (process.env.AEOLUS_SIMULATOR_BOOTSTRAP === "true") {
     const bootstrapClient = createBootstrapClient(api);
     const { configured, skipped } = await configureSimulatedCommandProfiles(
       bootstrapClient,
-      REFERENCE_WATER_ACTUATOR_SPECS,
+      AGRICULTURE_ACTUATOR_SPECS,
       { timeoutMs: 30000, pollMs: 1000 },
     );
     console.log(`  ✓ Simulated actuators — configured: ${configured.length}, already-current: ${skipped.length}`);
