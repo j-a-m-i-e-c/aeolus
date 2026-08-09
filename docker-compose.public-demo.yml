@@ -1,0 +1,199 @@
+# docker-compose.public-demo.yml — Hardened public demo deployment (standalone).
+#
+# This is the PUBLIC, internet-facing demo stack for demo.aeolus.com.au. It is a
+# self-contained compose file (NOT an overlay of docker-compose.yml) because the
+# base stack uses host networking for LAN device discovery, and the public demo
+# must NOT use host networking (Public Demo requirements §13, §21). Run it on the
+# demo VM by itself:
+#
+#   CLOUDFLARE_TUNNEL_TOKEN=... DEMO_PUBLIC_ORIGIN=https://demo.aeolus.com.au \
+#     docker compose -f docker-compose.public-demo.yml up -d --build
+#
+# For LOCAL demo-mode testing (no tunnel, no hardening) keep using the base stack
+# with the AEOLUS_PUBLIC_DEMO flag or the docker-compose.demo.yml testing overlay.
+#
+# Hardening (requirements §13, §17, §21, §22):
+#   - bridge networking only; NO host networking; NO LAN discovery
+#   - the MQTT broker is INTERNAL only — port 1883 is never published
+#   - the backend and frontend publish NO host ports; Cloudflare Tunnel is the
+#     sole public ingress (no 80/443/1883/backend/DB exposed on the VM)
+#   - no Docker socket is mounted into any container
+#   - every service runs with `no-new-privileges`, drops all Linux capabilities,
+#     and has memory/CPU ceilings so a visitor cannot exhaust the VM
+#   - the app mounts only the ACTIVE database directory; the immutable golden
+#     snapshot is never mounted, so the running app can never mutate it
+#     (reset copies golden -> active on the host — see scripts/reset-demo.sh)
+#
+# Nothing here weakens the in-app fail-closed PublicDemoGuard; this file provides
+# the isolated, disposable environment the guard assumes.
+
+name: aeolus-public-demo
+
+x-hardening: &hardening
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+services:
+  # Internal MQTT broker. No published port: reachable only by other services on
+  # the demo network. Anonymous is fine because it is unreachable from outside
+  # the compose network and holds no real credentials or devices.
+  mosquitto:
+    <<: *hardening
+    image: eclipse-mosquitto:2
+    container_name: aeolus-demo-mosquitto
+    # Dedicated demo broker config (anonymous, ephemeral). Read-only mount.
+    volumes:
+      - ./mosquitto/mosquitto.demo.conf:/mosquitto/config/mosquitto.conf:ro
+    networks:
+      - demo
+    mem_limit: 128m
+    cpus: 0.5
+
+  # Aeolus backend in public-demo mode. Bridge networking only, no published
+  # ports, production node env, and the fail-closed demo guard enabled.
+  backend:
+    <<: *hardening
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BUILD_COMMIT: ${BUILD_COMMIT:-unknown}
+        BUILD_DATE: ${BUILD_DATE:-unknown}
+    image: aeolus-app:local
+    container_name: aeolus-demo-backend
+    networks:
+      - demo
+    environment:
+      NODE_ENV: production
+      PORT: "3001"
+      # Fail-closed public demo capability envelope (Phase A).
+      AEOLUS_PUBLIC_DEMO: "true"
+      DEMO_SESSION_MINUTES: ${DEMO_SESSION_MINUTES:-120}
+      DEMO_RESET_TIME: ${DEMO_RESET_TIME:-03:30}
+      # Internal broker over the demo network (service name, not localhost).
+      MQTT_BROKER_URL: mqtt://mosquitto:1883
+      MQTT_TOPICS: "#"
+      DB_PATH: /app/data/aeolus.db
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      # Dedicated public-demo rate limit ceiling (application-level; not reliant
+      # on Cloudflare — requirements §16).
+      RATE_LIMIT_RPM: ${RATE_LIMIT_RPM:-600}
+      # Managed MQTT provisioning stays OFF: the demo never writes broker files
+      # and mounts no shared mosquitto config, so there is no reload path.
+    depends_on:
+      mosquitto:
+        condition: service_started
+    volumes:
+      # ACTIVE database directory ONLY. The immutable golden snapshot is never
+      # mounted here, so the running app cannot modify it (requirements §18, §13).
+      - ${AEOLUS_DEMO_DATA_DIR:-./demo-data}:/app/data
+    mem_limit: 768m
+    cpus: 1.5
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "-O", "/dev/null", "http://localhost:3001/api/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+
+  # Static React dashboard built in demo mode and pointed at the public tunnel
+  # origin (single origin: the tunnel path-routes /api and /ws to the backend).
+  frontend:
+    <<: *hardening
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_PUBLIC_DEMO: "true"
+        VITE_API_URL: ${DEMO_PUBLIC_ORIGIN:-https://demo.aeolus.com.au}
+        VITE_WS_URL: ${DEMO_PUBLIC_WS_URL:-wss://demo.aeolus.com.au/ws}
+    image: aeolus-demo-frontend:local
+    container_name: aeolus-demo-frontend
+    networks:
+      - demo
+    depends_on:
+      - backend
+    mem_limit: 128m
+    cpus: 0.5
+
+  # Simulated hardware runtime — the SAME built backend image, running the
+  # compiled simulator entrypoint. Speaks only MQTT to the internal broker; holds
+  # no admin credentials and exposes no ports.
+  simulator:
+    <<: *hardening
+    image: aeolus-app:local
+    container_name: aeolus-demo-simulator
+    networks:
+      - demo
+    environment:
+      AEOLUS_SIMULATOR_ENABLED: "true"
+      AEOLUS_SIMULATOR_SCENARIOS: ${AEOLUS_SIMULATOR_SCENARIOS:-reference-water}
+      MQTT_BROKER_URL: mqtt://mosquitto:1883
+      AEOLUS_SIMULATOR_LOG_LEVEL: ${AEOLUS_SIMULATOR_LOG_LEVEL:-info}
+    command: ["node", "dist/simulator/index.js"]
+    depends_on:
+      - mosquitto
+      - backend
+    mem_limit: 256m
+    cpus: 0.5
+
+  # Cloudflare Tunnel — the ONLY public ingress. It makes outbound connections to
+  # Cloudflare (no inbound ports on the VM). Public-hostname ingress rules are
+  # configured in the Cloudflare dashboard for the token's tunnel and should route
+  # the demo hostname's `/api/*` and `/ws` to http://backend:3001 and everything
+  # else to http://frontend:80. Provide the token via CLOUDFLARE_TUNNEL_TOKEN.
+  cloudflared:
+    <<: *hardening
+    image: cloudflare/cloudflared:latest
+    container_name: aeolus-demo-cloudflared
+    command: ["tunnel", "--no-autoupdate", "run"]
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?set CLOUDFLARE_TUNNEL_TOKEN to the demo tunnel token}
+    networks:
+      - demo
+    depends_on:
+      - frontend
+      - backend
+    mem_limit: 128m
+    cpus: 0.5
+
+  # One-shot seeder (profile: not started by `up`). Creates the admin + public
+  # demo identity and configures simulated command profiles, then you snapshot
+  # the resulting DB as the golden database. Runs from the mounted repo because
+  # the built image does not ship scripts/. Talks to the backend over the demo
+  # network. Run once when building the golden snapshot:
+  #   docker compose -f docker-compose.public-demo.yml --profile seed \
+  #     run --rm -e SEED_PASS=... seed
+  seed:
+    profiles: ["seed"]
+    image: node:22.22.1-slim
+    working_dir: /repo
+    volumes:
+      - .:/repo
+    environment:
+      SEED_USER: ${SEED_USER:-admin}
+      SEED_PASS: ${SEED_PASS:-}
+      AEOLUS_PUBLIC_DEMO: "true"
+      AEOLUS_SIMULATOR_BOOTSTRAP: "true"
+    entrypoint: ["sh", "-c", "node scripts/seed-demo.mjs http://backend:3001 \"$$SEED_USER\" \"$$SEED_PASS\""]
+    networks:
+      - demo
+    depends_on:
+      - backend
+
+# The demo broker is intentionally ephemeral (persistence off) and the active
+# database lives in a host bind mount (AEOLUS_DEMO_DATA_DIR), so no named volumes
+# are needed. Broker state clears naturally on restart; the active DB is reset
+# from the golden snapshot by scripts/reset-demo.sh.
+
+networks:
+  demo:
+    driver: bridge

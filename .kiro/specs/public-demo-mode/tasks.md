@@ -169,38 +169,75 @@ optional test tasks; the non-`*` tasks are the feature. Every task keeps normal
 
 ## Phase B — Deployment & operations
 
-- [ ] 13. Demo Compose stack
-  - [ ] 13.1 Add `docker-compose.demo.yml` (frontend, backend, mosquitto,
+> **STATUS: artifacts delivered; live cutover pending an operator + demo VM.**
+> The hardened deployment landed as a **separate self-contained file**,
+> `docker-compose.public-demo.yml`, rather than editing the existing
+> `docker-compose.demo.yml` (which the repo documents as the local demo-mode
+> *testing overlay*). This is required: the base backend uses host networking,
+> which cannot be unset via an overlay, and the public demo must use bridge
+> networking (Req 12/14). Delivered:
+> - `docker-compose.public-demo.yml` — mosquitto (internal, `mosquitto.demo.conf`,
+>   no published port), backend (bridge, `NODE_ENV=production`,
+>   `AEOLUS_PUBLIC_DEMO=true`, active-DB-only mount), frontend (bridge, demo build
+>   args), simulator (built image, `dist/simulator/index.js`), `cloudflared`
+>   ingress; every service `no-new-privileges` + `cap_drop: ALL` + `mem_limit`/`cpus`;
+>   no Docker socket; no published ports.
+> - `frontend/Dockerfile` gains `VITE_API_URL`/`VITE_WS_URL` build args for the
+>   single tunnel origin (defaults empty → normal builds unchanged).
+> - `scripts/reset-demo.sh` + `scripts/demo-health-check.sh` (orderly golden→active
+>   reset with the app stopped during the swap; golden never mounted into the app).
+> - `scripts/systemd/aeolus-demo-reset.{service,timer}` (~03:30 Australia/Sydney).
+> - `.github/workflows/deploy-demo.yml` (verify→deploy→health-check, no auto-deploy)
+>   and `reset-demo.yml`, both gated behind the `demo` environment.
+> - `src/simulator/deployment.test.ts` asserts the hardening (no host networking,
+>   no published ports/1883, no Docker socket, no-new-privileges + limits,
+>   production public-demo backend, simulator from the built image).
+> - Docs: `docs/reference/operations.md` "Public demo deployment (hardened)";
+>   demo deployment vars in `.env.example`.
+>
+> **Operator-dependent (cannot be completed from the repo):** the Cloudflare
+> tunnel token + dashboard ingress rules (18.1), the `/opt/aeolus-demo/{golden,data}`
+> layout + golden snapshot on the VM (14.1), GH `demo`-environment secrets for the
+> deploy/reset workflows (17.1), and the live reset/hostile-client passes (20).
+
+- [x] 13. Demo Compose stack
+  - [x] 13.1 Add `docker-compose.public-demo.yml` (frontend, backend, mosquitto,
     cloudflared): bridge networking, `NODE_ENV=production`,
     `AEOLUS_PUBLIC_DEMO=true`, no host networking, no published
     1883/backend/DB ports, `no-new-privileges`, dropped caps, mem/cpu limits, no
-    Docker socket
+    Docker socket. (Delivered as a standalone file, not by mutating the testing
+    overlay — see status note.)
     - _Requirements: 12.1, 12.2, 14.1, 14.2, 11.4_
 
-- [ ] 14. Golden/active database
-  - [ ] 14.1 Establish `/opt/aeolus-demo/{golden,data}`; backend mounts only
-    `data/`; golden mounted read-only or not at all
+- [x] 14. Golden/active database
+  - [x] 14.1 Backend mounts only the active `data/` directory; the golden
+    snapshot is never mounted into the app. The `/opt/aeolus-demo/{golden,data}`
+    layout + snapshot creation are operator steps documented in
+    `operations.md` and defaulted in the reset script.
     - _Requirements: 13.1, 13.2_
 
-- [ ] 15. Manual reset
-  - [ ] 15.1 Add `scripts/reset-demo.sh` (orderly sequence) and
+- [x] 15. Manual reset
+  - [x] 15.1 Add `scripts/reset-demo.sh` (orderly sequence) and
     `scripts/demo-health-check.sh`
     - _Requirements: 13.3, 13.4, 13.5_
 
-- [ ] 16. Nightly reset
-  - [ ] 16.1 Schedule the reset at ~`03:30` Australia/Sydney (cron/systemd timer)
-    with maintenance flag + health gate; safety must not depend on it running
+- [x] 16. Nightly reset
+  - [x] 16.1 Schedule the reset at ~`03:30` Australia/Sydney (systemd timer) with
+    a health gate; safety does not depend on it running. (Frontend maintenance
+    state during the window remains a Phase A frontend follow-on.)
     - _Requirements: 13.3, 13.6_
 
-- [ ] 17. Deploy & reset workflows
-  - [ ] 17.1 Add a `workflow_dispatch` "Deploy Aeolus Demo" (build/publish for a
-    chosen ref → deploy → health check) and an admin-only "Reset Public Demo";
-    no auto-deploy on `main`
+- [x] 17. Deploy & reset workflows
+  - [x] 17.1 Add a `workflow_dispatch` "Deploy Aeolus Demo" (verify a chosen ref
+    → deploy → health check) and an admin-only "Reset Public Demo"; no
+    auto-deploy on `main`. (Requires operator-configured `demo`-environment
+    secrets.)
     - _Requirements: 14.5, 13.5_
 
 - [ ] 18. Cloudflare Tunnel ingress
-  - [ ] 18.1 Configure cloudflared as the sole public ingress; no direct
-    80/443/1883/backend/DB exposure on the VM
+  - [~] 18.1 `cloudflared` is the sole ingress service in the stack (no direct
+    80/443/1883/backend/DB exposure). The tunnel token + dashboard ingress rules
+    are operator configuration (documented in `operations.md`).
     - _Requirements: 14.3_
 
 - [ ] 19. Observability

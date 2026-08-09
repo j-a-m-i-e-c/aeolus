@@ -1,0 +1,84 @@
+name: Deploy Aeolus Demo
+
+# Manual, operator-initiated deploy of the public demo (never auto-deploys on a
+# push to main — requirements §23). The operator chooses the ref; the workflow
+# verifies it, then deploys over SSH and gates on a post-deploy health check.
+#
+# Required repository/environment configuration (set under Settings → Secrets and
+# variables, scoped to the `demo` environment which should require admin review):
+#   secrets.DEMO_SSH_HOST   demo VM hostname / IP
+#   secrets.DEMO_SSH_USER   SSH user on the demo VM
+#   secrets.DEMO_SSH_KEY    private key authorised on the demo VM
+#   vars.DEMO_APP_DIR       absolute path of the checked-out repo on the VM
+#                           (contains docker-compose.public-demo.yml)
+#
+# The demo host holds its own environment (CLOUDFLARE_TUNNEL_TOKEN,
+# DEMO_PUBLIC_ORIGIN, AEOLUS_DEMO_GOLDEN_DB, AEOLUS_DEMO_DATA_DIR) in an .env
+# file next to the compose file — secrets never pass through this workflow.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref (branch, tag, or commit SHA) to deploy"
+        required: true
+        default: main
+
+concurrency:
+  group: deploy-demo
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      - name: TypeScript check
+        run: npx tsc --noEmit
+
+      - name: Build (backend + simulator bundles)
+        run: npm run build
+
+      - name: Tests
+        run: npx vitest run
+
+  deploy:
+    needs: verify
+    runs-on: ubuntu-latest
+    # Gate behind the `demo` environment so a required reviewer must approve
+    # (admin-only deploys). Configure protection rules on the environment.
+    environment: demo
+    steps:
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.DEMO_SSH_KEY }}" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          ssh-keyscan -H "${{ secrets.DEMO_SSH_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Deploy selected ref and health-check
+        env:
+          SSH_HOST: ${{ secrets.DEMO_SSH_HOST }}
+          SSH_USER: ${{ secrets.DEMO_SSH_USER }}
+          APP_DIR: ${{ vars.DEMO_APP_DIR }}
+          DEPLOY_REF: ${{ inputs.ref }}
+        run: |
+          ssh -i ~/.ssh/id_deploy "${SSH_USER}@${SSH_HOST}" bash -ls <<EOF
+          set -euo pipefail
+          cd "${APP_DIR}"
+          git fetch --all --tags
+          git checkout "${DEPLOY_REF}"
+          git pull --ff-only || true
+          docker compose -f docker-compose.public-demo.yml up -d --build
+          ./scripts/demo-health-check.sh
+          EOF

@@ -14,6 +14,7 @@ import { loadSimulatorConfig } from "./config.js";
 const REPO_ROOT = path.resolve(import.meta.dirname, "..", "..");
 const baseCompose = readFileSync(path.join(REPO_ROOT, "docker-compose.yml"), "utf8");
 const demoCompose = readFileSync(path.join(REPO_ROOT, "docker-compose.demo.yml"), "utf8");
+const publicDemoCompose = readFileSync(path.join(REPO_ROOT, "docker-compose.public-demo.yml"), "utf8");
 
 /** Extract the indented block for a named service from a compose file. */
 function serviceBlock(compose: string, service: string): string | undefined {
@@ -51,5 +52,59 @@ describe("simulator deployment guardrails", () => {
     // A published port would appear as a `ports:` key inside the service block.
     expect(/^\s{4}ports:/m.test(block)).toBe(false);
     expect(block).toContain("network_mode: host");
+  });
+});
+
+describe("hardened public demo stack (docker-compose.public-demo.yml)", () => {
+  const backend = serviceBlock(publicDemoCompose, "backend") ?? "";
+  const mosquitto = serviceBlock(publicDemoCompose, "mosquitto") ?? "";
+  const frontend = serviceBlock(publicDemoCompose, "frontend") ?? "";
+  const simulator = serviceBlock(publicDemoCompose, "simulator") ?? "";
+
+  it("defines the full self-contained stack including a Cloudflare Tunnel ingress", () => {
+    expect(serviceBlock(publicDemoCompose, "cloudflared")).toBeDefined();
+    expect(backend).not.toBe("");
+    expect(mosquitto).not.toBe("");
+    expect(frontend).not.toBe("");
+    expect(simulator).not.toBe("");
+  });
+
+  it("never uses host networking (bridge only — requirements §13, §21)", () => {
+    expect(publicDemoCompose).not.toContain("network_mode: host");
+  });
+
+  it("publishes no host ports — Cloudflare Tunnel is the only public ingress", () => {
+    // No `ports:` mapping anywhere; the broker's 1883 is never exposed.
+    expect(/^\s{4}ports:/m.test(publicDemoCompose)).toBe(false);
+    expect(publicDemoCompose).not.toMatch(/1883:1883/);
+    expect(backend).not.toContain("ports:");
+    expect(frontend).not.toContain("ports:");
+    expect(mosquitto).not.toContain("ports:");
+  });
+
+  it("mounts no Docker socket into any container", () => {
+    expect(publicDemoCompose).not.toContain("/var/run/docker.sock");
+  });
+
+  it("applies no-new-privileges, drops capabilities, and sets resource ceilings", () => {
+    expect(publicDemoCompose).toContain("no-new-privileges:true");
+    expect(publicDemoCompose).toContain("cap_drop");
+    expect(publicDemoCompose).toContain("mem_limit");
+    expect(publicDemoCompose).toContain("cpus:");
+  });
+
+  it("runs the backend in production public-demo mode against the internal broker", () => {
+    expect(backend).toContain('AEOLUS_PUBLIC_DEMO: "true"');
+    expect(backend).toContain("NODE_ENV: production");
+    expect(backend).toContain("mqtt://mosquitto:1883");
+    // Active DB directory only; the golden snapshot is never mounted here.
+    expect(backend).toContain("/app/data");
+  });
+
+  it("runs the simulator from the built image, not source", () => {
+    expect(simulator).toContain('command: ["node", "dist/simulator/index.js"]');
+    expect(simulator).toContain('AEOLUS_SIMULATOR_ENABLED: "true"');
+    expect(simulator).not.toContain("npx");
+    expect(simulator).not.toContain("tsx");
   });
 });

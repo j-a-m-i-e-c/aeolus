@@ -91,6 +91,80 @@ make demo-reset     # restart the simulator; it republishes initial state on rec
 
 The reference `reference-water` scenario is a conformance fixture, not a public tab. See `.kiro/specs/phase-2-mqtt-simulator/` for the design and the Phase 3 migration handoff.
 
+## Public demo deployment (hardened)
+
+The public demo (`demo.aeolus.com.au`) runs from a dedicated, self-contained
+stack, **`docker-compose.public-demo.yml`** — not the base compose file. It is
+separate because the base backend uses host networking for LAN discovery, which
+the public demo must not do. The full policy is `docs/AEOLUS_PUBLIC_DEMO_REQUIREMENTS.md`;
+this section is the operational summary.
+
+Bring it up on the demo VM:
+
+```bash
+CLOUDFLARE_TUNNEL_TOKEN=... DEMO_PUBLIC_ORIGIN=https://demo.aeolus.com.au \
+  docker compose -f docker-compose.public-demo.yml up -d --build
+```
+
+What the stack enforces:
+
+- **bridge networking only** — no host networking, no LAN discovery;
+- the **broker is internal** — port `1883` is never published;
+- the backend and frontend **publish no host ports**; **Cloudflare Tunnel**
+  (`cloudflared`) is the sole public ingress. Configure the tunnel's public
+  hostname to route `/api/*` and `/ws` to `http://backend:3001` and everything
+  else to `http://frontend:80` (token-managed tunnels set ingress in the
+  Cloudflare dashboard);
+- every service runs with `no-new-privileges`, drops all Linux capabilities,
+  has `mem_limit`/`cpus` ceilings, and mounts **no Docker socket**;
+- `AEOLUS_PUBLIC_DEMO=true` enables the in-app fail-closed guard; managed MQTT
+  provisioning stays off (no broker files are written).
+
+### Golden / active database and reset
+
+The demo uses two databases (requirements §18):
+
+```text
+/opt/aeolus-demo/
+├── golden/aeolus-demo.db   # immutable known-good snapshot (NOT mounted into the app)
+└── data/aeolus.db          # active, disposable DB the backend actually uses
+```
+
+Only the active directory (`AEOLUS_DEMO_DATA_DIR`) is bind-mounted into the
+backend, so the running application can never mutate the golden snapshot. Build
+the golden snapshot once by seeding (`--profile seed`) and copying the resulting
+`data/aeolus.db` to `golden/`.
+
+`scripts/reset-demo.sh` restores the demo from golden with the orderly sequence
+(stop app services → delete the active DB and its WAL/SHM → copy golden → active
+→ start → health-check via `scripts/demo-health-check.sh`). The database is only
+swapped while the backend is stopped, so it is never overwritten under a running
+Aeolus. Reset is a presentation mechanism, **not** a security control — the demo
+stays safe even if it never runs.
+
+A nightly reset (~03:30 Australia/Sydney) is scheduled with the systemd units in
+`scripts/systemd/` (`aeolus-demo-reset.{service,timer}`):
+
+```bash
+sudo cp scripts/systemd/aeolus-demo-reset.{service,timer} /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now aeolus-demo-reset.timer
+```
+
+### Deploy and manual reset workflows
+
+Two `workflow_dispatch` GitHub Actions drive the demo VM over SSH and are gated
+behind the `demo` environment (require admin review):
+
+- **Deploy Aeolus Demo** (`.github/workflows/deploy-demo.yml`) — verify a chosen
+  ref, then deploy and health-check it. Never auto-runs on `main`.
+- **Reset Public Demo** (`.github/workflows/reset-demo.yml`) — run
+  `reset-demo.sh` on demand (emergency restore).
+
+Both need `secrets.DEMO_SSH_HOST` / `DEMO_SSH_USER` / `DEMO_SSH_KEY` and
+`vars.DEMO_APP_DIR`. The `CLOUDFLARE_TUNNEL_TOKEN` and golden/active paths live
+in an `.env` on the demo host, never in the workflow.
+
 ## Logging
 
 The backend uses pino structured logs.
@@ -131,12 +205,16 @@ GitHub Actions runs:
 - repository-wide ESLint;
 - backend typecheck;
 - backend tests with coverage;
+- broker-backed integration + vertical E2E tests (a dedicated `integration` job
+  on an ubuntu runner that pre-pulls `eclipse-mosquitto:2` and runs the
+  `__integration__` suite — the Docker-gated tests that self-skip on dev
+  machines without Docker);
 - frontend typecheck;
 - frontend tests with coverage.
 
 ### On main pushes
 
-- backend image build;
+- backend image build (gated on the `integration` job);
 - frontend image build.
 
 ### Daily when main changed
