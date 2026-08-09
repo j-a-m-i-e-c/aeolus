@@ -5,9 +5,11 @@
 
 import type { SimulatorScenario } from "../types.js";
 import { createReferenceWaterScenario, REFERENCE_WATER_SCENARIO_KEY } from "./reference-water.js";
+import { createAgricultureScenario, AGRICULTURE_SCENARIO_KEY } from "./agriculture.js";
 
 const SCENARIO_FACTORIES: Record<string, () => SimulatorScenario> = {
   [REFERENCE_WATER_SCENARIO_KEY]: () => createReferenceWaterScenario(),
+  [AGRICULTURE_SCENARIO_KEY]: () => createAgricultureScenario(),
 };
 
 /** True when a scenario key is known. */

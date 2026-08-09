@@ -21,6 +21,10 @@ interface Device {
   integration: string;
   /** Unix timestamp of last state update. */
   lastSeen: number;
+  /** MQTT state topic, present for MQTT-sourced devices. */
+  topic?: string;
+  /** MQTT command topic, when explicitly known. */
+  commandTopic?: string;
 }
 
 /** A single execution log entry for an automation rule. */

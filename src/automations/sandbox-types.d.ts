@@ -33,6 +33,10 @@ interface Device {
   integration: string;
   /** Unix timestamp of last state update. */
   lastSeen: number;
+  /** MQTT state topic, present for MQTT-sourced devices. */
+  topic?: string;
+  /** MQTT command topic, when explicitly known. */
+  commandTopic?: string;
 }
 
 /**
@@ -95,6 +99,21 @@ declare const mqtt: {
    * @param payload - The message payload as a string.
    */
   publish(topic: string, payload: string): void;
+};
+
+
+/**
+ * Emit a constrained automation-to-automation domain event over Aeolus's
+ * reserved MQTT event namespace. The source rule id and causal metadata are
+ * derived by the host and cannot be spoofed by the script.
+ */
+declare const events: {
+  emit(name: string, payload?: unknown): {
+    published: boolean;
+    eventId?: string;
+    topic?: string;
+    error?: string;
+  };
 };
 
 /**
