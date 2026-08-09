@@ -63,13 +63,38 @@ jobs:
       - name: Run tests with coverage
         run: npm run test:coverage
 
-  # End-to-end tests run on a daily schedule (see .github/workflows/e2e.yml).
-  # They're too slow/expensive to run on every push. The daily job checks
-  # whether main has new commits since the last successful run.
+  # Broker-backed integration + vertical E2E tests. These require a real MQTT 5
+  # broker (a throwaway eclipse-mosquitto:2 container) and self-skip anywhere
+  # Docker is unavailable — which is every normal (often Windows) dev machine.
+  # Running them here as an explicit, named check means the most valuable
+  # end-to-end proof (stimulus -> AutomationEngine -> CommandService -> simulator
+  # -> ACK + observed lifecycle) is continuously exercised rather than relying on
+  # Docker happening to be present inside the coverage job.
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      - name: Pre-pull MQTT broker image
+        run: docker pull eclipse-mosquitto:2
+
+      - name: Run broker-backed integration tests
+        run: npx vitest run __integration__
+
+  # Playwright browser end-to-end tests run on a daily schedule (see
+  # .github/workflows/e2e.yml). They're too slow/expensive to run on every push.
+  # The daily job checks whether main has new commits since the last run.
 
   build-images:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [lint, backend, frontend]
+    needs: [lint, backend, frontend, integration]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

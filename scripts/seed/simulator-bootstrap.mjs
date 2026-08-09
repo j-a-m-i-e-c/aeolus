@@ -32,19 +32,6 @@ export const REFERENCE_WATER_ACTUATOR_SPECS = [
 ];
 
 /**
- * Derive the Aeolus device id from an MQTT state topic. Matches the backend
- * topic parser: non-empty segments joined with "-", casing preserved.
- * @param {string} stateTopic
- * @returns {string}
- */
-export function deviceIdFromStateTopic(stateTopic) {
-  return stateTopic
-    .split("/")
-    .filter((segment) => segment.length > 0)
-    .join("-");
-}
-
-/**
  * Normalise the managed subset of an MQTT command profile for comparison.
  * @param {any} profile
  * @returns {string}

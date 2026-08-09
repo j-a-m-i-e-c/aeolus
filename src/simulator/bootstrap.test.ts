@@ -4,7 +4,6 @@
 // fake client so it needs no running backend.
 import { describe, it, expect, vi } from "vitest";
 import {
-  deviceIdFromStateTopic,
   profileMatches,
   configureSimulatedCommandProfiles,
 } from "../../scripts/seed/simulator-bootstrap.mjs";
@@ -37,13 +36,6 @@ const PUMP_ID = "switch-reference-water-transfer-pump-state";
 const ackProfile = { acknowledgement: { supported: true }, qos: 1 };
 
 const silentOpts = { logger: { info: () => undefined, warn: () => undefined } };
-
-describe("deviceIdFromStateTopic", () => {
-  it("joins topic segments with hyphens like the backend parser", () => {
-    expect(deviceIdFromStateTopic(PUMP_STATE)).toBe(PUMP_ID);
-    expect(deviceIdFromStateTopic("sensor/reference-water/flow")).toBe("sensor-reference-water-flow");
-  });
-});
 
 describe("profileMatches", () => {
   it("treats equal managed fields as a match regardless of key order", () => {
