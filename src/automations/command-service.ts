@@ -20,6 +20,24 @@ import { DEFAULT_CONFIRM_TIMEOUT_MS } from "../core/types.js";
 import { selectRequiredTier, type ConfirmationTier } from "./command-lifecycle.js";
 import type { PendingCommandTracker } from "./pending-command-tracker.js";
 import type { AutomationScopeResolver } from "./automation-scope-resolver.js";
+import type {
+  CommandHistoryStore,
+  CommandRecord,
+  CommandFailureReason,
+} from "./command-history-store.js";
+
+/**
+ * Narrow, read-only view of the active automation execution context
+ * (phase-1-runtime-foundations, design §2.3).
+ *
+ * `CommandService` consumes this to stamp a command with its originating
+ * execution/causation without becoming coupled to the automation runtime.
+ * Backed at composition by the `CommandResultCollector` AsyncLocalStorage.
+ * Commands issued outside an automation see `undefined` and carry no context.
+ */
+export interface ExecutionContextProvider {
+  current(): { executionId?: string; causationId?: string; automationId?: string } | undefined;
+}
 
 // ── Explicit command source model (pre-promotion-release-gates Req 1) ────────
 
@@ -82,6 +100,19 @@ export interface CommandServiceDeps {
    * non-automation Command_Source), no scope restriction is applied.
    */
   scopeResolver?: AutomationScopeResolver;
+  /**
+   * Durable command-history sink (phase-1). When present, every Verified
+   * Physical Command creates a `REQUESTED` record and records its lifecycle
+   * transitions. Absent ⇒ commands still receive a `commandId` but no durable
+   * history is written (e.g. lightweight unit tests).
+   */
+  commandHistoryStore?: CommandHistoryStore;
+  /**
+   * Read-only provider of the active automation execution context (phase-1).
+   * When present, a command issued inside an automation execution is stamped
+   * with its `executionId`/`causationId`. Absent ⇒ no execution linkage.
+   */
+  executionContext?: ExecutionContextProvider;
 }
 
 /**
@@ -111,20 +142,48 @@ export type ActionHandler = (
  */
 export class CommandService {
   private handlers = new Map<string, ActionHandler>();
+  /**
+   * Action types classified as Verified Physical Commands (phase-1). Only these
+   * receive a `commandId` and durable history; raw `publish`/`log`/`delay`/
+   * `webhook` never do (Req 1.9). Built-in `toggle`/`device_action` default to
+   * physical; connector-contributed device handlers register with
+   * `{ physical: true }`. The default keeps existing call sites unchanged.
+   */
+  private physicalActionTypes = new Set<string>();
   private deps: CommandServiceDeps;
 
   constructor(deps: CommandServiceDeps) {
     this.deps = deps;
   }
 
-  /** Register a handler for an action type. Overwrites if already registered. */
-  registerHandler(type: string, handler: ActionHandler): void {
+  /**
+   * Register a handler for an action type. Overwrites if already registered.
+   *
+   * `options.physical` marks the type as a Verified Physical Command; when
+   * omitted it defaults to `true` for the built-in `toggle`/`device_action`
+   * types and `false` otherwise, so connectors contributing device actions pass
+   * `{ physical: true }` explicitly.
+   */
+  registerHandler(type: string, handler: ActionHandler, options?: { physical?: boolean }): void {
     this.handlers.set(type, handler);
+    const physical = options?.physical ?? (type === "toggle" || type === "device_action");
+    if (physical) this.physicalActionTypes.add(type);
+    else this.physicalActionTypes.delete(type);
   }
 
   /** Unregister a handler for an action type. No-op if not registered. */
   unregisterHandler(type: string): void {
     this.handlers.delete(type);
+    this.physicalActionTypes.delete(type);
+  }
+
+  /**
+   * True when `type` is a Verified Physical Command (device action), so it
+   * warrants a `commandId` and durable command history. Raw messaging actions
+   * (publish/log/delay/webhook) are never verified physical commands (Req 1.9).
+   */
+  private isVerifiedPhysicalAction(type: string): boolean {
+    return this.physicalActionTypes.has(type);
   }
 
   /**
@@ -160,7 +219,10 @@ export class CommandService {
     const src: CommandSource = typeof source === "string" ? automationSource(source) : source;
     const logId = src.kind === "automation" ? src.ruleId : (src.label ?? src.kind);
 
-    // REQUESTED
+    // ── Pre-acceptance checks (no commandId, no record — locked decision 1) ──
+    // A handler-resolution or scope/authorization refusal is a request-level
+    // failure that happens BEFORE the command is accepted into the pipeline, so
+    // it never receives a commandId or a durable record (design §2.1).
     const handler = this.handlers.get(action.type);
     if (!handler) {
       this.deps.logger.warn(
@@ -183,6 +245,36 @@ export class CommandService {
       return scopeRefusal;
     }
 
+    // ── Accepted into the command pipeline ──────────────────────────────────
+    // Only a Verified Physical Command (device action) receives a commandId and
+    // durable history; raw publish/webhook/log/delay never do (Req 1.9, locked
+    // decision 2). The commandId is allocated for physical actions regardless of
+    // whether a history store is present, so every physical result carries one.
+    const physical = this.isVerifiedPhysicalAction(action.type);
+    const store = physical ? this.deps.commandHistoryStore : undefined;
+    const commandId = physical ? randomUUID() : undefined;
+    const withId = (result: ActionResult): ActionResult =>
+      commandId ? { ...result, commandId } : result;
+
+    // Record a lifecycle transition when history is active. Never throws into
+    // the physical path: a post-dispatch persistence failure is logged, never
+    // repaired by re-dispatching (design §8).
+    const recordTransition = (
+      toState: CommandLifecycleState,
+      terminal: boolean,
+      extra?: { success?: boolean; failureKind?: CommandFailureReason; error?: string },
+    ): void => {
+      if (!store || !commandId) return;
+      try {
+        store.transition({ commandId, toState, timestamp: Date.now(), terminal, ...extra });
+      } catch (err) {
+        this.deps.logger.error(
+          { commandId, toState, error: (err as Error).message },
+          "Failed to persist command transition; retaining truthful in-memory outcome",
+        );
+      }
+    };
+
     const targetDeviceId = action.target;
     const ackCapability = this.resolveAckCapability(targetDeviceId);
     const hasAckCapability = ackCapability?.supported === true;
@@ -191,6 +283,8 @@ export class CommandService {
     // The highest tier this command can prove given its inputs — the capability
     // ceiling. `observed` requires Confirmation_Options; `acknowledged` requires
     // a declared acknowledgement capability; `dispatch` is always provable.
+    // Resolved BEFORE the first durable write (side-effect free) so the REQUESTED
+    // record is complete on first insert (refinement A / Req 3.2).
     const ceiling = selectRequiredTier(hasConfirm, hasAckCapability);
     const tier = this.resolveEffectiveTier(
       requiredTier,
@@ -200,22 +294,6 @@ export class CommandService {
       logId,
       targetDeviceId,
     );
-
-    // Validate the observed device exists before dispatching (Req 5.5). Only
-    // meaningful when we will actually observe (tier === "observed").
-    const observedDeviceId = confirm?.deviceId ?? targetDeviceId;
-    if (
-      tier === "observed" &&
-      this.deps.deviceRegistry &&
-      !this.deps.deviceRegistry.getById(observedDeviceId)
-    ) {
-      return {
-        success: false,
-        error: `Confirmation observed device '${observedDeviceId}' not found`,
-        lifecycleState: "FAILED",
-        failureKind: "not_found",
-      };
-    }
 
     // Assign a correlation id for any command that will be tracked, and attach
     // an MQTT envelope only when the device is expected to reply on a response
@@ -231,6 +309,67 @@ export class CommandService {
       }
     }
 
+    // Create the durable REQUESTED record, complete on first insert. If the
+    // audit contract cannot be established BEFORE dispatch, do not dispatch —
+    // returning FAILED is safer than a physical action with no record (§8).
+    if (store && commandId) {
+      const ctx = this.deps.executionContext?.current();
+      const record: CommandRecord = {
+        commandId,
+        ...(correlationId ? { correlationId } : {}),
+        sourceKind: src.kind,
+        ...(src.kind === "automation"
+          ? { ruleId: src.ruleId, sourceId: src.ruleId }
+          : src.label
+            ? { sourceId: src.label }
+            : {}),
+        ...(ctx?.executionId ? { executionId: ctx.executionId } : {}),
+        ...(ctx?.causationId ? { causationId: ctx.causationId } : {}),
+        targetDeviceId,
+        actionType: action.type,
+        ...(requiredTier ? { requestedTier: requiredTier } : {}),
+        effectiveTier: tier,
+        lifecycleState: "REQUESTED",
+        requestedAt: Date.now(),
+      };
+      try {
+        store.create(record);
+      } catch (err) {
+        this.deps.logger.error(
+          { commandId, error: (err as Error).message },
+          "Failed to create command record before dispatch; refusing command",
+        );
+        return withId({
+          success: false,
+          error: "Command history unavailable; command refused before dispatch",
+          lifecycleState: "FAILED",
+          failureKind: "execution",
+        });
+      }
+    }
+
+    // Validate the observed device exists before dispatching (Req 5.5). Only
+    // meaningful when we will actually observe (tier === "observed"). This is a
+    // post-acceptance failure, so it is recorded as REQUESTED -> FAILED.
+    const observedDeviceId = confirm?.deviceId ?? targetDeviceId;
+    if (
+      tier === "observed" &&
+      this.deps.deviceRegistry &&
+      !this.deps.deviceRegistry.getById(observedDeviceId)
+    ) {
+      recordTransition("FAILED", true, {
+        success: false,
+        failureKind: "not_found",
+        error: `Confirmation observed device '${observedDeviceId}' not found`,
+      });
+      return withId({
+        success: false,
+        error: `Confirmation observed device '${observedDeviceId}' not found`,
+        lifecycleState: "FAILED",
+        failureKind: "not_found",
+      });
+    }
+
     // Dispatch-only path (no tracker involvement) — dispatch, then DISPATCHED
     // terminal success. This path is unchanged by the register-before-dispatch
     // reordering (Req 12.6).
@@ -244,26 +383,34 @@ export class CommandService {
           { ruleId: logId, actionType: action.type, target: action.target, error: message },
           `Action execution failed for rule ${logId}`,
         );
+        recordTransition("FAILED", true, { success: false, failureKind: "execution", error: message });
         this.logTerminal(logId, action.target, "FAILED", message);
-        return { success: false, error: message, lifecycleState: "FAILED" };
+        return withId({ success: false, error: message, lifecycleState: "FAILED" });
       }
 
       // A handler that reports an explicit dispatch failure → FAILED.
       if (dispatchResult && dispatchResult.success === false) {
+        recordTransition("FAILED", true, {
+          success: false,
+          ...(dispatchResult.failureKind ? { failureKind: dispatchResult.failureKind } : {}),
+          ...(dispatchResult.error ? { error: dispatchResult.error } : {}),
+        });
         this.logTerminal(logId, action.target, "FAILED", dispatchResult.error);
-        return { ...dispatchResult, lifecycleState: "FAILED" };
+        return withId({ ...dispatchResult, lifecycleState: "FAILED" });
       }
 
       const dispatchData = dispatchResult && dispatchResult.success ? dispatchResult.data : undefined;
 
-      // Dispatch-only tier → DISPATCHED is the truthful terminal success (Req 4.8, 9.3, 9.5).
+      // Dispatch-only tier → DISPATCHED is the truthful terminal success and is
+      // therefore terminal: its record carries terminal_at (locked decision 5).
+      recordTransition("DISPATCHED", true, { success: true });
       this.logTerminal(logId, action.target, "DISPATCHED");
-      return {
+      return withId({
         success: true,
         ...(dispatchData ? { data: dispatchData } : {}),
         lifecycleState: "DISPATCHED",
         ...(correlationId ? { correlationId } : {}),
-      };
+      });
     }
 
     // Tracked path — register BEFORE dispatch so a fast device reply arriving
@@ -272,6 +419,7 @@ export class CommandService {
     // synchronously inserts the pending entry and arms the timeout timer.
     const timeoutMs = confirm?.timeoutMs ?? DEFAULT_CONFIRM_TIMEOUT_MS;
     const resolutionPromise = this.deps.pendingCommandTracker.register({
+      ...(commandId ? { commandId } : {}),
       correlationId: correlationId as string,
       targetDeviceId,
       observedDeviceId,
@@ -295,22 +443,38 @@ export class CommandService {
         { ruleId: logId, actionType: action.type, target: action.target, error: message },
         `Action execution failed for rule ${logId}`,
       );
+      recordTransition("FAILED", true, { success: false, failureKind: "execution", error: message });
       this.logTerminal(logId, action.target, "FAILED", message);
-      return { success: false, error: message, lifecycleState: "FAILED" };
+      return withId({ success: false, error: message, lifecycleState: "FAILED" });
     }
 
     // A handler that reports an explicit dispatch failure → FAILED.
     if (dispatchResult && dispatchResult.success === false) {
       this.deps.pendingCommandTracker.cancel(correlationId as string);
+      recordTransition("FAILED", true, {
+        success: false,
+        ...(dispatchResult.failureKind ? { failureKind: dispatchResult.failureKind } : {}),
+        ...(dispatchResult.error ? { error: dispatchResult.error } : {}),
+      });
       this.logTerminal(logId, action.target, "FAILED", dispatchResult.error);
-      return { ...dispatchResult, lifecycleState: "FAILED" };
+      return withId({ ...dispatchResult, lifecycleState: "FAILED" });
     }
 
     const dispatchData = dispatchResult && dispatchResult.success ? dispatchResult.data : undefined;
 
-    // Dispatch accepted — await the terminal resolution (ack and/or observe).
-    // A fast ack may have already resolved this promise during dispatch above.
+    // Dispatch accepted → DISPATCHED (non-terminal for a tracked command). The
+    // intermediate ACKNOWLEDGED (when waiting for OBSERVED) is recorded by the
+    // tracker's transition hook in Task 4; store idempotency dedupes overlap.
+    recordTransition("DISPATCHED", false, { success: true });
+
+    // Await the terminal resolution (ack and/or observe). A fast ack may have
+    // already resolved this promise during dispatch above.
     const resolution = await resolutionPromise;
+
+    recordTransition(resolution.lifecycleState, true, {
+      success: resolution.success,
+      ...(resolution.error ? { error: resolution.error } : {}),
+    });
 
     this.logTerminal(
       logId,
@@ -321,13 +485,13 @@ export class CommandService {
       timeoutMs,
     );
 
-    return {
+    return withId({
       success: resolution.success,
       ...(dispatchData ? { data: dispatchData } : {}),
       ...(resolution.error ? { error: resolution.error } : {}),
       lifecycleState: resolution.lifecycleState,
       ...(correlationId ? { correlationId } : {}),
-    };
+    });
   }
 
   /**

@@ -141,7 +141,11 @@ describe("ConnectorManager", () => {
       });
 
       await manager.enable("mock", {});
-      expect(mockExecutor.registerHandler).toHaveBeenCalledWith("custom_action", expect.any(Function));
+      expect(mockExecutor.registerHandler).toHaveBeenCalledWith(
+        "custom_action",
+        expect.any(Function),
+        { physical: true },
+      );
       expect(mockConditionReg.registerCondition).toHaveBeenCalledWith("custom_condition", expect.any(Function));
     });
   });

@@ -96,7 +96,10 @@ export class ConnectorManager {
     if (count === 0) {
       if (mod.actionHandlers && this.actionExecutor) {
         for (const [type, handler] of Object.entries(mod.actionHandlers)) {
-          this.actionExecutor.registerHandler(type, handler);
+          // Connector-contributed handlers dispatch physical device commands
+          // (e.g. hue_scene, hue_color_loop), so they are Verified Physical
+          // Commands and warrant a commandId + durable history (phase-1 Task 3).
+          this.actionExecutor.registerHandler(type, handler, { physical: true });
         }
       }
       if (mod.conditions && this.conditionRegistry) {

@@ -31,6 +31,12 @@ export type RequiredTier = "acknowledged" | "observed";
 
 /** A dispatched command awaiting acknowledgement and/or observation. */
 export interface PendingCommand {
+  /**
+   * Stable Aeolus command identity (phase-1). Carried from `CommandService` so
+   * intermediate transitions can be attributed without a correlation→command DB
+   * lookup (locked decision 6). Optional until the transition hook lands in Task 4.
+   */
+  commandId?: string;
   correlationId: string;
   targetDeviceId: string;
   /** Device whose state is inspected for observation (may differ from target). */
@@ -54,10 +60,32 @@ export interface PendingResolution {
   error?: string;
 }
 
+/**
+ * An intermediate (non-terminal) lifecycle transition observed by the tracker,
+ * reported so the composition layer can persist it (phase-1 Req 3.5). Carries
+ * `commandId` so the recorder needs no correlation→command DB lookup (locked
+ * decision 7). The tracker itself never touches the database.
+ */
+export interface PendingCommandTransition {
+  commandId?: string;
+  correlationId: string;
+  targetDeviceId: string;
+  fromState: CommandLifecycleState;
+  toState: CommandLifecycleState;
+  timestamp: number;
+}
+
 /** Optional logging hook for late/duplicate arrivals and terminal transitions. */
 export interface PendingCommandTrackerDeps {
   onResolve?: (correlationId: string, resolution: PendingResolution, targetDeviceId: string) => void;
   onLateMessage?: (correlationId: string) => void;
+  /**
+   * Reports an intermediate transition (currently ACKNOWLEDGED reached while an
+   * observed-tier command keeps waiting for OBSERVED). Terminal transitions are
+   * recorded by the CommandService from the awaited resolution, so they are not
+   * re-emitted here. Never invoked with the database — the recorder is composed.
+   */
+  onTransition?: (event: PendingCommandTransition) => void;
 }
 
 /** Internal bookkeeping for one outstanding command. */
@@ -140,12 +168,28 @@ export class PendingCommandTracker {
 
     // 1. Acknowledgement — advance to ACKNOWLEDGED at most once.
     if (this.isAcknowledgement(message, entry.command)) {
-      if (canTransition(entry.state, "ACKNOWLEDGED")) {
+      const advanced = canTransition(entry.state, "ACKNOWLEDGED");
+      if (advanced) {
         entry.state = "ACKNOWLEDGED";
       }
       if (entry.command.requiredTier === "acknowledged") {
+        // ACKNOWLEDGED is terminal for an ack-tier command; the CommandService
+        // records it from the awaited resolution, so no intermediate emission.
         this.finalize(entry, "ACKNOWLEDGED", true);
         return;
+      }
+      // Observed-tier: ACK is an intermediate milestone before observation.
+      // Report it (once) so the durable timeline keeps both the ACKNOWLEDGED and
+      // the later terminal transition (Req 3.5).
+      if (advanced) {
+        this.deps.onTransition?.({
+          ...(entry.command.commandId ? { commandId: entry.command.commandId } : {}),
+          correlationId: entry.command.correlationId,
+          targetDeviceId: entry.command.targetDeviceId,
+          fromState: "DISPATCHED",
+          toState: "ACKNOWLEDGED",
+          timestamp: Date.now(),
+        });
       }
     }
 
