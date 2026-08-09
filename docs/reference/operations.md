@@ -60,6 +60,37 @@ driver error.
 
 The provisioning service needs writable access to the Mosquitto configuration and password file, plus a way to reload the broker. The default `docker-compose.yml` intentionally does not grant the backend those host/container privileges. Configure Mosquitto manually in that deployment, or provide a narrowly scoped external provisioning mechanism. See [MQTT security](../security/mqtt.md).
 
+## Demo simulator (Phase 2)
+
+The demo simulator is a **separate process** that emulates MQTT hardware for the public demo and for integration tests. It speaks only MQTT to the broker: it holds no Aeolus credentials, opens no ports, and never touches the Aeolus database or command internals. It is **off by default** — a normal install never runs it.
+
+Run it locally against a broker:
+
+```bash
+make sim            # AEOLUS_SIMULATOR_ENABLED=true npm run sim
+```
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `AEOLUS_SIMULATOR_ENABLED` | `false` | Master switch; the process exits unless set to `true` |
+| `AEOLUS_SIMULATOR_SCENARIOS` | empty | Comma-separated scenario keys to load (e.g. `reference-water`) |
+| `AEOLUS_SIMULATOR_LOG_LEVEL` | `LOG_LEVEL` or `info` | pino level for the simulator |
+| `AEOLUS_SIMULATOR_MAX_DELAY_MS` | `15000` | Ceiling for any modelled ACK/state delay |
+| `AEOLUS_SIMULATOR_MAX_PENDING_TIMERS` | `200` | Global cap on outstanding delayed operations |
+| `AEOLUS_SIMULATOR_MAX_COMMAND_QUEUE` | `100` | Per-device command-queue depth before fail-fast |
+| `AEOLUS_SIMULATOR_RANDOM_SEED` | unset | Seed for deterministic telemetry |
+
+Simulated actuators are ordinary generic MQTT devices. Their acknowledgement capability is configured through the normal `PUT /api/devices/:id/mqtt-command-profile` path by a seed-time bootstrap (`scripts/seed/simulator-bootstrap.mjs`), not by the simulator itself.
+
+In the public-demo overlay the simulator runs as a `simulator` service (no published ports, internal broker only):
+
+```bash
+make demo-up        # backend demo mode + simulator
+make demo-reset     # restart the simulator; it republishes initial state on reconnect
+```
+
+The reference `reference-water` scenario is a conformance fixture, not a public tab. See `.kiro/specs/phase-2-mqtt-simulator/` for the design and the Phase 3 migration handoff.
+
 ## Logging
 
 The backend uses pino structured logs.
