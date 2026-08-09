@@ -33,8 +33,16 @@ Exact request schemas are defined under `src/api/schemas/` and tested with the r
 | `GET` | `/api/devices/:id/history` | Query state history |
 | `DELETE` | `/api/devices/:id/history` | Clear one device history |
 | `DELETE` | `/api/devices/history/all` | Clear all device history |
+| `GET` | `/api/devices/:id/mqtt-command-profile` | Read a generic MQTT device's command profile (requires device `read`) |
+| `PUT` | `/api/devices/:id/mqtt-command-profile` | Set/clear the profile (requires device `write`; MQTT devices only) |
 | `GET` | `/api/state` | Devices keyed by ID |
 | `POST` | `/api/mqtt/publish` | Publish an MQTT message |
+
+The MQTT command profile declares generic-MQTT acknowledgement capability and
+optional QoS (see [Microcontrollers](../MICROCONTROLLERS.md)). The body is
+validated and sanitized: QoS must be `0`/`1`/`2`, the acknowledgement response
+topic must be a concrete topic (no `+`/`#`), and unknown fields are dropped. A
+non-MQTT device returns `400`.
 
 ### Device action outcomes
 
@@ -78,6 +86,20 @@ or `TIMED_OUT` (504).
 | `GET` | `/api/automations/:id/state` | Read private automation state |
 | `PUT` | `/api/automations/:id/state` | Save a state value |
 | `DELETE` | `/api/automations/:id/state/:key` | Delete a state value |
+
+## Command history
+
+Durable history for every verified physical command (see
+[Automations](automations.md)). Admin only, because command history can
+disclose device names and behaviour.
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/api/commands` | Bounded, newest-first list. Filters: `deviceId`, `ruleId`, `executionId`, `state`, `sourceKind`, `limit` (clamped) |
+| `GET` | `/api/commands/:commandId` | One command with its chronological transition timeline |
+
+The list never returns an unbounded result; `limit` defaults to 50 and is
+clamped to a maximum of 200.
 
 ## Connectors
 
@@ -138,6 +160,8 @@ On connection, the server sends an initial device snapshot. Live message types i
 - `automation-state`
 - `data-store-write`
 - `data-store-collection-deleted`
+- `command-lifecycle` — a command lifecycle transition was durably recorded (admin-only)
+- `automation-event` — an automation event was seen on the reserved namespace (admin-only)
 
 The WebSocket layer maps internal event names to public message types at startup rather than hardcoding each event in the server class.
 

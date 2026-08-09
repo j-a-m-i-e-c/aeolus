@@ -19,9 +19,17 @@ Core tables cover:
 - dashboard tabs and panes;
 - connectors;
 - device history;
+- durable command history (`command_records` and `command_transitions`);
 - users, groups and refresh tokens;
 - MQTT credentials and system settings;
 - schema migration history.
+
+Generic MQTT devices may carry an optional `mqtt_command_profile` (a validated
+JSON column on the device row) describing acknowledgement capability and QoS;
+see [Automations](automations.md) and [Microcontrollers](../MICROCONTROLLERS.md).
+`command_records` holds one durable summary per verified command (keyed by
+`command_id`, with `terminal_at` authoritative for completeness) and
+`command_transitions` is an append-only lifecycle timeline.
 
 The Data Store creates its own configuration, collection, record and bucket tables when initialised.
 

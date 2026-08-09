@@ -317,6 +317,38 @@ Or on failure:
 
 That's the entire protocol. Aeolus matches the correlation ID back to the pending command and advances it to the `ACKNOWLEDGED` lifecycle state.
 
+### Enable acknowledgement on the device
+
+A generic MQTT device is dispatch-only until you tell Aeolus it can acknowledge.
+Configure its **MQTT command profile** so the correlation envelope is sent and
+the acknowledged tier becomes available:
+
+```bash
+curl -X PUT http://aeolus.local:3001/api/devices/pump-01/mqtt-command-profile \
+  -H "Authorization: Bearer $AEOLUS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "acknowledgement": {
+      "supported": true,
+      "responseTopic": "aeolus/acks/pump-01"
+    },
+    "qos": 1
+  }'
+```
+
+- `acknowledgement.supported` — `true` turns on the correlation envelope and the
+  `acknowledged` completion tier for this device.
+- `acknowledgement.responseTopic` — the topic the device publishes its ack on.
+  Optional; defaults to `aeolus/acks/<deviceId>`. Must be a concrete topic
+  (no `+`/`#` wildcards).
+- `acknowledgement.ackIndicatorValues` — optional. Values of a `status` field
+  that count as acknowledgement when the device does not send `success: true`.
+- `qos` — optional MQTT QoS (`0`, `1`, or `2`) for the device-command publish.
+
+The profile survives restart. `GET` the same path to read it back; send an empty
+body (`{}`) to clear it. Only MQTT devices accept a profile. Editing it requires
+`write` permission on the device.
+
 ### ESP32 example
 
 ```cpp

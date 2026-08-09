@@ -166,8 +166,72 @@ The command framework lives in:
 src/automations/command-service.ts
 src/automations/command-lifecycle.ts
 src/automations/pending-command-tracker.ts
+src/automations/command-history-store.ts
 src/mqtt/command-envelope.ts
 ```
+
+### Command identity and durable history
+
+Every verified physical command accepted by `CommandService` is assigned a
+stable `commandId` before dispatch, and its `ActionResult` carries it. This is
+distinct from `correlationId`, which identifies a confirmation exchange and is
+present only for tracked commands.
+
+`CommandHistoryStore` persists one durable record per command plus an immutable
+row for each lifecycle transition, so the full `REQUESTED → DISPATCHED →
+ACKNOWLEDGED → OBSERVED` (or failure) timeline is queryable after the fact —
+independent of automation execution history, since REST and system commands are
+also verified commands. Query it through the command API (see
+[API reference](api.md)). Handler-resolution and authorization refusals happen
+before acceptance and therefore receive no `commandId` and no record.
+
+Completeness is determined by a durable `terminal_at` timestamp, not the state
+name, because `DISPATCHED` is terminal for a dispatch-only command but not for
+an acknowledged/observed one.
+
+### Restart semantics (no physical replay)
+
+`PendingCommandTracker` is in-memory, so a restart loses live confirmation
+waits. At startup Aeolus reconciles any command record still non-terminal
+(`terminal_at IS NULL`): it becomes a terminal `FAILED` with failure reason
+`interrupted` and a matching transition row. Aeolus never re-dispatches or
+replays a physical command after a restart — reconciliation only corrects the
+audit trail. Reconciliation is idempotent.
+
+## Automation events
+
+An automation can emit a domain event that other automations react to, without
+being granted arbitrary MQTT publish authority:
+
+```javascript
+events.emit("tank.low", { level: 18, tankId: "header-tank" });
+```
+
+Aeolus publishes a versioned envelope to a reserved namespace it owns:
+
+```text
+aeolus/events/<sourceRuleId>/<eventName>
+```
+
+The `<sourceRuleId>` segment is generated from the executing automation and is
+not caller-selectable, so an event can never escape the reserved namespace.
+`events.emit()` is available to scoped automations even though raw
+`mqtt.publish()` remains forbidden for them — it is not a verified command,
+creates no command record, and only ever publishes inside `aeolus/events`.
+
+Another automation subscribes with an ordinary MQTT topic trigger (for example
+`aeolus/events/#`); the user payload arrives as `context.state` and causal
+metadata as `context.meta`. Automation events never create Device Registry
+entries. A bounded causal depth stops an `A → B → A` cycle from publishing
+forever.
+
+Provenance metadata (`context.meta`: `eventId`, `causationId`, `traceId`,
+`source`, …) is diagnostic only. Because any broker client could forge an
+envelope, Aeolus never treats provenance as an authorization credential — a
+receiving automation's own authorization scope still governs every command it
+attempts.
+
+Source: `src/automations/automation-event-service.ts`.
 
 ## Execution history
 
@@ -180,7 +244,7 @@ src/mqtt/command-envelope.ts
 - failure reason;
 - terminal lifecycle state where relevant.
 
-The current execution log and pending-command registry are process memory, while automation state is persistent.
+The execution log and the live pending-command registry are process memory. Automation state and durable command history (records and transitions) are persistent.
 
 ## Main source files
 
