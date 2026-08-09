@@ -21,6 +21,7 @@ import { NotFoundError, ForbiddenError } from "../middleware/error-handler.js";
 import { asyncHandler } from "../middleware/async-handler.js";
 import { httpStatusForCommandResult } from "./command-status.js";
 import { validateAction } from "../middleware/validators.js";
+import { validateMqttCommandProfile } from "./mqtt-command-profile.js";
 import { requireAdmin } from "../../auth/auth-middleware.js";
 import type { PermissionLevel } from "../../auth/permission-service.js";
 import type { PermissionResolver } from "../../auth/permission-resolver.js";
@@ -242,6 +243,49 @@ export function createDeviceRoutes(
     // error). A timeout is 504, a rejection 4xx, a transport failure 5xx.
     res.status(httpStatusForCommandResult(result)).json(result);
   }));
+
+  /**
+   * GET /api/devices/:id/mqtt-command-profile — read the generic MQTT command
+   * profile for an MQTT device (phase-1 Req 2). Returns `null` when unset.
+   * Requires device `read`; only MQTT devices carry a profile.
+   */
+  router.get("/:id/mqtt-command-profile", requireDevice("read"), (req, res, next) => {
+    const id = req.params.id as string;
+    const device = registry.getById(id);
+    if (!device) {
+      return next(new NotFoundError(`Device not found: ${id}`));
+    }
+    if (device.integration !== "mqtt") {
+      return res.status(400).json({ error: "MQTT command profile is only available for MQTT devices" });
+    }
+    return res.json(device.mqttCommandProfile ?? null);
+  });
+
+  /**
+   * PUT /api/devices/:id/mqtt-command-profile — create/replace/clear the MQTT
+   * command profile (phase-1 Req 2, 8.9, 8.10). Configuration is control-
+   * relevant, so it requires device `write` (stronger than the `interact`
+   * needed to operate the device). Only MQTT devices accept a profile; the body
+   * is validated and sanitized (wildcards, unbounded, and unknown fields
+   * rejected) before persistence. An empty/omitted profile clears it.
+   */
+  router.put("/:id/mqtt-command-profile", requireDevice("write"), (req, res, next) => {
+    const id = req.params.id as string;
+    const device = registry.getById(id);
+    if (!device) {
+      return next(new NotFoundError(`Device not found: ${id}`));
+    }
+    if (device.integration !== "mqtt") {
+      return res.status(400).json({ error: "MQTT command profile is only available for MQTT devices" });
+    }
+    const validation = validateMqttCommandProfile(req.body);
+    if (!validation.ok) {
+      return res.status(400).json({ error: validation.error });
+    }
+    const updated = registry.setMqttCommandProfile(id, validation.value);
+    logger.info({ deviceId: id }, "Updated MQTT command profile");
+    return res.json(updated?.mqttCommandProfile ?? null);
+  });
 
   return router;
 }

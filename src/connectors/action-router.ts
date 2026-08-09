@@ -282,6 +282,23 @@ export class ActionRouter {
   getAcknowledgementCapability(deviceId: string): AcknowledgementCapability | undefined {
     const device = this.deviceRegistry.getById(deviceId);
     if (!device) return undefined;
+
+    // Generic MQTT devices declare acknowledgement capability through their
+    // persisted MQTT command profile rather than a connector instance (phase-1
+    // Req 2.4). Translate it into the shared AcknowledgementCapability contract
+    // so CommandService / PendingCommandTracker resolve the acknowledged tier
+    // through the same path as connector devices — no MQTT-only special case.
+    if (device.integration === "mqtt") {
+      const ack = device.mqttCommandProfile?.acknowledgement;
+      if (!ack || ack.supported !== true) return undefined;
+      return {
+        supported: true,
+        ...(ack.responseTopic ? { responseTopic: ack.responseTopic } : {}),
+        ...(ack.ackIndicatorField ? { ackIndicatorField: ack.ackIndicatorField } : {}),
+        ...(ack.ackIndicatorValues ? { ackIndicatorValues: ack.ackIndicatorValues } : {}),
+      };
+    }
+
     const owner = this.resolveOwningInstance(device);
     return owner?.connector.getAcknowledgementCapability?.(deviceId);
   }
@@ -332,12 +349,19 @@ export class ActionRouter {
         : JSON.stringify(action.params);
     }
 
+    // Honour a device-configured MQTT QoS for the command publish; default
+    // behaviour is unchanged when no profile QoS is set (phase-1 Req 2.8).
+    const qos = device.mqttCommandProfile?.qos;
+
     try {
       if (correlation) {
         this.mqttService.publish(commandTopic, payload, {
           correlationData: Buffer.from(correlation.correlationId, "utf8"),
           responseTopic: correlation.responseTopic,
+          ...(qos !== undefined ? { qos } : {}),
         });
+      } else if (qos !== undefined) {
+        this.mqttService.publish(commandTopic, payload, { qos });
       } else {
         this.mqttService.publish(commandTopic, payload);
       }
