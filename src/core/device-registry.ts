@@ -3,7 +3,7 @@
 import type { Database as DatabaseType } from "better-sqlite3";
 import type { EventEmitter } from "node:events";
 import { createHash } from "node:crypto";
-import type { Device, NormalizedEvent } from "./types.js";
+import type { Device, NormalizedEvent, MqttCommandProfile } from "./types.js";
 import { WS_STATE_CHANGE } from "./event-bus.js";
 import logger from "../logger.js";
 
@@ -18,6 +18,7 @@ interface DeviceRow {
   topic?: string | null;
   command_topic?: string | null;
   connector_instance_id?: string | null;
+  mqtt_command_profile?: string | null;
 }
 
 /** Serialize a Device to JSON-safe values for SQLite */
@@ -33,6 +34,9 @@ export function serializeDevice(device: Device): Record<string, unknown> {
     topic: device.topic ?? null,
     command_topic: device.commandTopic ?? null,
     connector_instance_id: device.connectorInstanceId ?? null,
+    mqtt_command_profile: device.mqttCommandProfile
+      ? JSON.stringify(device.mqttCommandProfile)
+      : null,
   };
 }
 
@@ -53,6 +57,9 @@ export function deserializeDevice(row: Record<string, unknown>): Device | null {
       ...(typeof row.topic === "string" ? { topic: row.topic } : {}),
       ...(typeof row.command_topic === "string" ? { commandTopic: row.command_topic } : {}),
       ...(typeof row.connector_instance_id === "string" ? { connectorInstanceId: row.connector_instance_id } : {}),
+      ...(typeof row.mqtt_command_profile === "string" && row.mqtt_command_profile.length > 0
+        ? { mqttCommandProfile: JSON.parse(row.mqtt_command_profile as string) as Device["mqttCommandProfile"] }
+        : {}),
     };
   } catch (err) {
     logger.warn({ row, error: (err as Error).message }, "Malformed device row, skipping");
@@ -199,17 +206,39 @@ export class DeviceRegistry {
     this.persistDevice(device, false);
   }
 
+  /**
+   * Set (or clear, when `profile` is undefined) a device's generic MQTT command
+   * profile and persist it (phase-1 Req 2.1, 2.9). Returns the updated device,
+   * or undefined when the device does not exist. In-memory and SQLite stay in
+   * sync so the profile survives restart.
+   */
+  setMqttCommandProfile(id: string, profile: MqttCommandProfile | undefined): Device | undefined {
+    const existing = this.devices.get(id);
+    if (!existing) return undefined;
+
+    const updated: Device = { ...existing };
+    if (profile) {
+      updated.mqttCommandProfile = profile;
+    } else {
+      delete updated.mqttCommandProfile;
+    }
+
+    this.devices.set(id, updated);
+    this.persistDevice(updated, true);
+    return updated;
+  }
+
   private persistDevice(device: Device, isUpdate: boolean): void {
     try {
       const s = serializeDevice(device);
       if (isUpdate) {
         this.db.prepare(
-          "UPDATE devices SET name=?, type=?, capabilities=?, state=?, integration=?, last_seen=?, topic=?, command_topic=?, connector_instance_id=? WHERE id=?"
-        ).run(s.name, s.type, s.capabilities, s.state, s.integration, s.last_seen, s.topic, s.command_topic, s.connector_instance_id, s.id);
+          "UPDATE devices SET name=?, type=?, capabilities=?, state=?, integration=?, last_seen=?, topic=?, command_topic=?, connector_instance_id=?, mqtt_command_profile=? WHERE id=?"
+        ).run(s.name, s.type, s.capabilities, s.state, s.integration, s.last_seen, s.topic, s.command_topic, s.connector_instance_id, s.mqtt_command_profile, s.id);
       } else {
         this.db.prepare(
-          "INSERT OR REPLACE INTO devices (id, name, type, capabilities, state, integration, last_seen, topic, command_topic, connector_instance_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-        ).run(s.id, s.name, s.type, s.capabilities, s.state, s.integration, s.last_seen, s.topic, s.command_topic, s.connector_instance_id);
+          "INSERT OR REPLACE INTO devices (id, name, type, capabilities, state, integration, last_seen, topic, command_topic, connector_instance_id, mqtt_command_profile) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        ).run(s.id, s.name, s.type, s.capabilities, s.state, s.integration, s.last_seen, s.topic, s.command_topic, s.connector_instance_id, s.mqtt_command_profile);
       }
     } catch (err) {
       logger.error({ deviceId: device.id, error: (err as Error).message }, "Failed to persist device");

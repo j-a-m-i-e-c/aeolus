@@ -50,6 +50,7 @@ import { connectorInstanceOwnership } from "./009-connector-instance-ownership.j
 import { collectionTabAssignments } from "./010-collection-tab-assignments.js";
 import { automationAuthorizationScope } from "./011-automation-authorization-scope.js";
 import { automationDemoAccess } from "./012-automation-demo-access.js";
+import { commandHistoryAndMqttProfile } from "./013-command-history-and-mqtt-profile.js";
 
 export const migrations: Migration[] = [
   baseline,                      // id 1
@@ -64,4 +65,5 @@ export const migrations: Migration[] = [
   collectionTabAssignments,      // id 10
   automationAuthorizationScope,  // id 11
   automationDemoAccess,          // id 12
+  commandHistoryAndMqttProfile,  // id 13
 ];

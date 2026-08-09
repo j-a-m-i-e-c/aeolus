@@ -345,6 +345,66 @@ describe("DeviceRegistry — unit tests", () => {
     });
   });
 
+  describe("MQTT command profile serialization (phase-1 Req 2.9)", () => {
+    it("round-trips an ack-capable profile across a reload", () => {
+      registry.registerDevice({
+        id: "esp32-relay",
+        name: "ESP32 Relay",
+        type: "switch",
+        capabilities: ["on/off"],
+        state: {},
+        integration: "mqtt",
+        lastSeen: Date.now(),
+        topic: "esp32/relay/state",
+        commandTopic: "esp32/relay/set",
+        mqttCommandProfile: {
+          qos: 1,
+          acknowledgement: {
+            supported: true,
+            responseTopic: "aeolus/acks/esp32-relay",
+            ackIndicatorField: "status",
+            ackIndicatorValues: ["ok", "executed"],
+          },
+        },
+      });
+
+      const afterRestart = new DeviceRegistry(db, eventBus);
+      afterRestart.loadFromDb();
+      const restored = afterRestart.getById("esp32-relay");
+      expect(restored?.mqttCommandProfile).toEqual({
+        qos: 1,
+        acknowledgement: {
+          supported: true,
+          responseTopic: "aeolus/acks/esp32-relay",
+          ackIndicatorField: "status",
+          ackIndicatorValues: ["ok", "executed"],
+        },
+      });
+    });
+
+    it("persists the profile column as NULL and loads an undefined profile when absent", () => {
+      registry.registerDevice({
+        id: "plain-mqtt",
+        name: "Plain",
+        type: "sensor",
+        capabilities: ["temperature"],
+        state: {},
+        integration: "mqtt",
+        lastSeen: Date.now(),
+        topic: "home/plain",
+      });
+
+      const stored = db
+        .prepare("SELECT mqtt_command_profile FROM devices WHERE id = ?")
+        .get("plain-mqtt") as { mqtt_command_profile: string | null };
+      expect(stored.mqtt_command_profile).toBeNull();
+
+      const afterRestart = new DeviceRegistry(db, eventBus);
+      afterRestart.loadFromDb();
+      expect(afterRestart.getById("plain-mqtt")?.mqttCommandProfile).toBeUndefined();
+    });
+  });
+
   describe("loadFromDb", () => {
     it("loads persisted devices on startup", () => {
       // Insert a device directly into the database

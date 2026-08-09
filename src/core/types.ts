@@ -5,6 +5,31 @@ import type { ConfirmationTier } from "../automations/command-lifecycle.js";
 /** Device type — open string, not restricted to a fixed set */
 export type DeviceType = string;
 
+/**
+ * Per-device generic MQTT command behaviour that is not derivable from topic
+ * discovery alone (phase-1-runtime-foundations Req 2).
+ *
+ * Only meaningful for devices whose `integration === "mqtt"`. Persisted as
+ * validated JSON on the device row so it survives restart. The canonical
+ * command topic remains {@link Device.commandTopic}; this profile never
+ * duplicates it.
+ */
+export interface MqttCommandProfile {
+  /** MQTT QoS applied to device-command publishes. Omitted ⇒ current default. */
+  qos?: 0 | 1 | 2;
+  /** Acknowledgement configuration; absent/`supported:false` ⇒ dispatch-only. */
+  acknowledgement?: {
+    /** True when the device publishes an ack Aeolus can correlate. */
+    supported: boolean;
+    /** Response-topic override the device replies on. Concrete topic, never a wildcard. */
+    responseTopic?: string;
+    /** Ack-message field whose value confirms receipt (default "status"). */
+    ackIndicatorField?: string;
+    /** Values of the indicator field that count as acknowledgement. */
+    ackIndicatorValues?: string[];
+  };
+}
+
 /** Core domain entity representing any IoT device */
 export interface Device {
   id: string;
@@ -26,6 +51,54 @@ export interface Device {
   topic?: string;
   /** MQTT command topic used to send commands to the device. */
   commandTopic?: string;
+  /**
+   * Generic MQTT command profile (acknowledgement capability, QoS). Present
+   * only for configured MQTT devices; absent ⇒ dispatch-only default behaviour.
+   */
+  mqttCommandProfile?: MqttCommandProfile;
+}
+
+/**
+ * Origin kind of an event or command, used for provenance/causation metadata
+ * (phase-1-runtime-foundations Req 5). Additive and descriptive only — a source
+ * value received over an untrusted transport never grants authorization.
+ */
+export type EventSourceKind =
+  | "mqtt-device"
+  | "connector"
+  | "automation"
+  | "ui"
+  | "cron"
+  | "rest"
+  | "system";
+
+/**
+ * Additive event identity and causation envelope shared by device events and
+ * Automation Events (phase-1-runtime-foundations Req 5). Attached optionally so
+ * existing `NormalizedEvent` / `EventContext` consumers remain source-compatible.
+ */
+export interface EventMetadata {
+  /** Globally unique id for this specific event occurrence. */
+  eventId: string;
+  /** Event creation time (epoch ms). */
+  timestamp: number;
+  /** Where the event originated. */
+  source: {
+    kind: EventSourceKind;
+    id?: string;
+  };
+  /** Id of the event/command that caused this one, when known. */
+  causationId?: string;
+  /** Transport/confirmation correlation id, when applicable. */
+  correlationId?: string;
+  /** Authoring automation rule id, when the source is an automation. */
+  ruleId?: string;
+  /** Automation execution id, when produced inside an execution. */
+  executionId?: string;
+  /** Root-of-chain id shared by all descendants of the first event in a chain. */
+  traceId?: string;
+  /** Causal hop count from the chain root; incremented per descendant. */
+  depth?: number;
 }
 
 /** Internal event emitted after MQTT message normalization */
@@ -45,6 +118,8 @@ export interface NormalizedEvent {
   capabilities?: string[];
   /** Explicit MQTT command topic when an integration provides one. */
   commandTopic?: string;
+  /** Optional additive provenance/causation envelope (phase-1 Req 5). */
+  meta?: EventMetadata;
 }
 
 /** Automation rule registered in the Rule Registry */
@@ -68,6 +143,12 @@ export interface EventContext {
   deviceId: string;
   state: Record<string, unknown>;
   timestamp: number;
+  /**
+   * Optional additive provenance/causation envelope (phase-1 Req 5). Present
+   * when the triggering event carried metadata (Automation Events always do;
+   * device events do once event-metadata generation is wired in).
+   */
+  meta?: EventMetadata;
 }
 
 /** Command sent to an integration to control a device */
@@ -151,6 +232,15 @@ export interface ActionResult {
   lifecycleState?: CommandLifecycleState;
   /** Correlation id assigned at dispatch. Present for MQTT commands that correlate. */
   correlationId?: string;
+  /**
+   * Stable Aeolus identity for a Verified Command (phase-1 Req 1). Present on
+   * every physical-command result produced by `CommandService` once the command
+   * has been accepted into the pipeline. Distinct from {@link correlationId}:
+   * `commandId` identifies the command, `correlationId` a confirmation exchange.
+   * Optional at this shared boundary for compatibility with connector-local
+   * results that exist below the command boundary.
+   */
+  commandId?: string;
   /** Coarse cause when success is false; drives the REST action route's HTTP status. */
   failureKind?: CommandFailureKind;
 }

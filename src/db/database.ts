@@ -64,6 +64,9 @@ export function initSchema(database: DatabaseType): void {
   // Connector instance ownership is nullable so MQTT and pre-existing devices
   // stay valid and connector devices reacquire their owner on the next poll.
   addDeviceColumn("connector_instance_id", "TEXT DEFAULT NULL");
+  // Generic MQTT command profile (phase-1-runtime-foundations, mirrors migration
+  // 013). Nullable JSON; NULL ⇒ dispatch-only default behaviour.
+  addDeviceColumn("mqtt_command_profile", "TEXT DEFAULT NULL");
   addColumn("rule_type", "TEXT NOT NULL DEFAULT 'form'");
   addColumn("script_source", "TEXT DEFAULT NULL");
   addColumn("compiled_js", "TEXT DEFAULT NULL");
@@ -138,6 +141,55 @@ export function initSchema(database: DatabaseType): void {
   database.exec(`
     CREATE INDEX IF NOT EXISTS idx_device_history_device_ts
     ON device_history(device_id, timestamp DESC);
+  `);
+
+  // Durable command history (phase-1-runtime-foundations, mirrors migration 013)
+  // so legacy/test databases built via initSchema have it. `terminal_at` is
+  // authoritative for lifecycle completeness, not the lifecycle_state name.
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS command_records (
+      command_id TEXT PRIMARY KEY,
+      correlation_id TEXT,
+      source_kind TEXT NOT NULL,
+      source_id TEXT,
+      rule_id TEXT,
+      execution_id TEXT,
+      causation_id TEXT,
+      target_device_id TEXT NOT NULL,
+      action_type TEXT NOT NULL,
+      requested_tier TEXT,
+      effective_tier TEXT NOT NULL,
+      lifecycle_state TEXT NOT NULL,
+      success INTEGER,
+      failure_kind TEXT,
+      error TEXT,
+      requested_at INTEGER NOT NULL,
+      terminal_at INTEGER
+    );
+  `);
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS command_transitions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      command_id TEXT NOT NULL,
+      from_state TEXT,
+      to_state TEXT NOT NULL,
+      timestamp INTEGER NOT NULL,
+      details TEXT,
+      FOREIGN KEY(command_id) REFERENCES command_records(command_id) ON DELETE CASCADE
+    );
+  `);
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS idx_command_records_requested_at
+      ON command_records(requested_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_command_records_target_time
+      ON command_records(target_device_id, requested_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_command_records_execution
+      ON command_records(execution_id, requested_at DESC);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_command_records_correlation
+      ON command_records(correlation_id)
+      WHERE correlation_id IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_command_transitions_command
+      ON command_transitions(command_id, id);
   `);
 
   // Auth tables

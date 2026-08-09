@@ -24,6 +24,10 @@ export const WS_CLIENT_CONNECT = "ws:client-connect" as const;
 export const WS_CLIENT_DISCONNECT = "ws:client-disconnect" as const;
 export const WS_BROADCAST = "ws:broadcast" as const;
 export const MQTT_MESSAGE_PUBLISHED = "mqtt:message-published" as const;
+/** A domain event emitted by an automation over the reserved Aeolus event namespace (phase-1 Req 6). */
+export const AUTOMATION_EVENT = "automation:event" as const;
+/** Emitted after a command lifecycle transition is durably recorded (phase-1 Req 7.5). */
+export const COMMAND_LIFECYCLE_TRANSITION = "command:lifecycle-transition" as const;
 
 /** Typed event bus instance used across the application */
 export const eventBus = new EventEmitter();
