@@ -7,14 +7,17 @@ import {
   AUTOMATION_FIRED,
   AUTOMATION_RULE_REGISTERED,
   AUTOMATION_RULE_UNREGISTERED,
+  AUTOMATION_EVENT,
 } from "../core/event-bus.js";
 import type { NormalizedEvent, EventContext, Rule } from "../core/types.js";
+import type { AutomationEventEnvelopeV1 } from "./automation-event-service.js";
 import type { Sandbox, SandboxContext } from "./sandbox.js";
 import type { CommandService } from "./command-service.js";
 import type { AutomationScopeResolver } from "./automation-scope-resolver.js";
 import type { ExecutionLog } from "./execution-log.js";
 import { ExecutionRecorder, type ExecutionRecordRule } from "./execution-recorder.js";
 import { CommandResultCollector } from "./command-result-collector.js";
+import { runInExecutionContext } from "./execution-context.js";
 import { assembleExecutionResult, type LogicOutcome } from "./execution-result.js";
 import type { AutomationExecutionResult, CommandResult } from "./execution-types.js";
 import { RuleRegistry } from "./rule-registry.js";
@@ -101,6 +104,12 @@ export class AutomationEngine {
     this.cronTimerManager = new CronTimerManager();
     this.eventBus.on(DEVICE_STATE_CHANGE, (event: NormalizedEvent) => {
       this.evaluate(event);
+    });
+    // Automation Events are domain messages, not device state — they trigger
+    // topic-matching rules WITHOUT the device-scope admission gate (Req 6.10,
+    // 6.11), and never carry a hidden device id.
+    this.eventBus.on(AUTOMATION_EVENT, (event: { topic: string; envelope: AutomationEventEnvelopeV1 }) => {
+      this.evaluateAutomationEvent(event.topic, event.envelope);
     });
   }
 
@@ -220,6 +229,7 @@ export class AutomationEngine {
       deviceId: event.deviceId,
       state: event.state,
       timestamp: event.timestamp,
+      ...(event.meta ? { meta: event.meta } : {}),
     };
 
     const rules = this.registry.listRules();
@@ -246,6 +256,53 @@ export class AutomationEngine {
       // Each matching rule runs as its own Automation_Execution. Executions are
       // not awaited here so concurrent rules interleave; each is correlated by
       // its own executionId (Req 6.7).
+      const result = this.gate.submit({
+        ruleId: rule.id,
+        deviceId: context.deviceId,
+        topic: context.topic,
+        execute: () => this.executeRule(rule, context),
+      });
+      if (result.status === "dropped" || result.status === "suppressed") {
+        logger.debug({ ruleId: rule.id, status: result.status }, "Execution gate: rule not admitted");
+      }
+    }
+  }
+
+  /**
+   * Evaluate rules against an Automation Event (Req 6.10-6.12). Unlike device
+   * state, this bypasses the device-scope admission gate (an automation event is
+   * not a hidden device-state event, Req 6.11) and carries no device id. The
+   * receiving rule gets the user payload as `state` plus the event metadata.
+   */
+  private evaluateAutomationEvent(topic: string, envelope: AutomationEventEnvelopeV1): void {
+    // Normalize a primitive payload so EventContext.state stays a record.
+    const payload = envelope.payload;
+    const state: Record<string, unknown> =
+      typeof payload === "object" && payload !== null && !Array.isArray(payload)
+        ? (payload as Record<string, unknown>)
+        : { value: payload };
+
+    const context: EventContext = {
+      topic,
+      deviceId: "", // non-device event; never claim the source rule is a device
+      state,
+      timestamp: envelope.meta.timestamp,
+      meta: envelope.meta,
+    };
+
+    for (const rule of this.registry.listRules()) {
+      if (!this.topicMatches(rule.topic, topic)) continue;
+      // NOTE: no admitDeviceEvent() here — automation events are not gated by the
+      // device-scope admission check (Req 6.11).
+      try {
+        if (rule.condition && !rule.condition(context)) continue;
+      } catch (err) {
+        logger.error(
+          { ruleId: rule.id, topic, error: (err as Error).message },
+          "Rule condition threw error on automation event",
+        );
+        continue;
+      }
       const result = this.gate.submit({
         ruleId: rule.id,
         deviceId: context.deviceId,
@@ -298,11 +355,24 @@ export class AutomationEngine {
       deviceId: context.deviceId,
       state: context.state,
       timestamp: context.timestamp,
+      ...(context.meta ? { meta: context.meta } : {}),
     };
 
-    // Sandbox.execute() resolves for every outcome and never rejects.
-    const sandboxResult = await this.collector.context.run(executionId, () =>
-      this.sandbox!.execute(compiledJs, sandboxContext, rule.id, rule.completionTier),
+    // Sandbox.execute() resolves for every outcome and never rejects. Run inside
+    // both the collector ALS (for pushCurrent) and the narrow execution context
+    // (so commands/events issued during this execution carry executionId and the
+    // triggering causation, phase-1 Req 5.6, 5.7).
+    const sandboxResult = await runInExecutionContext(
+      {
+        executionId,
+        ...(context.meta?.eventId ? { causationId: context.meta.eventId } : {}),
+        automationId: rule.id,
+        ...(context.meta ? { triggerMeta: context.meta } : {}),
+      },
+      () =>
+        this.collector.context.run(executionId, () =>
+          this.sandbox!.execute(compiledJs, sandboxContext, rule.id, rule.completionTier),
+        ),
     );
 
     const logic: LogicOutcome =
@@ -347,9 +417,18 @@ export class AutomationEngine {
       // Run under the ALS context so any collector.pushCurrent() during the
       // action attributes to this execution. The action's return value is a
       // Command_Result for migrated form rules (task 6.3) and void otherwise.
-      const returned = await this.collector.context.run(
-        executionId,
-        () => Promise.resolve(rule.action(context)) as Promise<unknown>,
+      const returned = await runInExecutionContext(
+        {
+          executionId,
+          ...(context.meta?.eventId ? { causationId: context.meta.eventId } : {}),
+          automationId: rule.id,
+          ...(context.meta ? { triggerMeta: context.meta } : {}),
+        },
+        () =>
+          this.collector.context.run(
+            executionId,
+            () => Promise.resolve(rule.action(context)) as Promise<unknown>,
+          ),
       );
       if (isCommandResult(returned)) {
         this.collector.push(executionId, returned);

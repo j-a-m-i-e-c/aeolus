@@ -5,10 +5,11 @@ import type { AutomationScopeResolver, AuthorizationScope } from "./automation-s
 import type { ConfirmationTier } from "./command-lifecycle.js";
 import { isConfirmationTier, resolveEffectiveTier } from "./completion-tier.js";
 import type { CommandResultCollector } from "./command-result-collector.js";
+import type { AutomationEventService } from "./automation-event-service.js";
 import type { AutomationStateStore } from "./automation-state-store.js";
 import type { DeviceRegistry } from "../core/device-registry.js";
 import type { DataStore } from "../data-store/data-store.js";
-import type { Device, ActionResult, BulkActionResult, ConfirmOptions } from "../core/types.js";
+import type { Device, ActionResult, BulkActionResult, ConfirmOptions, EventMetadata } from "../core/types.js";
 import logger from "../logger.js";
 
 // isolated-vm is a native addon that requires C++ compilation.
@@ -271,6 +272,12 @@ export interface SandboxDeps {
   collector?: CommandResultCollector;
   onStateChange?: (ruleId: string, key: string, value: unknown) => void;
   /**
+   * Safe automation-to-automation event emitter (phase-1 Req 6). Backs the
+   * `events.emit()` sandbox global. Available to scoped automations (it never
+   * grants arbitrary MQTT publish). When absent, `events.emit()` is not exposed.
+   */
+  automationEventService?: AutomationEventService;
+  /**
    * Resolves the executing automation's authorization scope by rule id. When a
    * scoped scope is returned, the sandbox injects only the owning tab's devices
    * and confines Data Store access to that tab's collections (refusing shared
@@ -286,6 +293,8 @@ export interface SandboxContext {
   deviceId: string;
   state: Record<string, unknown>;
   timestamp: number;
+  /** Optional additive provenance/causation envelope (phase-1 Req 5). */
+  meta?: EventMetadata;
 }
 
 /** Memory limit in MB for each V8 isolate. */
@@ -406,6 +415,7 @@ const BOOTSTRAP_SCRIPT = `
   var dbSetRef = __dbSetRef;
   var dbDeleteRef = __dbDeleteRef;
   var dbCollectionsRef = __dbCollectionsRef;
+  var eventsEmitRef = __eventsEmitRef;
 
   globalThis.devices = {
     list: function() { return data; },
@@ -460,6 +470,16 @@ const BOOTSTRAP_SCRIPT = `
       mqttRef.applySync(undefined, [topic, payload]);
     }
   };
+
+  if (eventsEmitRef) {
+    globalThis.events = {
+      emit: function(name, payload) {
+        // Returns { published, eventId?, topic?, error? }. Never throws into the
+        // script; the source rule and causal metadata are host-derived.
+        return eventsEmitRef.applySync(undefined, [name, payload], { result: { copy: true } });
+      }
+    };
+  }
 
   globalThis.log = {
     info: function(message) { logInfoRef.applySync(undefined, [message]); },
@@ -595,6 +615,7 @@ const BOOTSTRAP_SCRIPT = `
   delete globalThis.__dbSetRef;
   delete globalThis.__dbDeleteRef;
   delete globalThis.__dbCollectionsRef;
+  delete globalThis.__eventsEmitRef;
 })();
 `;
 
@@ -615,6 +636,7 @@ export class Sandbox {
   private collector?: CommandResultCollector;
   private onStateChange?: (ruleId: string, key: string, value: unknown) => void;
   private scopeResolver?: AutomationScopeResolver;
+  private automationEventService?: AutomationEventService;
 
   constructor(deps: SandboxDeps) {
     this.actionExecutor = deps.actionExecutor;
@@ -624,6 +646,7 @@ export class Sandbox {
     this.collector = deps.collector;
     this.onStateChange = deps.onStateChange;
     this.scopeResolver = deps.scopeResolver;
+    this.automationEventService = deps.automationEventService;
   }
 
   /**
@@ -686,6 +709,7 @@ export class Sandbox {
       // Set raw data and references on the global scope
       await this.setDevicesRefs(jail, ruleId, inFlight, ruleTierDefault, scope);
       await this.setMqttRefs(jail, ruleId);
+      await this.setEventsRefs(jail);
       await this.setLogRefs(jail, ruleId);
       await this.setContextData(jail, context);
       await this.setHttpRefs(jail, ruleId);
@@ -970,6 +994,25 @@ export class Sandbox {
           { type: "publish", target: topic, params: { payload } },
           ruleId,
         );
+      }),
+    );
+  }
+
+  /**
+   * Set the Automation Event emit reference on the jail (phase-1 Req 6.3, 6.4).
+   * Only wired when an AutomationEventService is available. The source rule and
+   * causal metadata are resolved host-side from the active execution context, so
+   * user script supplies only the event name and payload. Scoped automations may
+   * use this; it never grants arbitrary MQTT publish authority.
+   */
+  private async setEventsRefs(jail: IvmGlobal): Promise<void> {
+    if (!ivm) return;
+    const service = this.automationEventService;
+    if (!service) return;
+    await jail.set(
+      "__eventsEmitRef",
+      new ivm.Reference(function (name: unknown, payload: unknown) {
+        return service.emit(name, payload);
       }),
     );
   }

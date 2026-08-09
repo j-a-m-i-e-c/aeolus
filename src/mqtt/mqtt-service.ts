@@ -3,8 +3,10 @@
 import mqtt, { type MqttClient, type IPublishPacket } from "mqtt";
 import type { EventEmitter } from "node:events";
 import { parseTopic } from "./topic-parser.js";
-import { DEVICE_STATE_CHANGE, MQTT_RAW_MESSAGE, MQTT_CONNECTION_STATE, MQTT_MESSAGE_PROCESSED, MQTT_MESSAGE_PUBLISHED } from "../core/event-bus.js";
+import { DEVICE_STATE_CHANGE, MQTT_RAW_MESSAGE, MQTT_CONNECTION_STATE, MQTT_MESSAGE_PROCESSED, MQTT_MESSAGE_PUBLISHED, AUTOMATION_EVENT } from "../core/event-bus.js";
 import type { NormalizedEvent } from "../core/types.js";
+import { newEventMetadata } from "../core/event-metadata.js";
+import { parseAutomationEventEnvelope } from "../automations/automation-event-service.js";
 import type { AckMessage } from "../automations/pending-command-tracker.js";
 import type { DeviceRegistry } from "../core/device-registry.js";
 import logger from "../logger.js";
@@ -47,6 +49,13 @@ export interface MqttServiceConfig {
   ackTopicFilter?: string;
   /** Topic leaf names that are raw-visible but excluded from device discovery. */
   discoveryIgnoredTopicSuffixes?: string[];
+  /**
+   * Reserved Automation Event topic space Aeolus subscribes to (e.g.
+   * "aeolus/events/#"). Messages here are parsed as versioned automation-event
+   * envelopes and emitted as AUTOMATION_EVENT — never treated as device state
+   * and never passed through device discovery (phase-1 Req 6.7, 6.9).
+   */
+  automationEventTopicFilter?: string;
 }
 
 /** Optional collaborators injected at construction time. */
@@ -255,6 +264,10 @@ export class MqttService {
     if (this.config.ackTopicFilter && !topics.includes(this.config.ackTopicFilter)) {
       topics.push(this.config.ackTopicFilter);
     }
+    // And the reserved Automation Event namespace when configured.
+    if (this.config.automationEventTopicFilter && !topics.includes(this.config.automationEventTopicFilter)) {
+      topics.push(this.config.automationEventTopicFilter);
+    }
     for (const topic of topics) {
       this.client.subscribe(topic, (err) => {
         if (err) {
@@ -301,6 +314,16 @@ export class MqttService {
       return;
     }
 
+    // Automation Event namespace: parse the versioned envelope and emit
+    // AUTOMATION_EVENT. These topics stay raw-visible (emitted above) but never
+    // become device state or Device Registry entries (Req 6.7, 6.9).
+    if (this.isAutomationEventTopic(topic)) {
+      this.handleAutomationEvent(topic, raw);
+      const eventDurationMs = Date.now() - start;
+      this.eventBus.emit(MQTT_MESSAGE_PROCESSED, { topic, durationMs: eventDurationMs });
+      return;
+    }
+
     if (this.isIgnoredDiscoveryTopic(topic)) {
       logger.debug({ topic }, "MQTT control-plane topic excluded from device discovery");
       const ignoredDurationMs = Date.now() - start;
@@ -336,13 +359,17 @@ export class MqttService {
       }
     }
 
+    const deviceId = this.deviceRegistry?.resolveMqttDeviceId(topic, parsed.deviceId) ?? parsed.deviceId;
     const event: NormalizedEvent = {
-      deviceId: this.deviceRegistry?.resolveMqttDeviceId(topic, parsed.deviceId) ?? parsed.deviceId,
+      deviceId,
       deviceType: parsed.deviceType,
       state,
       topic,
       timestamp: Date.now(),
       name: parsed.name,
+      // Additive provenance envelope (phase-1 Req 5). Legacy MQTT state carries
+      // no Aeolus envelope, so we originate a fresh inbound event identity.
+      meta: newEventMetadata({ kind: "mqtt-device", id: deviceId }),
     };
 
     this.eventBus.emit(DEVICE_STATE_CHANGE, event);
@@ -362,6 +389,28 @@ export class MqttService {
     // Strip an MQTT multi-level wildcard suffix ("aeolus/acks/#" → "aeolus/acks/").
     const prefix = filter.endsWith("/#") ? filter.slice(0, -1) : filter;
     return topic === prefix || topic.startsWith(prefix);
+  }
+
+  /** True when `topic` falls within the reserved Automation Event namespace. */
+  private isAutomationEventTopic(topic: string): boolean {
+    const filter = this.config.automationEventTopicFilter;
+    if (!filter) return false;
+    const prefix = filter.endsWith("/#") ? filter.slice(0, -1) : filter;
+    return topic === prefix || topic.startsWith(prefix);
+  }
+
+  /**
+   * Parse an Automation Event envelope and emit AUTOMATION_EVENT. A malformed
+   * envelope is logged and dropped: it never creates a device or triggers a rule
+   * (Req 6.9, §8 invalid-envelope policy).
+   */
+  private handleAutomationEvent(topic: string, raw: string): void {
+    const envelope = parseAutomationEventEnvelope(raw);
+    if (!envelope) {
+      logger.debug({ topic }, "Malformed automation event envelope ignored");
+      return;
+    }
+    this.eventBus.emit(AUTOMATION_EVENT, { topic, envelope });
   }
 
   /** True when the final topic level is excluded from automatic discovery. */
@@ -473,6 +522,7 @@ export class MqttService {
       correlationData?: Buffer;
       responseTopic?: string;
       retain?: boolean;
+      qos?: 0 | 1 | 2;
     },
   ): void {
     if (!this.client || this.connectionState !== "connected") {
@@ -487,7 +537,9 @@ export class MqttService {
     if (options?.responseTopic !== undefined) {
       properties.responseTopic = options.responseTopic;
     }
-    this.client.publish(topic, payload, { retain: options?.retain ?? false, properties }, (err) => {
+    // QoS defaults to 0 (unchanged behaviour) unless a device command profile
+    // configures otherwise (phase-1 Req 2.8).
+    this.client.publish(topic, payload, { retain: options?.retain ?? false, qos: options?.qos ?? 0, properties }, (err) => {
       if (err) {
         logger.error({ topic, error: err.message }, "Failed to publish MQTT message");
       } else {
