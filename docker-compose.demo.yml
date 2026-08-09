@@ -31,7 +31,43 @@ services:
       args:
         VITE_PUBLIC_DEMO: "true"
 
-  # When seeding through this overlay, provision the public demo identity too.
+  # When seeding through this overlay, provision the public demo identity too,
+  # and configure the simulated actuators' MQTT command profiles (Phase 2) once
+  # the simulator has published its devices.
   seed:
     environment:
       AEOLUS_PUBLIC_DEMO: "true"
+      AEOLUS_SIMULATOR_BOOTSTRAP: "true"
+
+  # Phase 2 simulated-hardware runtime. A SEPARATE process that speaks only MQTT
+  # to the internal broker — it holds no Aeolus admin credentials and exposes NO
+  # ports (Req 10.2, 10.4). Present ONLY in this demo overlay; a normal install
+  # never runs it (the base compose has no simulator service and the process is
+  # off unless AEOLUS_SIMULATOR_ENABLED=true — Req 10.1, 10.8).
+  #
+  # Runs from source via tsx (the same mounted-repo pattern as the seed job) so
+  # no separate build image is required for the demo/testing overlay.
+  simulator:
+    image: node:22.22.1-slim
+    container_name: aeolus-simulator
+    restart: unless-stopped
+    # Host networking so the simulator reaches the broker on localhost:1883, the
+    # same way the host-networked backend does. It publishes no ports of its own.
+    network_mode: host
+    working_dir: /repo
+    volumes:
+      - .:/repo
+    environment:
+      AEOLUS_SIMULATOR_ENABLED: "true"
+      AEOLUS_SIMULATOR_SCENARIOS: "reference-water"
+      MQTT_BROKER_URL: mqtt://localhost:1883
+      AEOLUS_SIMULATOR_LOG_LEVEL: ${AEOLUS_SIMULATOR_LOG_LEVEL:-info}
+    entrypoint: ["npx", "tsx", "src/simulator/index.ts"]
+    depends_on:
+      - mosquitto
+      - backend
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"

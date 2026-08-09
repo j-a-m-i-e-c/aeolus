@@ -1,4 +1,4 @@
-.PHONY: deploy up up-desktop down restart logs logs-backend status clean dev seed reset test e2e e2e-fresh lint check verify help
+.PHONY: deploy up up-desktop demo-up demo-reset down restart logs logs-backend status clean dev sim seed reset test e2e e2e-fresh lint check verify help
 
 # `USER` is normally set by the shell (your login name), which would leak into
 # the seed command. Ignore the environment value and default to "admin" unless
@@ -40,8 +40,21 @@ clean: ## Remove unused Docker images and build cache (does NOT touch volumes/da
 up-desktop: ## Start all services with the opt-in desktop/dev bridge override (Docker Desktop)
 	docker compose -f docker-compose.yml -f docker-compose.desktop.yml up -d --build
 
+demo-up: ## Start the public demo overlay (backend demo mode + Phase 2 simulator)
+	docker compose -f docker-compose.yml -f docker-compose.demo.yml up -d --build
+
+demo-reset: ## Reset simulated hardware by restarting the simulator (it republishes initial state on reconnect)
+	docker compose -f docker-compose.yml -f docker-compose.demo.yml restart simulator
+	@echo "⏳ Waiting for the simulator to reconnect and republish initial state..."
+	@sleep 6
+	docker compose -f docker-compose.yml -f docker-compose.demo.yml logs --tail 20 simulator
+	@echo "✅ Simulator reset. If the database was wiped, re-run the seed with the demo overlay to reconfigure command profiles (AEOLUS_SIMULATOR_BOOTSTRAP=true)."
+
 dev: ## Start backend in dev mode (hot reload)
 	npm run dev
+
+sim: ## Start the demo MQTT simulator process (separate from the backend; off by default)
+	AEOLUS_SIMULATOR_ENABLED=true npm run sim
 
 seed: ## Seed demo data via Docker, no host Node needed (usage: make seed PASS=yourpass [USER=admin])
 	@if [ -z "$(PASS)" ]; then \
