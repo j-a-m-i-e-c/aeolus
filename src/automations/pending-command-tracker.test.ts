@@ -164,6 +164,91 @@ describe("PendingCommandTracker branch coverage", () => {
     });
   });
 
+  describe("observed-tier: a plain ACK is not a settled observation", () => {
+    it("advances to ACKNOWLEDGED on a plain success ack and waits for the real observation", async () => {
+      const tracker = new PendingCommandTracker();
+      const promise = tracker.register({
+        correlationId: "c1",
+        targetDeviceId: "dev-1",
+        observedDeviceId: "flow-1",
+        requiredTier: "observed",
+        condition: (s) => Number(s.litresPerMinute) > 0,
+        timeoutMs: 5000,
+      });
+
+      // A plain ack carries no `state`. It must NOT be evaluated against the
+      // observation predicate (which would STATE_MISMATCH) — only advance the
+      // command to ACKNOWLEDGED while it waits for the real sensor.
+      tracker.route({ correlationId: "c1", success: true });
+      expect(tracker.has("c1")).toBe(true);
+
+      // The independent sensor later reports a matching observation → OBSERVED.
+      tracker.observeState("flow-1", { litresPerMinute: 120 });
+      const result = await promise;
+      expect(result.lifecycleState).toBe("OBSERVED");
+    });
+
+    it("reports the intermediate DISPATCHED->ACKNOWLEDGED transition before OBSERVED", async () => {
+      const transitions: string[] = [];
+      const tracker = new PendingCommandTracker({
+        onTransition: (e) => transitions.push(`${e.fromState}->${e.toState}`),
+      });
+      const promise = tracker.register({
+        commandId: "cmd-1",
+        correlationId: "c1",
+        targetDeviceId: "dev-1",
+        observedDeviceId: "flow-1",
+        requiredTier: "observed",
+        condition: (s) => Number(s.litresPerMinute) > 0,
+        timeoutMs: 5000,
+      });
+
+      tracker.route({ correlationId: "c1", success: true });
+      tracker.observeState("flow-1", { litresPerMinute: 120 });
+      await promise;
+      expect(transitions).toContain("DISPATCHED->ACKNOWLEDGED");
+    });
+
+    it("STATE_MISMATCH only when the device explicitly reports a mismatching settled observation", async () => {
+      const tracker = new PendingCommandTracker();
+      const promise = tracker.register({
+        correlationId: "c1",
+        targetDeviceId: "dev-1",
+        observedDeviceId: "dev-1",
+        requiredTier: "observed",
+        condition: (s) => Number(s.litresPerMinute) > 0,
+        timeoutMs: 5000,
+      });
+
+      // The device deliberately reports observed state (a `state` object) on the
+      // ack channel that fails the predicate → a settled mismatch.
+      tracker.route({ correlationId: "c1", success: true, state: { litresPerMinute: 0 } });
+      const result = await promise;
+      expect(result.lifecycleState).toBe("STATE_MISMATCH");
+    });
+
+    it("does not STATE_MISMATCH on a non-matching AMBIENT observation — it waits", async () => {
+      const tracker = new PendingCommandTracker();
+      const promise = tracker.register({
+        correlationId: "c1",
+        targetDeviceId: "dev-1",
+        observedDeviceId: "flow-1",
+        requiredTier: "observed",
+        condition: (s) => Number(s.litresPerMinute) > 0,
+        timeoutMs: 1000,
+      });
+
+      // Ambient device state that fails the predicate is ignored (not settled),
+      // so the command keeps waiting rather than mismatching.
+      tracker.observeState("flow-1", { litresPerMinute: 0 });
+      expect(tracker.has("c1")).toBe(true);
+
+      vi.advanceTimersByTime(1001);
+      const result = await promise;
+      expect(result.lifecycleState).toBe("TIMED_OUT");
+    });
+  });
+
   describe("route to unknown correlation id", () => {
     it("calls onLateMessage for unknown ids", () => {
       const lateIds: string[] = [];

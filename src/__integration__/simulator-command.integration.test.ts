@@ -9,7 +9,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { restSource } from "../automations/command-service.js";
 import type { ConfirmOptions } from "../core/types.js";
 import { createSimulatorE2E, waitFor, automationEvent, dockerAvailable, AEOLUS_DEVICE_IDS, type SimulatorE2E } from "./simulator-harness.js";
-import { STIMULUS, PUMP_COMMAND_TOPIC } from "../simulator/scenarios/reference-water.js";
+import { STIMULUS, PUMP_COMMAND_TOPIC, DEVICE_KEYS } from "../simulator/scenarios/reference-water.js";
 
 // This end-to-end suite runs against a throwaway eclipse-mosquitto:2 container
 // (the backend requires MQTT 5, which no in-process JS broker supports). It is
@@ -39,7 +39,7 @@ describeE2E("Phase 2 simulator command E2E", () => {
   let env: SimulatorE2E;
 
   beforeEach(async () => {
-    env = await createSimulatorE2E({ ackDelayMs: 40 });
+    env = await createSimulatorE2E();
   }, 30000);
 
   afterEach(async () => {
@@ -84,7 +84,12 @@ describeE2E("Phase 2 simulator command E2E", () => {
 
   it("derives FAILED from a simulator rejection (negative ACK)", async () => {
     env.controlClient.publish(`${EVENTS}/${STIMULUS.rejectNextPump}`, automationEvent(STIMULUS.rejectNextPump, {}));
-    await waitFor(() => true, { timeoutMs: 200, intervalMs: 50 }); // let the stimulus arm the fault
+    // Wait until the stimulus has actually armed the fault, so the command that
+    // follows is guaranteed to hit it (no fixed-sleep race).
+    await waitFor(() => env.simulator.getFaults().peek(DEVICE_KEYS.pump)?.rejectNext !== undefined, {
+      label: "reject-next-pump fault armed",
+      timeoutMs: 5000,
+    });
 
     const result = await pumpCommand(env, true, undefined, "acknowledged");
     expect(result.lifecycleState).toBe("FAILED");
@@ -93,31 +98,44 @@ describeE2E("Phase 2 simulator command E2E", () => {
 
   it("derives TIMED_OUT when the simulator drops the ACK", async () => {
     env.controlClient.publish(`${EVENTS}/${STIMULUS.dropNextPumpAck}`, automationEvent(STIMULUS.dropNextPumpAck, {}));
-    await waitFor(() => true, { timeoutMs: 200, intervalMs: 50 });
+    await waitFor(() => env.simulator.getFaults().peek(DEVICE_KEYS.pump)?.dropNextAck === true, {
+      label: "drop-next-pump-ack fault armed",
+      timeoutMs: 5000,
+    });
 
     const result = await pumpCommand(env, true, undefined, "acknowledged");
     expect(result.lifecycleState).toBe("TIMED_OUT");
   }, 20000);
 
-  it("derives STATE_MISMATCH when the observed flow never matches but the device replies", async () => {
-    // Suppress the flow observation; the ACK still settles as a non-matching
-    // observation for the flow condition -> STATE_MISMATCH.
-    env.controlClient.publish(`${EVENTS}/${STIMULUS.suppressNextFlow}`, automationEvent(STIMULUS.suppressNextFlow, {}));
-    await waitFor(() => true, { timeoutMs: 200, intervalMs: 50 });
-
+  it("reaches ACKNOWLEDGED then TIMES OUT when the ack arrives but the observation never matches", async () => {
+    // Corrected ACK/observation semantics: a plain ack advances the command to
+    // ACKNOWLEDGED but is NOT itself a settled observation, and a non-matching
+    // AMBIENT sensor reading is ignored (it waits). Here the flow reports 120 but
+    // the predicate demands an impossible value, so the observation never
+    // matches: the command must reach ACKNOWLEDGED (on the ack) and then TIME OUT
+    // waiting for the observation — never STATE_MISMATCH off the ack.
     const confirm: ConfirmOptions = {
-      condition: (state) => Number(state.litresPerMinute) > 0,
+      condition: (state) => Number(state.litresPerMinute) > 1_000_000,
       deviceId: FLOW,
-      timeoutMs: 8000,
+      timeoutMs: 2000,
     };
     const result = await pumpCommand(env, true, confirm, "observed");
-    expect(result.lifecycleState).toBe("STATE_MISMATCH");
+    expect(result.lifecycleState).toBe("TIMED_OUT");
+
+    // It genuinely acknowledged first (distinct from a dispatch-then-timeout).
+    const record = env.store.get(result.commandId!);
+    expect(record?.transitions.map((t) => t.toState)).toContain("ACKNOWLEDGED");
   }, 20000);
 
   it("times out an observed command when both flow and ACK are suppressed", async () => {
     env.controlClient.publish(`${EVENTS}/${STIMULUS.suppressNextFlow}`, automationEvent(STIMULUS.suppressNextFlow, {}));
     env.controlClient.publish(`${EVENTS}/${STIMULUS.dropNextPumpAck}`, automationEvent(STIMULUS.dropNextPumpAck, {}));
-    await waitFor(() => true, { timeoutMs: 300, intervalMs: 50 });
+    // The two stimuli are published in order on the same client; waiting for the
+    // second (dropNextAck) to arm implies the first (suppressNextFlow) processed.
+    await waitFor(() => env.simulator.getFaults().peek(DEVICE_KEYS.pump)?.dropNextAck === true, {
+      label: "drop-next-pump-ack fault armed",
+      timeoutMs: 5000,
+    });
 
     const confirm: ConfirmOptions = {
       condition: (state) => Number(state.litresPerMinute) > 0,

@@ -86,7 +86,11 @@ jobs:
         run: docker pull eclipse-mosquitto:2
 
       - name: Run broker-backed integration tests
-        run: npx vitest run __integration__
+        # Serial (one file at a time): each broker-backed E2E spins up its own
+        # throwaway mosquitto container, and running several concurrently can
+        # contend on container startup. The dedicated job is small, so serial
+        # execution trades a little wall-clock for reliability.
+        run: npx vitest run __integration__ --no-file-parallelism
 
   # Playwright browser end-to-end tests run on a daily schedule (see
   # .github/workflows/e2e.yml). They're too slow/expensive to run on every push.

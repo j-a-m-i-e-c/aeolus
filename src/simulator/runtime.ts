@@ -72,6 +72,15 @@ export class SimulatorRuntime {
   }
 
   /**
+   * The fault controller. Exposed so end-to-end tests can deterministically
+   * confirm an Automation Event stimulus has armed a fault before issuing the
+   * command it should affect — removing the race a fixed sleep would leave.
+   */
+  getFaults(): FaultController {
+    return this.faults;
+  }
+
+  /**
    * Load a scenario before {@link start}: registers its devices and its declared
    * Automation Event stimulus handlers.
    */
