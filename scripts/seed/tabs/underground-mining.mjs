@@ -370,7 +370,7 @@ const dataStore = [
         location: (i) => (i % 2 === 0 ? "Level 3" : "Drift 7"),
         ch4: (i) => round(0.25 + Math.sin(i / 8) * 0.11 + noise(0.05), 2),
         co: (i) => round(13 + Math.sin(i / 11) * 6 + noise(2), 0),
-        o2: (i) => round(20.8 + noise(0.08), 1),
+        o2: () => round(20.8 + noise(0.08), 1),
         no2: (i) => round(1.4 + Math.sin(i / 13) * 0.6 + noise(0.18), 1),
       },
     }),
