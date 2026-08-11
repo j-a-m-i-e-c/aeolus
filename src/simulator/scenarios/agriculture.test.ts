@@ -105,6 +105,18 @@ describe("agriculture simulator scenario", () => {
     expect(last(AGRICULTURE_STATE_TOPICS.battery)).toMatchObject({ soc: 78, available: true });
   });
 
+  it("domain resets do not reset unrelated Farm systems", async () => {
+    const { fire, last } = setup();
+    await fire(AGRICULTURE_STIMULUS.headerLow);
+    await fire(AGRICULTURE_STIMULUS.energyLow);
+    await fire(AGRICULTURE_STIMULUS.waterReset);
+    expect(last(AGRICULTURE_STATE_TOPICS.header)).toMatchObject({ value: 65, litres: 3250 });
+    expect(last(AGRICULTURE_STATE_TOPICS.battery)).toMatchObject({ soc: 18, available: false });
+
+    await fire(AGRICULTURE_STIMULUS.energyReset);
+    expect(last(AGRICULTURE_STATE_TOPICS.battery)).toMatchObject({ soc: 78, available: true });
+  });
+
   it("reset restores the coherent morning state", async () => {
     const { fire, last } = setup();
     await fire(AGRICULTURE_STIMULUS.headerLow);

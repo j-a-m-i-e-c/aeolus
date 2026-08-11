@@ -58,6 +58,10 @@ export const AGRICULTURE_STIMULUS = {
   troughsLow: "farm/sim/troughs-low",
   energyLow: "farm/sim/energy-low",
   energyRestore: "farm/sim/energy-restore",
+  waterReset: "farm/sim/water-reset",
+  livestockReset: "farm/sim/livestock-reset",
+  troughsReset: "farm/sim/troughs-reset",
+  energyReset: "farm/sim/energy-reset",
   reset: "farm/sim/reset",
 } as const;
 
@@ -86,9 +90,9 @@ const INITIAL = {
   battery: { soc: 78, solarKw: 2.8, loadKw: 1.2, available: true } as BatteryState,
 };
 
-// Returns the state type (a fresh object literal is assignable to the
+// Returns the state type: a fresh object literal is assignable to the
 // controller's Partial<SimulatedState> patch parameter, whereas a named-type
-// return value would not be — it would lack the required string index signature).
+// return value would lack the required string index signature.
 function tankState(levelPct: number, capacityLitres: number): SimulatedState {
   const value = Math.max(0, Math.min(100, levelPct));
   return { value, litres: Math.round((value / 100) * capacityLitres) };
@@ -140,6 +144,30 @@ class AgricultureEnvironment {
 
   restoreEnergy(): void {
     this.controller(AGRICULTURE_DEVICE_KEYS.battery)?.update({ ...INITIAL.battery });
+  }
+
+  resetWater(): void {
+    this.controller(AGRICULTURE_DEVICE_KEYS.dam)?.update({ ...INITIAL.dam } as Record<string, unknown>, { forcePublish: true });
+    this.controller(AGRICULTURE_DEVICE_KEYS.header)?.update({ ...INITIAL.header } as Record<string, unknown>, { forcePublish: true });
+    this.controller(AGRICULTURE_DEVICE_KEYS.shed)?.update({ ...INITIAL.shed } as Record<string, unknown>, { forcePublish: true });
+    this.controller(AGRICULTURE_DEVICE_KEYS.house)?.update({ ...INITIAL.house } as Record<string, unknown>, { forcePublish: true });
+    this.controller(AGRICULTURE_DEVICE_KEYS.pump)?.update({ ...INITIAL.pump } as Record<string, unknown>, { forcePublish: true });
+    this.controller(AGRICULTURE_DEVICE_KEYS.flow)?.update({ ...INITIAL.flow } as Record<string, unknown>, { forcePublish: true });
+  }
+
+  resetLivestock(): void {
+    this.controller(AGRICULTURE_DEVICE_KEYS.energiser)?.update({ ...INITIAL.energiser } as Record<string, unknown>, { forcePublish: true });
+    this.controller(AGRICULTURE_DEVICE_KEYS.collars)?.update({ ...INITIAL.collars } as Record<string, unknown>, { forcePublish: true });
+    this.controller(AGRICULTURE_DEVICE_KEYS.recall)?.update({ ...INITIAL.recall } as Record<string, unknown>, { forcePublish: true });
+  }
+
+  resetTroughs(): void {
+    this.controller(AGRICULTURE_DEVICE_KEYS.troughs)?.update({ ...INITIAL.troughs } as Record<string, unknown>, { forcePublish: true });
+    this.controller(AGRICULTURE_DEVICE_KEYS.troughRefill)?.update({ ...INITIAL.troughRefill } as Record<string, unknown>, { forcePublish: true });
+  }
+
+  resetEnergy(): void {
+    this.controller(AGRICULTURE_DEVICE_KEYS.battery)?.update({ ...INITIAL.battery } as Record<string, unknown>, { forcePublish: true });
   }
 
   scheduleTransfer(litres: number): void {
@@ -300,6 +328,10 @@ export function createAgricultureScenario(): SimulatorScenario {
       [AGRICULTURE_STIMULUS.troughsLow]: () => env.lowerTroughs(),
       [AGRICULTURE_STIMULUS.energyLow]: () => env.setEnergyLow(),
       [AGRICULTURE_STIMULUS.energyRestore]: () => env.restoreEnergy(),
+      [AGRICULTURE_STIMULUS.waterReset]: () => env.resetWater(),
+      [AGRICULTURE_STIMULUS.livestockReset]: () => env.resetLivestock(),
+      [AGRICULTURE_STIMULUS.troughsReset]: () => env.resetTroughs(),
+      [AGRICULTURE_STIMULUS.energyReset]: () => env.resetEnergy(),
       [AGRICULTURE_STIMULUS.reset]: () => env.reset(),
     },
   };
