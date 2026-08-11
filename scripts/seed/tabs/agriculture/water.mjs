@@ -117,12 +117,36 @@ const logic = `automation({
       if (topic !== "sensor/farm/dam" &&
           topic !== "sensor/farm/header-tank" &&
           topic !== "sensor/farm/transfer-flow" &&
+          topic !== "sensor/farm/shed-tank" &&
+          topic !== "sensor/farm/house-tank" &&
           topic !== "sensor/farm/energy/battery") return;
+
+      var shed = byTopic("sensor/farm/shed-tank");
+      var house = byTopic("sensor/farm/house-tank");
 
       var damPct = Number(dam && dam.state && dam.state.value);
       var headerPct = Number(header && header.state && header.state.value);
       var soc = Number(battery && battery.state && battery.state.soc);
       var pumpOn = Boolean(pump && pump.state && pump.state.on);
+      var shedPct = Number(shed && shed.state && shed.state.value);
+      var housePct = Number(house && house.state && house.state.value);
+      var flowLpm = Number(flow && flow.state && flow.state.litresPerMinute);
+
+      // UI projection: mirror ONLY observed device state into this automation's
+      // own state — never a fabricated value. The non-admin demo user is not
+      // granted direct device visibility, so the custom UI reads these keys via
+      // aeolus.read() instead of aeolus.devices. pumpOn is the OBSERVED switch
+      // state (published by the simulator after the command's physical effect),
+      // not an optimistic echo of the button press. Guards prevent a missing
+      // reading from overwriting a good projection with NaN.
+      if (!isNaN(damPct)) state.set("damPct", damPct);
+      if (!isNaN(headerPct)) state.set("headerPct", headerPct);
+      if (!isNaN(shedPct)) state.set("shedPct", shedPct);
+      if (!isNaN(housePct)) state.set("housePct", housePct);
+      if (!isNaN(flowLpm)) state.set("flowLpm", flowLpm);
+      state.set("pumpOn", pumpOn);
+      if (!isNaN(soc)) state.set("batterySoc", soc);
+      state.set("energyAllowed", !battery || (battery.state && battery.state.available !== false && (isNaN(soc) || soc >= 30)));
 
       var sourceLowActive = Boolean(state.get("sourceLowActive"));
       if (!isNaN(damPct) && damPct <= 10 && !sourceLowActive) {
@@ -174,26 +198,17 @@ function lerp(a: number, b: number, t: number) {
 }
 
 export default function WaterManagement(aeolus: CustomComponentProps) {
-  function physical(topic: string): any {
-    return aeolus.devices.find((device: any) => device.topic === topic);
-  }
-
-  const damDevice = physical("sensor/farm/dam");
-  const headerDevice = physical("sensor/farm/header-tank");
-  const shedDevice = physical("sensor/farm/shed-tank");
-  const houseDevice = physical("sensor/farm/house-tank");
-  const pumpDevice = physical("switch/farm/dam-pump/state");
-  const flowDevice = physical("sensor/farm/transfer-flow");
-  const batteryDevice = physical("sensor/farm/energy/battery");
-
-  const sharedDam = clamp(Number(damDevice?.state?.value ?? 82), 0, 100);
-  const sharedHeader = clamp(Number(headerDevice?.state?.value ?? 65), 0, 100);
-  const shed = clamp(Number(shedDevice?.state?.value ?? 78), 0, 100);
-  const house = clamp(Number(houseDevice?.state?.value ?? 55), 0, 100);
-  const pumpOn = Boolean(pumpDevice?.state?.on);
-  const flow = Math.max(0, Number(flowDevice?.state?.litresPerMinute ?? 0));
-  const batterySoc = clamp(Number(batteryDevice?.state?.soc ?? 78), 0, 100);
-  const energyAllowed = batteryDevice?.state?.available !== false && batterySoc >= 30;
+  // A non-admin demo user is not granted direct device visibility, so this UI
+  // reads the automation's own projection state (mirrored from observed device
+  // state by the Logic) rather than the raw device inventory.
+  const sharedDam = clamp(Number(aeolus.read("damPct") ?? 82), 0, 100);
+  const sharedHeader = clamp(Number(aeolus.read("headerPct") ?? 65), 0, 100);
+  const shed = clamp(Number(aeolus.read("shedPct") ?? 78), 0, 100);
+  const house = clamp(Number(aeolus.read("housePct") ?? 55), 0, 100);
+  const pumpOn = Boolean(aeolus.read("pumpOn"));
+  const flow = Math.max(0, Number(aeolus.read("flowLpm") ?? 0));
+  const batterySoc = clamp(Number(aeolus.read("batterySoc") ?? 78), 0, 100);
+  const energyAllowed = aeolus.read("energyAllowed") !== false && batterySoc >= 30;
   const lastAction = aeolus.read("lastAction") as any;
 
   const [dam, setDam] = useState(sharedDam);

@@ -26,7 +26,15 @@ const logic = `automation({
       var soc = Number(context.state && context.state.soc);
       var solarKw = Number(context.state && context.state.solarKw);
       var loadKw = Number(context.state && context.state.loadKw);
-      var allowed = context.state && context.state.available !== false && (isNaN(soc) || soc >= 30);
+      var batteryAvailable = !(context.state && context.state.available === false);
+      var allowed = batteryAvailable && (isNaN(soc) || soc >= 30);
+      // UI projection: mirror ONLY observed battery state into this automation's
+      // own state (the non-admin demo user reads these via aeolus.read, not
+      // aeolus.devices).
+      if (!isNaN(soc)) state.set("batterySoc", soc);
+      if (!isNaN(solarKw)) state.set("solarKw", solarKw);
+      if (!isNaN(loadKw)) state.set("loadKw", loadKw);
+      state.set("batteryAvailable", batteryAvailable);
       var previous = state.get("allowed");
       state.set("allowed", allowed);
 
@@ -55,11 +63,13 @@ const ui = `import { useEffect, useState } from "react";
 import type { CustomComponentProps } from "./types";
 
 export default function SiteEnergy(aeolus: CustomComponentProps) {
-  const battery = aeolus.devices.find((device: any) => device.topic === "sensor/farm/energy/battery") as any;
-  const soc = Math.max(0, Math.min(100, Number(battery?.state?.soc ?? 78)));
-  const solar = Math.max(0, Number(battery?.state?.solarKw ?? 2.8));
-  const load = Math.max(0, Number(battery?.state?.loadKw ?? 1.2));
-  const available = battery?.state?.available !== false && soc >= 30;
+  // Non-admin demo users have no direct device visibility; read the automation's
+  // projection state (mirrored from observed device state) rather than the raw
+  // device inventory.
+  const soc = Math.max(0, Math.min(100, Number(aeolus.read("batterySoc") ?? 78)));
+  const solar = Math.max(0, Number(aeolus.read("solarKw") ?? 2.8));
+  const load = Math.max(0, Number(aeolus.read("loadKw") ?? 1.2));
+  const available = aeolus.read("batteryAvailable") !== false && soc >= 30;
   const lastAction = aeolus.read("lastAction") as any;
   const [phase, setPhase] = useState(0);
 

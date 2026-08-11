@@ -60,6 +60,13 @@ const logic = `automation({
       if (topic !== "sensor/farm/troughs") return;
       var average = Math.max(0, Math.min(100, Number(context.state && context.state.average) || 0));
       var low = Math.max(0, Number(context.state && context.state.low) || 0);
+      var refilling = Math.max(0, Number(context.state && context.state.refilling) || 0);
+      // UI projection: mirror ONLY observed trough state into this automation's
+      // own state (the non-admin demo user reads these via aeolus.read, not
+      // aeolus.devices).
+      state.set("troughAverage", average);
+      state.set("troughLow", low);
+      state.set("troughRefilling", refilling);
       var lowActive = Boolean(state.get("lowActive"));
 
       if ((low > 0 || average < 50) && !lowActive) {
@@ -82,13 +89,12 @@ const ui = `import { useEffect, useState } from "react";
 import type { CustomComponentProps } from "./types";
 
 export default function TroughWatering(aeolus: CustomComponentProps) {
-  function physical(topic: string): any {
-    return aeolus.devices.find((device: any) => device.topic === topic);
-  }
-  const troughs = physical("sensor/farm/troughs");
-  const average = Math.max(0, Math.min(100, Number(troughs?.state?.average ?? 71)));
-  const low = Math.max(0, Math.min(20, Number(troughs?.state?.low ?? 3)));
-  const refilling = Math.max(0, Math.min(20, Number(troughs?.state?.refilling ?? 2)));
+  // Non-admin demo users have no direct device visibility; read the automation's
+  // projection state (mirrored from observed device state) rather than the raw
+  // device inventory.
+  const average = Math.max(0, Math.min(100, Number(aeolus.read("troughAverage") ?? 71)));
+  const low = Math.max(0, Math.min(20, Number(aeolus.read("troughLow") ?? 3)));
+  const refilling = Math.max(0, Math.min(20, Number(aeolus.read("troughRefilling") ?? 2)));
   const auto = Boolean(aeolus.read("autoRefill"));
   const lastAction = aeolus.read("lastAction") as any;
   const [phase, setPhase] = useState(0);

@@ -55,6 +55,12 @@ const logic = `automation({
         var strays = Math.max(0, Number(context.state && context.state.strays) || 0);
         var herd = Math.max(0, Number(context.state && context.state.herd) || 0);
         var tracked = Math.max(0, Number(context.state && context.state.tracked) || 0);
+        // UI projection: mirror ONLY observed collar state into this automation's
+        // own state (the non-admin demo user has no direct device visibility, so
+        // the UI reads these via aeolus.read, not aeolus.devices).
+        state.set("strays", strays);
+        state.set("herd", herd);
+        state.set("tracked", tracked);
         var previous = Number(state.get("lastStrays"));
         state.set("lastStrays", strays);
 
@@ -65,9 +71,16 @@ const logic = `automation({
           setAction("Herd contained · all collars inside boundary");
           events.emit("farm/livestock/contained", { herd: herd, tracked: tracked });
         }
-      } else if (context.state && context.state.fault === true) {
-        setAction("Fence energiser fault detected");
-        events.emit("farm/livestock/fence-fault", { voltage: context.state.voltage });
+      } else {
+        // Energiser: mirror observed voltage/fault into the projection.
+        var voltage = Number(context.state && context.state.voltage);
+        var fault = Boolean(context.state && context.state.fault === true);
+        if (!isNaN(voltage)) state.set("voltage", voltage);
+        state.set("fenceFault", fault);
+        if (fault) {
+          setAction("Fence energiser fault detected");
+          events.emit("farm/livestock/fence-fault", { voltage: context.state.voltage });
+        }
       }
     },
   ],
@@ -77,17 +90,14 @@ const ui = `import { useEffect, useMemo, useState } from "react";
 import type { CustomComponentProps } from "./types";
 
 export default function LivestockFence(aeolus: CustomComponentProps) {
-  function physical(topic: string): any {
-    return aeolus.devices.find((device: any) => device.topic === topic);
-  }
-
-  const collars = physical("sensor/fence/collars");
-  const energiser = physical("sensor/fence/energiser");
-  const strays = Math.max(0, Number(collars?.state?.strays ?? 2));
-  const herd = Math.max(0, Number(collars?.state?.herd ?? 30));
-  const tracked = Math.max(0, Number(collars?.state?.tracked ?? 30));
-  const voltage = Number(energiser?.state?.voltage ?? 7.2);
-  const fault = Boolean(energiser?.state?.fault);
+  // Non-admin demo users have no direct device visibility, so this UI reads the
+  // automation's projection state (mirrored from observed device state) rather
+  // than the raw device inventory.
+  const strays = Math.max(0, Number(aeolus.read("strays") ?? 2));
+  const herd = Math.max(0, Number(aeolus.read("herd") ?? 30));
+  const tracked = Math.max(0, Number(aeolus.read("tracked") ?? 30));
+  const voltage = Number(aeolus.read("voltage") ?? 7.2);
+  const fault = Boolean(aeolus.read("fenceFault"));
   const lastAction = aeolus.read("lastAction") as any;
   const [phase, setPhase] = useState(0);
 
