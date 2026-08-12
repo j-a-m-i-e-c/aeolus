@@ -63,55 +63,96 @@ export function classifySandboxError(
 }
 
 /**
+ * Numeric comparison operators supported in a {@link ConditionSpec}.
+ */
+const CONDITION_COMPARATORS: Record<string, (a: number, b: number) => boolean> = {
+  eq: (a, b) => a === b,
+  ne: (a, b) => a !== b,
+  gt: (a, b) => a > b,
+  gte: (a, b) => a >= b,
+  lt: (a, b) => a < b,
+  lte: (a, b) => a <= b,
+};
+
+/**
+ * Declarative confirmation condition passed from a sandboxed automation to the
+ * host. It is deliberately PLAIN DATA — a `{ field, op, value }` numeric
+ * comparison, or an `{ all: [...] }` / `{ any: [...] }` combinator — because
+ * isolated-vm does not transfer a live predicate FUNCTION across the isolate
+ * boundary (a raw function argument throws "A non-transferable value was
+ * passed"). The host reconstructs a native predicate from the spec via
+ * {@link evaluateConditionSpec}, so the observed-tier condition is evaluated
+ * entirely host-side with nothing but data crossing the boundary.
+ */
+export interface ConditionComparison {
+  field: string;
+  op: keyof typeof CONDITION_COMPARATORS;
+  value: number;
+}
+
+/** True when `spec` is a structurally valid condition spec (recursively). */
+export function isConditionSpec(spec: unknown): boolean {
+  if (!spec || typeof spec !== "object") return false;
+  const s = spec as Record<string, unknown>;
+  if (Array.isArray(s.all)) return s.all.length > 0 && s.all.every(isConditionSpec);
+  if (Array.isArray(s.any)) return s.any.length > 0 && s.any.every(isConditionSpec);
+  return (
+    typeof s.field === "string" &&
+    typeof s.op === "string" &&
+    Object.prototype.hasOwnProperty.call(CONDITION_COMPARATORS, s.op) &&
+    typeof s.value === "number"
+  );
+}
+
+/**
+ * Evaluate a {@link ConditionSpec} against an observed device state. A missing
+ * or non-numeric observed field yields `false` (the condition is simply not yet
+ * satisfied), never a throw. Exported for unit testing without a live isolate.
+ */
+export function evaluateConditionSpec(spec: unknown, state: Record<string, unknown>): boolean {
+  if (!spec || typeof spec !== "object") return false;
+  const s = spec as Record<string, unknown>;
+  if (Array.isArray(s.all)) return s.all.every((sub) => evaluateConditionSpec(sub, state));
+  if (Array.isArray(s.any)) return s.any.some((sub) => evaluateConditionSpec(sub, state));
+  if (
+    typeof s.field !== "string" ||
+    typeof s.op !== "string" ||
+    !Object.prototype.hasOwnProperty.call(CONDITION_COMPARATORS, s.op)
+  ) {
+    return false;
+  }
+  const actual = Number(state[s.field]);
+  const expected = Number(s.value);
+  if (Number.isNaN(actual) || Number.isNaN(expected)) return false;
+  return CONDITION_COMPARATORS[s.op](actual, expected);
+}
+
+/**
  * Build a host-side {@link ConfirmOptions} from the pieces threaded across the
  * isolate boundary by the `devices.action` / `devices.actionAll` wrappers.
  *
- * The predicate may arrive either as a native host-callable function or as an
- * isolated-vm `Reference` (depending on how the runtime marshals function
- * arguments), so the wrapper handles both. When it is a Reference, the observed
- * state is copied into the isolate before applying the predicate, mirroring the
- * existing host-callback marshalling.
- *
- * NOTE: the exact function-marshalling behaviour of isolated-vm can only be
- * validated against a native build (Docker/Pi), not the Windows dev box where
- * isolated-vm is unavailable.
+ * The confirmation predicate arrives as a declarative {@link ConditionSpec}
+ * (plain data), NOT a function: isolated-vm cannot transfer a live function as
+ * a call argument. The host reconstructs a native predicate that evaluates the
+ * spec against the observed device state (see {@link evaluateConditionSpec}).
+ * An absent or malformed spec yields `undefined` (no confirmation), so the
+ * command falls back to the highest tier it can otherwise prove.
  */
 function buildConfirmOptions(
-  condition: unknown,
+  conditionSpec: unknown,
   confirmDeviceId?: string,
   confirmTimeoutMs?: number,
 ): ConfirmOptions | undefined {
-  if (typeof condition !== "function" && !isIvmReference(condition)) return undefined;
+  if (!isConditionSpec(conditionSpec)) return undefined;
 
-  let predicate: (state: Record<string, unknown>) => boolean;
-  if (isIvmReference(condition)) {
-    predicate = (state: Record<string, unknown>): boolean => {
-      const arg = ivm ? new ivm.ExternalCopy(state).copyInto() : state;
-      return Boolean(condition.applySync(undefined, [arg]));
-    };
-  } else {
-    const fn = condition as (state: Record<string, unknown>) => unknown;
-    predicate = (state: Record<string, unknown>): boolean => Boolean(fn(state));
-  }
+  const predicate = (state: Record<string, unknown>): boolean =>
+    evaluateConditionSpec(conditionSpec, state);
 
   return {
     condition: predicate,
     ...(typeof confirmDeviceId === "string" ? { deviceId: confirmDeviceId } : {}),
     ...(typeof confirmTimeoutMs === "number" ? { timeoutMs: confirmTimeoutMs } : {}),
   };
-}
-
-/** Minimal shape of an isolated-vm Reference we call synchronously. */
-interface IvmCallableReference {
-  applySync(receiver: unknown, args: unknown[]): unknown;
-}
-
-function isIvmReference(value: unknown): value is IvmCallableReference {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    typeof (value as { applySync?: unknown }).applySync === "function"
-  );
 }
 
 /**
@@ -422,20 +463,18 @@ const BOOTSTRAP_SCRIPT = `
     get: function(id) { return map[id]; },
     filter: function(predicate) { return data.filter(predicate); },
     action: function(deviceId, actionType, params, opts) {
-      // 3-arg form is preserved byte-for-byte. The 4th options bag may carry a
-      // confirm predicate (condition/deviceId/timeoutMs) and/or an optional
-      // per-call completion tier, forwarded as the trailing host-callback arg.
+      // The optional 4th options bag may carry a DECLARATIVE confirm condition
+      // (a plain-data spec — NOT a function, since isolated-vm cannot transfer a
+      // live function call-argument), the observed deviceId/timeoutMs, and an
+      // optional per-call completion tier, forwarded as trailing host-callback
+      // args. params and the condition spec are plain objects (transferable).
       var tier = opts ? opts.tier : undefined;
-      var p;
-      if (opts && typeof opts.condition === 'function') {
-        p = actionRef.apply(undefined,
-          [deviceId, actionType, params, opts.condition, opts.deviceId, opts.timeoutMs, tier],
-          { result: { promise: true } });
-      } else {
-        p = actionRef.apply(undefined,
-          [deviceId, actionType, params, undefined, undefined, undefined, tier],
-          { result: { promise: true } });
-      }
+      var condition = (opts && opts.condition != null) ? opts.condition : undefined;
+      var confirmDeviceId = opts ? opts.deviceId : undefined;
+      var confirmTimeoutMs = opts ? opts.timeoutMs : undefined;
+      var p = actionRef.apply(undefined,
+        [deviceId, actionType, params, condition, confirmDeviceId, confirmTimeoutMs, tier],
+        { result: { promise: true } });
       // Record a logical (non-throwing) command failure on an isolate-global flag
       // so automation() can fail-fast without depending on the user action
       // callback returning the ActionResult (Req 11.3, 11.4).

@@ -125,4 +125,17 @@ describe("Agriculture demo UI projection contract", () => {
       expect(automation.scriptSource).toContain("payload:");
     },
   );
+
+  it.each(commandAutomations.map((a) => [a.name, a] as const))(
+    "%s expresses its observed-tier condition as a data spec, never a function",
+    (_name, automation) => {
+      // isolated-vm cannot transfer a live predicate FUNCTION as a call argument
+      // (it throws "A non-transferable value was passed"), which silently blocked
+      // every command before dispatch. The confirm condition must therefore be a
+      // declarative data spec ({ field, op, value } / { all: [...] }) that the
+      // host evaluates natively. Guard against a regression to a function literal.
+      expect(automation.scriptSource).not.toMatch(/condition:\s*function/);
+      expect(automation.scriptSource).toMatch(/condition:\s*\{/);
+    },
+  );
 });

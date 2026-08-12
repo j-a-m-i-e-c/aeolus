@@ -34,7 +34,7 @@ const logic = `automation({
             {
               tier: "observed",
               deviceId: collars.id,
-              condition: function(s) { return Number(s.strays) === 0; },
+              condition: { field: "strays", op: "eq", value: 0 },
               timeoutMs: 5000,
             }
           );

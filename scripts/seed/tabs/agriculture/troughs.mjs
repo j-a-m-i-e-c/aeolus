@@ -27,7 +27,7 @@ const logic = `automation({
           {
             tier: "observed",
             deviceId: troughs.id,
-            condition: function(s) { return Number(s.low) === 0 && Number(s.average) >= 80; },
+            condition: { all: [{ field: "low", op: "eq", value: 0 }, { field: "average", op: "gte", value: 80 }] },
             timeoutMs: 5000,
           }
         );

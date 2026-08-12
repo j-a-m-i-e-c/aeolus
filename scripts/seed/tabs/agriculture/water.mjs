@@ -29,7 +29,7 @@ const logic = `automation({
           {
             tier: "observed",
             deviceId: flow.id,
-            condition: function(s) { return Number(s.litresPerMinute) === 0; },
+            condition: { field: "litresPerMinute", op: "eq", value: 0 },
             timeoutMs: 5000,
           }
         );
@@ -81,7 +81,7 @@ const logic = `automation({
           {
             tier: "observed",
             deviceId: flow.id,
-            condition: function(s) { return Number(s.litresPerMinute) > 0; },
+            condition: { field: "litresPerMinute", op: "gt", value: 0 },
             timeoutMs: 5000,
           }
         );
