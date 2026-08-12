@@ -6,6 +6,11 @@ import type { ConfirmationTier } from "./command-lifecycle.js";
 import { isConfirmationTier, resolveEffectiveTier } from "./completion-tier.js";
 import type { CommandResultCollector } from "./command-result-collector.js";
 import type { AutomationEventService } from "./automation-event-service.js";
+import {
+  currentExecutionContext,
+  runInExecutionContext,
+  type ActiveExecutionContext,
+} from "./execution-context.js";
 import type { AutomationStateStore } from "./automation-state-store.js";
 import type { DeviceRegistry } from "../core/device-registry.js";
 import type { DataStore } from "../data-store/data-store.js";
@@ -751,10 +756,21 @@ export class Sandbox {
         ? this.scopeResolver.resolve(ruleId)
         : { kind: "unrestricted" };
 
+      // Capture the active execution context HERE, on the host stack, where the
+      // AsyncLocalStorage set by AutomationEngine.executeScriptRule() is still
+      // in scope. The context does NOT survive a synchronous host callback
+      // invoked from inside the isolate (isolated-vm crosses a native boundary
+      // that async_hooks does not track), so events.emit — which runs during
+      // script.run() and reads the source rule id from this context — would
+      // otherwise see `undefined` and refuse. We re-establish it in the emit
+      // callback below. (devices.action is unaffected: its rule id is passed in
+      // directly, and its command results settle on the host's own async stack.)
+      const executionContext = currentExecutionContext();
+
       // Set raw data and references on the global scope
       await this.setDevicesRefs(jail, ruleId, inFlight, ruleTierDefault, scope);
       await this.setMqttRefs(jail, ruleId);
-      await this.setEventsRefs(jail);
+      await this.setEventsRefs(jail, executionContext);
       await this.setLogRefs(jail, ruleId);
       await this.setContextData(jail, context);
       await this.setHttpRefs(jail, ruleId);
@@ -1058,7 +1074,10 @@ export class Sandbox {
    * user script supplies only the event name and payload. Scoped automations may
    * use this; it never grants arbitrary MQTT publish authority.
    */
-  private async setEventsRefs(jail: IvmGlobal): Promise<void> {
+  private async setEventsRefs(
+    jail: IvmGlobal,
+    executionContext: ActiveExecutionContext | undefined,
+  ): Promise<void> {
     if (!ivm) return;
     const service = this.automationEventService;
     if (!service) return;
@@ -1068,7 +1087,13 @@ export class Sandbox {
         // The payload crosses the boundary as a JSON string (isolated-vm transfers
         // only primitives as call arguments); parse it back before emitting.
         const payload = typeof payloadJson === "string" ? JSON.parse(payloadJson) : payloadJson;
-        return service.emit(name, payload);
+        // Re-establish the execution context captured on the host stack: this
+        // callback is invoked synchronously from inside the isolate, where the
+        // ambient AsyncLocalStorage context is not preserved. Without this,
+        // service.emit() resolves no source rule id and refuses the event.
+        return executionContext !== undefined
+          ? runInExecutionContext(executionContext, () => service.emit(name, payload))
+          : service.emit(name, payload);
       }),
     );
   }
