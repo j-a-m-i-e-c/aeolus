@@ -463,17 +463,20 @@ const BOOTSTRAP_SCRIPT = `
     get: function(id) { return map[id]; },
     filter: function(predicate) { return data.filter(predicate); },
     action: function(deviceId, actionType, params, opts) {
-      // The optional 4th options bag may carry a DECLARATIVE confirm condition
-      // (a plain-data spec — NOT a function, since isolated-vm cannot transfer a
-      // live function call-argument), the observed deviceId/timeoutMs, and an
-      // optional per-call completion tier, forwarded as trailing host-callback
-      // args. params and the condition spec are plain objects (transferable).
+      // isolated-vm only transfers PRIMITIVES as call arguments — a plain object
+      // (or a function) throws "A non-transferable value was passed". So, exactly
+      // like state.set/db.*, object-shaped arguments are JSON-serialised here and
+      // parsed back host-side. The 4th options bag may carry a DECLARATIVE confirm
+      // condition (plain-data spec, never a function), the observed
+      // deviceId/timeoutMs, and an optional per-call completion tier.
       var tier = opts ? opts.tier : undefined;
       var condition = (opts && opts.condition != null) ? opts.condition : undefined;
       var confirmDeviceId = opts ? opts.deviceId : undefined;
       var confirmTimeoutMs = opts ? opts.timeoutMs : undefined;
+      var paramsJson = params === undefined ? undefined : JSON.stringify(params);
+      var conditionJson = condition === undefined ? undefined : JSON.stringify(condition);
       var p = actionRef.apply(undefined,
-        [deviceId, actionType, params, condition, confirmDeviceId, confirmTimeoutMs, tier],
+        [deviceId, actionType, paramsJson, conditionJson, confirmDeviceId, confirmTimeoutMs, tier],
         { result: { promise: true } });
       // Record a logical (non-throwing) command failure on an isolate-global flag
       // so automation() can fail-fast without depending on the user action
@@ -514,8 +517,11 @@ const BOOTSTRAP_SCRIPT = `
     globalThis.events = {
       emit: function(name, payload) {
         // Returns { published, eventId?, topic?, error? }. Never throws into the
-        // script; the source rule and causal metadata are host-derived.
-        return eventsEmitRef.applySync(undefined, [name, payload], { result: { copy: true } });
+        // script; the source rule and causal metadata are host-derived. The
+        // payload is JSON-serialised because isolated-vm cannot transfer a plain
+        // object as a call argument (only primitives cross); the host parses it.
+        var payloadJson = payload === undefined ? undefined : JSON.stringify(payload);
+        return eventsEmitRef.applySync(undefined, [name, payloadJson], { result: { copy: true } });
       }
     };
   }
@@ -886,15 +892,23 @@ export class Sandbox {
       new ivm.Reference(function (
         deviceId: string,
         actionType: string,
-        params?: Record<string, unknown>,
-        condition?: unknown,
+        paramsJson?: string,
+        conditionJson?: string,
         confirmDeviceId?: string,
         confirmTimeoutMs?: number,
         perCallTier?: unknown,
       ): Promise<ActionResult> {
         const run = (async (): Promise<ActionResult> => {
           try {
-            const confirm = buildConfirmOptions(condition, confirmDeviceId, confirmTimeoutMs);
+            // params and the confirm condition cross the isolate boundary as JSON
+            // strings (isolated-vm transfers only primitives as call arguments);
+            // parse them back to their object forms here.
+            const params =
+              typeof paramsJson === "string"
+                ? (JSON.parse(paramsJson) as Record<string, unknown>)
+                : undefined;
+            const conditionSpec = typeof conditionJson === "string" ? JSON.parse(conditionJson) : undefined;
+            const confirm = buildConfirmOptions(conditionSpec, confirmDeviceId, confirmTimeoutMs);
             // Completion-tier gate (Req 5.1–5.6): fail-on-invalid before dispatch,
             // otherwise dispatch with the resolved tier (per-call overrides the
             // rule-level default; undefined ⇒ highest-available).
@@ -1050,7 +1064,10 @@ export class Sandbox {
     if (!service) return;
     await jail.set(
       "__eventsEmitRef",
-      new ivm.Reference(function (name: unknown, payload: unknown) {
+      new ivm.Reference(function (name: unknown, payloadJson: unknown) {
+        // The payload crosses the boundary as a JSON string (isolated-vm transfers
+        // only primitives as call arguments); parse it back before emitting.
+        const payload = typeof payloadJson === "string" ? JSON.parse(payloadJson) : payloadJson;
         return service.emit(name, payload);
       }),
     );
