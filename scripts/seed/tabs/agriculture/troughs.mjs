@@ -22,8 +22,8 @@ const logic = `automation({
         setAction("Refill command dispatched");
         var result = await devices.action(
           actuator.id,
-          "refill",
-          { active: true },
+          "command",
+          { payload: { active: true } },
           {
             tier: "observed",
             deviceId: troughs.id,

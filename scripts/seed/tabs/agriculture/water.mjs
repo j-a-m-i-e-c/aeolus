@@ -24,8 +24,8 @@ const logic = `automation({
         }
         var result = await devices.action(
           pump.id,
-          "set",
-          { on: false },
+          "command",
+          { payload: { on: false } },
           {
             tier: "observed",
             deviceId: flow.id,
@@ -76,8 +76,8 @@ const logic = `automation({
         setAction("Requesting " + litres + " L transfer");
         var result = await devices.action(
           pump.id,
-          "set",
-          { on: true, litres: litres },
+          "command",
+          { payload: { on: true, litres: litres } },
           {
             tier: "observed",
             deviceId: flow.id,

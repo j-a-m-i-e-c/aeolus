@@ -47,6 +47,15 @@ function setKeys(scriptSource: string): Set<string> {
   return new Set([...scriptSource.matchAll(/state\.set\(\s*["']([^"']+)["']/g)].map((m) => m[1]));
 }
 
+/**
+ * Action types the Logic passes as the 2nd argument of devices.action(id, "type", ...).
+ * The 1st arg is a device-id expression (e.g. `pump.id`) with no comma, so a
+ * non-greedy `[^,]+` reaches the quoted action type reliably.
+ */
+function actionTypes(scriptSource: string): string[] {
+  return [...scriptSource.matchAll(/devices\.action\(\s*[^,]+,\s*["']([^"']+)["']/g)].map((m) => m[1]);
+}
+
 describe("Agriculture demo UI projection contract", () => {
   it.each(allAutomations.map((a) => [a.name, a] as const))(
     "%s UI never reads aeolus.devices directly",
@@ -87,6 +96,33 @@ describe("Agriculture demo UI projection contract", () => {
       // Commands remain verified device actions through the CommandService;
       // physical truth still comes back over MQTT and is only then mirrored.
       expect(automation.scriptSource).toContain("devices.action(");
+    },
+  );
+
+  it.each(commandAutomations.map((a) => [a.name, a] as const))(
+    "%s dispatches only the MQTT-valid \"command\" action type",
+    (_name, automation) => {
+      // A generic MQTT (simulated-hardware) device's Action_Catalog is its
+      // capability descriptors plus the MQTT_COMMAND_DESCRIPTOR ("command").
+      // Any other action type (e.g. "set"/"recall"/"refill") is rejected by
+      // ActionRouter as unsupported BEFORE the command is published to MQTT, so
+      // the simulator never actuates and the UI animation never fires. This
+      // locks the action type for the four worlds and the migrations to follow.
+      const types = actionTypes(automation.scriptSource);
+      expect(types.length, "expected at least one devices.action() call").toBeGreaterThan(0);
+      for (const type of types) {
+        expect(type, `devices.action() used unsupported action type "${type}"`).toBe("command");
+      }
+    },
+  );
+
+  it.each(commandAutomations.map((a) => [a.name, a] as const))(
+    "%s wraps command fields in a payload object",
+    (_name, automation) => {
+      // executeMqttAction publishes action.params.payload (when an object) as the
+      // command body; the real command fields (on/litres/active) must live inside
+      // { payload: { ... } } so the simulator receives them under command.params.
+      expect(automation.scriptSource).toContain("payload:");
     },
   );
 });

@@ -29,8 +29,8 @@ const logic = `automation({
           setAction("Recall command dispatched to collars");
           var result = await devices.action(
             recall.id,
-            "recall",
-            { active: true },
+            "command",
+            { payload: { active: true } },
             {
               tier: "observed",
               deviceId: collars.id,
