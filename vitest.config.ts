@@ -35,6 +35,12 @@ export default defineConfig({
         "db/migration-errors.ts",
         "db/database.ts",
         "db/migration-runner.ts",
+        // Simulator scenarios are demo/integration FIXTURES: illustrative device
+        // models with heavy command-validation and fault-injection branching.
+        // Their behaviour is covered by the scenario tests, but they are not
+        // product runtime, so exclude them from the coverage metric (paths here
+        // are relative to the `src/` coverage root).
+        "simulator/scenarios/**",
       ],
       thresholds: {
         lines: 90,
