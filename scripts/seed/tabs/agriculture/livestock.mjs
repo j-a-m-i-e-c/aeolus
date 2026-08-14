@@ -10,24 +10,34 @@ const logic = `automation({
       function setAction(label) {
         state.set("lastAction", { label: label, at: Date.now() });
       }
+      if (state.get("demoScenarioPending") === undefined) state.set("demoScenarioPending", "");
 
       if (topic.indexOf("ui/") === 0) {
         if (evt === "simulate-strays") {
+          if (String(state.get("demoScenarioPending") || "")) return;
+          state.set("demoScenarioPending", "breach");
           events.emit("farm/sim/livestock-boundary-breach", {});
-          setAction("Simulating an east-boundary crossing");
+          setAction("DEMO · injecting east-boundary crossing");
         } else if (evt === "move-herd") {
+          if (String(state.get("demoScenarioPending") || "")) return;
+          state.set("demoScenarioPending", "move");
           events.emit("farm/sim/livestock-move-herd", {});
-          setAction("Simulating a paddock rotation");
+          setAction("DEMO · injecting paddock movement");
         } else if (evt === "simulate-fence-fault") {
+          if (String(state.get("demoScenarioPending") || "")) return;
+          state.set("demoScenarioPending", "fault");
           events.emit("farm/sim/livestock-fence-fault", {});
-          setAction("Simulating perimeter energiser fault");
+          setAction("DEMO · injecting perimeter energiser fault");
         } else if (evt === "restore-fence") {
+          if (String(state.get("demoScenarioPending") || "")) return;
+          state.set("demoScenarioPending", "restore");
           events.emit("farm/sim/livestock-fence-restore", {});
-          setAction("Restoring perimeter energiser");
+          setAction("DEMO · restoring perimeter energiser");
         } else if (evt === "reset-livestock") {
           events.emit("farm/sim/livestock-reset", {});
           state.set("recallInProgress", false);
-          setAction("Resetting livestock system to nominal");
+          state.set("demoScenarioPending", "");
+          setAction("DEMO · livestock system reset to nominal");
         } else if (evt === "recall-strays") {
           var recall = byTopic("switch/fence/recall/state");
           var collars = byTopic("sensor/fence/collars");
@@ -78,6 +88,8 @@ const logic = `automation({
         state.set("breachSector", breachSector);
         state.set("movement", movement);
         if (state.get("recallInProgress") === undefined) state.set("recallInProgress", false);
+        var pending = String(state.get("demoScenarioPending") || "");
+        if ((pending === "breach" && strays > 0) || (pending === "move" && movement === "rotating")) state.set("demoScenarioPending", "");
 
         var previous = Number(state.get("lastStrays"));
         state.set("lastStrays", strays);
@@ -95,6 +107,8 @@ const logic = `automation({
         if (!isNaN(voltage)) state.set("voltage", voltage);
         if (!isNaN(current)) state.set("fenceCurrent", current);
         state.set("fenceFault", fault);
+        var pendingFence = String(state.get("demoScenarioPending") || "");
+        if ((pendingFence === "fault" && fault) || (pendingFence === "restore" && !fault)) state.set("demoScenarioPending", "");
         var previousFault = Boolean(state.get("lastFenceFault"));
         state.set("lastFenceFault", fault);
         if (fault && !previousFault) {
@@ -124,6 +138,7 @@ export default function LivestockFence(aeolus: CustomComponentProps) {
   const fenceCurrent = Number(aeolus.read("fenceCurrent") ?? 0.4);
   const fault = Boolean(aeolus.read("fenceFault"));
   const recallInProgress = Boolean(aeolus.read("recallInProgress"));
+  const demoScenarioPending = String(aeolus.read("demoScenarioPending") ?? "");
   const lastAction = aeolus.read("lastAction") as any;
   const [phase, setPhase] = useState(0);
 
@@ -201,11 +216,21 @@ export default function LivestockFence(aeolus: CustomComponentProps) {
         </svg>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4,minmax(0,1fr))", gap: 6, marginTop: 8 }}>
-        <button onClick={() => aeolus.fire(alert ? "recall-strays" : "simulate-strays")} disabled={recallInProgress} style={{ borderRadius: 8, padding: "8px 5px", border: "1px solid " + (alert ? "#743B34" : "#31573C"), background: alert ? "#2A1714" : "#11241A", color: alert ? "#FF9A8D" : "#8DE9A8", fontSize: 8, fontWeight: 750, cursor: recallInProgress ? "wait" : "pointer", opacity: recallInProgress ? .55 : 1 }}>{recallInProgress ? "Recalling…" : alert ? "Recall herd" : "Simulate breach"}</button>
-        <button onClick={() => aeolus.fire("move-herd")} disabled={alert || recallInProgress} style={{ borderRadius: 8, padding: "8px 5px", border: "1px solid #3A543F", background: "#132019", color: "#8DB79A", fontSize: 8, cursor: alert ? "not-allowed" : "pointer", opacity: alert ? .5 : 1 }}>Rotate paddock</button>
-        <button onClick={() => aeolus.fire(fault ? "restore-fence" : "simulate-fence-fault")} style={{ borderRadius: 8, padding: "8px 5px", border: "1px solid " + (fault ? "#315B3C" : "#62452D"), background: fault ? "#102319" : "#251C10", color: fault ? "#83D99A" : "#E0B071", fontSize: 8, cursor: "pointer" }}>{fault ? "Restore fence" : "Fence fault"}</button>
-        <button onClick={() => aeolus.fire("reset-livestock")} style={{ borderRadius: 8, padding: "8px 5px", border: "1px solid #303A34", background: "#151B17", color: "#87958D", fontSize: 8, cursor: "pointer" }}>Reset</button>
+      <div style={{ marginTop: 8, padding: 8, border: "1px solid #2D4836", borderRadius: 9, background: "#0C1710" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+          <div><div style={{ color: "#74877A", fontSize: 7, fontWeight: 850, letterSpacing: 1 }}>OPERATOR CONTROL</div><div style={{ color: "#5C6E62", fontSize: 6.5, marginTop: 2 }}>Recall is a real verified command to the virtual-fence/collar system.</div></div>
+          <button onClick={() => aeolus.fire("recall-strays")} disabled={!alert || recallInProgress} style={{ minWidth: 135, borderRadius: 8, padding: "8px 6px", border: "1px solid " + (alert ? "#743B34" : "#304138"), background: alert ? "#2A1714" : "#121A15", color: alert ? "#FF9A8D" : "#68766D", fontSize: 8, fontWeight: 750, cursor: alert && !recallInProgress ? "pointer" : "not-allowed" }}>{recallInProgress ? "Recalling…" : alert ? "Recall herd" : "No recall required"}</button>
+        </div>
+      </div>
+
+      <div style={{ marginTop: 7, padding: 8, border: "1px dashed #5A5132", borderRadius: 9, background: "#17150D" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}><div><div style={{ color: "#C5AA67", fontSize: 7, fontWeight: 850, letterSpacing: 1 }}>DEMO SCENARIO</div><div style={{ color: "#746D57", fontSize: 6.5, marginTop: 2 }}>Injects livestock movement and fence conditions into the simulated property.</div></div>{demoScenarioPending && <div style={{ color: "#D4B770", fontSize: 7 }}>INJECTING…</div>}</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4,minmax(0,1fr))", gap: 6 }}>
+          <button onClick={() => aeolus.fire("simulate-strays")} disabled={!!demoScenarioPending || recallInProgress || alert} style={{ borderRadius: 8, padding: "8px 5px", border: "1px solid #5F4930", background: "#21190F", color: demoScenarioPending || alert ? "#756A55" : "#D8B978", fontSize: 8, cursor: demoScenarioPending || alert ? "not-allowed" : "pointer" }}>Boundary breach</button>
+          <button onClick={() => aeolus.fire("move-herd")} disabled={!!demoScenarioPending || alert || recallInProgress} style={{ borderRadius: 8, padding: "8px 5px", border: "1px solid #465238", background: "#171D11", color: demoScenarioPending || alert ? "#68705D" : "#AEBE82", fontSize: 8, cursor: demoScenarioPending || alert ? "not-allowed" : "pointer" }}>Herd changes paddock</button>
+          <button onClick={() => aeolus.fire(fault ? "restore-fence" : "simulate-fence-fault")} disabled={!!demoScenarioPending} style={{ borderRadius: 8, padding: "8px 5px", border: "1px solid " + (fault ? "#315B3C" : "#62452D"), background: fault ? "#102319" : "#251C10", color: demoScenarioPending ? "#746B57" : fault ? "#83D99A" : "#E0B071", fontSize: 8, cursor: demoScenarioPending ? "not-allowed" : "pointer" }}>{fault ? "Restore fence" : "Fence fault"}</button>
+          <button onClick={() => aeolus.fire("reset-livestock")} style={{ borderRadius: 8, padding: "8px 5px", border: "1px solid #3C3A30", background: "#171713", color: "#8D8878", fontSize: 8, cursor: "pointer" }}>Reset demo</button>
+        </div>
       </div>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginTop: 7 }}>
         <div style={{ color: "#66736B", fontSize: 8, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{actionLabel}</div>

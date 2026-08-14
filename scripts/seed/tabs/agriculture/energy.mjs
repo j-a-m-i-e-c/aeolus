@@ -10,6 +10,14 @@ const logic = `automation({
       function setAction(label) {
         state.set("lastAction", { label: label, at: Date.now() });
       }
+      function init(key, value) {
+        if (state.get(key) === undefined) state.set(key, value);
+      }
+
+      init("autoOpportunity", true);
+      init("chargerCommandPending", false);
+      init("demoScenarioPending", "");
+      init("energyMode", "solar-surplus");
 
       async function setCharger(on, reason) {
         if (Boolean(state.get("chargerCommandPending"))) return;
@@ -37,7 +45,7 @@ const logic = `automation({
         );
         state.set("chargerCommandPending", false);
         if (result.success) {
-          setAction((on ? "Opportunity load online" : "Opportunity load shed") + " · physical state verified");
+          setAction((on ? "Opportunity charging online" : "Opportunity charging shed") + " · physical state verified");
           events.emit("farm/energy/opportunity-load", { on: on, reason: reason, lifecycleState: result.lifecycleState });
         } else {
           setAction("Charger-bank command not verified: " + String(result.error || result.lifecycleState || "unknown"));
@@ -46,21 +54,28 @@ const logic = `automation({
 
       if (topic.indexOf("ui/") === 0) {
         if (evt === "simulate-low-battery") {
+          if (String(state.get("demoScenarioPending") || "")) return;
+          state.set("demoScenarioPending", "low-reserve");
           events.emit("farm/sim/energy-low", {});
-          setAction("Simulating cloud cover + low battery reserve");
+          setAction("DEMO · injecting cloud cover + low battery reserve");
         } else if (evt === "restore-battery") {
+          if (String(state.get("demoScenarioPending") || "")) return;
+          state.set("demoScenarioPending", "restore");
           events.emit("farm/sim/energy-restore", {});
-          setAction("Restoring solar production + battery reserve");
+          setAction("DEMO · restoring nominal solar + battery reserve");
         } else if (evt === "toggle-opportunity") {
-          var next = !Boolean(state.get("autoOpportunity"));
+          var current = state.get("autoOpportunity");
+          var enabled = current === undefined ? true : Boolean(current);
+          var next = !enabled;
           state.set("autoOpportunity", next);
-          if (!next) await setCharger(false, "automatic opportunity loads disabled");
-          else setAction("Automatic opportunity-load control enabled");
+          if (!next) await setCharger(false, "operator disabled opportunity charging");
+          else setAction("Automatic opportunity charging enabled · lowest-priority load");
         } else if (evt === "reset-energy") {
           events.emit("farm/sim/energy-reset", {});
           state.set("autoOpportunity", true);
           state.set("chargerCommandPending", false);
-          setAction("Resetting energy system to nominal");
+          state.set("demoScenarioPending", "");
+          setAction("DEMO · energy system reset to nominal");
         }
         return;
       }
@@ -85,23 +100,39 @@ const logic = `automation({
       state.set("chargerOn", chargerOn || (!isNaN(chargerKw) && chargerKw > 0));
       state.set("batteryAvailable", batteryAvailable);
       state.set("allowed", allowed);
-      if (state.get("autoOpportunity") === undefined) state.set("autoOpportunity", true);
-      if (state.get("chargerCommandPending") === undefined) state.set("chargerCommandPending", false);
 
-      var uncontrollableLoad = Math.max(0, (isNaN(loadKw) ? 0 : loadKw) - (isNaN(chargerKw) ? 0 : chargerKw));
-      var solarMargin = (isNaN(solarKw) ? 0 : solarKw) - uncontrollableLoad;
-      state.set("solarMarginKw", solarMargin);
-      var mode = !allowed ? "reserve-protection" : solarMargin >= 0.7 ? "solar-surplus" : solarMargin >= 0 ? "balanced" : "battery-support";
+      var netKw = (isNaN(solarKw) ? 0 : solarKw) - (isNaN(loadKw) ? 0 : loadKw);
+      var headroomBeforeCharger = (isNaN(solarKw) ? 0 : solarKw) - Math.max(0, (isNaN(loadKw) ? 0 : loadKw) - (isNaN(chargerKw) ? 0 : chargerKw));
+      state.set("netKw", netKw);
+      state.set("solarMarginKw", headroomBeforeCharger);
+
+      var chargerIsOn = chargerOn || (!isNaN(chargerKw) && chargerKw > 0);
+      var pumpActive = !isNaN(pumpKw) && pumpKw > 0.1;
+      var mode = !allowed
+        ? "reserve-protection"
+        : pumpActive && !chargerIsOn
+          ? "water-priority"
+          : chargerIsOn
+            ? "opportunity-charging"
+            : netKw < 0
+              ? "battery-support"
+              : netKw >= 0.4
+                ? "solar-surplus"
+                : "balanced";
       state.set("energyMode", mode);
+
+      var pendingScenario = String(state.get("demoScenarioPending") || "");
+      if (pendingScenario === "low-reserve" && (!allowed || (!isNaN(soc) && soc <= 20))) state.set("demoScenarioPending", "");
+      else if (pendingScenario === "restore" && allowed && !isNaN(soc) && soc >= 70) state.set("demoScenarioPending", "");
 
       var previous = state.get("previousAllowed");
       state.set("previousAllowed", allowed);
       if (allowed === false && previous !== false) {
-        setAction("Reserve protection active · discretionary loads constrained");
+        setAction("Reserve protection active · water transfer held and opportunity load shed");
       } else if (allowed === true && previous === false) {
-        setAction("Energy reserve restored · discretionary loads available");
+        setAction("Energy reserve restored · normal load policy resumed");
       } else if (previous === undefined) {
-        setAction("Energy telemetry online · evaluating opportunity loads");
+        setAction("Energy policy online · priorities: essential > water > charging");
       }
 
       events.emit("farm/energy/permission", {
@@ -113,11 +144,13 @@ const logic = `automation({
       });
 
       var auto = Boolean(state.get("autoOpportunity"));
-      var chargerIsOn = chargerOn || (!isNaN(chargerKw) && chargerKw > 0);
-      if (auto && !chargerIsOn && allowed && !isNaN(soc) && soc >= 60 && solarMargin >= 0.7) {
-        await setCharger(true, "solar surplus available");
-      } else if (chargerIsOn && (!auto || !allowed || (!isNaN(soc) && soc < 45) || solarMargin < 0.15)) {
-        await setCharger(false, !allowed ? "reserve protection" : solarMargin < 0.15 ? "solar margin collapsed" : "automatic control disabled");
+      // Opportunity charging is deliberately the lowest-priority load. It can
+      // start only with comfortable headroom and is shed as soon as water
+      // transfer or reserve conditions consume that margin.
+      if (auto && !chargerIsOn && allowed && !isNaN(soc) && soc >= 60 && headroomBeforeCharger >= 0.65) {
+        await setCharger(true, "solar headroom available after higher-priority loads");
+      } else if (chargerIsOn && (!auto || !allowed || (!isNaN(soc) && soc < 45) || netKw < 0.2 || (pumpActive && netKw < 0.35))) {
+        await setCharger(false, !allowed ? "reserve protection" : pumpActive ? "water transfer given priority" : netKw < 0.2 ? "solar headroom exhausted" : "automatic control disabled");
       }
     },
   ],
@@ -128,7 +161,7 @@ import type { CustomComponentProps } from "./types";
 
 export default function SiteEnergy(aeolus: CustomComponentProps) {
   const soc = Math.max(0, Math.min(100, Number(aeolus.read("batterySoc") ?? 78)));
-  const solar = Math.max(0, Number(aeolus.read("solarKw") ?? 2.8));
+  const solar = Math.max(0, Number(aeolus.read("solarKw") ?? 2.1));
   const load = Math.max(0, Number(aeolus.read("loadKw") ?? .72));
   const baseLoad = Math.max(0, Number(aeolus.read("baseLoadKw") ?? .72));
   const pumpLoad = Math.max(0, Number(aeolus.read("pumpKw") ?? 0));
@@ -137,9 +170,11 @@ export default function SiteEnergy(aeolus: CustomComponentProps) {
   const available = aeolus.read("batteryAvailable") !== false && soc >= 30;
   const allowed = aeolus.read("allowed") !== false && available;
   const solarMargin = Number(aeolus.read("solarMarginKw") ?? (solar - (load - chargerLoad)));
+  const netKw = Number(aeolus.read("netKw") ?? (solar - load));
   const mode = String(aeolus.read("energyMode") ?? "solar-surplus");
   const autoOpportunity = aeolus.read("autoOpportunity") !== false;
   const chargerPending = Boolean(aeolus.read("chargerCommandPending"));
+  const demoScenarioPending = String(aeolus.read("demoScenarioPending") ?? "");
   const lastAction = aeolus.read("lastAction") as any;
   const [phase, setPhase] = useState(0);
 
@@ -149,8 +184,8 @@ export default function SiteEnergy(aeolus: CustomComponentProps) {
   }, []);
 
   const net = solar - load;
-  const status = mode === "reserve-protection" ? "RESERVE PROTECTION" : mode === "solar-surplus" ? "SOLAR SURPLUS" : mode === "battery-support" ? "BATTERY SUPPORT" : "BALANCED";
-  const statusColor = mode === "reserve-protection" ? "#F09B61" : mode === "solar-surplus" ? "#8DE59A" : mode === "battery-support" ? "#E6C26B" : "#8AB7A0";
+  const status = mode === "reserve-protection" ? "RESERVE PROTECTION" : mode === "water-priority" ? "WATER PRIORITY" : mode === "opportunity-charging" ? "OPPORTUNITY CHARGING" : mode === "solar-surplus" ? "SOLAR SURPLUS" : mode === "battery-support" ? "BATTERY SUPPORT" : "BALANCED";
+  const statusColor = mode === "reserve-protection" ? "#F09B61" : mode === "water-priority" ? "#73DDF1" : mode === "opportunity-charging" ? "#8DE59A" : mode === "solar-surplus" ? "#B6DE78" : mode === "battery-support" ? "#E6C26B" : "#8AB7A0";
   const actionLabel = lastAction?.label ? String(lastAction.label) : "Energy telemetry online";
 
   function FlowDots(props: { x1: number; x2: number; y: number; active: boolean; reverse?: boolean; color: string }) {
@@ -176,11 +211,11 @@ export default function SiteEnergy(aeolus: CustomComponentProps) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
         <div>
           <div style={{ fontSize: 13, fontWeight: 850 }}>SITE ENERGY</div>
-          <div style={{ color: "#777B68", fontSize: 8, marginTop: 2 }}>Solar → battery → real Farm loads · automatic opportunity-load shedding</div>
+          <div style={{ color: "#777B68", fontSize: 8, marginTop: 2 }}>Local load policy · essential loads → water transfer → opportunity charging</div>
         </div>
         <div style={{ textAlign: "right" }}>
           <div style={{ color: statusColor, fontSize: 10, fontWeight: 800 }}>{status}</div>
-          <div style={{ color: "#667064", fontSize: 7 }}>{allowed ? "discretionary loads permitted" : "water transfer held"}</div>
+          <div style={{ color: "#667064", fontSize: 7 }}>{!allowed ? "water transfer held" : mode === "water-priority" ? "chargers shed for pump demand" : chargerOn ? "surplus charging active" : "higher-priority loads protected"}</div>
         </div>
       </div>
 
@@ -222,15 +257,36 @@ export default function SiteEnergy(aeolus: CustomComponentProps) {
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1.15fr 1fr .8fr", gap: 6, marginTop: 8 }}>
-        <button onClick={() => aeolus.fire(available ? "simulate-low-battery" : "restore-battery")} style={{ borderRadius: 8, padding: "8px", border: "1px solid " + (available ? "#6C4A2F" : "#315B3C"), background: available ? "#25180F" : "#102319", color: available ? "#E5A268" : "#83D99A", fontSize: 8, fontWeight: 750, cursor: "pointer" }}>{available ? "Simulate cloud + low reserve" : "Restore solar + reserve"}</button>
-        <button onClick={() => aeolus.fire("toggle-opportunity")} disabled={chargerPending} style={{ borderRadius: 8, padding: "8px", border: "1px solid " + (autoOpportunity ? "#3C5E3F" : "#353A32"), background: autoOpportunity ? "#132218" : "#161A15", color: autoOpportunity ? "#8DD49A" : "#879083", fontSize: 8, cursor: chargerPending ? "wait" : "pointer" }}>Opportunity loads {autoOpportunity ? "AUTO" : "OFF"}</button>
-        <button onClick={() => aeolus.fire("reset-energy")} style={{ borderRadius: 8, padding: "8px", border: "1px solid #353A32", background: "#161A15", color: "#879083", fontSize: 8, cursor: "pointer" }}>Reset</button>
+      <div style={{ marginTop: 8, padding: 8, border: "1px solid #3B462C", borderRadius: 9, background: "#12160E" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 10, alignItems: "center" }}>
+          <div>
+            <div style={{ color: "#87937B", fontSize: 7, fontWeight: 850, letterSpacing: 1 }}>OPERATOR CONTROL</div>
+            <div style={{ color: "#656F60", fontSize: 6.5, marginTop: 2 }}>Shed charging is lowest priority. Auto mode uses spare solar and yields to water transfer.</div>
+          </div>
+          <button onClick={() => aeolus.fire("toggle-opportunity")} disabled={chargerPending} style={{ minWidth: 135, borderRadius: 8, padding: "8px", border: "1px solid " + (autoOpportunity ? "#3C5E3F" : "#353A32"), background: autoOpportunity ? "#132218" : "#161A15", color: autoOpportunity ? "#8DD49A" : "#879083", fontSize: 8, cursor: chargerPending ? "wait" : "pointer" }}>Opportunity charging {autoOpportunity ? "AUTO" : "OFF"}</button>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 5, marginTop: 7, fontSize: 6.5 }}>
+          <div style={{ padding: "5px 6px", borderRadius: 6, background: "#171B13", color: "#9BA594" }}><b>1</b> Essential farm load</div>
+          <div style={{ padding: "5px 6px", borderRadius: 6, background: pumpLoad > 0 ? "#10232A" : "#171B13", color: pumpLoad > 0 ? "#83DCEB" : "#9BA594" }}><b>2</b> Water transfer</div>
+          <div style={{ padding: "5px 6px", borderRadius: 6, background: chargerOn ? "#142319" : "#171B13", color: chargerOn ? "#8DD49A" : "#777F74" }}><b>3</b> Shed charging</div>
+        </div>
+      </div>
+
+      <div style={{ marginTop: 7, padding: 8, border: "1px dashed #615034", borderRadius: 9, background: "#19140D" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+          <div><div style={{ color: "#C99F64", fontSize: 7, fontWeight: 850, letterSpacing: 1 }}>DEMO SCENARIO</div><div style={{ color: "#776752", fontSize: 6.5, marginTop: 2 }}>Injects weather/reserve conditions into the simulated site.</div></div>
+          {demoScenarioPending && <div style={{ color: "#D7A66B", fontSize: 7 }}>INJECTING…</div>}
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1.4fr .9fr .65fr", gap: 6 }}>
+          <button onClick={() => aeolus.fire("simulate-low-battery")} disabled={!available || !!demoScenarioPending} style={{ borderRadius: 8, padding: "8px", border: "1px solid #6C4A2F", background: "#25180F", color: !available || demoScenarioPending ? "#735E4C" : "#E5A268", fontSize: 8, fontWeight: 750, cursor: !available || demoScenarioPending ? "not-allowed" : "pointer" }}>Cloud + low reserve</button>
+          <button onClick={() => aeolus.fire("restore-battery")} disabled={available || !!demoScenarioPending} style={{ borderRadius: 8, padding: "8px", border: "1px solid #315B3C", background: "#102319", color: available || demoScenarioPending ? "#516A57" : "#83D99A", fontSize: 8, cursor: available || demoScenarioPending ? "not-allowed" : "pointer" }}>Restore nominal</button>
+          <button onClick={() => aeolus.fire("reset-energy")} style={{ borderRadius: 8, padding: "8px", border: "1px solid #433B30", background: "#181510", color: "#8E8678", fontSize: 8, cursor: "pointer" }}>Reset demo</button>
+        </div>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8, marginTop: 7, alignItems: "center" }}>
         <div style={{ color: "#6D756A", fontSize: 8, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{actionLabel}</div>
-        <div style={{ color: chargerOn ? "#8DCF99" : "#626B61", fontSize: 7, whiteSpace: "nowrap" }}>{chargerOn ? "CHARGER BANK ON" : "CHARGER BANK SHED"} · margin {solarMargin.toFixed(2)} kW</div>
+        <div style={{ color: chargerOn ? "#8DCF99" : pumpLoad > 0 ? "#75CEDD" : "#626B61", fontSize: 7, whiteSpace: "nowrap" }}>{chargerOn ? "CHARGER BANK ON" : pumpLoad > 0 ? "CHARGERS YIELD TO WATER" : "CHARGER BANK SHED"} · site net {netKw >= 0 ? "+" : ""}{netKw.toFixed(2)} kW</div>
       </div>
     </div>
   );

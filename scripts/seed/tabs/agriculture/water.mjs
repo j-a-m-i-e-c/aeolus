@@ -10,14 +10,31 @@ const logic = `automation({
       function setAction(label) {
         state.set("lastAction", { label: label, at: Date.now() });
       }
+      function init(key, value) {
+        if (state.get(key) === undefined) state.set(key, value);
+      }
+
+      init("distributionActive", false);
+      init("houseRefillActive", false);
+      init("shedRefillActive", false);
+      init("transferActive", false);
+      init("transferStopping", false);
+      init("transferMode", "idle");
+      init("transferTargetLitres", 0);
+      init("transferProgressLitres", 0);
+      init("flowTotalLitres", 0);
+      init("demoScenarioPending", "");
+      init("energyAllowed", true);
 
       async function stopPump(reason) {
+        if (Boolean(state.get("transferStopping"))) return;
         var pump = byTopic("switch/farm/dam-pump/state");
         var flow = byTopic("sensor/farm/transfer-flow");
         if (!pump || !flow) {
           setAction("Pump stop blocked: pump or flow sensor unavailable");
           return;
         }
+        state.set("transferStopping", true);
         var result = await devices.action(
           pump.id,
           "command",
@@ -29,9 +46,15 @@ const logic = `automation({
             timeoutMs: 5000,
           }
         );
+        state.set("transferStopping", false);
         if (result.success) {
+          var delivered = Math.max(0, Number(state.get("transferProgressLitres")) || 0);
+          state.set("lastTransferLitres", delivered);
+          state.set("transferActive", false);
+          state.set("transferMode", "idle");
+          state.set("transferTargetLitres", 0);
           setAction("Transfer stopped · zero flow observed");
-          events.emit("farm/water/transfer-stopped", { reason: reason, lifecycleState: result.lifecycleState });
+          events.emit("farm/water/transfer-stopped", { reason: reason, deliveredLitres: delivered, lifecycleState: result.lifecycleState });
         } else {
           setAction("Pump stop not verified: " + String(result.error || result.lifecycleState || "unknown"));
           events.emit("farm/water/transfer-failed", { stage: "stop", reason: result.error || "not verified", lifecycleState: result.lifecycleState });
@@ -68,13 +91,29 @@ const logic = `automation({
           setAction("Transfer blocked: header tank already full");
           return;
         }
-        if (pump.state && pump.state.on) {
+        if ((pump.state && pump.state.on) || Boolean(state.get("transferActive"))) {
           setAction("Transfer pump already running");
           return;
         }
 
-        var litres = Math.max(100, Math.min(3000, Number(requestedLitres) || 500));
-        setAction("Requesting " + litres + " L transfer from lower dam");
+        var requested = Math.max(100, Math.min(3000, Number(requestedLitres) || 500));
+        var headerLitres = Math.max(0, Number(header.state && header.state.litres) || (isNaN(headerPct) ? 0 : headerPct * 50));
+        var damLitres = Math.max(0, Number(dam.state && dam.state.litres) || (isNaN(damPct) ? 0 : damPct * 600));
+        var headerHeadroom = Math.max(0, 5000 - headerLitres);
+        var sourceAboveReserve = Math.max(0, damLitres - 6000);
+        var litres = Math.floor(Math.min(requested, headerHeadroom, sourceAboveReserve));
+        if (litres < 100) {
+          setAction("Transfer blocked: insufficient safe source/headroom for a batch");
+          return;
+        }
+        var startTotal = Math.max(0, Number(flow.state && flow.state.totalLitres) || 0);
+        state.set("transferActive", true);
+        state.set("transferMode", source === "automatic-header-recovery" ? "automatic" : "manual");
+        state.set("transferTargetLitres", litres);
+        state.set("transferStartTotalLitres", startTotal);
+        state.set("transferProgressLitres", 0);
+        setAction((source === "automatic-header-recovery" ? "Automatic recovery" : "Operator batch") + " · requesting " + litres + " L from lower dam");
+
         var result = await devices.action(
           pump.id,
           "command",
@@ -87,9 +126,12 @@ const logic = `automation({
           }
         );
         if (result.success) {
-          setAction("Transfer verified · flow observed at rising main");
+          setAction((source === "automatic-header-recovery" ? "Automatic recovery" : litres + " L batch") + " running · flow verified");
           events.emit("farm/water/transfer-started", { litres: litres, source: source || "automation", lifecycleState: result.lifecycleState });
         } else {
+          state.set("transferActive", false);
+          state.set("transferMode", "idle");
+          state.set("transferTargetLitres", 0);
           setAction("Transfer not verified: " + String(result.error || result.lifecycleState || "unknown"));
           events.emit("farm/water/transfer-failed", { stage: "start", reason: result.error || "not verified", lifecycleState: result.lifecycleState });
         }
@@ -153,19 +195,29 @@ const logic = `automation({
         else if (evt === "transfer-1000") await startTransfer(1000, "operator");
         else if (evt === "pump-stop") await stopPump("operator");
         else if (evt === "simulate-header-low") {
+          if (String(state.get("demoScenarioPending") || "")) return;
+          state.set("demoScenarioPending", "header-drawdown");
           state.set("recoveryHoldUntil", Date.now() + 4000);
           events.emit("farm/sim/header-low", {});
-          setAction("Simulating header-tank drawdown");
+          setAction("DEMO · injecting header-tank drawdown");
         } else if (evt === "simulate-property-demand") {
+          if (String(state.get("demoScenarioPending") || "")) return;
+          state.set("demoScenarioPending", "morning-demand");
           events.emit("farm/sim/property-water-demand", {});
-          setAction("Simulating morning house + shed demand");
+          setAction("DEMO · injecting morning house + shed demand");
         } else if (evt === "reset-water") {
           events.emit("farm/sim/water-reset", {});
           state.set("recoveryHoldUntil", 0);
           state.set("distributionActive", false);
           state.set("houseRefillActive", false);
           state.set("shedRefillActive", false);
-          setAction("Resetting water system to nominal");
+          state.set("transferActive", false);
+          state.set("transferStopping", false);
+          state.set("transferMode", "idle");
+          state.set("transferTargetLitres", 0);
+          state.set("transferProgressLitres", 0);
+          state.set("demoScenarioPending", "");
+          setAction("DEMO · water system reset to nominal");
         }
         return;
       }
@@ -192,18 +244,49 @@ const logic = `automation({
       var shedPct = Number(shed && shed.state && shed.state.value);
       var housePct = Number(house && house.state && house.state.value);
       var flowLpm = Number(flow && flow.state && flow.state.litresPerMinute);
+      var flowTotal = Number(flow && flow.state && flow.state.totalLitres);
+      var physicalBatchActive = Boolean(flow && flow.state && flow.state.batchActive);
 
       if (!isNaN(damPct)) state.set("damPct", damPct);
       if (!isNaN(headerPct)) state.set("headerPct", headerPct);
       if (!isNaN(shedPct)) state.set("shedPct", shedPct);
       if (!isNaN(housePct)) state.set("housePct", housePct);
       if (!isNaN(flowLpm)) state.set("flowLpm", flowLpm);
+      if (!isNaN(flowTotal)) state.set("flowTotalLitres", flowTotal);
       state.set("pumpOn", pumpOn);
       if (!isNaN(soc)) state.set("batterySoc", soc);
       state.set("energyAllowed", !battery || (battery.state && battery.state.available !== false && (isNaN(soc) || soc >= 30)));
-      if (state.get("distributionActive") === undefined) state.set("distributionActive", false);
-      if (state.get("houseRefillActive") === undefined) state.set("houseRefillActive", false);
-      if (state.get("shedRefillActive") === undefined) state.set("shedRefillActive", false);
+
+      var pendingScenario = String(state.get("demoScenarioPending") || "");
+      if (pendingScenario === "header-drawdown" && topic === "sensor/farm/header-tank" && !isNaN(headerPct) && headerPct <= 30) {
+        state.set("demoScenarioPending", "");
+      } else if (pendingScenario === "morning-demand" &&
+                 ((topic === "sensor/farm/house-tank" && !isNaN(housePct) && housePct <= 50) ||
+                  (topic === "sensor/farm/shed-tank" && !isNaN(shedPct) && shedPct <= 60))) {
+        state.set("demoScenarioPending", "");
+      }
+
+      var transferActive = Boolean(state.get("transferActive"));
+      var transferTarget = Math.max(0, Number(state.get("transferTargetLitres")) || 0);
+      var transferStart = Math.max(0, Number(state.get("transferStartTotalLitres")) || 0);
+      if (transferActive && !isNaN(flowTotal)) {
+        var progress = Math.max(0, flowTotal - transferStart);
+        state.set("transferProgressLitres", progress);
+        if (progress >= transferTarget - 1 && pumpOn && !Boolean(state.get("transferStopping"))) {
+          state.set("transferActive", false);
+          setAction("Batch target reached · stopping transfer at " + Math.round(progress) + " L");
+          await stopPump("batch volume reached");
+          pumpOn = false;
+        } else if (!physicalBatchActive && !pumpOn && !isNaN(flowLpm) && flowLpm === 0 && progress > 0) {
+          // Reconcile a device-side failsafe stop rather than leaving the UI in
+          // an impossible forever-running batch state.
+          state.set("lastTransferLitres", progress);
+          state.set("transferActive", false);
+          state.set("transferMode", "idle");
+          state.set("transferTargetLitres", 0);
+          setAction("Transfer ended at device · " + Math.round(progress) + " L observed");
+        }
+      }
 
       var sourceLowActive = Boolean(state.get("sourceLowActive"));
       if (!isNaN(damPct) && damPct <= 10 && !sourceLowActive) {
@@ -215,30 +298,38 @@ const logic = `automation({
       }
 
       await reconcileDownstream();
+      header = byTopic("sensor/farm/header-tank");
+      headerPct = Number(header && header.state && header.state.value);
+      if (!isNaN(headerPct)) state.set("headerPct", headerPct);
 
       var recoveryHeld = Date.now() < (Number(state.get("recoveryHoldUntil")) || 0);
       var headerLowActive = Boolean(state.get("headerLowActive"));
-      if (!isNaN(headerPct) && headerPct <= 30 && !headerLowActive && !recoveryHeld) {
+      if (!isNaN(headerPct) && headerPct <= 30 && !headerLowActive && !recoveryHeld && !Boolean(state.get("distributionActive")) && !Boolean(state.get("transferActive")) && !pumpOn) {
         state.set("headerLowActive", true);
         var targetLitres = Math.max(500, Math.round((72 - headerPct) * 50));
-        setAction("Header reserve low · automatic dam transfer requested");
+        setAction("Header reserve low · automatic recovery requested");
         events.emit("farm/water/header-low", { headerPct: headerPct, damPct: damPct });
         await startTransfer(targetLitres, "automatic-header-recovery");
       } else if (!isNaN(headerPct) && headerPct > 35 && headerLowActive) {
         state.set("headerLowActive", false);
       }
 
-      var satisfiedActive = Boolean(state.get("headerSatisfiedActive"));
-      if (!isNaN(headerPct) && headerPct >= 70 && pumpOn && !satisfiedActive) {
-        state.set("headerSatisfiedActive", true);
-        setAction("Header target reached · stopping transfer");
-        await stopPump("header target reached");
-      } else if ((!pumpOn || (!isNaN(headerPct) && headerPct < 65)) && satisfiedActive) {
-        state.set("headerSatisfiedActive", false);
+      var mode = String(state.get("transferMode") || "idle");
+      if (mode === "automatic" && !isNaN(headerPct) && headerPct >= 70 && pumpOn && !Boolean(state.get("transferStopping"))) {
+        state.set("transferActive", false);
+        setAction("Header recovery target reached · stopping transfer");
+        await stopPump("header recovery target reached");
+        pumpOn = false;
+      } else if (!isNaN(headerPct) && headerPct >= 95 && pumpOn && !Boolean(state.get("transferStopping"))) {
+        state.set("transferActive", false);
+        setAction("Header high-level safety stop");
+        await stopPump("header high-level safety");
+        pumpOn = false;
       }
 
       var energyAllowed = !battery || battery.state.available !== false;
-      if (pumpOn && (!energyAllowed || (!isNaN(soc) && soc < 30))) {
+      if (pumpOn && (!energyAllowed || (!isNaN(soc) && soc < 30)) && !Boolean(state.get("transferStopping"))) {
+        state.set("transferActive", false);
         setAction("Energy reserve low · stopping discretionary pump load");
         await stopPump("energy reserve protection");
       }
@@ -286,6 +377,14 @@ export default function WaterManagement(aeolus: CustomComponentProps) {
   const distributionActive = Boolean(aeolus.read("distributionActive"));
   const houseRefill = Boolean(aeolus.read("houseRefillActive"));
   const shedRefill = Boolean(aeolus.read("shedRefillActive"));
+  const transferActive = Boolean(aeolus.read("transferActive"));
+  const transferStopping = Boolean(aeolus.read("transferStopping"));
+  const transferMode = String(aeolus.read("transferMode") ?? "idle");
+  const transferTarget = Math.max(0, Number(aeolus.read("transferTargetLitres") ?? 0));
+  const transferProgress = Math.max(0, Number(aeolus.read("transferProgressLitres") ?? 0));
+  const totalizer = Math.max(0, Number(aeolus.read("flowTotalLitres") ?? 0));
+  const lastTransfer = Math.max(0, Number(aeolus.read("lastTransferLitres") ?? 0));
+  const demoScenarioPending = String(aeolus.read("demoScenarioPending") ?? "");
   const lastAction = aeolus.read("lastAction") as any;
   const [phase, setPhase] = useState(0);
 
@@ -295,6 +394,9 @@ export default function WaterManagement(aeolus: CustomComponentProps) {
   }, []);
 
   const moving = pumpOn && flow > 0;
+  const batchPct = transferTarget > 0 ? Math.max(0, Math.min(100, transferProgress / transferTarget * 100)) : 0;
+  const operatorBusy = pumpOn || transferActive || transferStopping;
+  const demoBusy = operatorBusy || distributionActive || houseRefill || shedRefill || demoScenarioPending.length > 0;
   const actionLabel = lastAction?.label ? String(lastAction.label) : "Water system online";
 
   function Tank(props: { x: number; y: number; w: number; h: number; label: string; value: number; litresPerPct: number; accent?: string }) {
@@ -330,8 +432,8 @@ export default function WaterManagement(aeolus: CustomComponentProps) {
           <div style={{ color: "#657A7F", fontSize: 8, marginTop: 2 }}>Dam transfer · header reserve · house & shed distribution</div>
         </div>
         <div style={{ textAlign: "right" }}>
-          <div style={{ color: moving ? "#78E6FF" : pumpOn ? "#F1C06B" : "#7C8F91", fontSize: 9, fontWeight: 800 }}>{moving ? "FLOW OBSERVED" : pumpOn ? "PUMP ON · WAITING FLOW" : distributionActive ? "DISTRIBUTING" : "SYSTEM BALANCED"}</div>
-          <div style={{ color: "#596D70", fontSize: 7, marginTop: 2 }}>{flow.toFixed(0)} L/min rising main</div>
+          <div style={{ color: moving ? "#78E6FF" : pumpOn ? "#F1C06B" : "#7C8F91", fontSize: 9, fontWeight: 800 }}>{transferStopping ? "STOPPING" : moving ? (transferMode === "automatic" ? "AUTO RECOVERY" : "BATCH TRANSFER") : pumpOn ? "PUMP ON · WAITING FLOW" : distributionActive ? "DISTRIBUTING" : "SYSTEM BALANCED"}</div>
+          <div style={{ color: "#596D70", fontSize: 7, marginTop: 2 }}>{flow.toFixed(0)} L/min · totalizer {Math.round(totalizer).toLocaleString()} L</div>
         </div>
       </div>
 
@@ -367,17 +469,37 @@ export default function WaterManagement(aeolus: CustomComponentProps) {
         </svg>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 5, marginTop: 8 }}>
-        <button onClick={() => aeolus.fire("transfer-500")} style={{ borderRadius: 7, padding: "7px 4px", border: "1px solid #27586A", background: "#0C2630", color: "#79DDF5", fontSize: 8, fontWeight: 750, cursor: "pointer" }}>Transfer 500 L</button>
-        <button onClick={() => aeolus.fire("transfer-1000")} style={{ borderRadius: 7, padding: "7px 4px", border: "1px solid #27586A", background: "#0C2630", color: "#79DDF5", fontSize: 8, fontWeight: 750, cursor: "pointer" }}>Transfer 1000 L</button>
-        <button onClick={() => aeolus.fire("pump-stop")} disabled={!pumpOn} style={{ borderRadius: 7, padding: "7px 4px", border: "1px solid " + (pumpOn ? "#6A3B34" : "#2C3638"), background: pumpOn ? "#281713" : "#111718", color: pumpOn ? "#F39B8C" : "#566366", fontSize: 8, cursor: pumpOn ? "pointer" : "not-allowed" }}>Stop pump</button>
-        <button onClick={() => aeolus.fire("simulate-header-low")} style={{ borderRadius: 7, padding: "7px 4px", border: "1px solid #5C4D2A", background: "#221C0E", color: "#D8BD6B", fontSize: 8, cursor: "pointer" }}>Drain header</button>
-        <button onClick={() => aeolus.fire("simulate-property-demand")} style={{ borderRadius: 7, padding: "7px 4px", border: "1px solid #4D5630", background: "#19200E", color: "#BACE78", fontSize: 8, cursor: "pointer" }}>Morning demand</button>
-        <button onClick={() => aeolus.fire("reset-water")} style={{ borderRadius: 7, padding: "7px 4px", border: "1px solid #303B3D", background: "#12191A", color: "#7A898C", fontSize: 8, cursor: "pointer" }}>Reset water</button>
+      {transferTarget > 0 && <div style={{ marginTop: 8, padding: "7px 9px", border: "1px solid #234651", borderRadius: 8, background: "#09191E" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 7, color: "#718B91", marginBottom: 5 }}>
+          <span>{transferMode === "automatic" ? "AUTOMATIC HEADER RECOVERY" : "OPERATOR BATCH"}</span>
+          <span>{Math.min(transferTarget, transferProgress).toFixed(0)} / {transferTarget.toFixed(0)} L</span>
+        </div>
+        <div style={{ height: 5, borderRadius: 5, background: "#173038", overflow: "hidden" }}><div style={{ width: batchPct + "%", height: "100%", background: "#55D6F3" }} /></div>
+      </div>}
+
+      <div style={{ marginTop: 8, padding: 8, border: "1px solid #244650", borderRadius: 9, background: "#0A171B" }}>
+        <div style={{ color: "#6E858B", fontSize: 7, fontWeight: 800, letterSpacing: 1, marginBottom: 6 }}>OPERATOR CONTROLS</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 5 }}>
+          <button onClick={() => aeolus.fire("transfer-500")} disabled={operatorBusy || !energyAllowed} style={{ borderRadius: 7, padding: "7px 4px", border: "1px solid " + (!operatorBusy && energyAllowed ? "#27586A" : "#2C393D"), background: !operatorBusy && energyAllowed ? "#0C2630" : "#12191B", color: !operatorBusy && energyAllowed ? "#79DDF5" : "#5B686C", fontSize: 8, fontWeight: 750, cursor: !operatorBusy && energyAllowed ? "pointer" : "not-allowed" }}>Transfer 500 L</button>
+          <button onClick={() => aeolus.fire("transfer-1000")} disabled={operatorBusy || !energyAllowed} style={{ borderRadius: 7, padding: "7px 4px", border: "1px solid " + (!operatorBusy && energyAllowed ? "#27586A" : "#2C393D"), background: !operatorBusy && energyAllowed ? "#0C2630" : "#12191B", color: !operatorBusy && energyAllowed ? "#79DDF5" : "#5B686C", fontSize: 8, fontWeight: 750, cursor: !operatorBusy && energyAllowed ? "pointer" : "not-allowed" }}>Transfer 1000 L</button>
+          <button onClick={() => aeolus.fire("pump-stop")} disabled={!pumpOn || transferStopping} style={{ borderRadius: 7, padding: "7px 4px", border: "1px solid " + (pumpOn ? "#6A3B34" : "#2C3638"), background: pumpOn ? "#281713" : "#111718", color: pumpOn ? "#F39B8C" : "#566366", fontSize: 8, cursor: pumpOn && !transferStopping ? "pointer" : "not-allowed" }}>{transferStopping ? "Stopping…" : "Stop transfer"}</button>
+        </div>
+      </div>
+
+      <div style={{ marginTop: 7, padding: 8, border: "1px dashed #5B4E2F", borderRadius: 9, background: "#17150D" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+          <div><div style={{ color: "#C8AA62", fontSize: 7, fontWeight: 850, letterSpacing: 1 }}>DEMO SCENARIO</div><div style={{ color: "#766D54", fontSize: 6.5, marginTop: 2 }}>Injects external physical conditions. These are not normal operator controls.</div></div>
+          {demoScenarioPending && <div style={{ color: "#D7B968", fontSize: 7 }}>INJECTING…</div>}
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr .7fr", gap: 5 }}>
+          <button onClick={() => aeolus.fire("simulate-header-low")} disabled={demoBusy} style={{ borderRadius: 7, padding: "7px 4px", border: "1px solid #5C4D2A", background: "#221C0E", color: demoBusy ? "#756C50" : "#D8BD6B", fontSize: 8, cursor: demoBusy ? "not-allowed" : "pointer" }}>Header drawdown</button>
+          <button onClick={() => aeolus.fire("simulate-property-demand")} disabled={demoBusy} style={{ borderRadius: 7, padding: "7px 4px", border: "1px solid #4D5630", background: "#19200E", color: demoBusy ? "#687052" : "#BACE78", fontSize: 8, cursor: demoBusy ? "not-allowed" : "pointer" }}>Morning demand</button>
+          <button onClick={() => aeolus.fire("reset-water")} style={{ borderRadius: 7, padding: "7px 4px", border: "1px solid #3D3A30", background: "#171713", color: "#8D8878", fontSize: 8, cursor: "pointer" }}>Reset demo</button>
+        </div>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8, alignItems: "center", marginTop: 7 }}>
-        <div style={{ color: "#677A7E", fontSize: 8, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{actionLabel}</div>
+        <div style={{ color: "#677A7E", fontSize: 8, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{actionLabel}{lastTransfer > 0 && !operatorBusy ? " · last batch " + Math.round(lastTransfer) + " L" : ""}</div>
         <div style={{ borderRadius: 999, padding: "2px 7px", border: "1px solid " + (energyAllowed ? "#31533A" : "#69462F"), background: energyAllowed ? "#102118" : "#25170F", color: energyAllowed ? "#78D890" : "#E6A16B", fontSize: 7 }}>ENERGY {energyAllowed ? "PERMITTED" : "HELD"} · {Math.round(batterySoc)}%</div>
       </div>
     </div>

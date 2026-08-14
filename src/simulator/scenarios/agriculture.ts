@@ -92,7 +92,13 @@ const CHARGER_LOAD_KW = 0.45;
 
 interface WaterTankState { value: number; litres: number }
 interface PumpState { on: boolean; running: boolean }
-interface FlowState { litresPerMinute: number }
+interface FlowState extends SimulatedState {
+  litresPerMinute: number;
+  totalLitres: number;
+  batchActive: boolean;
+  batchTargetLitres: number;
+  batchTransferredLitres: number;
+}
 interface CollarState {
   herd: number;
   tracked: number;
@@ -112,6 +118,8 @@ interface TroughState extends SimulatedState {
   refillTargets: string[];
   drinkingIds: string[];
   drinkingHead: number;
+  drinkingActive: boolean;
+  drinkingProgress: number;
   consumptionTodayLitres: number;
   lastDrinkLitres: number;
   refillFlowLpm: number;
@@ -159,6 +167,8 @@ function summarizeTroughs(
     refillTargets: [],
     drinkingIds: [],
     drinkingHead: 0,
+    drinkingActive: false,
+    drinkingProgress: 0,
     consumptionTodayLitres: 1240,
     lastDrinkLitres: 0,
     refillFlowLpm: 0,
@@ -172,7 +182,7 @@ const INITIAL = {
   shed: { value: 72, litres: 5_760 } as WaterTankState,
   house: { value: 64, litres: 2_560 } as WaterTankState,
   pump: { on: false, running: false } as PumpState,
-  flow: { litresPerMinute: 0 } as FlowState,
+  flow: { litresPerMinute: 0, totalLitres: 18_420, batchActive: false, batchTargetLitres: 0, batchTransferredLitres: 0 } as FlowState,
   shedFill: { on: false, zone: "shed" },
   houseFill: { on: false, zone: "house" },
   energiser: { voltage: 7.2, current: 0.4, fault: false },
@@ -190,7 +200,7 @@ const INITIAL = {
   troughRefill: { active: false },
   battery: {
     soc: 78,
-    solarKw: 2.8,
+    solarKw: 2.1,
     loadKw: BASE_LOAD_KW,
     available: true,
     baseLoadKw: BASE_LOAD_KW,
@@ -205,6 +215,10 @@ class AgricultureEnvironment {
   private readonly controllers = new Map<string, SimulatedStateController>();
   private pumpKw = 0;
   private chargerKw = 0;
+  private transferTimer?: ReturnType<typeof setTimeout>;
+  private transferFailsafeTimer?: ReturnType<typeof setTimeout>;
+  private troughDrinkTimer?: ReturnType<typeof setTimeout>;
+  private troughRefillTimers: Array<ReturnType<typeof setTimeout>> = [];
 
   register(key: string, controller: SimulatedStateController): void {
     this.controllers.set(key, controller);
@@ -261,26 +275,63 @@ class AgricultureEnvironment {
 
   drinkTroughs(): void {
     const troughs = this.controller(AGRICULTURE_DEVICE_KEYS.troughs);
-    if (!troughs) return;
+    if (!troughs || this.troughDrinkTimer) return;
     const state = troughs.read() as TroughState;
-    const levels = Array.isArray(state.levels) ? [...state.levels] : [...INITIAL_TROUGH_LEVELS];
+    if (state.drinkingActive || Number(state.refilling || 0) > 0) return;
+
+    const startLevels = Array.isArray(state.levels) ? [...state.levels] : [...INITIAL_TROUGH_LEVELS];
     const drinkIndexes = [3, 4, 11, 16]; // T4, T5, T12, T17
     const drops = [42, 48, 40, 44];
-    let consumed = 0;
+    const finalLevels = [...startLevels];
+    let totalConsumed = 0;
     drinkIndexes.forEach((index, offset) => {
-      const before = Number(levels[index]) || 0;
+      const before = Number(startLevels[index]) || 0;
       const after = Math.max(18, before - drops[offset]);
-      levels[index] = after;
-      consumed += Math.round((before - after) * 3.2);
+      finalLevels[index] = after;
+      totalConsumed += Math.round((before - after) * 3.2);
     });
     const drinkingIds = drinkIndexes.map(troughId);
-    troughs.update(summarizeTroughs(levels, {
+    const startingConsumption = Number(state.consumptionTodayLitres || 0);
+    const steps = 4;
+    let step = 0;
+
+    troughs.update(summarizeTroughs(startLevels, {
       drinkingIds,
       drinkingHead: 18,
-      consumptionTodayLitres: Number(state.consumptionTodayLitres || 0) + consumed,
-      lastDrinkLitres: consumed,
-    }));
-    troughs.update({ drinkingIds: [], drinkingHead: 0 }, { delayMs: 2400 });
+      drinkingActive: true,
+      drinkingProgress: 0,
+      consumptionTodayLitres: startingConsumption,
+      lastDrinkLitres: 0,
+      refillFlowLpm: 0,
+    }), { forcePublish: true });
+
+    const tick = (): void => {
+      step += 1;
+      const progress = Math.min(1, step / steps);
+      const levels = startLevels.map((start, index) => {
+        const target = finalLevels[index];
+        return start + (target - start) * progress;
+      });
+      const consumedSoFar = Math.round(totalConsumed * progress);
+      const complete = step >= steps;
+      troughs.update(summarizeTroughs(levels, {
+        drinkingIds: complete ? [] : drinkingIds,
+        drinkingHead: complete ? 0 : 18,
+        drinkingActive: !complete,
+        drinkingProgress: Math.round(progress * 100),
+        consumptionTodayLitres: startingConsumption + consumedSoFar,
+        lastDrinkLitres: complete ? totalConsumed : 0,
+        refillFlowLpm: 0,
+      }), { forcePublish: true });
+
+      if (complete) {
+        this.troughDrinkTimer = undefined;
+        return;
+      }
+      this.troughDrinkTimer = setTimeout(tick, 650);
+    };
+
+    this.troughDrinkTimer = setTimeout(tick, 550);
   }
 
   lowerTroughs(): void {
@@ -293,11 +344,12 @@ class AgricultureEnvironment {
   }
 
   restoreEnergy(): void {
-    this.controller(AGRICULTURE_DEVICE_KEYS.battery)?.update({ soc: 78, solarKw: 2.8, available: true });
+    this.controller(AGRICULTURE_DEVICE_KEYS.battery)?.update({ soc: 78, solarKw: 2.1, available: true });
     this.publishEnergyLoad();
   }
 
   resetWater(): void {
+    this.clearTransferTimers();
     this.pumpKw = 0;
     this.controller(AGRICULTURE_DEVICE_KEYS.dam)?.update({ ...INITIAL.dam }, { forcePublish: true });
     this.controller(AGRICULTURE_DEVICE_KEYS.header)?.update({ ...INITIAL.header }, { forcePublish: true });
@@ -317,6 +369,7 @@ class AgricultureEnvironment {
   }
 
   resetTroughs(): void {
+    this.clearTroughTimers();
     this.controller(AGRICULTURE_DEVICE_KEYS.troughs)?.update({ ...INITIAL.troughs, levels: [...INITIAL_TROUGH_LEVELS] }, { forcePublish: true });
     this.controller(AGRICULTURE_DEVICE_KEYS.troughRefill)?.update({ ...INITIAL.troughRefill }, { forcePublish: true });
   }
@@ -357,29 +410,82 @@ class AgricultureEnvironment {
     const flow = this.controller(AGRICULTURE_DEVICE_KEYS.flow);
     if (!dam || !header || !flow) return;
 
-    const damState = dam.read();
-    const headerState = header.read();
-    const damLitres = Number(damState.litres) || 0;
-    const headerLitres = Number(headerState.litres) || 0;
+    this.clearTransferTimers();
+    const damLitres = Number(dam.read().litres) || 0;
+    const headerLitres = Number(header.read().litres) || 0;
     const actual = Math.max(0, Math.min(litres, damLitres, HEADER_CAPACITY_L - headerLitres));
+    const initialFlow = flow.read() as FlowState;
+    const startingTotal = Number(initialFlow.totalLitres || 0);
+    if (actual <= 0) {
+      flow.update({ litresPerMinute: 0, batchActive: false, batchTargetLitres: 0, batchTransferredLitres: 0 });
+      return;
+    }
 
-    flow.update({ litresPerMinute: actual > 0 ? 120 : 0 }, { delayMs: 80 });
-    if (actual <= 0) return;
+    const steps = Math.max(4, Math.min(8, Math.ceil(actual / 200)));
+    let delivered = 0;
+    let step = 0;
+    flow.update({
+      litresPerMinute: 120,
+      totalLitres: startingTotal,
+      batchActive: true,
+      batchTargetLitres: Math.round(actual),
+      batchTransferredLitres: 0,
+    }, { forcePublish: true });
 
-    const nextDamLitres = damLitres - actual;
-    const nextHeaderLitres = headerLitres + actual;
-    dam.update(
-      { value: Math.round((nextDamLitres / DAM_CAPACITY_L) * 1000) / 10, litres: Math.round(nextDamLitres) },
-      { delayMs: 220 },
-    );
-    header.update(
-      { value: Math.round((nextHeaderLitres / HEADER_CAPACITY_L) * 1000) / 10, litres: Math.round(nextHeaderLitres) },
-      { delayMs: 220 },
-    );
+    const tick = (): void => {
+      step += 1;
+      const remaining = actual - delivered;
+      const stepLitres = step >= steps ? remaining : Math.min(remaining, actual / steps);
+      delivered += stepLitres;
+
+      const currentDam = Number(dam.read().litres) || 0;
+      const currentHeader = Number(header.read().litres) || 0;
+      const moved = Math.max(0, Math.min(stepLitres, currentDam, HEADER_CAPACITY_L - currentHeader));
+      const nextDam = currentDam - moved;
+      const nextHeader = currentHeader + moved;
+      dam.update({ value: Math.round((nextDam / DAM_CAPACITY_L) * 1000) / 10, litres: Math.round(nextDam) });
+      header.update({ value: Math.round((nextHeader / HEADER_CAPACITY_L) * 1000) / 10, litres: Math.round(nextHeader) });
+      flow.update({
+        litresPerMinute: 120,
+        totalLitres: Math.round((startingTotal + delivered) * 10) / 10,
+        batchActive: true,
+        batchTargetLitres: Math.round(actual),
+        batchTransferredLitres: Math.round(delivered * 10) / 10,
+      }, { forcePublish: true });
+
+      if (step >= steps || delivered >= actual - 0.1) {
+        this.transferTimer = undefined;
+        // Aeolus should issue the normal OFF command after seeing the batch
+        // totalizer reach its target. This bounded fallback keeps the physical
+        // simulator truthful if that control path fails.
+        this.transferFailsafeTimer = setTimeout(() => {
+          this.transferFailsafeTimer = undefined;
+          const pump = this.controller(AGRICULTURE_DEVICE_KEYS.pump);
+          const currentFlow = flow.read() as FlowState;
+          if (currentFlow.batchActive) {
+            flow.update({ litresPerMinute: 0, batchActive: false }, { forcePublish: true });
+            pump?.update({ on: false, running: false }, { forcePublish: true });
+            this.setPumpLoad(false);
+          }
+        }, 900);
+        return;
+      }
+      this.transferTimer = setTimeout(tick, 420);
+    };
+
+    this.transferTimer = setTimeout(tick, 320);
   }
 
   stopFlow(): void {
-    this.controller(AGRICULTURE_DEVICE_KEYS.flow)?.update({ litresPerMinute: 0 }, { delayMs: 80 });
+    this.clearTransferTimers();
+    const flow = this.controller(AGRICULTURE_DEVICE_KEYS.flow);
+    const current = flow?.read() as FlowState | undefined;
+    flow?.update({
+      litresPerMinute: 0,
+      batchActive: false,
+      batchTargetLitres: Number(current?.batchTargetLitres || 0),
+      batchTransferredLitres: Number(current?.batchTransferredLitres || 0),
+    }, { forcePublish: true });
   }
 
   refillDownstream(zone: "shed" | "house", targetPct: number): void {
@@ -422,41 +528,71 @@ class AgricultureEnvironment {
     const troughs = this.controller(AGRICULTURE_DEVICE_KEYS.troughs);
     if (!troughs) return;
     const state = troughs.read() as TroughState;
+    if (state.drinkingActive || this.troughRefillTimers.length > 0) return;
     const levels = Array.isArray(state.levels) ? [...state.levels] : [...INITIAL_TROUGH_LEVELS];
     const targets = (targetIds.length > 0 ? targetIds : state.lowIds || []).filter((id) => /^T(?:[1-9]|1\d|20)$/.test(id));
     if (targets.length === 0) return;
 
-    troughs.update({ refilling: targets.length, refillTargets: targets, refillFlowLpm: 46 }, { delayMs: 90 });
+    troughs.update({ refilling: targets.length, refillTargets: targets, refillFlowLpm: 46 }, { forcePublish: true });
 
     const mid = [...levels];
     for (const id of targets) {
       const index = Number(id.slice(1)) - 1;
       mid[index] = Math.min(78, Math.max(mid[index] || 0, 66));
     }
-    troughs.update(summarizeTroughs(mid, {
-      refilling: targets.length,
-      refillTargets: targets,
-      drinkingIds: state.drinkingIds || [],
-      drinkingHead: Number(state.drinkingHead || 0),
-      consumptionTodayLitres: Number(state.consumptionTodayLitres || 0),
-      lastDrinkLitres: Number(state.lastDrinkLitres || 0),
-      refillFlowLpm: 46,
-    }), { delayMs: 950 });
+    const midTimer = setTimeout(() => {
+      troughs.update(summarizeTroughs(mid, {
+        refilling: targets.length,
+        refillTargets: targets,
+        drinkingIds: [],
+        drinkingHead: 0,
+        drinkingActive: false,
+        drinkingProgress: 100,
+        consumptionTodayLitres: Number(state.consumptionTodayLitres || 0),
+        lastDrinkLitres: Number(state.lastDrinkLitres || 0),
+        refillFlowLpm: 46,
+      }), { forcePublish: true });
+    }, 900);
 
-    const finalLevels = [...mid];
-    for (const id of targets) {
-      const index = Number(id.slice(1)) - 1;
-      finalLevels[index] = 90;
-    }
-    troughs.update(summarizeTroughs(finalLevels, {
-      refilling: 0,
-      refillTargets: [],
-      drinkingIds: [],
-      drinkingHead: 0,
-      consumptionTodayLitres: Number(state.consumptionTodayLitres || 0),
-      lastDrinkLitres: Number(state.lastDrinkLitres || 0),
-      refillFlowLpm: 0,
-    }), { delayMs: 2500 });
+    const finalTimer = setTimeout(() => {
+      const finalLevels = [...mid];
+      for (const id of targets) {
+        const index = Number(id.slice(1)) - 1;
+        finalLevels[index] = 90;
+      }
+      troughs.update(summarizeTroughs(finalLevels, {
+        refilling: 0,
+        refillTargets: [],
+        drinkingIds: [],
+        drinkingHead: 0,
+        drinkingActive: false,
+        drinkingProgress: 100,
+        consumptionTodayLitres: Number(state.consumptionTodayLitres || 0),
+        lastDrinkLitres: Number(state.lastDrinkLitres || 0),
+        refillFlowLpm: 0,
+      }), { forcePublish: true });
+      this.troughRefillTimers = [];
+    }, 2400);
+    this.troughRefillTimers = [midTimer, finalTimer];
+  }
+
+  dispose(): void {
+    this.clearTransferTimers();
+    this.clearTroughTimers();
+  }
+
+  private clearTransferTimers(): void {
+    if (this.transferTimer) clearTimeout(this.transferTimer);
+    if (this.transferFailsafeTimer) clearTimeout(this.transferFailsafeTimer);
+    this.transferTimer = undefined;
+    this.transferFailsafeTimer = undefined;
+  }
+
+  private clearTroughTimers(): void {
+    if (this.troughDrinkTimer) clearTimeout(this.troughDrinkTimer);
+    this.troughDrinkTimer = undefined;
+    for (const timer of this.troughRefillTimers) clearTimeout(timer);
+    this.troughRefillTimers = [];
   }
 }
 
@@ -649,5 +785,6 @@ export function createAgricultureScenario(): SimulatorScenario {
       [AGRICULTURE_STIMULUS.energyReset]: () => env.resetEnergy(),
       [AGRICULTURE_STIMULUS.reset]: () => env.reset(),
     },
+    dispose: () => env.dispose(),
   };
 }

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Logger } from "pino";
 import { SimulatorDeviceRegistry } from "../device-registry.js";
 import { FaultController } from "../fault-controller.js";
@@ -58,6 +58,14 @@ function setup() {
 }
 
 describe("agriculture simulator scenario", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  });
   it("registers all six command-capable Farm actuators", () => {
     const { registry, scenario } = setup();
     expect(registry.getByCommandTopic(AGRICULTURE_COMMAND_TOPICS.pump)?.definition.key).toBe(AGRICULTURE_DEVICE_KEYS.pump);
@@ -69,15 +77,26 @@ describe("agriculture simulator scenario", () => {
     expect(scenario.devices.filter((device) => device.commandProfile?.acknowledgement.supported)).toHaveLength(6);
   });
 
-  it("models a dam transfer and reflects the pump as a real site-energy load", async () => {
+  it("models a bounded dam batch with a totalizer and a physical failsafe stop", async () => {
     const { registry, command, last } = setup();
     const pump = registry.get(AGRICULTURE_DEVICE_KEYS.pump)!;
     const outcome = await pump.model.onCommand!(command(AGRICULTURE_COMMAND_TOPICS.pump, { on: true, litres: 500 }));
     expect(outcome).toMatchObject({ accepted: true, state: { patch: { on: true, running: true } } });
-    expect(last(AGRICULTURE_STATE_TOPICS.flow)).toEqual({ litresPerMinute: 120 });
+    expect(last(AGRICULTURE_STATE_TOPICS.flow)).toMatchObject({ litresPerMinute: 120, batchActive: true, batchTargetLitres: 500, batchTransferredLitres: 0 });
+    expect(last(AGRICULTURE_STATE_TOPICS.battery)).toMatchObject({ pumpKw: 1.05, loadKw: 1.77 });
+
+    await vi.advanceTimersByTimeAsync(1800);
     expect(last(AGRICULTURE_STATE_TOPICS.header)).toMatchObject({ value: 75, litres: 3750 });
     expect(last(AGRICULTURE_STATE_TOPICS.dam)).toMatchObject({ litres: 48700 });
-    expect(last(AGRICULTURE_STATE_TOPICS.battery)).toMatchObject({ pumpKw: 1.05, loadKw: 1.77 });
+    expect(last(AGRICULTURE_STATE_TOPICS.flow)).toMatchObject({ batchTransferredLitres: 500, batchActive: true });
+
+    // The automation normally issues OFF when its totalizer delta reaches the
+    // target. The simulator has a bounded physical failsafe so a broken control
+    // path can never leave the demo pump animation running forever.
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(last(AGRICULTURE_STATE_TOPICS.flow)).toMatchObject({ litresPerMinute: 0, batchActive: false, batchTransferredLitres: 500 });
+    expect(last(AGRICULTURE_STATE_TOPICS.pump)).toMatchObject({ on: false, running: false });
+    expect(last(AGRICULTURE_STATE_TOPICS.battery)).toMatchObject({ pumpKw: 0, loadKw: 0.72 });
   });
 
   it("makes house and shed tanks physically refill from header storage", async () => {
@@ -108,10 +127,17 @@ describe("agriculture simulator scenario", () => {
     expect(last(AGRICULTURE_STATE_TOPICS.collars)).toMatchObject({ strays: 0, paddock: "A", movement: "grazing" });
   });
 
-  it("models herd drinking at individual troughs and a targeted refill", async () => {
+  it("models one guarded herd-drinking sequence and a targeted refill", async () => {
     const { registry, command, fire, last } = setup();
     await fire(AGRICULTURE_STIMULUS.troughsDrink);
+    expect(last(AGRICULTURE_STATE_TOPICS.troughs)).toMatchObject({ drinkingActive: true, drinkingHead: 18, drinkingProgress: 0 });
+
+    // A second click while the herd visit is active is ignored instead of
+    // stacking another delayed drinking sequence on top of the first.
+    await fire(AGRICULTURE_STIMULUS.troughsDrink);
+    await vi.advanceTimersByTimeAsync(3000);
     const afterDrink = last(AGRICULTURE_STATE_TOPICS.troughs)!;
+    expect(afterDrink.drinkingActive).toBe(false);
     expect(afterDrink.low).toBeGreaterThan(0);
     expect(afterDrink.lastDrinkLitres).toBeGreaterThan(0);
     expect(afterDrink.lowIds).toEqual(expect.arrayContaining(["T4", "T5"]));
@@ -121,6 +147,8 @@ describe("agriculture simulator scenario", () => {
       active: true,
       targets: afterDrink.lowIds,
     }));
+    expect(last(AGRICULTURE_STATE_TOPICS.troughs)).toMatchObject({ refilling: (afterDrink.lowIds as string[]).length });
+    await vi.advanceTimersByTimeAsync(2600);
     expect(last(AGRICULTURE_STATE_TOPICS.troughs)).toMatchObject({ low: 0, refilling: 0, refillFlowLpm: 0 });
   });
 

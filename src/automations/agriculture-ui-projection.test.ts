@@ -90,6 +90,31 @@ describe("Agriculture demo UI projection contract", () => {
     },
   );
 
+
+  it.each(allAutomations.map((a) => [a.name, a] as const))(
+    "%s visually separates real operator controls from demo-world injection",
+    (_name, automation) => {
+      expect(automation.uiSource).toContain("OPERATOR CONTROL");
+      expect(automation.uiSource).toContain("DEMO SCENARIO");
+    },
+  );
+
+  it("Water Management stops bounded batches from observed totalizer progress", () => {
+    expect(waterAutomation.scriptSource).toContain("flowTotalLitres");
+    expect(waterAutomation.scriptSource).toContain("transferStartTotalLitres");
+    expect(waterAutomation.scriptSource).toContain("batch volume reached");
+  });
+
+  it("Trough Watering never auto-refills while the herd is still drinking", () => {
+    expect(troughAutomation.scriptSource).toContain('!drinkingActive');
+    expect(troughAutomation.scriptSource).toContain('Automatic refill enabled · acts after cattle leave');
+  });
+
+  it("Site Energy explicitly gives water transfer priority over opportunity charging", () => {
+    expect(energyAutomation.scriptSource).toContain("water transfer given priority");
+    expect(energyAutomation.uiSource).toContain("essential loads → water transfer → opportunity charging");
+  });
+
   it.each(commandAutomations.map((a) => [a.name, a] as const))(
     "%s issues real physical commands via devices.action() (not optimistic state)",
     (_name, automation) => {

@@ -10,9 +10,18 @@ const logic = `automation({
       function setAction(label) {
         state.set("lastAction", { label: label, at: Date.now() });
       }
+      function init(key, value) {
+        if (state.get(key) === undefined) state.set(key, value);
+      }
+
+      init("autoRefill", true);
+      init("refillCommandActive", false);
+      init("drinkScenarioRequested", false);
+      init("drinkingActive", false);
+      init("drinkingProgress", 0);
 
       async function refill(source) {
-        if (Boolean(state.get("refillCommandActive"))) return;
+        if (Boolean(state.get("refillCommandActive")) || Boolean(state.get("drinkingActive"))) return;
         var troughs = byTopic("sensor/farm/troughs");
         var actuator = byTopic("switch/farm/trough-refill/state");
         if (!actuator || !troughs) {
@@ -27,7 +36,7 @@ const logic = `automation({
           return;
         }
         state.set("refillCommandActive", true);
-        setAction("Opening refill manifold for " + lowIds.length + " low troughs");
+        setAction((source === "automatic" ? "AUTO · " : "") + "opening refill manifold for " + lowIds.length + " low troughs");
         var result = await devices.action(
           actuator.id,
           "command",
@@ -41,7 +50,7 @@ const logic = `automation({
         );
         state.set("refillCommandActive", false);
         if (result.success) {
-          setAction("Refill verified · all targeted troughs recovered");
+          setAction((source === "automatic" ? "Automatic" : "Operator") + " refill verified · targeted troughs recovered");
           events.emit("farm/troughs/refill-verified", { source: source || "operator", targets: lowIds, lifecycleState: result.lifecycleState });
         } else {
           setAction("Refill not verified: " + String(result.error || result.lifecycleState || "unknown"));
@@ -50,20 +59,29 @@ const logic = `automation({
       }
 
       if (topic.indexOf("ui/") === 0) {
-        if (evt === "refill-troughs") await refill("operator");
-        else if (evt === "simulate-drinking") {
+        if (evt === "refill-troughs") {
+          await refill("operator");
+        } else if (evt === "simulate-drinking") {
+          if (Boolean(state.get("drinkScenarioRequested")) || Boolean(state.get("drinkingActive")) || Boolean(state.get("refillCommandActive"))) return;
+          state.set("drinkScenarioRequested", true);
           events.emit("farm/sim/troughs-drink", {});
-          setAction("Simulating herd water demand at four troughs");
+          setAction("DEMO · herd arriving at T4, T5, T12 and T17");
         } else if (evt === "toggle-auto") {
-          var next = !Boolean(state.get("autoRefill"));
+          var current = state.get("autoRefill");
+          var enabled = current === undefined ? true : Boolean(current);
+          var next = !enabled;
           state.set("autoRefill", next);
-          setAction(next ? "Automatic low-trough recovery enabled" : "Automatic low-trough recovery disabled");
+          setAction(next ? "Automatic refill enabled · acts after cattle leave" : "Automatic refill disabled · low troughs require operator action");
+          if (next && !Boolean(state.get("drinkingActive"))) await refill("automatic");
         } else if (evt === "reset-troughs") {
           events.emit("farm/sim/troughs-reset", {});
           state.set("lowActive", false);
           state.set("refillCommandActive", false);
+          state.set("drinkScenarioRequested", false);
+          state.set("drinkingActive", false);
+          state.set("drinkingProgress", 0);
           state.set("autoRefill", true);
-          setAction("Resetting trough network to nominal");
+          setAction("DEMO · trough network reset to nominal");
         }
         return;
       }
@@ -77,6 +95,8 @@ const logic = `automation({
       var refillTargets = Array.isArray(context.state && context.state.refillTargets) ? context.state.refillTargets : [];
       var drinkingIds = Array.isArray(context.state && context.state.drinkingIds) ? context.state.drinkingIds : [];
       var drinkingHead = Math.max(0, Number(context.state && context.state.drinkingHead) || 0);
+      var drinkingActive = Boolean(context.state && context.state.drinkingActive);
+      var drinkingProgress = Math.max(0, Math.min(100, Number(context.state && context.state.drinkingProgress) || 0));
       var consumptionToday = Math.max(0, Number(context.state && context.state.consumptionTodayLitres) || 0);
       var lastDrink = Math.max(0, Number(context.state && context.state.lastDrinkLitres) || 0);
       var refillFlow = Math.max(0, Number(context.state && context.state.refillFlowLpm) || 0);
@@ -89,24 +109,26 @@ const logic = `automation({
       state.set("refillTargets", refillTargets);
       state.set("drinkingIds", drinkingIds);
       state.set("drinkingHead", drinkingHead);
+      state.set("drinkingActive", drinkingActive);
+      state.set("drinkingProgress", drinkingProgress);
       state.set("consumptionTodayLitres", consumptionToday);
       state.set("lastDrinkLitres", lastDrink);
       state.set("refillFlowLpm", refillFlow);
-      if (state.get("autoRefill") === undefined) state.set("autoRefill", true);
-      if (state.get("refillCommandActive") === undefined) state.set("refillCommandActive", false);
+      if (drinkingActive) state.set("drinkScenarioRequested", false);
 
       var lowActive = Boolean(state.get("lowActive"));
       if (low > 0 && !lowActive) {
         state.set("lowActive", true);
         setAction(low + " troughs below refill threshold · average " + Math.round(average) + "%");
         events.emit("farm/troughs/low", { average: average, low: low, lowIds: lowIds });
-        if (Boolean(state.get("autoRefill"))) await refill("automatic");
-      } else if (low === 0) {
-        if (lowActive) {
-          state.set("lowActive", false);
-          setAction("Trough network recovered · all low points cleared");
-          events.emit("farm/troughs/recovered", { average: average });
-        }
+      } else if (low === 0 && lowActive) {
+        state.set("lowActive", false);
+        setAction("Trough network recovered · all low points cleared");
+        events.emit("farm/troughs/recovered", { average: average });
+      }
+
+      if (low > 0 && Boolean(state.get("autoRefill")) && !drinkingActive && refilling === 0 && !Boolean(state.get("refillCommandActive"))) {
+        await refill("automatic");
       }
     },
   ],
@@ -125,6 +147,9 @@ export default function TroughWatering(aeolus: CustomComponentProps) {
   const refillTargets = (aeolus.read("refillTargets") as string[] | undefined) || [];
   const drinkingIds = (aeolus.read("drinkingIds") as string[] | undefined) || [];
   const drinkingHead = Math.max(0, Number(aeolus.read("drinkingHead") ?? 0));
+  const drinkingActive = Boolean(aeolus.read("drinkingActive"));
+  const drinkingProgress = Math.max(0, Math.min(100, Number(aeolus.read("drinkingProgress") ?? 0)));
+  const drinkScenarioRequested = Boolean(aeolus.read("drinkScenarioRequested"));
   const consumptionToday = Math.max(0, Number(aeolus.read("consumptionTodayLitres") ?? 1240));
   const lastDrink = Math.max(0, Number(aeolus.read("lastDrinkLitres") ?? 0));
   const refillFlow = Math.max(0, Number(aeolus.read("refillFlowLpm") ?? 0));
@@ -143,8 +168,9 @@ export default function TroughWatering(aeolus: CustomComponentProps) {
     y: 52 + Math.floor(i / 5) * 47,
   })), []);
 
-  const status = drinkingIds.length > 0 ? "CATTLE DRINKING" : refilling > 0 || refillCommandActive ? "REFILLING " + Math.max(refilling, refillTargets.length) : low > 0 ? low + " LOW" : "NETWORK HEALTHY";
-  const statusColor = drinkingIds.length > 0 ? "#E9C66D" : low > 0 ? "#F4A45A" : refilling > 0 ? "#76DDF4" : "#74DDA0";
+  const scenarioBusy = drinkingActive || drinkScenarioRequested;
+  const status = scenarioBusy ? "HERD WATERING " + Math.round(drinkingProgress) + "%" : refilling > 0 || refillCommandActive ? "REFILLING " + Math.max(refilling, refillTargets.length) : low > 0 ? low + " LOW" : "NETWORK HEALTHY";
+  const statusColor = scenarioBusy ? "#E9C66D" : refilling > 0 || refillCommandActive ? "#76DDF4" : low > 0 ? "#F4A45A" : "#74DDA0";
   const actionLabel = lastAction?.label ? String(lastAction.label) : "Distributed trough telemetry online";
 
   function Trough(props: { index: number; x: number; y: number }) {
@@ -156,7 +182,7 @@ export default function TroughWatering(aeolus: CustomComponentProps) {
     const waterWidth = Math.max(3, 27 * level / 100);
     return <g transform={"translate(" + props.x + " " + props.y + ")"}>
       <line x1="-34" y1="0" x2="-13" y2="0" stroke={isRefilling ? "#4ECDED" : "#254451"} strokeWidth={isRefilling ? "2.2" : "1.2"} />
-      {isRefilling && <circle cx={-23 + ((phase + props.index * 7) % 12)} cy="0" r="2" fill="#9CEFFF" />}
+      {isRefilling && <line x1="-31" y1="0" x2="-15" y2="0" stroke="#9CEFFF" strokeWidth="2.6" strokeLinecap="round" opacity={.45 + (Math.sin(phase * .16 + props.index) + 1) * .22} />}
       <rect x="-13" y="-8" width="32" height="16" rx="5" fill="#0D191D" stroke={isLow ? "#9B6234" : isRefilling ? "#3F91A7" : "#345660"} />
       <rect x="-10" y="1" width={waterWidth} height="4" rx="2" fill={isLow ? "#B27638" : "#43C7EA"} opacity=".85" />
       <text x="3" y="-13" textAnchor="middle" fill="#6C828A" fontSize="6.5">{id}</text>
@@ -199,15 +225,30 @@ export default function TroughWatering(aeolus: CustomComponentProps) {
             <text x="9" y="24" fill="#86E3F7" fontSize="10" fontFamily="monospace" fontWeight="700">{Math.round(consumptionToday).toLocaleString()} L</text>
             {lastDrink > 0 && <text x="82" y="24" fill="#A79062" fontSize="6.5">last drink {Math.round(lastDrink)} L</text>}
           </g>
-          {drinkingHead > 0 && <text x="34" y="231" fill="#BDA66C" fontSize="7">{drinkingHead} head currently drinking · trough levels are physical simulator state</text>}
+          {drinkingHead > 0 && <text x="34" y="231" fill="#BDA66C" fontSize="7">{drinkingHead} head currently drinking · {Math.round(drinkingProgress)}% through simulated visit</text>}
         </svg>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr .9fr .8fr", gap: 6, marginTop: 8 }}>
-        <button onClick={() => aeolus.fire("simulate-drinking")} style={{ borderRadius: 8, padding: "8px 5px", border: "1px solid #5E5631", background: "#211D0F", color: "#DAC175", fontSize: 8, fontWeight: 750, cursor: "pointer" }}>Simulate herd drinking</button>
-        <button onClick={() => aeolus.fire("refill-troughs")} disabled={low === 0 || refillCommandActive} style={{ borderRadius: 8, padding: "8px 5px", border: "1px solid " + (low > 0 ? "#2A6170" : "#303B40"), background: low > 0 ? "#102830" : "#151A1D", color: low > 0 ? "#7ADCF4" : "#69777C", fontSize: 8, cursor: low > 0 ? "pointer" : "not-allowed" }}>Refill low troughs</button>
-        <button onClick={() => aeolus.fire("toggle-auto")} style={{ borderRadius: 8, padding: "8px 5px", border: "1px solid " + (auto ? "#315B45" : "#303B40"), background: auto ? "#10251A" : "#151A1D", color: auto ? "#82E3A0" : "#87949A", fontSize: 8, cursor: "pointer" }}>Auto {auto ? "ON" : "OFF"}</button>
-        <button onClick={() => aeolus.fire("reset-troughs")} style={{ borderRadius: 8, padding: "8px 5px", border: "1px solid #303B40", background: "#151A1D", color: "#87949A", fontSize: 8, cursor: "pointer" }}>Reset</button>
+      <div style={{ marginTop: 8, padding: 8, border: "1px solid #27424A", borderRadius: 9, background: "#0A161A" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", marginBottom: 6 }}>
+          <div><div style={{ color: "#70838A", fontSize: 7, fontWeight: 850, letterSpacing: 1 }}>OPERATOR CONTROLS</div><div style={{ color: "#596A70", fontSize: 6.5, marginTop: 2 }}>Auto refill waits until cattle leave, then restores troughs below 45%.</div></div>
+          <div style={{ color: auto ? "#83DFA0" : "#8A9291", fontSize: 7, fontWeight: 800 }}>AUTO REFILL {auto ? "ON" : "OFF"}</div>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+          <button onClick={() => aeolus.fire("refill-troughs")} disabled={low === 0 || refillCommandActive || drinkingActive} style={{ borderRadius: 8, padding: "8px 5px", border: "1px solid " + (low > 0 && !drinkingActive ? "#2A6170" : "#303B40"), background: low > 0 && !drinkingActive ? "#102830" : "#151A1D", color: low > 0 && !drinkingActive ? "#7ADCF4" : "#69777C", fontSize: 8, cursor: low > 0 && !drinkingActive ? "pointer" : "not-allowed" }}>{refillCommandActive ? "Refilling…" : "Refill low troughs"}</button>
+          <button onClick={() => aeolus.fire("toggle-auto")} disabled={refillCommandActive} style={{ borderRadius: 8, padding: "8px 5px", border: "1px solid " + (auto ? "#315B45" : "#303B40"), background: auto ? "#10251A" : "#151A1D", color: auto ? "#82E3A0" : "#87949A", fontSize: 8, cursor: refillCommandActive ? "wait" : "pointer" }}>Automatic refill {auto ? "ON" : "OFF"}</button>
+        </div>
+      </div>
+
+      <div style={{ marginTop: 7, padding: 8, border: "1px dashed #5D5331", borderRadius: 9, background: "#17150D" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+          <div><div style={{ color: "#C8AE66", fontSize: 7, fontWeight: 850, letterSpacing: 1 }}>DEMO SCENARIO</div><div style={{ color: "#766E55", fontSize: 6.5, marginTop: 2 }}>Injects a herd visit into the simulated physical world.</div></div>
+          {scenarioBusy && <div style={{ color: "#D8BC72", fontSize: 7 }}>HERD VISIT {Math.round(drinkingProgress)}%</div>}
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1.35fr .65fr", gap: 6 }}>
+          <button onClick={() => aeolus.fire("simulate-drinking")} disabled={scenarioBusy || refilling > 0 || refillCommandActive} style={{ borderRadius: 8, padding: "8px 5px", border: "1px solid #5E5631", background: "#211D0F", color: scenarioBusy || refilling > 0 ? "#756D50" : "#DAC175", fontSize: 8, fontWeight: 750, cursor: scenarioBusy || refilling > 0 ? "not-allowed" : "pointer" }}>{scenarioBusy ? "Herd drinking…" : "Herd visits troughs"}</button>
+          <button onClick={() => aeolus.fire("reset-troughs")} style={{ borderRadius: 8, padding: "8px 5px", border: "1px solid #3D3A30", background: "#171713", color: "#8D8878", fontSize: 8, cursor: "pointer" }}>Reset demo</button>
+        </div>
       </div>
       <div style={{ color: "#63727A", fontSize: 8, marginTop: 7, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{actionLabel}</div>
     </div>
