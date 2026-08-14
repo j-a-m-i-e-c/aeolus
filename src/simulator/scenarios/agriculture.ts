@@ -127,7 +127,13 @@ class AgricultureEnvironment {
   }
 
   lowerHeader(): void {
-    this.controller(AGRICULTURE_DEVICE_KEYS.header)?.update(tankState(25, HEADER_CAPACITY_L));
+    const header = this.controller(AGRICULTURE_DEVICE_KEYS.header);
+    header?.update(tankState(25, HEADER_CAPACITY_L));
+    // Re-assert the current level after a short hold (empty patch = no value
+    // change, just a forced re-publish) so the Water automation re-evaluates
+    // and runs its auto-recovery only AFTER the drawdown has been legible. The
+    // empty patch means a manual refill during the hold is not clobbered.
+    header?.update({}, { forcePublish: true, delayMs: 5000 });
   }
 
   boundaryBreach(): void {

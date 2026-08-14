@@ -102,10 +102,15 @@ const logic = `automation({
         else if (evt === "transfer-1000") await startTransfer(1000, "operator");
         else if (evt === "pump-stop") await stopPump("operator");
         else if (evt === "simulate-header-low") {
+          // Briefly hold off auto-recovery so the drawdown is visibly readable
+          // before the automation refills. The simulator re-asserts the low
+          // level after this window, re-triggering this automation to recover.
+          state.set("recoveryHoldUntil", Date.now() + 4000);
           events.emit("farm/sim/header-low", {});
           setAction("Simulating header-tank drawdown");
         } else if (evt === "reset-water") {
           events.emit("farm/sim/water-reset", {});
+          state.set("recoveryHoldUntil", 0);
           setAction("Resetting water system to nominal");
         }
         return;
@@ -157,8 +162,12 @@ const logic = `automation({
         state.set("sourceLowActive", false);
       }
 
+      // While the manual-drawdown hold window is open, leave the low level in
+      // place so it is legible in the UI; the simulator re-triggers this
+      // automation once the window closes, and recovery proceeds then.
+      var recoveryHeld = Date.now() < (Number(state.get("recoveryHoldUntil")) || 0);
       var headerLowActive = Boolean(state.get("headerLowActive"));
-      if (!isNaN(headerPct) && headerPct <= 30 && !headerLowActive) {
+      if (!isNaN(headerPct) && headerPct <= 30 && !headerLowActive && !recoveryHeld) {
         state.set("headerLowActive", true);
         var targetLitres = Math.max(500, Math.round((75 - headerPct) * 50));
         setAction("Header tank low · automatic transfer requested");
