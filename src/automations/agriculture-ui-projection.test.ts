@@ -27,15 +27,15 @@ interface SeedAutomation {
   uiSource: string;
 }
 
-/** Automations whose Logic issues a physical device command (has an actuator). */
+/** Every Agriculture world now owns at least one real actuator command path. */
 const commandAutomations: SeedAutomation[] = [
   waterAutomation as SeedAutomation,
   livestockAutomation as SeedAutomation,
   troughAutomation as SeedAutomation,
+  energyAutomation as SeedAutomation,
 ];
 
-/** Every Agriculture world (Site Energy observes + emits events, no actuator). */
-const allAutomations: SeedAutomation[] = [...commandAutomations, energyAutomation as SeedAutomation];
+const allAutomations: SeedAutomation[] = [...commandAutomations];
 
 /** Keys the UI reads via aeolus.read("key"). */
 function readKeys(uiSource: string): string[] {
@@ -135,7 +135,11 @@ describe("Agriculture demo UI projection contract", () => {
       // declarative data spec ({ field, op, value } / { all: [...] }) that the
       // host evaluates natively. Guard against a regression to a function literal.
       expect(automation.scriptSource).not.toMatch(/condition:\s*function/);
-      expect(automation.scriptSource).toMatch(/condition:\s*\{/);
+      // The condition is supplied either directly as a spec object or chosen via
+      // a ternary of specs (e.g. `condition: on ? {...} : {...}`).
+      expect(automation.scriptSource).toMatch(/condition:\s*(?:\{|[\w$]+\s*\?)/);
+      // ...and a declarative comparison/combinator spec shape is actually present.
+      expect(automation.scriptSource).toMatch(/\{\s*(?:field|all|any)\s*:/);
     },
   );
 });

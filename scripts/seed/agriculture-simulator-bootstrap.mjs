@@ -7,11 +7,23 @@ export const AGRICULTURE_ACTUATOR_SPECS = [
     profile: { acknowledgement: { supported: true }, qos: 1 },
   },
   {
+    stateTopic: "switch/farm/shed-fill/state",
+    profile: { acknowledgement: { supported: true }, qos: 1 },
+  },
+  {
+    stateTopic: "switch/farm/house-fill/state",
+    profile: { acknowledgement: { supported: true }, qos: 1 },
+  },
+  {
     stateTopic: "switch/fence/recall/state",
     profile: { acknowledgement: { supported: true }, qos: 1 },
   },
   {
     stateTopic: "switch/farm/trough-refill/state",
+    profile: { acknowledgement: { supported: true }, qos: 1 },
+  },
+  {
+    stateTopic: "switch/farm/charger-bank/state",
     profile: { acknowledgement: { supported: true }, qos: 1 },
   },
 ];
