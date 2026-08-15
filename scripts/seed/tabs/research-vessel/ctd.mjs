@@ -1,0 +1,114 @@
+const logic = `automation({
+  actions: [
+    async function ctdOperations(context) {
+      var topic = String(context.topic || "");
+      var evt = topic.split("/").pop();
+      function byTopic(wanted) { return devices.list().find(function(d) { return d.topic === wanted; }); }
+      function setAction(label) { state.set("lastAction", { label: label, at: Date.now() }); }
+      function project() {
+        var sonde = byTopic("sensor/ctd/sonde");
+        var winch = byTopic("switch/vessel/ctd-winch/state");
+        var depth = Number(sonde && sonde.state && sonde.state.depth);
+        var temp = Number(sonde && sonde.state && sonde.state.temperature);
+        var sal = Number(sonde && sonde.state && sonde.state.salinity);
+        var oxy = Number(sonde && sonde.state && sonde.state.oxygen);
+        var speed = Number(sonde && sonde.state && sonde.state.verticalSpeed);
+        var tension = Number(winch && winch.state && winch.state.tension);
+        var target = Number(winch && winch.state && winch.state.targetDepth);
+        var mode = String(winch && winch.state && winch.state.mode || "holding");
+        if (!isNaN(depth)) state.set("depth", depth); if (!isNaN(temp)) state.set("temperature", temp);
+        if (!isNaN(sal)) state.set("salinity", sal); if (!isNaN(oxy)) state.set("oxygen", oxy);
+        if (!isNaN(speed)) state.set("verticalSpeed", speed); if (!isNaN(tension)) state.set("tension", tension);
+        if (!isNaN(target)) state.set("targetDepth", target); state.set("status", mode);
+        state.set("winchOn", Boolean(winch && winch.state && winch.state.on));
+        events.emit("vessel/summary/ctd", { ctdDepth: isNaN(depth) ? 0 : depth, ctdStatus: mode, ctdTemperature: isNaN(temp) ? 0 : temp, ctdSalinity: isNaN(sal) ? 0 : sal, ctdOxygen: isNaN(oxy) ? 0 : oxy, ctdTension: isNaN(tension) ? 0 : tension });
+      }
+
+      async function commandWinch(mode, targetDepth) {
+        var winch = byTopic("switch/vessel/ctd-winch/state"); var sonde = byTopic("sensor/ctd/sonde");
+        if (!winch || !sonde) { setAction("CTD hardware unavailable"); return; }
+        if (Boolean(state.get("commandPending"))) return;
+        var currentMode = String(winch.state && winch.state.mode || "holding");
+        if ((currentMode === "deploying" || currentMode === "recovering") && mode !== "hold") { setAction("Winch already moving · hold before changing direction"); return; }
+        state.set("commandPending", true);
+        var options;
+        if (mode === "deploy") options = { tier: "observed", deviceId: sonde.id, condition: { field: "depth", op: "gte", value: targetDepth - 5 }, timeoutMs: 8000 };
+        else if (mode === "recover") options = { tier: "observed", deviceId: sonde.id, condition: { field: "depth", op: "lte", value: targetDepth + 5 }, timeoutMs: 8000 };
+        else options = { tier: "observed", deviceId: winch.id, condition: { field: "mode", op: "eq", value: "holding" }, timeoutMs: 5000 };
+        setAction(mode === "deploy" ? "Deploying CTD to " + targetDepth + " m" : mode === "recover" ? "Recovering CTD to deck" : "Holding CTD at current depth");
+        var result = await devices.action(winch.id, "command", { payload: { mode: mode, targetDepth: targetDepth } }, options);
+        state.set("commandPending", false);
+        if (result.success) {
+          setAction(mode === "deploy" ? "Cast on station at " + targetDepth + " m" : mode === "recover" ? "CTD recovered to surface" : "Winch hold verified");
+          events.emit("vessel/ctd/command-verified", { mode: mode, targetDepth: targetDepth, lifecycleState: result.lifecycleState });
+        } else setAction("CTD command not verified: " + String(result.error || result.lifecycleState || "unknown"));
+        project();
+      }
+
+      async function tensionProtection() {
+        if (Boolean(state.get("tensionProtectionActive"))) return;
+        var winch = byTopic("switch/vessel/ctd-winch/state");
+        if (!winch || !Boolean(winch.state && winch.state.on)) return;
+        state.set("tensionProtectionActive", true);
+        setAction("Cable tension high · arresting winch motion");
+        var result = await devices.action(winch.id, "command", { payload: { mode: "hold", targetDepth: Number(state.get("depth") || 0) } }, { tier: "observed", deviceId: winch.id, condition: { field: "mode", op: "eq", value: "holding" }, timeoutMs: 5000 });
+        state.set("tensionProtectionActive", false);
+        if (result.success) { setAction("Winch stopped on high-tension interlock"); events.emit("vessel/ctd/tension-protection", { lifecycleState: result.lifecycleState }); }
+        else setAction("High-tension stop not verified");
+        project();
+      }
+
+      if (topic.indexOf("ui/") === 0) {
+        if (evt === "deploy-420") await commandWinch("deploy", 420);
+        else if (evt === "hold-ctd") await commandWinch("hold", Number(state.get("depth") || 120));
+        else if (evt === "recover-ctd") await commandWinch("recover", 5);
+        else if (evt === "simulate-snag") { events.emit("vessel/sim/ctd-snag", {}); setAction("Injecting cable snag into simulator"); }
+        else if (evt === "reset-ctd") { events.emit("vessel/sim/ctd-reset", {}); state.set("tensionProtectionActive", false); setAction("Resetting CTD cast to nominal hold"); }
+        return;
+      }
+      project();
+      var tension = Number(state.get("tension") || 0); var winchOn = Boolean(state.get("winchOn"));
+      if (tension >= 650 && winchOn) await tensionProtection();
+    },
+  ],
+});`;
+
+const ui = `import { useEffect, useState } from "react";
+import type { CustomComponentProps } from "./types";
+function clamp(v:number,a:number,b:number){return Math.min(b,Math.max(a,v));}
+export default function CtdOperations(aeolus: CustomComponentProps) {
+  const depth = clamp(Number(aeolus.read("depth") ?? 120),0,500);
+  const target = clamp(Number(aeolus.read("targetDepth") ?? 120),0,500);
+  const status = String(aeolus.read("status") || "holding");
+  const temp = Number(aeolus.read("temperature") ?? 12.1); const sal = Number(aeolus.read("salinity") ?? 35.1); const oxy = Number(aeolus.read("oxygen") ?? 5.8);
+  const tension = Number(aeolus.read("tension") ?? 220); const speed = Number(aeolus.read("verticalSpeed") ?? 0); const pending = Boolean(aeolus.read("commandPending"));
+  const last = aeolus.read("lastAction") as any; const [phase,setPhase]=useState(0);
+  useEffect(()=>{const id=setInterval(()=>setPhase(v=>(v+1)%100000),90);return()=>clearInterval(id);},[]);
+  const action=last?.label?String(last.label):"CTD telemetry online"; const tensionHigh=tension>=650; const moving=status==="deploying"||status==="recovering";
+  const tempAt=(d:number)=>18.5-14.3/(1+Math.exp(-(d-90)/18)); const salAt=(d:number)=>35.0-.4/(1+Math.exp(-(d-90)/40));
+  const points:number[]=[];for(let d=0;d<=Math.max(30,depth);d+=18)points.push(d);if(points[points.length-1]!==depth)points.push(depth);
+  const y=(d:number)=>24+d/500*185; const tx=(t:number)=>210+(t-3)/16*105; const sx=(s:number)=>335+(s-34.55)/.55*92;
+  const tPath=points.map((d,i)=>(i?"L":"M")+tx(tempAt(d)).toFixed(1)+","+y(d).toFixed(1)).join(" "); const sPath=points.map((d,i)=>(i?"L":"M")+sx(salAt(d)).toFixed(1)+","+y(d).toFixed(1)).join(" ");
+  return <div style={{padding:11,minHeight:"100%",background:"linear-gradient(180deg,#09131A,#061018)",color:"#EDF2F4"}}>
+    <div style={{display:"flex",justifyContent:"space-between",marginBottom:7}}><div><div style={{fontSize:12,fontWeight:900}}>CTD OPERATIONS</div><div style={{color:"#687C87",fontSize:7.5,marginTop:2}}>Winch control · water-column profile · cable-tension protection</div></div><div style={{textAlign:"right"}}><div style={{color:tensionHigh?"#EF8A67":moving?"#69D7EF":"#84DBA2",fontSize:9,fontWeight:850}}>{tensionHigh?"TENSION INTERLOCK":status.toUpperCase()}</div><div style={{color:"#60737D",fontSize:7}}>{Math.round(depth)} m · target {Math.round(target)} m</div></div></div>
+    <div style={{border:"1px solid #1F3948",borderRadius:10,background:"#05131C",overflow:"hidden"}}><svg width="100%" height="220" viewBox="0 0 500 220">
+      <rect width="190" height="220" fill="#08283E"/><rect y="42" width="190" height="178" fill="#061A2A"/><path d="M0 42 Q45 36 95 42 T190 42" fill="none" stroke="#62BDD7" opacity=".45"/>
+      {[0,100,200,300,400,500].map(d=><g key={d}><line x1="0" y1={y(d)} x2="190" y2={y(d)} stroke="#315369" opacity=".23"/><text x="5" y={y(d)-2} fill="#527489" fontSize="6">{d}</text></g>)}
+      <line x1="92" y1="31" x2="92" y2={y(depth)} stroke="#A7B7BC"/><g transform={"translate(92 "+y(depth)+")"}><circle r="9" fill="#E5A64B" stroke="#FFD07B"/><rect x="-6" y="-12" width="12" height="3" fill="#C4CED0"/></g>
+      {moving&&Array.from({length:4}).map((_,i)=><circle key={i} cx="92" cy={50+((phase*2+i*38)%Math.max(30,y(depth)-50))} r="1.5" fill="#70DBF3"/>)}
+      <text x="108" y={y(depth)+3} fill="#F2C06F" fontSize="7">{Math.round(depth)}m</text>
+      <rect x="190" width="310" height="220" fill="#071018"/><text x="210" y="15" fill="#6B818D" fontSize="6.5" letterSpacing="1">LIVE PROFILE</text>
+      {[0,100,200,300,400,500].map(d=><line key={d} x1="210" y1={y(d)} x2="474" y2={y(d)} stroke="#1A2F3B"/>)}<path d={tPath} fill="none" stroke="#F0A84A" strokeWidth="2"/><path d={sPath} fill="none" stroke="#51D1EA" strokeWidth="1.7" strokeDasharray="4 3"/>
+      <line x1="210" y1={y(depth)} x2="474" y2={y(depth)} stroke="#6ED899" strokeDasharray="3 3"/><text x="212" y="208" fill="#F0A84A" fontSize="7">TEMP {temp.toFixed(1)}°C</text><text x="302" y="208" fill="#51D1EA" fontSize="7">SAL {sal.toFixed(2)}</text><text x="404" y="208" fill="#83D29D" fontSize="7">O₂ {oxy.toFixed(1)}</text>
+    </svg></div>
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginTop:7}}><div style={{border:"1px solid "+(tensionHigh?"#75412F":"#263C47"),borderRadius:8,padding:7,background:"#081117"}}><div style={{color:"#687D87",fontSize:6.5}}>CABLE TENSION</div><div style={{color:tensionHigh?"#F08B69":"#C8D5D9",fontFamily:"monospace",fontSize:14,fontWeight:800,marginTop:2}}>{Math.round(tension)} N</div><div style={{height:5,background:"#17262E",borderRadius:4,overflow:"hidden",marginTop:4}}><div style={{height:"100%",width:Math.min(100,tension/8)+"%",background:tensionHigh?"#D76645":"#4EACC1"}}/></div></div><div style={{border:"1px solid #263C47",borderRadius:8,padding:7,background:"#081117"}}><div style={{color:"#687D87",fontSize:6.5}}>VERTICAL SPEED</div><div style={{color:"#B9C9CF",fontFamily:"monospace",fontSize:14,fontWeight:800,marginTop:2}}>{speed.toFixed(1)} m/s</div><div style={{color:"#596E78",fontSize:7,marginTop:5}}>Profile values are physical sonde MQTT state.</div></div></div>
+    <div style={{marginTop:7,border:"1px solid #263E49",borderRadius:9,padding:8,background:"#07141C"}}><div style={{color:"#80939C",fontSize:6.5,letterSpacing:".12em",marginBottom:6}}>OPERATOR CONTROLS</div><div style={{display:"flex",gap:5}}><button disabled={pending||moving} onClick={()=>aeolus.fire("deploy-420")} style={{flex:1,padding:"7px",borderRadius:6,border:"1px solid #285C70",background:"#0A2633",color:"#71D7EF",fontSize:7.5,cursor:"pointer"}}>Deploy 420 m</button><button disabled={pending} onClick={()=>aeolus.fire("hold-ctd")} style={{padding:"7px 9px",borderRadius:6,border:"1px solid #434A4E",background:"#161A1C",color:"#A9B3B7",fontSize:7.5,cursor:"pointer"}}>Hold</button><button disabled={pending||moving} onClick={()=>aeolus.fire("recover-ctd")} style={{padding:"7px 9px",borderRadius:6,border:"1px solid #375945",background:"#102219",color:"#87D9A0",fontSize:7.5,cursor:"pointer"}}>Recover</button></div></div>
+    <div style={{marginTop:7,border:"1px dashed #69502E",borderRadius:9,padding:8,background:"#171309"}}><div style={{color:"#D8B66D",fontSize:6.5,letterSpacing:".12em"}}>DEMO SCENARIO</div><div style={{color:"#806F50",fontSize:7,margin:"3px 0 6px"}}>Inject a physical cable problem. The CTD automation should arrest the winch itself.</div><div style={{display:"flex",gap:5}}><button onClick={()=>aeolus.fire("simulate-snag")} style={{flex:1,padding:"6px",borderRadius:6,border:"1px solid #6A5130",background:"#21180B",color:"#E3B866",fontSize:7.5,cursor:"pointer"}}>Inject cable snag</button><button onClick={()=>aeolus.fire("reset-ctd")} style={{padding:"6px 9px",borderRadius:6,border:"1px solid #454138",background:"#171713",color:"#898B82",fontSize:7.5,cursor:"pointer"}}>Reset cast</button></div></div>
+    <div style={{color:"#5B6E77",fontSize:7,marginTop:6,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{action}</div>
+  </div>;
+}`;
+
+export const ctdAutomation = {
+  key: "vessel-ctd", name: "CTD Operations", triggerTopic: "sensor/ctd/#", scriptSource: logic, uiSource: ui,
+  demoAccess: { fireEvents: ["deploy-420", "hold-ctd", "recover-ctd", "simulate-snag", "reset-ctd"] },
+};
