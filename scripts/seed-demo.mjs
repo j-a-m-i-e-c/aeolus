@@ -2,9 +2,10 @@
 /**
  * seed-demo.mjs — Populate Aeolus with the multi-domain demo.
  *
- * Showcases the platform across distinct deployment domains — smart home,
- * research vessel, agriculture, underground mining, spacecraft, escape room,
- * and an off-grid bunker — proving the core abstractions are domain-agnostic.
+ * Showcases the platform across distinct deployment domains — agriculture,
+ * wildlife, research vessel, underground mining, escape room, stage/show,
+ * off-grid continuity, and live space data — proving the core abstractions are
+ * domain-agnostic without forcing every use case into the same UI shape.
  *
  * Each tab lives in its own module under scripts/seed/tabs/. This orchestrator
  * wires them together: clean → automations → devices → data store → layout.
@@ -36,6 +37,11 @@ import {
 } from "./seed/simulator-bootstrap.mjs";
 import { AGRICULTURE_ACTUATOR_SPECS } from "./seed/agriculture-simulator-bootstrap.mjs";
 import { RESEARCH_VESSEL_ACTUATOR_SPECS } from "./seed/research-vessel-simulator-bootstrap.mjs";
+import { UNDERGROUND_MINING_ACTUATOR_SPECS } from "./seed/underground-mining-simulator-bootstrap.mjs";
+import { WILDLIFE_ACTUATOR_SPECS } from "./seed/wildlife-simulator-bootstrap.mjs";
+import { STAGE_SHOW_ACTUATOR_SPECS } from "./seed/stage-show-simulator-bootstrap.mjs";
+import { ESCAPE_ROOM_ACTUATOR_SPECS } from "./seed/escape-room-simulator-bootstrap.mjs";
+import { OFF_GRID_BUNKER_ACTUATOR_SPECS } from "./seed/off-grid-bunker-simulator-bootstrap.mjs";
 
 const API = process.argv[2] || "http://localhost:3001";
 const USER = process.argv[3] || "admin";
@@ -94,7 +100,7 @@ if (process.env.AEOLUS_PUBLIC_DEMO === "true") {
   // declares a demo_access allowlist; otherwise it is look-only (`read`). This
   // keeps the RBAC grant in lock-step with what a tab actually exposes to demo
   // visitors — revived rich tabs (no demoAccess) are view-only, while the
-  // engine-driven flagships (stage-show, spacecraft, space) allow their bounded
+  // engine-driven flagships (stage-show, space) allow their bounded
   // fire/state interactions.
   const tabAssignments = tabModules.map((m) => ({
     tabId: m.tab.id,
@@ -115,7 +121,7 @@ if (process.env.AEOLUS_SIMULATOR_BOOTSTRAP === "true") {
     const bootstrapClient = createBootstrapClient(api);
     const { configured, skipped } = await configureSimulatedCommandProfiles(
       bootstrapClient,
-      [...AGRICULTURE_ACTUATOR_SPECS, ...RESEARCH_VESSEL_ACTUATOR_SPECS],
+      [...AGRICULTURE_ACTUATOR_SPECS, ...RESEARCH_VESSEL_ACTUATOR_SPECS, ...UNDERGROUND_MINING_ACTUATOR_SPECS, ...WILDLIFE_ACTUATOR_SPECS, ...STAGE_SHOW_ACTUATOR_SPECS, ...ESCAPE_ROOM_ACTUATOR_SPECS, ...OFF_GRID_BUNKER_ACTUATOR_SPECS],
       { timeoutMs: 30000, pollMs: 1000 },
     );
     console.log(`  ✓ Simulated actuators — configured: ${configured.length}, already-current: ${skipped.length}`);

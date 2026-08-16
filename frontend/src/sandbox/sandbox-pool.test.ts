@@ -3,7 +3,7 @@
 
 import { describe, it, expect, vi } from "vitest";
 import * as fc from "fast-check";
-import { SandboxPool } from "./sandbox-pool";
+import { SandboxPool, SANDBOX_POOL_CAP } from "./sandbox-pool";
 
 describe("Feature: custom-ui-sandboxing, Property 7: Sandbox lifecycle releases resources and respects the pool bound", () => {
   it("live frames never exceed the pool cap at any step", () => {
@@ -73,6 +73,15 @@ describe("Feature: custom-ui-sandboxing, Property 7: Sandbox lifecycle releases 
 });
 
 describe("SandboxPool — unit tests", () => {
+
+  it("default pool can keep a supervisory hero plus four owning automation panes live", () => {
+    expect(SANDBOX_POOL_CAP).toBeGreaterThanOrEqual(5);
+    const pool = new SandboxPool();
+    const teardowns = Array.from({ length: 5 }, () => vi.fn());
+    teardowns.forEach((td, index) => pool.acquire(`showcase-${index}`, td));
+    expect(pool.size).toBe(5);
+    for (const td of teardowns) expect(td).not.toHaveBeenCalled();
+  });
   it("touch refreshes recency", () => {
     const pool = new SandboxPool(2);
     const td1 = vi.fn();

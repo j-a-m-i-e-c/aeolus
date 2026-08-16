@@ -1,4 +1,4 @@
-// frontend/src/components/ToastContainer.test.tsx — toast creation from events, dismiss, auto-expire
+// frontend/src/components/ToastContainer.test.tsx — operator-action toast policy
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, act } from "@testing-library/react";
@@ -9,8 +9,6 @@ vi.mock("../store/device-store", () => ({
   useDeviceStore: (selector: (s: any) => unknown) => selector(deviceState),
 }));
 
-// Strip framer-motion-only props so jsdom doesn't warn about unknown DOM attrs,
-// and render children synchronously (no enter/exit animation to wait on).
 vi.mock("framer-motion", () => ({
   AnimatePresence: ({ children }: { children: React.ReactNode }) => children,
   motion: new Proxy(
@@ -34,16 +32,14 @@ vi.mock("framer-motion", () => ({
 function event(overrides: Record<string, unknown> = {}) {
   return {
     ruleId: "r1",
-    ruleName: "Kitchen Motion",
-    topic: "sensor/kitchen/motion",
-    deviceId: "light-1",
+    ruleName: "Water Management",
+    topic: "ui/r1/transfer-500",
+    deviceId: "ui-r1",
     timestamp: 1_700_000_000_000,
     ...overrides,
   };
 }
 
-// The toast store is module-local (not exported), so reset modules per test to
-// get a fresh, empty store for each case.
 async function loadContainer() {
   vi.resetModules();
   const mod = await import("./ToastContainer");
@@ -65,12 +61,26 @@ describe("ToastContainer", () => {
     expect(container.querySelectorAll("button").length).toBe(0);
   });
 
-  it("shows a toast for a new automation event", async () => {
+  it("shows one brief toast for a direct UI action", async () => {
     deviceState.automationEvents = [event()];
     const ToastContainer = await loadContainer();
     render(<ToastContainer />);
-    expect(screen.getByText("Kitchen Motion")).toBeInTheDocument();
-    expect(screen.getByText("sensor/kitchen/motion → light-1")).toBeInTheDocument();
+    expect(screen.getByText("Water Management")).toBeInTheDocument();
+    expect(screen.getByText("transfer 500")).toBeInTheDocument();
+  });
+
+  it("does not toast telemetry-driven automation executions", async () => {
+    deviceState.automationEvents = [event({ topic: "sensor/farm/header-tank", deviceId: "header-tank" })];
+    const ToastContainer = await loadContainer();
+    render(<ToastContainer />);
+    expect(screen.queryByText("Water Management")).not.toBeInTheDocument();
+  });
+
+  it("does not toast automation-event fan-out executions", async () => {
+    deviceState.automationEvents = [event({ topic: "aeolus/events/source/vessel/summary/ctd", deviceId: "automation-event" })];
+    const ToastContainer = await loadContainer();
+    render(<ToastContainer />);
+    expect(screen.queryByText("Water Management")).not.toBeInTheDocument();
   });
 
   it("dismisses the toast when its close button is clicked", async () => {
@@ -78,18 +88,18 @@ describe("ToastContainer", () => {
     const ToastContainer = await loadContainer();
     render(<ToastContainer />);
     fireEvent.click(screen.getByRole("button"));
-    expect(screen.queryByText("Kitchen Motion")).not.toBeInTheDocument();
+    expect(screen.queryByText("Water Management")).not.toBeInTheDocument();
   });
 
-  it("auto-dismisses the toast after 4 seconds", async () => {
+  it("auto-dismisses operator feedback after 2.5 seconds", async () => {
     deviceState.automationEvents = [event()];
     const ToastContainer = await loadContainer();
     vi.useFakeTimers();
     render(<ToastContainer />);
-    expect(screen.getByText("Kitchen Motion")).toBeInTheDocument();
+    expect(screen.getByText("Water Management")).toBeInTheDocument();
     act(() => {
-      vi.advanceTimersByTime(4000);
+      vi.advanceTimersByTime(2500);
     });
-    expect(screen.queryByText("Kitchen Motion")).not.toBeInTheDocument();
+    expect(screen.queryByText("Water Management")).not.toBeInTheDocument();
   });
 });

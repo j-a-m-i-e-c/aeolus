@@ -5,7 +5,6 @@
 
 import researchVessel from "./research-vessel.mjs";
 import undergroundMining from "./underground-mining.mjs";
-import spacecraft from "./spacecraft.mjs";
 import escapeRoom from "./escape-room.mjs";
 import stageShow from "./stage-show.mjs";
 import offGridBunker from "./off-grid-bunker.mjs";
@@ -18,7 +17,6 @@ export const tabModules = [
   wildlife,
   researchVessel,
   undergroundMining,
-  spacecraft,
   escapeRoom,
   stageShow,
   offGridBunker,

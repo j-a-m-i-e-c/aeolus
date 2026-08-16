@@ -31,6 +31,8 @@ export interface MqttMessage {
 }
 
 export interface AutomationEvent {
+  /** Stable execution identity when supplied by the backend. */
+  executionId?: string;
   ruleId: string;
   ruleName: string;
   topic: string;

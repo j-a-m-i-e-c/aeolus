@@ -54,7 +54,7 @@ dev: ## Start backend in dev mode (hot reload)
 	npm run dev
 
 sim: ## Start the demo MQTT simulator process (separate from the backend; off by default)
-	AEOLUS_SIMULATOR_ENABLED=true AEOLUS_SIMULATOR_SCENARIOS=agriculture npm run sim
+	AEOLUS_SIMULATOR_ENABLED=true AEOLUS_SIMULATOR_SCENARIOS=agriculture,research-vessel,underground-mining,wildlife,stage-show,escape-room,off-grid-bunker npm run sim
 
 seed: ## Seed demo data via Docker, no host Node needed (usage: make seed PASS=yourpass [USER=admin])
 	@if [ -z "$(PASS)" ]; then \

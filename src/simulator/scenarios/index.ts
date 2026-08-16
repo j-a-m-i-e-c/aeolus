@@ -7,11 +7,21 @@ import type { SimulatorScenario } from "../types.js";
 import { createReferenceWaterScenario, REFERENCE_WATER_SCENARIO_KEY } from "./reference-water.js";
 import { createAgricultureScenario, AGRICULTURE_SCENARIO_KEY } from "./agriculture.js";
 import { createResearchVesselScenario, RESEARCH_VESSEL_SCENARIO_KEY } from "./research-vessel.js";
+import { createUndergroundMiningScenario, UNDERGROUND_MINING_SCENARIO_KEY } from "./underground-mining.js";
+import { createWildlifeScenario, WILDLIFE_SCENARIO_KEY } from "./wildlife.js";
+import { createStageShowScenario, STAGE_SHOW_SCENARIO_KEY } from "./stage-show.js";
+import { createEscapeRoomScenario, ESCAPE_ROOM_SCENARIO_KEY } from "./escape-room.js";
+import { createOffGridBunkerScenario, BUNKER_SCENARIO_KEY } from "./off-grid-bunker.js";
 
 const SCENARIO_FACTORIES: Record<string, () => SimulatorScenario> = {
   [REFERENCE_WATER_SCENARIO_KEY]: () => createReferenceWaterScenario(),
   [AGRICULTURE_SCENARIO_KEY]: () => createAgricultureScenario(),
   [RESEARCH_VESSEL_SCENARIO_KEY]: () => createResearchVesselScenario(),
+  [UNDERGROUND_MINING_SCENARIO_KEY]: () => createUndergroundMiningScenario(),
+  [WILDLIFE_SCENARIO_KEY]: () => createWildlifeScenario(),
+  [STAGE_SHOW_SCENARIO_KEY]: () => createStageShowScenario(),
+  [ESCAPE_ROOM_SCENARIO_KEY]: () => createEscapeRoomScenario(),
+  [BUNKER_SCENARIO_KEY]: () => createOffGridBunkerScenario(),
 };
 
 /** True when a scenario key is known. */

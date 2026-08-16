@@ -7,8 +7,15 @@
 // hook (which unregisters the broker entry and removes the iframe). Releasing a
 // frame leaves no registration behind (Requirement 7.4).
 
-/** Default maximum number of concurrently-live sandbox frames. */
-export const SANDBOX_POOL_CAP = 4;
+/**
+ * Default maximum number of concurrently-live sandbox frames.
+ *
+ * Showcase tabs can legitimately contain a read-only supervisory hero plus four
+ * owning automation panes. Keep the pool bounded for constrained clients, but
+ * do not evict a visible fifth pane as happened on Research Vessel. Six leaves
+ * one spare slot for editor/transition overlap while remaining deliberately low.
+ */
+export const SANDBOX_POOL_CAP = 6;
 
 interface PoolEntry {
   frameId: string;

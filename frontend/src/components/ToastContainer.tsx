@@ -29,7 +29,7 @@ const useToastStore = create<ToastState>((set) => ({
       toasts: [
         ...prev.toasts,
         { ...toast, id: `${toast.timestamp}-${Math.random().toString(36).slice(2, 6)}` },
-      ].slice(-5), // Keep max 5
+      ].slice(-3), // Operator feedback only; keep the stack deliberately small
     })),
   removeToast: (id) =>
     set((prev) => ({ toasts: prev.toasts.filter((t) => t.id !== id) })),
@@ -40,29 +40,43 @@ export function ToastContainer() {
   const removeToast = useToastStore((s) => s.removeToast);
   const addToast = useToastStore((s) => s.addToast);
   const automationEvents = useDeviceStore((s) => s.automationEvents);
-  const lastEventRef = useRef(0);
+  const lastEventRef = useRef("");
 
-  // Watch for new automation events
+  // AUTOMATION_FIRED is an execution/observability signal, not a user
+  // notification channel. Telemetry-driven rules can execute many times during
+  // one physical scenario, so toasting every firing overwhelms the operator and
+  // makes internal plumbing look like product notifications. Keep all firings in
+  // EventLog, but toast only executions that were directly initiated from a UI
+  // action (`ui/<ruleId>/<eventName>`).
   useEffect(() => {
     if (automationEvents.length === 0) return;
     const latest = automationEvents[0];
-    if (latest.timestamp > lastEventRef.current) {
-      lastEventRef.current = latest.timestamp;
-      addToast({
-        type: "automation",
-        message: latest.ruleName,
-        detail: `${latest.topic} → ${latest.deviceId}`,
-        timestamp: latest.timestamp,
-      });
-    }
+    const identity = latest.executionId || `${latest.timestamp}:${latest.ruleId}:${latest.topic}`;
+    if (identity === lastEventRef.current) return;
+    lastEventRef.current = identity;
+
+    if (!latest.topic.startsWith("ui/")) return;
+
+    const eventName = latest.topic.split("/").slice(2).join("/");
+    const detail = eventName
+      ? eventName.replace(/[-_]+/g, " ")
+      : "operator action";
+
+    addToast({
+      type: "automation",
+      message: latest.ruleName,
+      detail,
+      timestamp: latest.timestamp,
+    });
   }, [automationEvents, addToast]);
 
-  // Auto-dismiss after 4 seconds
+  // Direct operator feedback should be brief; execution history remains available
+  // in the automation/event views.
   useEffect(() => {
     if (toasts.length === 0) return;
     const timer = setTimeout(() => {
       removeToast(toasts[0].id);
-    }, 4000);
+    }, 2500);
     return () => clearTimeout(timer);
   }, [toasts, removeToast]);
 
