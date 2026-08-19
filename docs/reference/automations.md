@@ -1,12 +1,12 @@
 # Automation runtime
 
-Aeolus automations can be created as simple form rules or as free-form Logic with an optional custom UI.
+Aeolus automations are authored as free-form Logic with an optional custom UI.
 
 ## Rule types
 
-### Form rules
+### Form rules (runtime only)
 
-Form rules store a trigger, optional condition and action configuration. They are useful for straightforward behaviour without writing code.
+Form rules store a trigger, optional condition and action configuration instead of user code. They predate the Logic editor and are no longer authored from the dashboard, but the runtime is fully retained: existing rows load, register, run, toggle and delete as before, and they dispatch through the same action layer as script rules.
 
 ### Script rules
 
