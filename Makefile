@@ -70,11 +70,11 @@ seed: ## Seed demo data via Docker, no host Node needed (usage: make seed PASS=y
 		echo "Error: PASS is required.  Usage: make seed PASS=<admin-password> [USER=admin]"; \
 		exit 1; \
 	fi
-	@if ! docker image inspect node:22-slim >/dev/null 2>&1; then \
-		echo "Fetching the node:22-slim image the seeder runs in..."; \
-		docker pull node:22-slim || { \
+	@if ! docker image inspect node:22.22.1-slim >/dev/null 2>&1; then \
+		echo "Fetching the node:22.22.1-slim image the seeder runs in..."; \
+		docker pull node:22.22.1-slim || { \
 			echo ""; \
-			echo "Error: could not pull node:22-slim, which the seeder runs in."; \
+			echo "Error: could not pull node:22.22.1-slim, which the seeder runs in."; \
 			echo "This is almost always a host DNS/connectivity problem, not an Aeolus issue."; \
 			echo "Fix and retry:"; \
 			echo "  1. Test DNS:  docker run --rm busybox nslookup production.cloudfront.docker.com"; \

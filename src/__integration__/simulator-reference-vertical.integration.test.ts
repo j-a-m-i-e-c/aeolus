@@ -42,7 +42,9 @@ describeE2E("Phase 2 reference-water vertical E2E", () => {
 
   beforeEach(async () => {
     env = await createSimulatorE2E();
-  }, 30000);
+    // 60s: Docker-backed setup (throwaway mosquitto container + broker/simulator
+    // readiness) needs headroom on loaded CI runners; see simulator-command test.
+  }, 60000);
 
   afterEach(async () => {
     await env.stop();

@@ -40,7 +40,11 @@ describeE2E("Phase 2 simulator command E2E", () => {
 
   beforeEach(async () => {
     env = await createSimulatorE2E();
-  }, 30000);
+    // 60s: this hook starts a throwaway mosquitto Docker container per test and
+    // waits for broker + simulator readiness. A loaded CI runner can occasionally
+    // exceed a tighter budget during container start/port-map (the test body then
+    // never runs). 60s gives Docker-backed setup realistic headroom.
+  }, 60000);
 
   afterEach(async () => {
     await env.stop();
