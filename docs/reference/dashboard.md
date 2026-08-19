@@ -34,7 +34,10 @@ Automation authoring includes:
 - optional custom UI editor;
 - snippets and type declarations;
 - execution history;
-- manual fire and enable controls.
+- manual fire and enable controls;
+- the required acknowledgement level.
+
+The acknowledgement level is the automation's completion tier. It is set while authoring a device-directed form rule or a script rule, and changed in place from the automation list, including a reset to the automatic highest-available level. The picker reports which levels the target device can actually prove and warns when a stronger choice will be clamped at dispatch time; see [Automations](automations.md) for the command result model.
 
 ### Users and MQTT security
 

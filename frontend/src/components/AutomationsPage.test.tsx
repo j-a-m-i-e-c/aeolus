@@ -54,7 +54,10 @@ import { useDashboardStore } from "../store/dashboard-store";
 
 const RULES = [
   { id: "r1", name: "Form Rule", topic: "a/b", hasCondition: false, source: "ui", ruleType: "form", enabled: true, actionType: "log" },
-  { id: "r2", name: "Script Rule", topic: "c/d", hasCondition: true, source: "ui", ruleType: "script", enabled: false, scriptSource: "when(x)" },
+  { id: "r2", name: "Script Rule", topic: "c/d", hasCondition: true, source: "ui", ruleType: "script", enabled: false, scriptSource: "when(x)", completionTier: "dispatch" },
+  // Device-directed form rule — the acknowledgement level applies, and a form rule
+  // has no edit form, so the list control is the only route to changing it.
+  { id: "r3", name: "Toggle Rule", topic: "e/f", hasCondition: false, source: "ui", ruleType: "form", enabled: false, actionType: "toggle", actionTarget: "light/x", completionTier: "acknowledged" },
 ];
 
 function jsonResponse(body: unknown, status = 200) {
@@ -256,6 +259,133 @@ describe("AutomationsPage", () => {
     await waitFor(() => expect(lastCallWithMethod("POST")).toBeTruthy());
     const body = JSON.parse(lastCallWithMethod("POST")![1]!.body as string);
     expect(body.tabId).toBe("tab-x");
+  });
+
+  describe("acknowledgement level", () => {
+    it("shows each automation's current level and omits it where nothing is acknowledged", async () => {
+      render(<AutomationsPage />);
+      await screen.findByText("Toggle Rule");
+
+      expect(screen.getByLabelText("Acknowledgement level for Toggle Rule")).toHaveValue("acknowledged");
+      expect(screen.getByLabelText("Acknowledgement level for Script Rule")).toHaveValue("dispatch");
+      // A log action dispatches no device command, so the control is not offered.
+      expect(screen.queryByLabelText("Acknowledgement level for Form Rule")).not.toBeInTheDocument();
+    });
+
+    it("changes a form rule's level with a tier-only PUT that preserves everything else", async () => {
+      render(<AutomationsPage />);
+      await screen.findByText("Toggle Rule");
+
+      fireEvent.change(screen.getByLabelText("Acknowledgement level for Toggle Rule"), {
+        target: { value: "observed" },
+      });
+
+      await waitFor(() => expect(lastCallWithMethod("PUT")).toBeTruthy());
+      const [url, init] = lastCallWithMethod("PUT")!;
+      expect(url).toBe("http://test.local:3001/api/automations/r3");
+      // Only completionTier — the server merges PATCH-style, so omitting the rest
+      // preserves the trigger, condition, action and any custom UI.
+      expect(JSON.parse(init!.body as string)).toEqual({ completionTier: "observed" });
+    });
+
+    it("clears the level back to automatic with an explicit null", async () => {
+      render(<AutomationsPage />);
+      await screen.findByText("Toggle Rule");
+
+      fireEvent.change(screen.getByLabelText("Acknowledgement level for Toggle Rule"), {
+        target: { value: "" },
+      });
+
+      await waitFor(() => expect(lastCallWithMethod("PUT")).toBeTruthy());
+      // Explicit null, not an omitted field: omitting it would preserve the old level.
+      expect(JSON.parse(lastCallWithMethod("PUT")![1]!.body as string)).toEqual({
+        completionTier: null,
+      });
+    });
+
+    it("surfaces a refusal instead of leaving the old level silently in place", async () => {
+      render(<AutomationsPage />);
+      await screen.findByText("Toggle Rule");
+
+      mockAuthFetch.mockResolvedValueOnce(jsonResponse({ error: "Forbidden" }, 403));
+      fireEvent.change(screen.getByLabelText("Acknowledgement level for Toggle Rule"), {
+        target: { value: "dispatch" },
+      });
+
+      expect(await screen.findByRole("alert")).toHaveTextContent("Forbidden");
+    });
+
+    it("shows a non-admin a read-only level for an unrestricted automation", async () => {
+      mockAuthFetch.mockResolvedValue(
+        jsonResponse([
+          { id: "u1", name: "Admin Rule", topic: "a/b", hasCondition: false, source: "ui", ruleType: "form", enabled: true, actionType: "toggle", completionTier: "observed", authoredUnrestricted: true },
+        ]),
+      );
+      useAuthStore.setState({ user: { id: "u", username: "bob", role: "user", groupId: "g" } });
+
+      render(<AutomationsPage />);
+      await screen.findByText("Admin Rule");
+
+      expect(screen.queryByLabelText("Acknowledgement level for Admin Rule")).not.toBeInTheDocument();
+      expect(screen.getByText("ack: observed")).toBeInTheDocument();
+    });
+
+    it("offers the level on a device-directed Quick Rule and sends it on create", async () => {
+      mockAuthFetch.mockResolvedValue(jsonResponse([]));
+      render(<AutomationsPage />);
+      await screen.findByText("No automation rules");
+      await openForm();
+
+      // Not offered for the default log action.
+      expect(screen.queryByLabelText("Acknowledgement level")).not.toBeInTheDocument();
+
+      fireEvent.change(screen.getByPlaceholderText("e.g. Night motion alert"), { target: { value: "Ack Rule" } });
+      fireEvent.change(screen.getByPlaceholderText("e.g. motion/hallway or sensor/#"), { target: { value: "motion/x" } });
+      fireEvent.change(screen.getAllByRole("combobox")[1], { target: { value: "toggle" } });
+
+      const tier = screen.getByLabelText("Acknowledgement level");
+      fireEvent.change(tier, { target: { value: "acknowledged" } });
+      fireEvent.click(screen.getByRole("button", { name: "Create Rule" }));
+
+      await waitFor(() => expect(lastCallWithMethod("POST")).toBeTruthy());
+      expect(JSON.parse(lastCallWithMethod("POST")![1]!.body as string).completionTier).toBe("acknowledged");
+    });
+
+    it("warns when the chosen level is stronger than the target device can prove", async () => {
+      mockAuthFetch.mockImplementation((url: string) =>
+        Promise.resolve(
+          String(url).includes("/completion-tiers")
+            ? jsonResponse({ deviceId: "dev-1", resolved: true, availableTiers: ["dispatch"], ceiling: "dispatch" })
+            : jsonResponse([]),
+        ),
+      );
+      render(<AutomationsPage />);
+      await screen.findByText("No automation rules");
+      await openForm();
+
+      fireEvent.change(screen.getAllByRole("combobox")[1], { target: { value: "device_action" } });
+      fireEvent.change(screen.getByPlaceholderText("e.g. hue-light-01"), { target: { value: "dev-1" } });
+      fireEvent.change(screen.getByLabelText("Acknowledgement level"), { target: { value: "observed" } });
+
+      // Still selectable (the server accepts it) but the clamp is disclosed.
+      expect(await screen.findByText(/can only prove/)).toBeInTheDocument();
+    });
+
+    it("prefills and saves the rule-level default when editing a script", async () => {
+      render(<AutomationsPage />);
+      await screen.findByText("Script Rule");
+      fireEvent.click(screen.getByText("Script Rule"));
+      await screen.findByText("Edit Automation Rule");
+
+      const tier = screen.getByLabelText("Acknowledgement level");
+      expect(tier).toHaveValue("dispatch");
+
+      fireEvent.change(tier, { target: { value: "observed" } });
+      fireEvent.click(screen.getByRole("button", { name: "Update Script" }));
+
+      await waitFor(() => expect(lastCallWithMethod("PUT")).toBeTruthy());
+      expect(JSON.parse(lastCallWithMethod("PUT")![1]!.body as string).completionTier).toBe("observed");
+    });
   });
 
   it("hides authoring for a non-admin with no writable tab", async () => {

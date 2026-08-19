@@ -18,6 +18,15 @@ import { authFetch } from "../lib/auth-fetch";
 import { useAuthStore } from "../store/auth-store";
 import { usePermissionsStore } from "../store/permissions-store";
 import { useDashboardStore } from "../store/dashboard-store";
+import { CompletionTierField } from "./CompletionTierField";
+import {
+  TIER_LABELS,
+  fetchCompletionTierCapability,
+  isConfirmationTier,
+  tierApplies,
+  type CompletionTierCapability,
+  type ConfirmationTier,
+} from "../lib/completion-tier";
 
 import { API_URL } from "../lib/env";
 
@@ -37,10 +46,14 @@ interface AutomationRule {
   conditionType?: string | null;
   conditionValue?: string | null;
   scriptSource?: string;
-  completionTier?: string | null;
+  /** Required acknowledgement level, or null for "highest available". */
+  completionTier?: ConfirmationTier | null;
   ownerTabId?: string | null;
   authoredUnrestricted?: boolean;
 }
+
+/** Action types that dispatch a device command, so an acknowledgement level applies. */
+const DEVICE_DIRECTED_ACTIONS = new Set(["device_action", "toggle"]);
 
 export function AutomationsPage() {
   const role = useAuthStore((s) => s.user?.role);
@@ -96,9 +109,22 @@ export function AutomationsPage() {
   const [scriptTriggerTopic, setScriptTriggerTopic] = useState("");
   const [scriptSource, setScriptSource] = useState("");
   const [transpileErrors, setTranspileErrors] = useState<TranspileError[]>([]);
+  // Rule-level acknowledgement default for a script rule. Individual devices.action()
+  // calls may override it per call via `opts.tier`.
+  const [scriptCompletionTier, setScriptCompletionTier] = useState("");
 
   // Editing state
   const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
+
+  // Acknowledgement capability of the Quick Rule's target device. `undefined` = not
+  // looked up yet, `null` = could not be determined (leaves every tier selectable).
+  const [tierCapability, setTierCapability] = useState<CompletionTierCapability | null | undefined>(
+    undefined,
+  );
+
+  // Inline acknowledgement-level editing in the rule list.
+  const [savingTierId, setSavingTierId] = useState<string | null>(null);
+  const [tierError, setTierError] = useState<{ id: string; message: string } | null>(null);
 
   const fetchRules = useCallback(async () => {
     try {
@@ -110,6 +136,28 @@ export function AutomationsPage() {
   useEffect(() => {
     fetchRules();
   }, [fetchRules]);
+
+  // Resolve the target device's acknowledgement ceiling so the picker can say which
+  // levels the device actually supports. Debounced because actionTarget is typed, and
+  // guarded by a cancelled flag so a slow reply cannot overwrite a newer one.
+  const formTierApplies = DEVICE_DIRECTED_ACTIONS.has(form.actionType);
+  const formTarget = form.actionTarget.trim();
+  useEffect(() => {
+    if (!formTierApplies || !formTarget) {
+      setTierCapability(undefined);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      fetchCompletionTierCapability(formTarget).then((cap) => {
+        if (!cancelled) setTierCapability(cap);
+      });
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [formTierApplies, formTarget]);
 
   const resetForm = () => {
     setForm({
@@ -137,6 +185,7 @@ export function AutomationsPage() {
     setScriptTriggerTopic("");
     setScriptSource("");
     setTranspileErrors([]);
+    setScriptCompletionTier("");
     setEditingRuleId(null);
   };
 
@@ -240,6 +289,10 @@ export function AutomationsPage() {
           triggerTopic: scriptTriggerTopic,
           ruleType: "script",
           scriptSource: source,
+          // Rule-level acknowledgement default. Sent explicitly (null when cleared)
+          // so an edit can reset the rule back to "highest available" — the server
+          // preserves an omitted value rather than clearing it.
+          completionTier: scriptCompletionTier || null,
           // Owning tab only matters on create; a non-admin binds scope to a tab
           // they can write. On edit (PUT) the server ignores scope fields.
           ...(isEditing || isAdmin ? {} : { tabId: ownerTabId }),
@@ -285,9 +338,57 @@ export function AutomationsPage() {
     setScriptTriggerTopic(rule.topic);
     setScriptSource(rule.scriptSource || "");
     setTranspileErrors([]);
+    setScriptCompletionTier(isConfirmationTier(rule.completionTier) ? rule.completionTier : "");
     setEditingRuleId(rule.id);
     setShowForm(true);
   };
+
+  /**
+   * Change an existing automation's required acknowledgement level in place.
+   *
+   * Sends `completionTier` alone: the update endpoint merges PATCH-style, so every
+   * other field (trigger, condition, action, script source, custom UI) is preserved,
+   * and an explicit null resets the rule to "highest available".
+   *
+   * A refusal is surfaced rather than swallowed — silently leaving the old level in
+   * place would let an operator believe a weaker guarantee had been tightened.
+   */
+  const updateRuleTier = async (rule: AutomationRule, tier: string) => {
+    setSavingTierId(rule.id);
+    setTierError(null);
+    try {
+      const res = await authFetch(`${API_URL}/api/automations/${rule.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ completionTier: tier || null }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        setTierError({
+          id: rule.id,
+          message:
+            (body as { error?: string }).error ??
+            (res.status === 403
+              ? "You do not have permission to change this automation."
+              : `Could not save the acknowledgement level (${res.status}).`),
+        });
+        return;
+      }
+      await fetchRules();
+    } catch {
+      setTierError({ id: rule.id, message: "Could not reach the server." });
+    } finally {
+      setSavingTierId(null);
+    }
+  };
+
+  /**
+   * Whether the current user may change this automation at all. An unrestricted
+   * (admin-authored) automation carries system-wide authority, so only an admin may
+   * mutate it — mirroring the server's authority guard. Resource-level write is left
+   * to the server to enforce, as it is for the existing toggle and delete controls.
+   */
+  const canMutateRule = (rule: AutomationRule) => isAdmin || !rule.authoredUnrestricted;
 
   return (
     <div className="space-y-6">
@@ -411,6 +512,17 @@ export function AutomationsPage() {
                       className="w-full text-xs bg-background border border-[#2A3441] rounded px-2 py-1.5 text-[#E6EDF3] placeholder-[#6B7785] font-mono focus:outline-none focus:border-primary"
                     />
                   </div>
+                </div>
+
+                {/* Rule-level acknowledgement default for every device command this
+                    script dispatches. A script may still override it per call. */}
+                <div className="grid grid-cols-2 gap-4">
+                  <CompletionTierField
+                    id="script-completion-tier"
+                    value={scriptCompletionTier}
+                    onChange={setScriptCompletionTier}
+                    hint="Applies to every device command this script dispatches, unless a call passes its own tier."
+                  />
                 </div>
 
                 <Suspense fallback={<div className="flex items-center justify-center h-64 text-neutral-500">Loading editor...</div>}>
@@ -703,37 +815,20 @@ export function AutomationsPage() {
                   </div>
                 )}
 
-                {/* Advanced options — collapsed by default */}
-                {(form.actionType === "device_action" || form.actionType === "toggle") &&
-                  form.actionTarget.trim() && (
-                    <details className="group">
-                      <summary className="text-[10px] text-[#6B7785] uppercase tracking-wider cursor-pointer select-none hover:text-[#9AA6B2] transition-colors">
-                        ▸ Advanced options
-                      </summary>
-                      <div className="mt-3 pl-3 border-l border-[#2A3441]">
-                        <div className="grid grid-cols-2 gap-4">
-                          <div>
-                            <label className="text-[10px] text-[#6B7785] uppercase tracking-wider block mb-1">
-                              Completion Tier
-                            </label>
-                            <select
-                              value={form.completionTier}
-                              onChange={(e) => setForm({ ...form, completionTier: e.target.value })}
-                              className="w-full text-xs bg-background border border-[#2A3441] rounded px-2 py-1.5 text-[#E6EDF3] focus:outline-none focus:border-primary"
-                            >
-                              <option value="">Highest available (auto)</option>
-                              <option value="dispatch">Dispatch only</option>
-                              <option value="acknowledged">Acknowledged</option>
-                              <option value="observed">Observed</option>
-                            </select>
-                            <p className="text-[10px] text-[#6B7785] mt-1">
-                              Controls when this automation considers a command successful.
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                    </details>
-                  )}
+                {/* Acknowledgement level — only meaningful for a device-directed
+                    action, since raw publish, webhook, log and delay have nothing
+                    to acknowledge. */}
+                {formTierApplies && (
+                  <div className="grid grid-cols-2 gap-4">
+                    <CompletionTierField
+                      id="form-completion-tier"
+                      value={form.completionTier}
+                      onChange={(v) => setForm({ ...form, completionTier: v })}
+                      capability={tierCapability}
+                      hint="Decides when this automation treats the command as successful."
+                    />
+                  </div>
+                )}
 
                 <div className="flex gap-2">
                   <button
@@ -803,6 +898,11 @@ export function AutomationsPage() {
                         {rule.actionType && ` → ${rule.actionType}`}
                         {rule.ruleType === "script" && " → script"}
                       </div>
+                      {tierError?.id === rule.id && (
+                        <div role="alert" className="text-[10px] text-[#EF4444] mt-1">
+                          {tierError.message}
+                        </div>
+                      )}
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
@@ -822,6 +922,42 @@ export function AutomationsPage() {
                         file
                       </span>
                     )}
+
+                    {/* Acknowledgement level. Editable in place so the guarantee can
+                        be changed without reopening the rule — the only route to it
+                        for a form rule, which has no edit form. Hidden for actions
+                        that dispatch no device command. */}
+                    {rule.source === "ui" &&
+                      tierApplies(rule) &&
+                      (canMutateRule(rule) ? (
+                        <select
+                          aria-label={`Acknowledgement level for ${rule.name}`}
+                          title="Acknowledgement level required before this automation treats a command as successful"
+                          value={rule.completionTier ?? ""}
+                          disabled={savingTierId === rule.id}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={(e) => {
+                            e.stopPropagation();
+                            updateRuleTier(rule, e.target.value);
+                          }}
+                          className="text-[10px] bg-background border border-[#2A3441] rounded px-1.5 py-0.5 text-[#9AA6B2] focus:outline-none focus:border-primary disabled:opacity-40"
+                        >
+                          <option value="">ack: automatic</option>
+                          <option value="dispatch">ack: dispatch only</option>
+                          <option value="acknowledged">ack: acknowledged</option>
+                          <option value="observed">ack: observed</option>
+                        </select>
+                      ) : (
+                        <span
+                          title="Only an administrator can change this automation"
+                          className="text-[10px] px-1.5 py-0.5 rounded bg-[#6B7785]/20 text-[#6B7785]"
+                        >
+                          ack:{" "}
+                          {rule.completionTier
+                            ? TIER_LABELS[rule.completionTier].toLowerCase()
+                            : "automatic"}
+                        </span>
+                      ))}
 
                     {rule.source === "ui" && (
                       <>
