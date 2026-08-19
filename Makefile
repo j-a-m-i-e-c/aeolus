@@ -1,4 +1,4 @@
-.PHONY: deploy up up-desktop demo-up demo-reset down restart logs logs-backend status clean dev sim seed reset test e2e e2e-fresh lint check verify help
+.PHONY: deploy deploy-demo up up-desktop demo-up demo-reset down restart logs logs-backend status clean dev sim seed seed-demo reset test test-integration e2e e2e-fresh lint check verify verify-all help
 
 # `USER` is normally set by the shell (your login name), which would leak into
 # the seed command. Ignore the environment value and default to "admin" unless
@@ -7,12 +7,21 @@ ifeq ($(origin USER),environment)
 USER := admin
 endif
 
+# Compose files for the public demo overlay (backend demo mode + Phase 2 simulator).
+# Used by the demo-* / deploy-demo / seed-demo targets so they don't repeat the flags.
+DEMO_COMPOSE := -f docker-compose.yml -f docker-compose.demo.yml
+
 # ─── Production (Pi) ──────────────────────────────────────────────────────────
 
-deploy: ## Pull latest, rebuild, and deploy (run on Pi)
+deploy: ## Pull latest, rebuild, and deploy the BASE stack (run on Pi)
 	git pull && \
 	BUILD_COMMIT=$$(git rev-parse --short HEAD) BUILD_DATE=$$(git log -1 --format=%cI HEAD) \
 	docker compose down && docker compose up -d --build && docker builder prune -f && docker image prune -f
+
+deploy-demo: ## Pull latest, rebuild, and deploy the PUBLIC DEMO overlay (run on the demo Pi)
+	git pull && \
+	BUILD_COMMIT=$$(git rev-parse --short HEAD) BUILD_DATE=$$(git log -1 --format=%cI HEAD) \
+	docker compose $(DEMO_COMPOSE) down && docker compose $(DEMO_COMPOSE) up -d --build && docker builder prune -f && docker image prune -f
 
 up: ## Start all services
 	docker compose up -d
@@ -41,13 +50,13 @@ up-desktop: ## Start all services with the opt-in desktop/dev bridge override (D
 	docker compose -f docker-compose.yml -f docker-compose.desktop.yml up -d --build
 
 demo-up: ## Start the public demo overlay (backend demo mode + Phase 2 simulator)
-	docker compose -f docker-compose.yml -f docker-compose.demo.yml up -d --build
+	docker compose $(DEMO_COMPOSE) up -d --build
 
 demo-reset: ## Reset simulated hardware by restarting the simulator (it republishes initial state on reconnect)
-	docker compose -f docker-compose.yml -f docker-compose.demo.yml restart simulator
+	docker compose $(DEMO_COMPOSE) restart simulator
 	@echo "⏳ Waiting for the simulator to reconnect and republish initial state..."
 	@sleep 6
-	docker compose -f docker-compose.yml -f docker-compose.demo.yml logs --tail 20 simulator
+	docker compose $(DEMO_COMPOSE) logs --tail 20 simulator
 	@echo "✅ Simulator reset. If the database was wiped, re-run the seed with the demo overlay to reconfigure command profiles (AEOLUS_SIMULATOR_BOOTSTRAP=true)."
 
 dev: ## Start backend in dev mode (hot reload)
@@ -81,6 +90,13 @@ seed: ## Seed demo data via Docker, no host Node needed (usage: make seed PASS=y
 	fi
 	docker compose --profile seed run --rm -e SEED_USER="$(USER)" -e SEED_PASS="$(PASS)" seed
 
+seed-demo: ## Seed the PUBLIC DEMO (adds demo identity + configures simulator command profiles). Usage: make seed-demo PASS=yourpass [USER=admin]
+	@if [ -z "$(PASS)" ]; then \
+		echo "Error: PASS is required.  Usage: make seed-demo PASS=<admin-password> [USER=admin]"; \
+		exit 1; \
+	fi
+	docker compose $(DEMO_COMPOSE) --profile seed run --rm -e SEED_USER="$(USER)" -e SEED_PASS="$(PASS)" seed
+
 reset: ## Wipe database and restart fresh (deletes all data!)
 	docker compose down -v
 	docker compose up -d
@@ -88,9 +104,13 @@ reset: ## Wipe database and restart fresh (deletes all data!)
 	@sleep 12
 	@echo "✅ Fresh start. Visit http://localhost:3000 to create admin, then run: make seed PASS=yourpass"
 
-test: ## Run backend + frontend test suites
-	npm test
-	cd frontend && npm test
+test: ## Run backend + frontend suites WITH coverage (mirrors CI's coverage thresholds)
+	npx vitest run --coverage
+	cd frontend && npm run test:coverage
+
+test-integration: ## Run broker-backed integration tests (needs Docker; self-skips without it)
+	docker pull eclipse-mosquitto:2
+	npx vitest run __integration__ --no-file-parallelism
 
 e2e: ## Run Playwright e2e against the running stack (adapts: sets up or logs in)
 	npm run test:e2e
@@ -107,7 +127,8 @@ check: ## TypeScript type check, backend + frontend (no emit)
 	npx tsc --noEmit
 	cd frontend && npx tsc --noEmit -p tsconfig.json
 
-verify: check lint test ## Full local gate — type check + lint + tests (backend + frontend)
+verify: check lint test ## Full local gate — type check + lint + tests with coverage (mirrors CI: lint, backend, frontend)
+verify-all: verify test-integration ## verify + broker-backed integration tests — the complete CI mirror (needs Docker)
 
 # ─── Help ─────────────────────────────────────────────────────────────────────
 
