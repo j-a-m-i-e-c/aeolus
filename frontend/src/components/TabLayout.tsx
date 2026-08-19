@@ -12,6 +12,7 @@ import { PanePicker } from "./PanePicker";
 import { PaneConfigPanel } from "./PaneConfigPanel";
 import { motion } from "framer-motion";
 import { useTabPermission } from "../hooks/useTabPermission";
+import { PUBLIC_DEMO } from "../lib/env";
 
 interface TabLayoutProps {
   tabId: string;
@@ -22,15 +23,17 @@ export function TabLayout({ tabId }: TabLayoutProps) {
   const updatePanePosition = useDashboardStore((s) => s.updatePanePosition);
   const updatePaneSize = useDashboardStore((s) => s.updatePaneSize);
   const removePane = useDashboardStore((s) => s.removePane);
+  const resetLayout = useDashboardStore((s) => s.resetLayout);
 
   // Permission-based controls
   const { canInteract, canWrite: _canWrite, isAdmin } = useTabPermission(tabId);
 
-  // Layout mutation controls (add/remove/drag/resize/settings) are admin-only.
-  // Non-admins cannot persist layout changes (PUT /api/layout is requireAdmin),
-  // so offering them edits would silently fail on reload.
-  // Tab write permission remains for automation authoring/editing (pre-promotion-release-gates Req 7.1–7.3, 7.6).
+  // Structural editing (add/remove/configure panes) remains admin-only. In the
+  // hosted public demo, however, visitors may drag/resize the existing panes as
+  // a local workspace experiment. dashboard-store deliberately never persists
+  // those public-demo mutations, so another visitor can never inherit them.
   const canEditLayout = isAdmin;
+  const canArrangeLayout = isAdmin || PUBLIC_DEMO;
 
   // PanePicker visibility
   const [showPicker, setShowPicker] = useState(false);
@@ -106,9 +109,17 @@ export function TabLayout({ tabId }: TabLayoutProps) {
 
   return (
     <div ref={containerRef} className="w-full">
-      {/* Header area with New Automation Pane + Browse Panes buttons — admin layout editing */}
-      {canEditLayout && (
-      <div className="flex items-center justify-end gap-2 px-4 py-2">
+      {/* Header area: admins get structural tools; public-demo visitors get a
+          clearly local drag/resize affordance with a one-click reset. */}
+      {(canEditLayout || (PUBLIC_DEMO && !isAdmin)) && (
+      <div className="flex items-center justify-between gap-2 px-4 py-2">
+        {PUBLIC_DEMO && !isAdmin ? (
+          <div className="text-[11px] text-[#6F7D89]">
+            Drag panes by their headers and resize from the corner. Changes are local to this visit.
+          </div>
+        ) : <div />}
+        <div className="flex items-center gap-2">
+        {canEditLayout && (<>
         <motion.button
           whileHover={{ scale: 1.02 }}
           whileTap={{ scale: 0.97 }}
@@ -128,6 +139,16 @@ export function TabLayout({ tabId }: TabLayoutProps) {
           <Plus size={14} />
           Browse Panes
         </button>
+        </>)}
+        {PUBLIC_DEMO && !isAdmin && (
+          <button
+            onClick={() => void resetLayout()}
+            className="px-3 py-1.5 rounded-lg text-xs font-medium text-[#9AA6B2] hover:text-[#E6EDF3] hover:bg-elevated/50 border border-[#2A3441] transition-colors"
+          >
+            Reset layout
+          </button>
+        )}
+        </div>
       </div>
       )}
 
@@ -144,8 +165,8 @@ export function TabLayout({ tabId }: TabLayoutProps) {
         cols={{ lg: 12, md: 12, sm: 6, xs: 4, xxs: 2 }}
         rowHeight={60}
         onLayoutChange={handleLayoutChange}
-        dragConfig={{ enabled: canEditLayout, handle: ".pane-drag-handle" }}
-        resizeConfig={{ enabled: canEditLayout, handles: ["se"] }}
+        dragConfig={{ enabled: canArrangeLayout, handle: ".pane-drag-handle" }}
+        resizeConfig={{ enabled: canArrangeLayout, handles: ["se"] }}
         compactor={verticalCompactor}
       >
         {tabPanes.map((pane) => {
@@ -157,7 +178,7 @@ export function TabLayout({ tabId }: TabLayoutProps) {
               className="relative bg-surface border border-[#2A3441] rounded-xl overflow-hidden flex flex-col"
             >
               {/* Header bar */}
-              <div className={`pane-drag-handle flex items-center justify-between px-3 py-2 border-b border-[#2A3441] ${canEditLayout ? "cursor-grab" : "cursor-default"} bg-elevated/50`}>
+              <div className={`pane-drag-handle flex items-center justify-between px-3 py-2 border-b border-[#2A3441] ${canArrangeLayout ? "cursor-grab" : "cursor-default"} bg-elevated/50`}>
                 <span className="text-xs font-medium text-[#9AA6B2] truncate select-none">
                   {(pane.config.ruleName as string) || entry?.displayName || pane.paneType}
                 </span>
@@ -194,8 +215,8 @@ export function TabLayout({ tabId }: TabLayoutProps) {
                 )}
               </div>
 
-              {/* Resize grip indicator — only shown for admin layout editing */}
-              {canEditLayout && (
+              {/* Resize grip indicator — admins and public-demo visitors can arrange panes. */}
+              {canArrangeLayout && (
               <div className="absolute bottom-1 right-1 text-[#2A3441] hover:text-[#6B7785] transition-colors pointer-events-none">
                 <svg width="12" height="12" viewBox="0 0 12 12">
                   <circle cx="9" cy="9" r="1.5" fill="currentColor" />

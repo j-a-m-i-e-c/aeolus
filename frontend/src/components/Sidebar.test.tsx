@@ -102,7 +102,8 @@ function resetState() {
     logout: vi.fn(),
   });
   Object.assign(permissionsState, {
-    hasTabAccess: vi.fn(() => true),
+    accessibleTabs: [],
+    loaded: true,
   });
 }
 
@@ -158,7 +159,11 @@ describe("Sidebar", () => {
 
   it("hides the Security tab and Add Tab control for non-admin users", () => {
     authState.user = { username: "bob", role: "viewer" };
-    permissionsState.hasTabAccess = vi.fn(() => true);
+    permissionsState.accessibleTabs = [
+      { tabId: "default-dashboard", permission: "read" },
+      { tabId: "default-connectors", permission: "read" },
+      { tabId: "default-data-store", permission: "read" },
+    ];
     render(<Sidebar />);
     expect(screen.queryByText("Security")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Add Tab" })).not.toBeInTheDocument();
@@ -171,7 +176,7 @@ describe("Sidebar", () => {
       makeTab({ id: "c1", name: "Allowed" }),
       makeTab({ id: "c2", name: "Denied", order: 1 }),
     ];
-    permissionsState.hasTabAccess = vi.fn((id: string) => id === "c1");
+    permissionsState.accessibleTabs = [{ tabId: "c1", permission: "read" }];
     render(<Sidebar />);
     expect(screen.getByText("Allowed")).toBeInTheDocument();
     expect(screen.queryByText("Denied")).not.toBeInTheDocument();

@@ -1,21 +1,25 @@
 // frontend/src/hooks/useTabPermission.test.ts — Permission hook: admin, user levels, no tab
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook } from "@testing-library/react";
 
 const mockUser = { current: { role: "admin" as "admin" | "user", id: "u1", username: "test", groupId: null } as { role: "admin" | "user"; id: string; username: string; groupId: string | null } | null };
-const mockGetTabPermission = vi.fn();
+const permissionsState = { accessibleTabs: [] as Array<{ tabId: string; permission: "read" | "interact" | "write" }>, loaded: true };
 
 vi.mock("../store/auth-store", () => ({
   useAuthStore: (sel: (s: { user: typeof mockUser.current }) => unknown) => sel({ user: mockUser.current }),
 }));
 vi.mock("../store/permissions-store", () => ({
-  usePermissionsStore: (sel: (s: { getTabPermission: typeof mockGetTabPermission }) => unknown) => sel({ getTabPermission: mockGetTabPermission }),
+  usePermissionsStore: (sel: (s: typeof permissionsState) => unknown) => sel(permissionsState),
 }));
 
 import { useTabPermission } from "./useTabPermission";
 
 describe("useTabPermission", () => {
+  beforeEach(() => {
+    permissionsState.accessibleTabs = [];
+    permissionsState.loaded = true;
+  });
   it("gives full access to admin regardless of tab", () => {
     mockUser.current = { role: "admin", id: "u1", username: "admin", groupId: null };
     const { result } = renderHook(() => useTabPermission("tab-1"));
@@ -42,7 +46,7 @@ describe("useTabPermission", () => {
 
   it("returns read-only access for 'read' permission", () => {
     mockUser.current = { role: "user", id: "u2", username: "bob", groupId: "g1" };
-    mockGetTabPermission.mockReturnValue("read");
+    permissionsState.accessibleTabs = [{ tabId: "tab-2", permission: "read" }];
     const { result } = renderHook(() => useTabPermission("tab-2"));
     expect(result.current).toEqual({
       permission: "read",
@@ -55,7 +59,7 @@ describe("useTabPermission", () => {
 
   it("returns interact access for 'interact' permission", () => {
     mockUser.current = { role: "user", id: "u2", username: "bob", groupId: "g1" };
-    mockGetTabPermission.mockReturnValue("interact");
+    permissionsState.accessibleTabs = [{ tabId: "tab-3", permission: "interact" }];
     const { result } = renderHook(() => useTabPermission("tab-3"));
     expect(result.current).toEqual({
       permission: "interact",
@@ -68,7 +72,7 @@ describe("useTabPermission", () => {
 
   it("returns full write access for 'write' permission", () => {
     mockUser.current = { role: "user", id: "u2", username: "bob", groupId: "g1" };
-    mockGetTabPermission.mockReturnValue("write");
+    permissionsState.accessibleTabs = [{ tabId: "tab-4", permission: "write" }];
     const { result } = renderHook(() => useTabPermission("tab-4"));
     expect(result.current).toEqual({
       permission: "write",
@@ -81,7 +85,7 @@ describe("useTabPermission", () => {
 
   it("returns no access when permission is null for non-admin", () => {
     mockUser.current = { role: "user", id: "u2", username: "bob", groupId: "g1" };
-    mockGetTabPermission.mockReturnValue(null);
+    permissionsState.accessibleTabs = [];
     const { result } = renderHook(() => useTabPermission("tab-5"));
     expect(result.current).toEqual({
       permission: null,

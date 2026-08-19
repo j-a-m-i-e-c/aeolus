@@ -23,7 +23,10 @@ export interface TabPermissionInfo {
  */
 export function useTabPermission(tabId: string | null): TabPermissionInfo {
   const user = useAuthStore((s) => s.user);
-  const getTabPermission = usePermissionsStore((s) => s.getTabPermission);
+  // Subscribe to the actual permission data, not just the stable lookup function.
+  // Otherwise an async /api/auth/me completion does not trigger a rerender.
+  const accessibleTabs = usePermissionsStore((s) => s.accessibleTabs);
+  const permissionsLoaded = usePermissionsStore((s) => s.loaded);
 
   const isAdmin = user?.role === "admin";
 
@@ -47,7 +50,9 @@ export function useTabPermission(tabId: string | null): TabPermissionInfo {
     };
   }
 
-  const permission = getTabPermission(tabId);
+  const permission = permissionsLoaded
+    ? (accessibleTabs.find((entry) => entry.tabId === tabId)?.permission ?? null)
+    : null;
 
   return {
     permission,

@@ -48,8 +48,8 @@ vi.mock("./store/dashboard-store", () => ({
 
 const fetchPermissions = vi.fn();
 vi.mock("./store/permissions-store", () => ({
-  usePermissionsStore: (selector: (s: { fetchPermissions: typeof fetchPermissions }) => unknown) =>
-    selector({ fetchPermissions }),
+  usePermissionsStore: (selector: (s: { fetchPermissions: typeof fetchPermissions; loaded: boolean }) => unknown) =>
+    selector({ fetchPermissions, loaded: true }),
 }));
 
 vi.mock("./lib/ws-client", () => ({ connectWebSocket: vi.fn(), disconnectWebSocket: vi.fn() }));

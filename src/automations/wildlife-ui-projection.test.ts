@@ -6,7 +6,7 @@ import { nestMonitoringAutomation } from "../../scripts/seed/tabs/wildlife/nest-
 const rules=[wildlifeDetectionAutomation,predatorResponseAutomation,nestMonitoringAutomation];
 describe("Wildlife showcase architecture",()=>{
  it("has three first-class automations and no direct device reads in UIs",()=>{expect(rules).toHaveLength(3);for(const rule of rules)expect(rule.uiSource).not.toContain("aeolus.devices");});
- it("routes classification to Predator Response over Automation Events",()=>{expect(wildlifeDetectionAutomation.scriptSource).toContain('events.emit("wildlife/detection/classified"');expect(predatorResponseAutomation.triggerTopic).toContain("wildlife/detection/#");});
+ it("routes classification to Predator Response over Automation Events",()=>{expect(wildlifeDetectionAutomation.scriptSource).toContain('events.emit("wildlife/detection/classified"');expect(predatorResponseAutomation.triggerTopic).toBe("aeolus/events/+/wildlife/detection/classified");});
  it("only Predator Response owns the physical deterrent",()=>{expect(predatorResponseAutomation.scriptSource).toContain("devices.action(");expect(wildlifeDetectionAutomation.scriptSource).not.toContain("devices.action(");expect(nestMonitoringAutomation.scriptSource).not.toContain("devices.action(");});
  it("labels simulator injection controls as demo scenarios",()=>{expect(wildlifeDetectionAutomation.uiSource).toContain("DEMO SCENARIO");expect(nestMonitoringAutomation.uiSource).toContain("DEMO SCENARIO");expect(predatorResponseAutomation.uiSource).not.toContain("DEMO SCENARIO");});
 });

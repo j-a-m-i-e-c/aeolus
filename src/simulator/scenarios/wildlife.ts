@@ -44,7 +44,7 @@ const INITIAL = {
   camera: { online: true, model: "TrailCam-01", accelerator: "Hailo-8L", fps: 30, inferenceMs: 17, framesToday: 18432 },
   detection: { eventId: "dawn-001", species: "ringtail-possum", label: "Ringtail Possum", category: "native", confidence: 0.91, distanceM: 7.2, direction: "east", ts: 0 },
   deterrent: { active: false, mode: "light-sound", target: "none", pulseMs: 0, activationsToday: 3 },
-  nest: { temp: 34.4, humidity: 56, occupied: true, adultPresent: false, chicks: 3, visitsToday: 11, thermalState: "normal" },
+  nest: { temp: 31.8, humidity: 61, occupied: true, adultPresent: false, adultGliders: 2, joeys: 2, visitsToday: 7, thermalState: "normal" },
   power: { solarW: 41, battery: 87, nodeW: 8.4, status: "solar" },
 };
 
@@ -100,14 +100,14 @@ class WildlifeEnvironment {
 
   nestVisit(): void {
     const nest = this.controller(WILDLIFE_DEVICE_KEYS.nest); if (!nest || Boolean(nest.read().adultPresent)) return;
-    nest.update({ adultPresent: true, occupied: true, visitsToday: Number(nest.read().visitsToday ?? 11) + 1, temp: Math.min(36, Number(nest.read().temp ?? 34.4) + 0.3) }, { forcePublish: true });
+    nest.update({ adultPresent: true, occupied: true, visitsToday: Number(nest.read().visitsToday ?? 11) + 1, temp: Math.min(34, Number(nest.read().temp ?? 31.8) + 0.4) }, { forcePublish: true });
     this.later(2400, () => nest.update({ adultPresent: false }, { forcePublish: true }));
   }
 
   nestHeat(): void {
     const nest = this.controller(WILDLIFE_DEVICE_KEYS.nest); if (!nest) return;
-    nest.update({ temp: 36.2, humidity: 49, thermalState: "watch" }, { forcePublish: true });
-    this.later(650, () => nest.update({ temp: 38.1, humidity: 46, thermalState: "high" }, { forcePublish: true }));
+    nest.update({ temp: 35.6, humidity: 50, thermalState: "watch" }, { forcePublish: true });
+    this.later(650, () => nest.update({ temp: 38.2, humidity: 45, thermalState: "high" }, { forcePublish: true }));
   }
 
   nestReset(): void { this.controller(WILDLIFE_DEVICE_KEYS.nest)?.update({ ...INITIAL.nest }, { forcePublish: true }); }
@@ -149,7 +149,7 @@ export function createWildlifeScenario(): SimulatorScenario {
       sensorDefinition(WILDLIFE_DEVICE_KEYS.camera, "Trail Camera Edge Node", WILDLIFE_STATE_TOPICS.camera, { ...INITIAL.camera }, env),
       sensorDefinition(WILDLIFE_DEVICE_KEYS.detection, "Wildlife Classifier", WILDLIFE_STATE_TOPICS.detection, { ...INITIAL.detection, ts: Date.now() - 16000 }, env),
       deterrent,
-      sensorDefinition(WILDLIFE_DEVICE_KEYS.nest, "Nest Box Monitor", WILDLIFE_STATE_TOPICS.nest, { ...INITIAL.nest }, env),
+      sensorDefinition(WILDLIFE_DEVICE_KEYS.nest, "Sugar Glider Den Monitor", WILDLIFE_STATE_TOPICS.nest, { ...INITIAL.nest }, env),
       sensorDefinition(WILDLIFE_DEVICE_KEYS.power, "Wildlife Edge Power", WILDLIFE_STATE_TOPICS.power, { ...INITIAL.power }, env),
     ],
     stimuli: {

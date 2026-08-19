@@ -185,8 +185,8 @@ export default function TroughWatering(aeolus: CustomComponentProps) {
       {isRefilling && <line x1="-31" y1="0" x2="-15" y2="0" stroke="#9CEFFF" strokeWidth="2.6" strokeLinecap="round" opacity={.45 + (Math.sin(phase * .16 + props.index) + 1) * .22} />}
       <rect x="-13" y="-8" width="32" height="16" rx="5" fill="#0D191D" stroke={isLow ? "#9B6234" : isRefilling ? "#3F91A7" : "#345660"} />
       <rect x="-10" y="1" width={waterWidth} height="4" rx="2" fill={isLow ? "#B27638" : "#43C7EA"} opacity=".85" />
-      <text x="3" y="-13" textAnchor="middle" fill="#6C828A" fontSize="6.5">{id}</text>
-      <text x="3" y="20" textAnchor="middle" fill={isLow ? "#E4A767" : "#7E949A"} fontSize="6.5">{Math.round(level)}%</text>
+      <text x="3" y="-13" textAnchor="middle" fill="#6C828A" fontSize="10">{id}</text>
+      <text x="3" y="20" textAnchor="middle" fill={isLow ? "#E4A767" : "#7E949A"} fontSize="10">{Math.round(level)}%</text>
       {isDrinking && <g transform="translate(25 -2)">
         <ellipse rx="6" ry="3.4" fill="#C9B27E" />
         <circle cx="5" cy="-1" r="2.3" fill="#C9B27E" />
@@ -201,11 +201,11 @@ export default function TroughWatering(aeolus: CustomComponentProps) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
         <div>
           <div style={{ fontSize: 13, fontWeight: 850 }}>TROUGH WATERING</div>
-          <div style={{ color: "#687982", fontSize: 8, marginTop: 2 }}>20 local level sensors · cattle demand · targeted refill manifold</div>
+          <div style={{ color: "#687982", fontSize:11, marginTop: 2 }}>20 local level sensors · cattle demand · targeted refill manifold</div>
         </div>
         <div style={{ textAlign: "right" }}>
-          <div style={{ color: statusColor, fontSize: 10, fontWeight: 800 }}>{status}</div>
-          <div style={{ color: "#62737B", fontSize: 7 }}>{Math.round(average)}% average · {refillFlow.toFixed(0)} L/min refill</div>
+          <div style={{ color: statusColor, fontSize:11, fontWeight: 800 }}>{status}</div>
+          <div style={{ color: "#62737B", fontSize:11 }}>{Math.round(average)}% average · {refillFlow.toFixed(0)} L/min refill</div>
         </div>
       </div>
 
@@ -216,41 +216,41 @@ export default function TroughWatering(aeolus: CustomComponentProps) {
           <path d="M25 28 L25 216" stroke="#55CAE9" strokeWidth="1.7" strokeLinecap="round" opacity={refilling > 0 ? .95 : .45} />
           {[52,99,146,193].map((y, row) => <g key={row}>
             <line x1="25" y1={y} x2="475" y2={y} stroke="#213D48" strokeWidth="2" />
-            <text x="34" y={y - 9} fill="#536971" fontSize="6.5">PADDOCK {String.fromCharCode(65 + row)}</text>
+            <text x="34" y={y - 9} fill="#536971" fontSize="10">PADDOCK {String.fromCharCode(65 + row)}</text>
           </g>)}
           {positions.map((pos, i) => <Trough key={i} index={i} x={pos.x} y={pos.y} />)}
           <g transform="translate(372 13)">
             <rect width="132" height="30" rx="7" fill="#0A171B" stroke="#28444D" />
-            <text x="9" y="12" fill="#677B82" fontSize="6.5">HERD WATER USE TODAY</text>
+            <text x="9" y="12" fill="#677B82" fontSize="10">HERD WATER USE TODAY</text>
             <text x="9" y="24" fill="#86E3F7" fontSize="10" fontFamily="monospace" fontWeight="700">{Math.round(consumptionToday).toLocaleString()} L</text>
-            {lastDrink > 0 && <text x="82" y="24" fill="#A79062" fontSize="6.5">last drink {Math.round(lastDrink)} L</text>}
+            {lastDrink > 0 && <text x="82" y="24" fill="#A79062" fontSize="10">last drink {Math.round(lastDrink)} L</text>}
           </g>
-          {drinkingHead > 0 && <text x="34" y="231" fill="#BDA66C" fontSize="7">{drinkingHead} head currently drinking · {Math.round(drinkingProgress)}% through simulated visit</text>}
+          {drinkingHead > 0 && <text x="34" y="231" fill="#BDA66C" fontSize="10">{drinkingHead} head currently drinking · {Math.round(drinkingProgress)}% through simulated visit</text>}
         </svg>
       </div>
 
       <div style={{ marginTop: 8, padding: 8, border: "1px solid #27424A", borderRadius: 9, background: "#0A161A" }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", marginBottom: 6 }}>
-          <div><div style={{ color: "#70838A", fontSize: 7, fontWeight: 850, letterSpacing: 1 }}>OPERATOR CONTROLS</div><div style={{ color: "#596A70", fontSize: 6.5, marginTop: 2 }}>Auto refill waits until cattle leave, then restores troughs below 45%.</div></div>
-          <div style={{ color: auto ? "#83DFA0" : "#8A9291", fontSize: 7, fontWeight: 800 }}>AUTO REFILL {auto ? "ON" : "OFF"}</div>
+          <div><div style={{ color: "#70838A", fontSize:11, fontWeight: 850, letterSpacing: 1 }}>OPERATOR CONTROLS</div><div style={{ color: "#596A70", fontSize:11, marginTop: 2 }}>Auto refill waits until cattle leave, then restores troughs below 45%.</div></div>
+          <div style={{ color: auto ? "#83DFA0" : "#8A9291", fontSize:11, fontWeight: 800 }}>AUTO REFILL {auto ? "ON" : "OFF"}</div>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-          <button onClick={() => aeolus.fire("refill-troughs")} disabled={low === 0 || refillCommandActive || drinkingActive} style={{ borderRadius: 8, padding: "8px 5px", border: "1px solid " + (low > 0 && !drinkingActive ? "#2A6170" : "#303B40"), background: low > 0 && !drinkingActive ? "#102830" : "#151A1D", color: low > 0 && !drinkingActive ? "#7ADCF4" : "#69777C", fontSize: 8, cursor: low > 0 && !drinkingActive ? "pointer" : "not-allowed" }}>{refillCommandActive ? "Refilling…" : "Refill low troughs"}</button>
-          <button onClick={() => aeolus.fire("toggle-auto")} disabled={refillCommandActive} style={{ borderRadius: 8, padding: "8px 5px", border: "1px solid " + (auto ? "#315B45" : "#303B40"), background: auto ? "#10251A" : "#151A1D", color: auto ? "#82E3A0" : "#87949A", fontSize: 8, cursor: refillCommandActive ? "wait" : "pointer" }}>Automatic refill {auto ? "ON" : "OFF"}</button>
+          <button onClick={() => aeolus.fire("refill-troughs")} disabled={low === 0 || refillCommandActive || drinkingActive} style={{ borderRadius: 8, padding: "8px 5px", border: "1px solid " + (low > 0 && !drinkingActive ? "#2A6170" : "#303B40"), background: low > 0 && !drinkingActive ? "#102830" : "#151A1D", color: low > 0 && !drinkingActive ? "#7ADCF4" : "#69777C", fontSize:11, cursor: low > 0 && !drinkingActive ? "pointer" : "not-allowed" }}>{refillCommandActive ? "Refilling…" : "Refill low troughs"}</button>
+          <button onClick={() => aeolus.fire("toggle-auto")} disabled={refillCommandActive} style={{ borderRadius: 8, padding: "8px 5px", border: "1px solid " + (auto ? "#315B45" : "#303B40"), background: auto ? "#10251A" : "#151A1D", color: auto ? "#82E3A0" : "#87949A", fontSize:11, cursor: refillCommandActive ? "wait" : "pointer" }}>Automatic refill {auto ? "ON" : "OFF"}</button>
         </div>
       </div>
 
       <div style={{ marginTop: 7, padding: 8, border: "1px dashed #5D5331", borderRadius: 9, background: "#17150D" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-          <div><div style={{ color: "#C8AE66", fontSize: 7, fontWeight: 850, letterSpacing: 1 }}>DEMO SCENARIO</div><div style={{ color: "#766E55", fontSize: 6.5, marginTop: 2 }}>Injects a herd visit into the simulated physical world.</div></div>
-          {scenarioBusy && <div style={{ color: "#D8BC72", fontSize: 7 }}>HERD VISIT {Math.round(drinkingProgress)}%</div>}
+          <div><div style={{ color: "#C8AE66", fontSize:11, fontWeight: 850, letterSpacing: 1 }}>DEMO SCENARIO</div><div style={{ color: "#766E55", fontSize:11, marginTop: 2 }}>Injects a herd visit into the simulated physical world.</div></div>
+          {scenarioBusy && <div style={{ color: "#D8BC72", fontSize:11 }}>HERD VISIT {Math.round(drinkingProgress)}%</div>}
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1.35fr .65fr", gap: 6 }}>
-          <button onClick={() => aeolus.fire("simulate-drinking")} disabled={scenarioBusy || refilling > 0 || refillCommandActive} style={{ borderRadius: 8, padding: "8px 5px", border: "1px solid #5E5631", background: "#211D0F", color: scenarioBusy || refilling > 0 ? "#756D50" : "#DAC175", fontSize: 8, fontWeight: 750, cursor: scenarioBusy || refilling > 0 ? "not-allowed" : "pointer" }}>{scenarioBusy ? "Herd drinking…" : "Herd visits troughs"}</button>
-          <button onClick={() => aeolus.fire("reset-troughs")} style={{ borderRadius: 8, padding: "8px 5px", border: "1px solid #3D3A30", background: "#171713", color: "#8D8878", fontSize: 8, cursor: "pointer" }}>Reset demo</button>
+          <button onClick={() => aeolus.fire("simulate-drinking")} disabled={scenarioBusy || refilling > 0 || refillCommandActive} style={{ borderRadius: 8, padding: "8px 5px", border: "1px solid #5E5631", background: "#211D0F", color: scenarioBusy || refilling > 0 ? "#756D50" : "#DAC175", fontSize:11, fontWeight: 750, cursor: scenarioBusy || refilling > 0 ? "not-allowed" : "pointer" }}>{scenarioBusy ? "Herd drinking…" : "Herd visits troughs"}</button>
+          <button onClick={() => aeolus.fire("reset-troughs")} style={{ borderRadius: 8, padding: "8px 5px", border: "1px solid #3D3A30", background: "#171713", color: "#8D8878", fontSize:11, cursor: "pointer" }}>Reset demo</button>
         </div>
       </div>
-      <div style={{ color: "#63727A", fontSize: 8, marginTop: 7, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{actionLabel}</div>
+      <div style={{ color: "#63727A", fontSize:11, marginTop: 7, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{actionLabel}</div>
     </div>
   );
 }`;

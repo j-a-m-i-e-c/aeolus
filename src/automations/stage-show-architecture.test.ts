@@ -1,3 +1,24 @@
-import {describe,expect,it} from "vitest";
-import {showSequencerAutomation} from "../../scripts/seed/tabs/stage-show/sequencer.mjs";import {physicalFxAutomation} from "../../scripts/seed/tabs/stage-show/fx.mjs";import {stageSafetyAutomation} from "../../scripts/seed/tabs/stage-show/safety.mjs";
-describe("Stage & Show showcase",()=>{it("separates sequencer, FX and safety",()=>{expect([showSequencerAutomation,physicalFxAutomation,stageSafetyAutomation]).toHaveLength(3)});it("coordinates by Automation Events",()=>{expect(showSequencerAutomation.scriptSource).toContain('events.emit("stage/cue/changed"');expect(stageSafetyAutomation.scriptSource).toContain('events.emit("stage/safety/status"');expect(physicalFxAutomation.triggerTopic).toContain("stage/#")});it("keeps simulator buttons only in Safety",()=>{expect(stageSafetyAutomation.uiSource).toContain("DEMO SCENARIO");expect(showSequencerAutomation.uiSource).not.toContain("DEMO SCENARIO")});it("does not raw-publish fake hardware",()=>{for(const r of [showSequencerAutomation,physicalFxAutomation,stageSafetyAutomation])expect(r.scriptSource).not.toContain("mqtt.publish(")})});
+import { describe, expect, it } from "vitest";
+import { showSequencerAutomation } from "../../scripts/seed/tabs/stage-show/sequencer.mjs";
+
+describe("Stage & Show showcase", () => {
+  it("uses one coherent Show Control automation instead of splitting one console into artificial silos", () => {
+    expect(showSequencerAutomation.name).toBe("Show Control");
+    expect(showSequencerAutomation.uiSource).toContain("CUE STACK");
+    expect(showSequencerAutomation.uiSource).toContain("SHOW CONTROL");
+  });
+  it("owns lighting and physical effects through verified commands", () => {
+    expect(showSequencerAutomation.scriptSource).toContain("devices.action(");
+    expect(showSequencerAutomation.scriptSource).toContain("switch/stage/dmx/state");
+    expect(showSequencerAutomation.scriptSource).toContain("switch/stage/fx/state");
+    expect(showSequencerAutomation.scriptSource).not.toContain("mqtt.publish(");
+  });
+  it("offers an editable browser-local cue stack and richer FX", () => {
+    for (const label of ["CONFETTI", "PYRO", "WATER", "SMOKE", "STROBE"]) expect(showSequencerAutomation.uiSource.toUpperCase()).toContain(label);
+    expect(showSequencerAutomation.uiSource).toContain("this browser only");
+  });
+  it("keeps safety visible inside the real control board and demo injection separate", () => {
+    expect(showSequencerAutomation.uiSource).toContain("SAFETY");
+    expect(showSequencerAutomation.uiSource).toContain("DEMO SCENARIO");
+  });
+});

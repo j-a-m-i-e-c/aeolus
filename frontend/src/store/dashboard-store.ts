@@ -5,6 +5,7 @@ import type { Tab, Pane, PaneConfig } from "../types/dashboard";
 import { DEFAULT_TABS, DEFAULT_PANES } from "../types/dashboard";
 import { PANE_REGISTRY } from "../lib/pane-registry";
 import { fetchLayout, saveLayout } from "../lib/api-client";
+import { PUBLIC_DEMO } from "../lib/env";
 
 /** Generate a UUID that works in non-secure contexts (HTTP) */
 function generateId(): string {
@@ -40,6 +41,7 @@ interface DashboardState {
 
   // Persistence
   initialize: () => Promise<void>;
+  resetLayout: () => Promise<void>;
   persistLayout: () => void;
 }
 
@@ -51,6 +53,10 @@ let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 const DEBOUNCE_MS = 2000;
 
 function debouncedPersist(getState: () => DashboardState): void {
+  // The hosted public demo is a shared account. Let visitors rearrange panes in
+  // their own in-memory session, but never write those experiments back to the
+  // shared server layout. A refresh/reset restores the seeded workspace.
+  if (PUBLIC_DEMO) return;
   if (debounceTimer) clearTimeout(debounceTimer);
   debounceTimer = setTimeout(() => {
     getState().persistLayout();
@@ -231,7 +237,28 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
     }
   },
 
+  resetLayout: async () => {
+    try {
+      const layout = await fetchLayout();
+      const pinnedTabs = DEFAULT_TABS.filter((t) => t.pinned);
+      const savedCustomTabs = (layout.tabs || []).filter((t: Tab) => !t.pinned);
+      const allTabs = [...pinnedTabs, ...savedCustomTabs];
+      const panes = (layout.panes || DEFAULT_PANES).filter((p: Pane) => p.paneType in PANE_REGISTRY);
+      set((state) => ({
+        tabs: allTabs,
+        panes,
+        activeTabId: state.activeTabId && allTabs.some((t) => t.id === state.activeTabId)
+          ? state.activeTabId
+          : (allTabs[0]?.id ?? null),
+        initialized: true,
+      }));
+    } catch (err) {
+      console.warn("[dashboard-store] Failed to reset layout:", err);
+    }
+  },
+
   persistLayout: () => {
+    if (PUBLIC_DEMO) return;
     const { tabs, panes } = get();
     // Only persist custom (unpinned) tabs — pinned tabs are hardcoded
     const customTabs = tabs.filter((t) => !t.pinned);

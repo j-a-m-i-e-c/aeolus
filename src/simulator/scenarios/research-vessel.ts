@@ -11,9 +11,6 @@ import type {
 export const RESEARCH_VESSEL_SCENARIO_KEY = "research-vessel";
 
 export const RESEARCH_VESSEL_DEVICE_KEYS = {
-  gnss: "vessel-gnss",
-  current: "vessel-current",
-  dp: "vessel-dp-controller",
   ctdWinch: "vessel-ctd-winch",
   ctdSonde: "vessel-ctd-sonde",
   rovVehicle: "vessel-rov-vehicle",
@@ -23,9 +20,6 @@ export const RESEARCH_VESSEL_DEVICE_KEYS = {
 } as const;
 
 export const RESEARCH_VESSEL_STATE_TOPICS = {
-  gnss: "sensor/vessel/gnss",
-  current: "sensor/vessel/current",
-  dp: "switch/vessel/dp-controller/state",
   ctdWinch: "switch/vessel/ctd-winch/state",
   ctdSonde: "sensor/ctd/sonde",
   rovVehicle: "switch/rov/vehicle/state",
@@ -35,15 +29,12 @@ export const RESEARCH_VESSEL_STATE_TOPICS = {
 } as const;
 
 export const RESEARCH_VESSEL_COMMAND_TOPICS = {
-  dp: "switch/vessel/dp-controller/set",
   ctdWinch: "switch/vessel/ctd-winch/set",
   rovVehicle: "switch/rov/vehicle/set",
   tsgPump: "switch/vessel/tsg-pump/set",
 } as const;
 
 export const RESEARCH_VESSEL_STIMULUS = {
-  currentShear: "vessel/sim/current-shear",
-  stationReset: "vessel/sim/station-reset",
   ctdSnag: "vessel/sim/ctd-snag",
   ctdReset: "vessel/sim/ctd-reset",
   rovCrossCurrent: "vessel/sim/rov-cross-current",
@@ -54,9 +45,6 @@ export const RESEARCH_VESSEL_STIMULUS = {
 } as const;
 
 const INITIAL = {
-  gnss: { lat: -42.881, lon: 147.327, heading: 142, sog: 0.2, driftM: 1.2 },
-  current: { speedKn: 0.8, direction: 248, seaState: 2 },
-  dp: { engaged: true, mode: "holding", bowThrust: 18, sternThrust: 12 },
   ctdWinch: { on: false, mode: "holding", payOut: 120, rate: 0, tension: 220, targetDepth: 120 },
   ctdSonde: { depth: 120, temperature: 12.1, salinity: 35.1, oxygen: 5.8, conductivity: 4.21, verticalSpeed: 0 },
   rovVehicle: { on: true, mode: "holding", targetDepth: 310, lights: true, thrusterPct: 18 },
@@ -84,35 +72,7 @@ class VesselEnvironment {
 
   register(key: string, controller: SimulatedStateController): void { this.controllers.set(key, controller); }
   controller(key: string): SimulatedStateController | undefined { return this.controllers.get(key); }
-
-  reset(): void { this.resetStation(); this.resetCtd(); this.resetRov(); this.resetUnderway(); }
-
-  resetStation(): void {
-    this.controller(RESEARCH_VESSEL_DEVICE_KEYS.gnss)?.update({ ...INITIAL.gnss }, { forcePublish: true });
-    this.controller(RESEARCH_VESSEL_DEVICE_KEYS.current)?.update({ ...INITIAL.current }, { forcePublish: true });
-    this.controller(RESEARCH_VESSEL_DEVICE_KEYS.dp)?.update({ ...INITIAL.dp }, { forcePublish: true });
-  }
-
-  currentShear(): void {
-    this.controller(RESEARCH_VESSEL_DEVICE_KEYS.current)?.update({ speedKn: 2.1, direction: 262, seaState: 3 });
-    this.controller(RESEARCH_VESSEL_DEVICE_KEYS.gnss)?.update({ driftM: 8.4, sog: 0.7, heading: 146 });
-  }
-
-  recoverStation(dp: SimulatedStateController): void {
-    dp.update({ engaged: true, mode: "correcting", bowThrust: 68, sternThrust: 56 });
-    const gnss = this.controller(RESEARCH_VESSEL_DEVICE_KEYS.gnss);
-    gnss?.update({ driftM: 5.4, sog: 0.5 }, { delayMs: 350 });
-    gnss?.update({ driftM: 2.9, sog: 0.35, heading: 143 }, { delayMs: 850 });
-    gnss?.update({ driftM: 1.4, sog: 0.2, heading: 142 }, { delayMs: 1500 });
-    dp.update({ engaged: true, mode: "holding", bowThrust: 34, sternThrust: 29 }, { delayMs: 1550 });
-  }
-
-  setDpHold(dp: SimulatedStateController): void {
-    dp.update({ engaged: true, mode: "holding", bowThrust: 22, sternThrust: 16 });
-    const gnss = this.controller(RESEARCH_VESSEL_DEVICE_KEYS.gnss);
-    const drift = Number(gnss?.read().driftM ?? 0);
-    if (drift > 2) this.recoverStation(dp);
-  }
+  reset(): void { this.resetCtd(); this.resetRov(); this.resetUnderway(); }
 
   resetCtd(): void {
     this.controller(RESEARCH_VESSEL_DEVICE_KEYS.ctdWinch)?.update({ ...INITIAL.ctdWinch }, { forcePublish: true });
@@ -224,14 +184,6 @@ function commandDefinition(
 export function createResearchVesselScenario(): SimulatorScenario {
   const env = new VesselEnvironment();
 
-  const dp = commandDefinition(RESEARCH_VESSEL_DEVICE_KEYS.dp, "Dynamic Positioning Controller", RESEARCH_VESSEL_STATE_TOPICS.dp, RESEARCH_VESSEL_COMMAND_TOPICS.dp, { ...INITIAL.dp }, env, (ctx, command) => {
-    if (typeof command.params.engaged !== "boolean") return { accepted: false, error: "dp-controller requires boolean engaged" };
-    const engaged = command.params.engaged; const mode = String(command.params.mode || (engaged ? "hold" : "off"));
-    if (!engaged) return { accepted: true, state: { patch: { engaged: false, mode: "off", bowThrust: 0, sternThrust: 0 } } };
-    if (mode === "recover") env.recoverStation(ctx.state); else env.setDpHold(ctx.state);
-    return { accepted: true, state: { patch: { engaged: true, mode: mode === "recover" ? "correcting" : "holding" } } };
-  });
-
   const ctdWinch = commandDefinition(RESEARCH_VESSEL_DEVICE_KEYS.ctdWinch, "CTD Winch", RESEARCH_VESSEL_STATE_TOPICS.ctdWinch, RESEARCH_VESSEL_COMMAND_TOPICS.ctdWinch, { ...INITIAL.ctdWinch }, env, (ctx, command) => {
     const mode = String(command.params.mode || ""); const target = Number(command.params.targetDepth);
     if (mode === "hold") { env.holdCtd(ctx.state); return { accepted: true, state: { patch: { on: false, mode: "holding", rate: 0, tension: 245 } } }; }
@@ -253,24 +205,17 @@ export function createResearchVesselScenario(): SimulatorScenario {
     env.setTsgPump(command.params.on); return { accepted: true, state: { patch: { on: command.params.on } } };
   });
 
-  const devices: AnyDeviceDefinition[] = [
-    sensorDefinition(RESEARCH_VESSEL_DEVICE_KEYS.gnss, "Vessel GNSS", RESEARCH_VESSEL_STATE_TOPICS.gnss, { ...INITIAL.gnss }, env),
-    sensorDefinition(RESEARCH_VESSEL_DEVICE_KEYS.current, "Surface Current", RESEARCH_VESSEL_STATE_TOPICS.current, { ...INITIAL.current }, env),
-    dp,
-    ctdWinch,
-    sensorDefinition(RESEARCH_VESSEL_DEVICE_KEYS.ctdSonde, "CTD Sonde", RESEARCH_VESSEL_STATE_TOPICS.ctdSonde, { ...INITIAL.ctdSonde }, env),
-    rovVehicle,
-    sensorDefinition(RESEARCH_VESSEL_DEVICE_KEYS.rovTelemetry, "ROV Telemetry", RESEARCH_VESSEL_STATE_TOPICS.rovTelemetry, { ...INITIAL.rovTelemetry }, env),
-    tsgPump,
-    sensorDefinition(RESEARCH_VESSEL_DEVICE_KEYS.tsg, "Underway TSG", RESEARCH_VESSEL_STATE_TOPICS.tsg, { ...INITIAL.tsg }, env),
-  ];
-
   return {
     key: RESEARCH_VESSEL_SCENARIO_KEY,
-    devices,
+    devices: [
+      ctdWinch,
+      sensorDefinition(RESEARCH_VESSEL_DEVICE_KEYS.ctdSonde, "CTD Sonde", RESEARCH_VESSEL_STATE_TOPICS.ctdSonde, { ...INITIAL.ctdSonde }, env),
+      rovVehicle,
+      sensorDefinition(RESEARCH_VESSEL_DEVICE_KEYS.rovTelemetry, "ROV Telemetry", RESEARCH_VESSEL_STATE_TOPICS.rovTelemetry, { ...INITIAL.rovTelemetry }, env),
+      tsgPump,
+      sensorDefinition(RESEARCH_VESSEL_DEVICE_KEYS.tsg, "Underway TSG", RESEARCH_VESSEL_STATE_TOPICS.tsg, { ...INITIAL.tsg }, env),
+    ],
     stimuli: {
-      [RESEARCH_VESSEL_STIMULUS.currentShear]: () => env.currentShear(),
-      [RESEARCH_VESSEL_STIMULUS.stationReset]: () => env.resetStation(),
       [RESEARCH_VESSEL_STIMULUS.ctdSnag]: () => env.snagCtd(),
       [RESEARCH_VESSEL_STIMULUS.ctdReset]: () => env.resetCtd(),
       [RESEARCH_VESSEL_STIMULUS.rovCrossCurrent]: () => env.rovCrossCurrent(),

@@ -65,6 +65,8 @@ function AuthenticatedApp() {
   const initialized = useDashboardStore((s) => s.initialized);
   const initialize = useDashboardStore((s) => s.initialize);
   const fetchPermissions = usePermissionsStore((s) => s.fetchPermissions);
+  const permissionsLoaded = usePermissionsStore((s) => s.loaded);
+  const authUser = useAuthStore((s) => s.user);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
 
   useEffect(() => { initialize(); }, [initialize]);
@@ -85,13 +87,16 @@ function AuthenticatedApp() {
     return () => { disconnectWebSocket(); };
   }, [setDevices]);
 
-  if (!initialized) {
+  // Non-admin navigation and interaction permissions arrive asynchronously.
+  // Hold the authenticated shell until both layout and permissions are ready so
+  // visitors never see the misleading "pinned tabs only / read-only" phase.
+  if (!initialized || (authUser?.role !== "admin" && !permissionsLoaded)) {
+    // Do not mount Layout/Sidebar until permissions are hydrated. Mounting the
+    // shell early produces a misleading pinned-tabs-only flash in public demo.
     return (
-      <Layout>
-        <div className="flex items-center justify-center h-full min-h-[60vh]">
-          <div className="text-[#6B7785] text-sm animate-pulse">Loading dashboard…</div>
-        </div>
-      </Layout>
+      <div className="min-h-screen flex items-center justify-center bg-[#0B0F14]">
+        <div className="text-[#6B7785] text-sm animate-pulse">Loading demo workspace…</div>
+      </div>
     );
   }
 

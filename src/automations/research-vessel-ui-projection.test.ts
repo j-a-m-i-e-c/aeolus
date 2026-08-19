@@ -1,31 +1,25 @@
 // Regression guard for the public-demo Research Vessel projection contract.
-// The demo user's custom UIs read automation state, never direct devices. Logic
-// projects observed MQTT state and verified command outcomes into those views.
+// The hero is read-only; the three science systems own their physical commands.
 
 import { describe, expect, it } from "vitest";
 import { missionOverviewAutomation } from "../../scripts/seed/tabs/research-vessel/mission-overview.mjs";
-import { stationKeepingAutomation } from "../../scripts/seed/tabs/research-vessel/station-keeping.mjs";
 import { ctdAutomation } from "../../scripts/seed/tabs/research-vessel/ctd.mjs";
 import { rovAutomation } from "../../scripts/seed/tabs/research-vessel/rov.mjs";
 import { underwayAutomation } from "../../scripts/seed/tabs/research-vessel/underway.mjs";
 
 interface SeedAutomation { key: string; name: string; scriptSource: string; uiSource: string; demoAccess?: unknown }
-const commandAutomations: SeedAutomation[] = [stationKeepingAutomation, ctdAutomation, rovAutomation, underwayAutomation] as SeedAutomation[];
+const commandAutomations: SeedAutomation[] = [ctdAutomation, rovAutomation, underwayAutomation] as SeedAutomation[];
 const allAutomations: SeedAutomation[] = [missionOverviewAutomation, ...commandAutomations] as SeedAutomation[];
 function readKeys(source: string): string[] { return [...source.matchAll(/aeolus\.read\(\s*["']([^"']+)["']/g)].map((m) => m[1]); }
-function setKeys(source: string): Set<string> {
-  return new Set([
-    ...[...source.matchAll(/state\.set\(\s*["']([^"']+)["']/g)].map((m) => m[1]),
-    ...[...source.matchAll(/init\(\s*["']([^"']+)["']/g)].map((m) => m[1]),
-  ]);
-}
+function setKeys(source: string): Set<string> { return new Set([...source.matchAll(/(?:state\.set|init)\(\s*["']([^"']+)["']/g)].map((m) => m[1])); }
 function actionTypes(source: string): string[] { return [...source.matchAll(/devices\.action\(\s*[^,]+,\s*["']([^"']+)["']/g)].map((m) => m[1]); }
 
 describe("Research Vessel demo architecture", () => {
-  it("Mission Overview is read-only and has no demo fire allowlist", () => {
+  it("keeps Mission Overview read-only and removes ship station-keeping control", () => {
     expect(missionOverviewAutomation.demoAccess).toBeUndefined();
     expect(missionOverviewAutomation.scriptSource).not.toContain("devices.action(");
-    expect(missionOverviewAutomation.scriptSource).toContain("vessel/summary/");
+    expect(missionOverviewAutomation.scriptSource).not.toContain("station");
+    expect(missionOverviewAutomation.uiSource).not.toMatch(/\bDP\b|station keeping/i);
   });
 
   it.each(allAutomations.map((a) => [a.name, a] as const))("%s UI never reads direct devices", (_name, automation) => {

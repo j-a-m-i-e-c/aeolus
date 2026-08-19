@@ -53,10 +53,18 @@ export function Sidebar() {
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
   const isAdmin = user?.role === "admin";
-  const hasTabAccess = usePermissionsStore((s) => s.hasTabAccess);
+  // Subscribe to permission data so the sidebar rerenders as soon as the
+  // public-demo session receives its tab assignments. Selecting only the
+  // stable hasTabAccess function leaves the first render stale until some
+  // unrelated navigation/health update occurs.
+  const accessibleTabs = usePermissionsStore((s) => s.accessibleTabs);
+  const permissionsLoaded = usePermissionsStore((s) => s.loaded);
+  const hasTabAccess = (tabId: string) => isAdmin || (permissionsLoaded && accessibleTabs.some((entry) => entry.tabId === tabId));
 
   // Fetch data store config once on mount so the sidebar dot is accurate
-  useEffect(() => { fetchDataStoreConfig(); }, [fetchDataStoreConfig]);  const tabs = useDashboardStore((s) => s.tabs);
+  useEffect(() => { fetchDataStoreConfig(); }, [fetchDataStoreConfig]);
+
+  const tabs = useDashboardStore((s) => s.tabs);
   const addTab = useDashboardStore((s) => s.addTab);
   const renameTab = useDashboardStore((s) => s.renameTab);
   const reorderTabs = useDashboardStore((s) => s.reorderTabs);
