@@ -6,5 +6,7 @@ npx tsc --noEmit || exit 1
 echo "→ pre-push: running tests with coverage (vitest run --coverage)..."
 npm test -- --coverage || exit 1
 
-echo "→ pre-push: frontend type check + tests..."
-(cd frontend && npx tsc --noEmit -p tsconfig.json && npm test) || exit 1
+echo "→ pre-push: frontend type check + tests with coverage..."
+# Run frontend tests WITH coverage so the local gate matches CI (which enforces
+# the coverage thresholds). Plain `npm test` skips the threshold check.
+(cd frontend && npx tsc --noEmit -p tsconfig.json && npm run test:coverage) || exit 1
