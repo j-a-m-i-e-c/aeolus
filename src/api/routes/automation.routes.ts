@@ -15,8 +15,6 @@ import { transpile, transpileUi } from "../../automations/transpiler.js";
 import { extractStructuredMetadata } from "../../automations/structured-metadata-extractor.js";
 import { buildSnippetCatalog } from "../../automations/snippet-catalog.js";
 import { isValidCron } from "../../automations/cron-utils.js";
-import { isConfirmationTier } from "../../automations/completion-tier.js";
-import type { ConfirmationTier } from "../../automations/command-lifecycle.js";
 import type { ConnectorRegistry } from "../../connectors/connector-registry.js";
 import { BadRequestError, NotFoundError, ForbiddenError } from "../middleware/error-handler.js";
 import { validate } from "../middleware/validate.js";
@@ -47,23 +45,17 @@ interface StoredRule {
   compiled_ui: string | null;
   trigger_type: string | null;
   cron_expression: string | null;
-  completion_tier: string | null;
   authored_unrestricted: number;
   owner_tab_id: string | null;
   enabled: number;
   created_at: number;
 }
 
-/** Normalize a stored/submitted completion tier to a valid tier or null. */
-function normalizeTier(value: unknown): ConfirmationTier | null {
-  return isConfirmationTier(value) ? value : null;
-}
-
 /**
  * PATCH-style field merge: undefined (omitted) preserves the existing value;
  * null (explicit clear) stores null; any other value replaces.
- * Used for completion_tier, condition_type, condition_value so that an
- * unrelated update never silently erases a previously-authored setting.
+ * Used for condition_type and condition_value so that an unrelated update never
+ * silently erases a previously-authored setting.
  *
  * Requirements: 8.1–8.5 (pre-promotion-release-gates spec)
  */
@@ -83,7 +75,6 @@ export function createAutomationRoutes(
   connectorRegistry?: ConnectorRegistry,
   stateStore?: AutomationStateStore,
   conditionRegistry?: ConditionRegistry,
-  getCompletionTierCapability?: (deviceId: string) => { ceiling: ConfirmationTier | null },
 ): Router {
   const router = Router();
 
@@ -282,8 +273,6 @@ export function createAutomationRoutes(
       if (row.ui_source != null) {
         entry.uiSource = row.ui_source;
       }
-      // Additive field (Req 7.6) — normalized ConfirmationTier | null; existing fields unchanged.
-      entry.completionTier = normalizeTier(row.completion_tier);
       dbRules.push(entry);
     }
 
@@ -306,7 +295,7 @@ export function createAutomationRoutes(
 
   /** POST /api/automations — create a new UI rule (form or script) */
   router.post("/", requireTabPermission("write"), validate({ body: createAutomationBodySchema }), asyncHandler((req, res) => {
-    const { name, triggerTopic, ruleType, conditionType, conditionValue, actionType, actionTarget, actionParams, scriptSource, uiSource, triggerType: rawTriggerType, cronExpression, completionTier } = req.body;
+    const { name, triggerTopic, ruleType, conditionType, conditionValue, actionType, actionTarget, actionParams, scriptSource, uiSource, triggerType: rawTriggerType, cronExpression } = req.body;
 
     if (!name) {
       throw new BadRequestError("name is required");
@@ -338,19 +327,12 @@ export function createAutomationRoutes(
         throw new BadRequestError("scriptSource is required for script rules");
       }
 
-      // Script rules may target multiple devices; validate format only at authoring time.
-      // Per-device ceiling validation happens at dispatch time (sandbox tier gate).
-      if (completionTier !== undefined && completionTier !== null && !isConfirmationTier(completionTier)) {
-        throw new BadRequestError("completionTier must be one of: dispatch, acknowledged, observed");
-      }
-      const completionTierValue = normalizeTier(completionTier);
-
       const { compiledJs, structuredJson } = compileScriptSource(scriptSource, effectiveTriggerTopic);
 
       db.prepare(
-        `INSERT INTO automation_rules (id, name, trigger_topic, condition_type, condition_value, action_type, action_target, action_params, rule_type, script_source, compiled_js, structured_metadata, ui_source, compiled_ui, trigger_type, cron_expression, completion_tier, authored_unrestricted, owner_tab_id, enabled, created_at)
-         VALUES (?, ?, ?, ?, ?, 'script', '', '{}', 'script', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`
-      ).run(id, name, effectiveTriggerTopic, conditionType || null, conditionValue || null, scriptSource, compiledJs, structuredJson, uiSourceValue, compiledUiValue, triggerType, effectiveCronExpression, completionTierValue, authoredUnrestricted, ownerTabId, now);
+        `INSERT INTO automation_rules (id, name, trigger_topic, condition_type, condition_value, action_type, action_target, action_params, rule_type, script_source, compiled_js, structured_metadata, ui_source, compiled_ui, trigger_type, cron_expression, authored_unrestricted, owner_tab_id, enabled, created_at)
+         VALUES (?, ?, ?, ?, ?, 'script', '', '{}', 'script', ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`
+      ).run(id, name, effectiveTriggerTopic, conditionType || null, conditionValue || null, scriptSource, compiledJs, structuredJson, uiSourceValue, compiledUiValue, triggerType, effectiveCronExpression, authoredUnrestricted, ownerTabId, now);
 
       registerUiRule(engine, registry, actionExecutor, {
         id, name, trigger_topic: effectiveTriggerTopic,
@@ -359,10 +341,9 @@ export function createAutomationRoutes(
         rule_type: "script", script_source: scriptSource, compiled_js: compiledJs,
         structured_metadata: structuredJson, ui_source: uiSourceValue, compiled_ui: compiledUiValue,
         trigger_type: triggerType, cron_expression: effectiveCronExpression,
-        completion_tier: completionTierValue,
         authored_unrestricted: authoredUnrestricted, owner_tab_id: ownerTabId,
         enabled: 1, created_at: now,
-      }, conditionRegistry, getCompletionTierCapability);
+      }, conditionRegistry);
 
       logger.info({ ruleId: id, name, triggerTopic: effectiveTriggerTopic, ruleType: "script", ownerTabId }, "Script automation rule created");
       res.json({ success: true, id, ownerTabId, authoredUnrestricted: authoredUnrestricted === 1 });
@@ -372,19 +353,10 @@ export function createAutomationRoutes(
         throw new BadRequestError("actionType and actionTarget are required for form rules");
       }
 
-      // Validate completionTier format only — any valid tier is allowed regardless of device ceiling.
-      let completionTierValue: ConfirmationTier | null = null;
-      if (completionTier !== undefined && completionTier !== null) {
-        if (!isConfirmationTier(completionTier)) {
-          throw new BadRequestError("completionTier must be one of: dispatch, acknowledged, observed");
-        }
-        completionTierValue = completionTier;
-      }
-
       db.prepare(
-        `INSERT INTO automation_rules (id, name, trigger_topic, condition_type, condition_value, action_type, action_target, action_params, rule_type, ui_source, compiled_ui, trigger_type, cron_expression, completion_tier, authored_unrestricted, owner_tab_id, enabled, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'form', ?, ?, ?, ?, ?, ?, ?, 1, ?)`
-      ).run(id, name, effectiveTriggerTopic, conditionType || null, conditionValue || null, actionType, actionTarget, JSON.stringify(actionParams || {}), uiSourceValue, compiledUiValue, triggerType, effectiveCronExpression, completionTierValue, authoredUnrestricted, ownerTabId, now);
+        `INSERT INTO automation_rules (id, name, trigger_topic, condition_type, condition_value, action_type, action_target, action_params, rule_type, ui_source, compiled_ui, trigger_type, cron_expression, authored_unrestricted, owner_tab_id, enabled, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'form', ?, ?, ?, ?, ?, ?, 1, ?)`
+      ).run(id, name, effectiveTriggerTopic, conditionType || null, conditionValue || null, actionType, actionTarget, JSON.stringify(actionParams || {}), uiSourceValue, compiledUiValue, triggerType, effectiveCronExpression, authoredUnrestricted, ownerTabId, now);
 
       registerUiRule(engine, registry, actionExecutor, {
         id, name, trigger_topic: effectiveTriggerTopic,
@@ -394,10 +366,9 @@ export function createAutomationRoutes(
         rule_type: "form", script_source: null, compiled_js: null,
         structured_metadata: null, ui_source: uiSourceValue, compiled_ui: compiledUiValue,
         trigger_type: triggerType, cron_expression: effectiveCronExpression,
-        completion_tier: completionTierValue,
         authored_unrestricted: authoredUnrestricted, owner_tab_id: ownerTabId,
         enabled: 1, created_at: now,
-      }, conditionRegistry, getCompletionTierCapability);
+      }, conditionRegistry);
 
       logger.info({ ruleId: id, name, triggerTopic: effectiveTriggerTopic, ownerTabId }, "Form automation rule created");
       res.json({ success: true, id, ownerTabId, authoredUnrestricted: authoredUnrestricted === 1 });
@@ -417,7 +388,7 @@ export function createAutomationRoutes(
     // inherit its system-wide authority (audit Critical 1).
     assertMayMutateAuthority(req, existing);
 
-    const { name, triggerTopic, conditionType, conditionValue, actionType, actionTarget, actionParams, scriptSource, uiSource, triggerType: rawTriggerType, cronExpression, completionTier } = req.body;
+    const { name, triggerTopic, conditionType, conditionValue, actionType, actionTarget, actionParams, scriptSource, uiSource, triggerType: rawTriggerType, cronExpression } = req.body;
 
     const { triggerType, effectiveTriggerTopic, effectiveCronExpression } =
       resolveTriggerConfig({ rawTriggerType, triggerTopic, cronExpression }, existing);
@@ -431,35 +402,24 @@ export function createAutomationRoutes(
         throw new BadRequestError("scriptSource is required for script rules");
       }
 
-      // Script rules may target multiple devices; validate format only at authoring time.
-      // Per-device ceiling validation happens at dispatch time (sandbox tier gate).
-      if (completionTier !== undefined && completionTier !== null && !isConfirmationTier(completionTier)) {
-        throw new BadRequestError("completionTier must be one of: dispatch, acknowledged, observed");
-      }
-      // PATCH semantics: undefined (omitted) preserves; null clears; valid replaces (Req 8.1–8.4).
-      const completionTierValue = preserveOrReplace(
-        completionTier === undefined ? undefined : normalizeTier(completionTier),
-        normalizeTier(existing.completion_tier),
-      );
-
       const { compiledJs, structuredJson } = compileScriptSource(updatedSource, effectiveTriggerTopic);
 
       db.prepare(
-        `UPDATE automation_rules SET name = ?, trigger_topic = ?, condition_type = ?, condition_value = ?, script_source = ?, compiled_js = ?, structured_metadata = ?, ui_source = ?, compiled_ui = ?, trigger_type = ?, cron_expression = ?, completion_tier = ? WHERE id = ?`
+        `UPDATE automation_rules SET name = ?, trigger_topic = ?, condition_type = ?, condition_value = ?, script_source = ?, compiled_js = ?, structured_metadata = ?, ui_source = ?, compiled_ui = ?, trigger_type = ?, cron_expression = ? WHERE id = ?`
       ).run(
         name || existing.name,
         effectiveTriggerTopic,
         preserveOrReplace(conditionType, existing.condition_type),   // Req 8.5
         preserveOrReplace(conditionValue, existing.condition_value), // Req 8.5
         updatedSource, compiledJs, structuredJson, uiSourceValue, compiledUiValue,
-        triggerType, effectiveCronExpression, completionTierValue, id,
+        triggerType, effectiveCronExpression, id,
       );
 
       // Re-register in engine
       engine.unregister(id);
       const updated = queryRuleById(db, id)!;
       if (updated.enabled) {
-        registerUiRule(engine, registry, actionExecutor, updated, conditionRegistry, getCompletionTierCapability);
+        registerUiRule(engine, registry, actionExecutor, updated, conditionRegistry);
       }
 
       logger.info({ ruleId: id, name: updated.name }, "Script automation rule updated");
@@ -469,18 +429,8 @@ export function createAutomationRoutes(
       // Resolve the effective action target (use submitted or existing).
       const effectiveActionTarget = actionTarget || existing.action_target;
 
-      // Validate completionTier format only — any valid tier is allowed regardless of device ceiling.
-      // PATCH semantics: undefined (omitted) preserves; null clears; valid replaces (Req 8.1–8.4).
-      if (completionTier !== undefined && completionTier !== null && !isConfirmationTier(completionTier)) {
-        throw new BadRequestError("completionTier must be one of: dispatch, acknowledged, observed");
-      }
-      const completionTierValue = preserveOrReplace(
-        completionTier === undefined ? undefined : normalizeTier(completionTier),
-        normalizeTier(existing.completion_tier),
-      );
-
       db.prepare(
-        `UPDATE automation_rules SET name = ?, trigger_topic = ?, condition_type = ?, condition_value = ?, action_type = ?, action_target = ?, action_params = ?, ui_source = ?, compiled_ui = ?, trigger_type = ?, cron_expression = ?, completion_tier = ? WHERE id = ?`
+        `UPDATE automation_rules SET name = ?, trigger_topic = ?, condition_type = ?, condition_value = ?, action_type = ?, action_target = ?, action_params = ?, ui_source = ?, compiled_ui = ?, trigger_type = ?, cron_expression = ? WHERE id = ?`
       ).run(
         name || existing.name,
         effectiveTriggerTopic,
@@ -493,7 +443,6 @@ export function createAutomationRoutes(
         compiledUiValue,
         triggerType,
         effectiveCronExpression,
-        completionTierValue,
         id,
       );
 
@@ -501,7 +450,7 @@ export function createAutomationRoutes(
       engine.unregister(id);
       const updated = queryRuleById(db, id)!;
       if (updated.enabled) {
-        registerUiRule(engine, registry, actionExecutor, updated, conditionRegistry, getCompletionTierCapability);
+        registerUiRule(engine, registry, actionExecutor, updated, conditionRegistry);
       }
 
       logger.info({ ruleId: id, name: updated.name }, "Form automation rule updated");
@@ -544,7 +493,7 @@ export function createAutomationRoutes(
     if (enabled) {
       // Re-register — reload from DB to get latest state
       const updated = queryRuleById(db, id)!;
-      registerUiRule(engine, registry, actionExecutor, updated, conditionRegistry, getCompletionTierCapability);
+      registerUiRule(engine, registry, actionExecutor, updated, conditionRegistry);
     } else {
       engine.unregister(id);
     }
@@ -799,7 +748,6 @@ function registerUiRule(
   actionExecutor: CommandService,
   stored: StoredRule,
   conditionRegistry?: ConditionRegistry,
-  _getCompletionTierCapability?: (deviceId: string) => { ceiling: ConfirmationTier | null },
 ): void {
   // If trigger_topic is empty, the rule is manual-only — still register it
   // so it's accessible via getRule() for the /fire endpoint, but it will
@@ -814,21 +762,6 @@ function registerUiRule(
   const condition = conditionRegistry
     ? conditionRegistry.buildCondition(stored.condition_type, stored.condition_value)
     : undefined;
-
-  // Resolve the stored completion tier. For a form rule this is attached to the
-  // runtime Rule; for a script rule it is the rule-level default the sandbox
-  // wiring consumes. If resolving/normalizing throws, disable the rule (do not
-  // register) rather than dispatching with an unresolved tier (Req 1.7).
-  let completionTier: ConfirmationTier | undefined;
-  try {
-    completionTier = isConfirmationTier(stored.completion_tier) ? stored.completion_tier : undefined;
-  } catch (err) {
-    logger.error(
-      { ruleId: stored.id, name: stored.name, error: (err as Error).message },
-      "Failed to resolve stored completion tier — leaving automation rule disabled",
-    );
-    return;
-  }
 
   if (stored.rule_type === "script" && stored.compiled_js) {
     // Script rule — action runs compiled JS through the Sandbox
@@ -848,21 +781,19 @@ function registerUiRule(
       compiled_js: compiledJs,
       triggerType,
       cronExpression,
-      ...(completionTier ? { completionTier } : {}),
     };
     engine.register(rule);
   } else {
-    // Form rule — dispatch through CommandService with stored completion tier directly.
-    // No dispatch-time ceiling check; CommandService's own clamping handles impossible tiers.
+    // Form rule — dispatch through CommandService without a requested tier, so the
+    // boundary resolves the highest tier the TARGET DEVICE can actually prove.
     const params = JSON.parse(stored.action_params);
-    const storedTier = completionTier; // already normalized above
     const action = async (_context: EventContext) => {
       const descriptor: ActionDescriptor = {
         type: stored.action_type,
         target: stored.action_target,
         params,
       };
-      return actionExecutor.execute(descriptor, stored.id, undefined, storedTier);
+      return actionExecutor.execute(descriptor, stored.id);
     };
 
     engine.register({
@@ -873,7 +804,6 @@ function registerUiRule(
       action,
       triggerType,
       cronExpression,
-      ...(completionTier ? { completionTier } : {}),
     });
   }
 }
@@ -885,14 +815,13 @@ export function loadUiRules(
   registry: DeviceRegistry,
   actionExecutor: CommandService,
   conditionRegistry?: ConditionRegistry,
-  getCompletionTierCapability?: (deviceId: string) => { ceiling: ConfirmationTier | null },
 ): void {
   const rows = db.prepare("SELECT * FROM automation_rules WHERE enabled = 1").all() as StoredRule[];
   if (rows.length === 0) return;
 
   let loaded = 0;
   for (const row of rows) {
-    registerUiRule(engine, registry, actionExecutor, row, conditionRegistry, getCompletionTierCapability);
+    registerUiRule(engine, registry, actionExecutor, row, conditionRegistry);
     loaded++;
   }
   logger.info({ loaded }, "Loaded UI automation rules from database");

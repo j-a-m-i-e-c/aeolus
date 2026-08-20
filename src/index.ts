@@ -307,7 +307,7 @@ async function main(): Promise<void> {
     executionRecorder,
     collector,
   });
-  loadUiRules(engine, db, registry, actionExecutor, conditionRegistry, (id) => connectorManager.getCompletionTierCapability(id));
+  loadUiRules(engine, db, registry, actionExecutor, conditionRegistry);
 
 
   // 7b. Initialize MetricsService
@@ -434,7 +434,7 @@ async function main(): Promise<void> {
     }),
   );
   const sandboxTypesPath = path.resolve(import.meta.dirname, "automations/sandbox-types.d.ts");
-  app.use("/api/automations", createAutomationRoutes(engine, db, registry, actionExecutor, executionLog, sandboxTypesPath, requireAutomation, permissionResolver, connectorRegistry, stateStore, conditionRegistry, (deviceId) => connectorManager.getCompletionTierCapability(deviceId)));
+  app.use("/api/automations", createAutomationRoutes(engine, db, registry, actionExecutor, executionLog, sandboxTypesPath, requireAutomation, permissionResolver, connectorRegistry, stateStore, conditionRegistry));
   app.use("/api/connectors", createConnectorRoutes(connectorManager, connectorRegistry));
   app.use("/api/metrics", createMetricsSummaryRoute(metricsService));
   app.use("/api/commands", createCommandRoutes(commandHistoryStore));

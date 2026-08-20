@@ -3,7 +3,7 @@
 import type { CommandService, ActionDescriptor } from "./command-service.js";
 import type { AutomationScopeResolver, AuthorizationScope } from "./automation-scope-resolver.js";
 import type { ConfirmationTier } from "./command-lifecycle.js";
-import { isConfirmationTier, resolveEffectiveTier } from "./completion-tier.js";
+import { isConfirmationTier } from "./completion-tier.js";
 import type { CommandResultCollector } from "./command-result-collector.js";
 import type { AutomationEventService } from "./automation-event-service.js";
 import {
@@ -170,22 +170,6 @@ export type ScriptTierResolution =
   | { ok: false; error: string };
 
 /**
- * Apply the script-rule completion-tier gate for one command (Req 5.1–5.6):
- *
- * - a per-call tier that is defined but not a valid `ConfirmationTier` fails
- *   validation (Req 5.5);
- * - with no per-call tier, a rule-level default that is defined but invalid
- *   fails validation (Req 5.6);
- * - otherwise the effective tier is `resolveEffectiveTier(default, perCall, null)`
- *   — a per-call tier overrides the rule-level default, and `undefined` means
- *   "omit `requiredTier`" so the boundary selects highest-available (Req 5.1–5.3).
- *
- * The ceiling is deliberately `null`: the inherited `CommandService` boundary
- * clamps the supplied tier against the device's live capability and never reports
- * an unreached tier, so the script path only hard-fails on a *malformed* value
- * and never pre-omits on a ceiling it cannot see here.
- */
-/**
  * Safely render an arbitrary (possibly malformed) tier value for an error
  * message. Plain `String(value)` throws for objects whose `toString`/`valueOf`
  * do not yield a primitive, so fall back to the object tag in that case.
@@ -198,36 +182,46 @@ export function describeTierValue(value: unknown): string {
   }
 }
 
-export function resolveScriptTier(
-  ruleTierDefault: unknown,
-  perCallTier: unknown,
-): ScriptTierResolution {
+/**
+ * Apply the completion-tier gate for one script-issued command (Req 5.1–5.5):
+ *
+ * - a per-call tier that is defined but not a valid `ConfirmationTier` fails
+ *   validation, so the command is never dispatched (Req 5.5);
+ * - `undefined` means "omit `requiredTier`", so the boundary selects the highest
+ *   tier the TARGET DEVICE can actually prove (Req 5.3).
+ *
+ * The per-call tier is the only place an automation states a tier. There is no
+ * rule-level default: one automation may command many devices with different
+ * acknowledgement capabilities, so a single value spanning the whole rule could
+ * only ever be an aspiration that the boundary silently clamped per device.
+ *
+ * No ceiling is consulted here. The `CommandService` boundary clamps the supplied
+ * tier against the device's live capability and never reports a tier it did not
+ * reach, so this gate only hard-fails on a *malformed* value.
+ */
+export function resolveScriptTier(perCallTier: unknown): ScriptTierResolution {
   if (perCallTier !== undefined && !isConfirmationTier(perCallTier)) {
     return { ok: false, error: `Invalid completion tier '${describeTierValue(perCallTier)}'` };
   }
-  if (perCallTier === undefined && ruleTierDefault !== undefined && !isConfirmationTier(ruleTierDefault)) {
-    return { ok: false, error: `Invalid rule-level completion tier '${describeTierValue(ruleTierDefault)}'` };
-  }
-  return { ok: true, chosen: resolveEffectiveTier(ruleTierDefault, perCallTier, null) };
+  // Already proven to be a valid tier or absent by the guard above.
+  return { ok: true, chosen: perCallTier as ConfirmationTier | undefined };
 }
 
 /**
  * Body of the `devices.action()` host callback, extracted so the completion-tier
  * gate can be property-tested without a live isolate. Validates the tier and,
  * on an invalid value, returns a failing {@link ActionResult} WITHOUT calling
- * `execute` (Req 5.5, 5.6); otherwise dispatches through the
- * {@link CommandService} with the resolved tier (per-call overrides the
- * rule-level default; `undefined` ⇒ highest-available).
+ * `execute` (Req 5.5); otherwise dispatches through the {@link CommandService}
+ * with the per-call tier (`undefined` ⇒ highest-available for that device).
  */
 export async function dispatchScriptAction(
   actionExecutor: Pick<CommandService, "execute">,
   descriptor: ActionDescriptor,
   ruleId: string,
   confirm: ConfirmOptions | undefined,
-  ruleTierDefault: unknown,
   perCallTier: unknown,
 ): Promise<ActionResult> {
-  const tier = resolveScriptTier(ruleTierDefault, perCallTier);
+  const tier = resolveScriptTier(perCallTier);
   if (!tier.ok) {
     return { success: false, error: tier.error, lifecycleState: "FAILED" };
   }
@@ -721,7 +715,6 @@ export class Sandbox {
     compiledJs: string,
     context: SandboxContext,
     ruleId: string,
-    ruleTierDefault?: ConfirmationTier,
   ): Promise<SandboxExecutionResult> {
     if (!ivm) {
       logger.error({ ruleId }, "Sandbox execution skipped — isolated-vm not available");
@@ -768,7 +761,7 @@ export class Sandbox {
       const executionContext = currentExecutionContext();
 
       // Set raw data and references on the global scope
-      await this.setDevicesRefs(jail, ruleId, inFlight, ruleTierDefault, scope);
+      await this.setDevicesRefs(jail, ruleId, inFlight, scope);
       await this.setMqttRefs(jail, ruleId);
       await this.setEventsRefs(jail, executionContext);
       await this.setLogRefs(jail, ruleId);
@@ -875,7 +868,6 @@ export class Sandbox {
     jail: IvmGlobal,
     ruleId: string,
     inFlight: Set<Promise<unknown>>,
-    ruleTierDefault?: ConfirmationTier,
     scope: AuthorizationScope = { kind: "unrestricted" },
   ): Promise<void> {
     if (!ivm) return;
@@ -925,15 +917,14 @@ export class Sandbox {
                 : undefined;
             const conditionSpec = typeof conditionJson === "string" ? JSON.parse(conditionJson) : undefined;
             const confirm = buildConfirmOptions(conditionSpec, confirmDeviceId, confirmTimeoutMs);
-            // Completion-tier gate (Req 5.1–5.6): fail-on-invalid before dispatch,
-            // otherwise dispatch with the resolved tier (per-call overrides the
-            // rule-level default; undefined ⇒ highest-available).
+            // Completion-tier gate (Req 5.1–5.5): fail-on-invalid before dispatch,
+            // otherwise dispatch with this call's tier (undefined ⇒ the highest
+            // tier this device can prove).
             const result = await dispatchScriptAction(
               actionExecutor,
               { type: "device_action", target: deviceId, params: { actionType, ...(params ?? {}) } },
               ruleId,
               confirm,
-              ruleTierDefault,
               perCallTier,
             );
             // Push the Command_Result into the collector for the running executionId
@@ -973,10 +964,10 @@ export class Sandbox {
         perCallTier?: unknown,
       ): Promise<BulkActionResult> {
         const run = (async (): Promise<BulkActionResult> => {
-          // Completion-tier gate (Req 5.1–5.6): an invalid per-call or rule-level
-          // tier fails validation for the whole call WITHOUT dispatching to any
-          // device. Runs before the predicate so no command is issued on failure.
-          const tier = resolveScriptTier(ruleTierDefault, perCallTier);
+          // Completion-tier gate (Req 5.1–5.5): an invalid per-call tier fails
+          // validation for the whole call WITHOUT dispatching to any device. Runs
+          // before the predicate so no command is issued on failure.
+          const tier = resolveScriptTier(perCallTier);
           if (!tier.ok) {
             return {
               total: 0,

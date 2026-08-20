@@ -51,6 +51,7 @@ import { collectionTabAssignments } from "./010-collection-tab-assignments.js";
 import { automationAuthorizationScope } from "./011-automation-authorization-scope.js";
 import { automationDemoAccess } from "./012-automation-demo-access.js";
 import { commandHistoryAndMqttProfile } from "./013-command-history-and-mqtt-profile.js";
+import { automationRulesDropCompletionTier } from "./014-automation-rules-drop-completion-tier.js";
 
 export const migrations: Migration[] = [
   baseline,                      // id 1
@@ -66,4 +67,5 @@ export const migrations: Migration[] = [
   automationAuthorizationScope,  // id 11
   automationDemoAccess,          // id 12
   commandHistoryAndMqttProfile,  // id 13
+  automationRulesDropCompletionTier, // id 14
 ];

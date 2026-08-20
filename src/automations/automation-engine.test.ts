@@ -84,8 +84,6 @@ describe("AutomationEngine", () => {
         deviceId: "sensor-1",
       }),
       "script-rule-1",
-      // 4th arg is the rule-level completion tier default (undefined when unset)
-      undefined,
     );
     // The rule's own action function should NOT be called for script rules
     expect(rule.action).not.toHaveBeenCalled();

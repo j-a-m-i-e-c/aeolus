@@ -18,7 +18,6 @@ export const createAutomationBodySchema = z.object({
   scriptSource: z.string().max(102_400).optional(), // 100KB limit
   uiSource: z.string().max(102_400).optional().nullable(),
   enabled: z.boolean().optional(),
-  completionTier: z.enum(["dispatch", "acknowledged", "observed"]).optional().nullable(),
 });
 
 export const updateAutomationBodySchema = z.object({
@@ -33,7 +32,6 @@ export const updateAutomationBodySchema = z.object({
   actionParams: z.record(z.string(), z.unknown()).optional(),
   scriptSource: z.string().max(102_400).optional(),
   uiSource: z.string().max(102_400).optional().nullable(),
-  completionTier: z.enum(["dispatch", "acknowledged", "observed"]).optional().nullable(),
 });
 
 export const automationIdParamsSchema = z.object({

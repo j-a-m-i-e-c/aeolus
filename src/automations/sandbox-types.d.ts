@@ -81,9 +81,10 @@ declare const devices: {
     /** Timeout in ms before TIMED_OUT (default 5000). */
     timeoutMs?: number;
     /**
-     * Completion tier that counts as success for this call, overriding the
-     * rule-level default. One of `dispatch`, `acknowledged`, or `observed`.
-     * Omit to use the rule's default (or the highest tier the device can prove).
+     * Completion tier that counts as success for this call. One of `dispatch`,
+     * `acknowledged`, or `observed`. This is the only place a tier is chosen —
+     * set it per call, since each device proves a different maximum.
+     * Omit to use the highest tier the target device can prove.
      */
     tier?: "dispatch" | "acknowledged" | "observed";
   }): Promise<ActionResult>;

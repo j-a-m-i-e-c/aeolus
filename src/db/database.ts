@@ -75,7 +75,6 @@ export function initSchema(database: DatabaseType): void {
   addColumn("compiled_ui", "TEXT DEFAULT NULL");
   addColumn("trigger_type", "TEXT DEFAULT 'mqtt'");
   addColumn("cron_expression", "TEXT DEFAULT NULL");
-  addColumn("completion_tier", "TEXT DEFAULT NULL");
   // Per-automation authorization scope (scoped-automation-authoring). A row with
   // authored_unrestricted = 1 runs system-wide; 0 is confined to owner_tab_id's
   // exposed resources. owner_tab_id is nullable and set NULL when its tab is

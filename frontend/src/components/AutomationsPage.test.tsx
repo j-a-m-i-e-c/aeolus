@@ -1,10 +1,9 @@
 // frontend/src/components/AutomationsPage.test.tsx — Automation authoring and rule list
 //
-// Authoring is code-only, so these cover the single authoring panel (create + edit,
-// including the acknowledgement level that sits with the trigger setup) and the list
-// actions (toggle/delete/edit). Legacy form rules still appear in the list and are
-// asserted as read-only there. The embedded Monaco editor and framer-motion are
-// mocked so the logic runs in jsdom.
+// Authoring is code-only, so these cover the single authoring panel (create + edit)
+// and the list actions (toggle/delete/edit). Legacy form rules still appear in the
+// list and are asserted as read-only there. The embedded Monaco editor and
+// framer-motion are mocked so the logic runs in jsdom.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
@@ -57,10 +56,9 @@ import { useDashboardStore } from "../store/dashboard-store";
 const RULES = [
   // Legacy form rule with a non-device action: no acknowledgement level applies.
   { id: "r1", name: "Form Rule", topic: "a/b", hasCondition: false, source: "ui", ruleType: "form", enabled: true, actionType: "log" },
-  { id: "r2", name: "Script Rule", topic: "c/d", hasCondition: true, source: "ui", ruleType: "script", enabled: false, scriptSource: "when(x)", completionTier: "dispatch" },
-  // Legacy device-directed form rule: level applies and is shown, but not editable
-  // here — form rules have no authoring surface any more.
-  { id: "r3", name: "Toggle Rule", topic: "e/f", hasCondition: false, source: "ui", ruleType: "form", enabled: false, actionType: "toggle", actionTarget: "light/x", completionTier: "acknowledged" },
+  { id: "r2", name: "Script Rule", topic: "c/d", hasCondition: true, source: "ui", ruleType: "script", enabled: false, scriptSource: "when(x)" },
+  // Legacy device-directed form rule: runtime-only, no authoring surface any more.
+  { id: "r3", name: "Toggle Rule", topic: "e/f", hasCondition: false, source: "ui", ruleType: "form", enabled: false, actionType: "toggle", actionTarget: "light/x" },
 ];
 
 function jsonResponse(body: unknown, status = 200) {
@@ -196,65 +194,29 @@ describe("AutomationsPage", () => {
     expect(await screen.findByText(/Line 3:5 — Unexpected token/)).toBeInTheDocument();
   });
 
-  describe("acknowledgement level", () => {
-    it("is authored alongside the trigger and sent on create", async () => {
-      mockAuthFetch.mockResolvedValue(jsonResponse([]));
-      render(<AutomationsPage />);
-      await screen.findByText("No automation rules");
-      await openPanel();
+  // The acknowledgement level is chosen per call inside Logic, never per automation:
+  // one automation may command many devices with different capabilities, so a
+  // rule-wide level could only be clamped per device anyway.
+  it("offers no automation-level acknowledgement control and never sends one", async () => {
+    mockAuthFetch.mockResolvedValue(jsonResponse([]));
+    render(<AutomationsPage />);
+    await screen.findByText("No automation rules");
+    await openPanel();
 
-      // Present as soon as the panel opens — not gated behind an action choice.
-      const tier = screen.getByLabelText("Acknowledgement level");
-      fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Ack" } });
-      fireEvent.change(screen.getByLabelText("Trigger Topic"), { target: { value: "sensor/x" } });
-      fireEvent.change(tier, { target: { value: "acknowledged" } });
+    expect(screen.queryByLabelText("Acknowledgement level")).not.toBeInTheDocument();
 
-      fireEvent.click(screen.getByRole("button", { name: "Create Automation" }));
-      await waitFor(() => expect(lastCallWithMethod("POST")).toBeTruthy());
-      expect(JSON.parse(lastCallWithMethod("POST")![1]!.body as string).completionTier).toBe("acknowledged");
-    });
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "No Ack" } });
+    fireEvent.change(screen.getByLabelText("Trigger Topic"), { target: { value: "sensor/x" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create Automation" }));
 
-    it("prefills from the stored value when editing and saves the change", async () => {
-      render(<AutomationsPage />);
-      await screen.findByText("Script Rule");
-      fireEvent.click(screen.getByText("Script Rule"));
-      await screen.findByText("Edit Automation");
+    await waitFor(() => expect(lastCallWithMethod("POST")).toBeTruthy());
+    expect(JSON.parse(lastCallWithMethod("POST")![1]!.body as string)).not.toHaveProperty("completionTier");
+  });
 
-      const tier = screen.getByLabelText("Acknowledgement level");
-      expect(tier).toHaveValue("dispatch");
-
-      fireEvent.change(tier, { target: { value: "observed" } });
-      fireEvent.click(screen.getByRole("button", { name: "Update Automation" }));
-
-      await waitFor(() => expect(lastCallWithMethod("PUT")).toBeTruthy());
-      expect(JSON.parse(lastCallWithMethod("PUT")![1]!.body as string).completionTier).toBe("observed");
-    });
-
-    it("clears back to automatic with an explicit null", async () => {
-      render(<AutomationsPage />);
-      await screen.findByText("Script Rule");
-      fireEvent.click(screen.getByText("Script Rule"));
-      await screen.findByText("Edit Automation");
-
-      fireEvent.change(screen.getByLabelText("Acknowledgement level"), { target: { value: "" } });
-      fireEvent.click(screen.getByRole("button", { name: "Update Automation" }));
-
-      await waitFor(() => expect(lastCallWithMethod("PUT")).toBeTruthy());
-      // Explicit null, not an omitted field: omitting it would preserve the old level.
-      expect(JSON.parse(lastCallWithMethod("PUT")![1]!.body as string).completionTier).toBeNull();
-    });
-
-    it("summarises the level in the list without offering a second way to change it", async () => {
-      render(<AutomationsPage />);
-      await screen.findByText("Toggle Rule");
-
-      expect(screen.getByText("ack: acknowledged")).toBeInTheDocument();
-      expect(screen.getByText("ack: dispatch only")).toBeInTheDocument();
-      // Read-only: no control in the row.
-      expect(screen.queryByLabelText(/Acknowledgement level for/)).not.toBeInTheDocument();
-      // A log action dispatches no device command, so it carries no badge at all.
-      expect(screen.queryByText("ack: automatic")).not.toBeInTheDocument();
-    });
+  it("shows no acknowledgement summary in the rule list", async () => {
+    render(<AutomationsPage />);
+    await screen.findByText("Toggle Rule");
+    expect(screen.queryByText(/^ack:/)).not.toBeInTheDocument();
   });
 
   it("a non-admin author binds the automation to a writable owning tab", async () => {

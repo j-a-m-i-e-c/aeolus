@@ -371,7 +371,7 @@ export class AutomationEngine {
       },
       () =>
         this.collector.context.run(executionId, () =>
-          this.sandbox!.execute(compiledJs, sandboxContext, rule.id, rule.completionTier),
+          this.sandbox!.execute(compiledJs, sandboxContext, rule.id),
         ),
     );
 

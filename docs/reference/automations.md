@@ -160,6 +160,8 @@ A command only uses the tiers supported by its path:
 - acknowledgement requires a device or connector capable of correlating a response;
 - observation uses a specified device-state condition, which may be on another device such as a flow sensor.
 
+The required tier is chosen per command, not per automation: `devices.action(id, type, params, { tier })`. Omitting it is the normal case and means each device independently resolves to the strongest tier it can prove, which is what an automation commanding a mixed fleet wants. A tier the target device cannot prove is clamped down at dispatch, so a reported lifecycle state is always one that was actually reached. Device capability comes from the device itself — `mqtt_command_profile.acknowledgement` for generic MQTT devices, or the owning connector — and is readable via `GET /api/devices/:id/completion-tiers`.
+
 The command framework lives in:
 
 ```text

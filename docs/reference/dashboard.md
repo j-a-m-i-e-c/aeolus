@@ -29,14 +29,13 @@ The Data area manages Data Store setup, collections, records, buckets, usage and
 Automation authoring is code-only. One panel creates and edits an automation, covering:
 
 - trigger selection;
-- the required acknowledgement level;
 - free-form Logic editor;
 - optional custom UI editor;
 - snippets and type declarations;
 - execution history;
 - manual fire and enable controls.
 
-The acknowledgement level is the automation's completion tier. It sits with the trigger setup, because it is a property of the automation rather than of any single action inside its Logic, and it is set the same way whether the automation is being created or edited. Leaving it on the automatic default lets Aeolus use the strongest level the target device can prove; an explicit level that a device cannot prove is clamped at dispatch time. Individual `devices.action()` calls may override the automation's level per call. The automation list shows the level as a read-only summary. See [Automations](automations.md) for the command result model.
+There is no automation-level acknowledgement setting. A single automation may command many devices with different acknowledgement capabilities, so one level spanning the whole automation could only ever be an aspiration that the command boundary clamped per device. The required level is stated per command in Logic — `devices.action(id, type, params, { tier })` — or omitted, in which case each device independently resolves to the strongest level it can actually prove. See [Automations](automations.md) for the command result model.
 
 Form rules are runtime-only. Existing `rule_type = 'form'` automations continue to load, run, toggle and delete, but the dashboard no longer authors them; the Logic editor is the single authoring surface.
 

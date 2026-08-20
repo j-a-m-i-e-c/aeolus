@@ -1,10 +1,16 @@
 // frontend/src/components/AutomationsPage.tsx — Automation authoring and rule list
 //
 // Authoring is code-only. The former form-based "Quick Rule" mode was retired: every
-// automation Aeolus ships or seeds is a script rule, and keeping a second authoring
-// surface meant shared settings (notably the acknowledgement level) had to be built
-// and placed twice. The form RUNTIME is untouched — existing `rule_type = 'form'` rows
-// still load, run, toggle and delete; they simply cannot be authored here any more.
+// automation Aeolus ships or seeds is a script rule, and a second authoring surface
+// meant shared settings had to be built and placed twice. The form RUNTIME is
+// untouched — existing `rule_type = 'form'` rows still load, run, toggle and delete;
+// they simply cannot be authored here any more.
+//
+// There is deliberately no acknowledgement-level control here. One automation may
+// command many devices with different acknowledgement capabilities, so a single
+// rule-wide level could only ever be an aspiration the command boundary clamped per
+// device. A tier is chosen per call in Logic via `devices.action(..., { tier })`, or
+// omitted so each device resolves to the strongest level it can actually prove.
 
 import { useState, useEffect, useCallback, lazy, Suspense } from "react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -24,13 +30,6 @@ import { authFetch } from "../lib/auth-fetch";
 import { useAuthStore } from "../store/auth-store";
 import { usePermissionsStore } from "../store/permissions-store";
 import { useDashboardStore } from "../store/dashboard-store";
-import { CompletionTierField } from "./CompletionTierField";
-import {
-  TIER_LABELS,
-  isConfirmationTier,
-  tierApplies,
-  type ConfirmationTier,
-} from "../lib/completion-tier";
 
 import { API_URL } from "../lib/env";
 
@@ -48,8 +47,6 @@ interface AutomationRule {
   conditionType?: string | null;
   conditionValue?: string | null;
   scriptSource?: string;
-  /** Required acknowledgement level, or null for "highest available". */
-  completionTier?: ConfirmationTier | null;
   ownerTabId?: string | null;
   authoredUnrestricted?: boolean;
 }
@@ -82,9 +79,6 @@ export function AutomationsPage() {
   const [scriptTriggerTopic, setScriptTriggerTopic] = useState("");
   const [scriptSource, setScriptSource] = useState("");
   const [transpileErrors, setTranspileErrors] = useState<TranspileError[]>([]);
-  // Rule-level acknowledgement default. Individual devices.action() calls may
-  // override it per call via `opts.tier`.
-  const [completionTier, setCompletionTier] = useState("");
 
   // Editing state
   const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
@@ -105,7 +99,6 @@ export function AutomationsPage() {
     setScriptTriggerTopic("");
     setScriptSource("");
     setTranspileErrors([]);
-    setCompletionTier("");
     setEditingRuleId(null);
   };
 
@@ -128,10 +121,6 @@ export function AutomationsPage() {
           triggerTopic: scriptTriggerTopic,
           ruleType: "script",
           scriptSource: source,
-          // Sent explicitly (null when cleared) so an edit can reset the automation
-          // back to "highest available" — the server preserves an omitted value
-          // rather than clearing it.
-          completionTier: completionTier || null,
           // Owning tab only matters on create; a non-admin binds scope to a tab
           // they can write. On edit (PUT) the server ignores scope fields.
           ...(isEditing || isAdmin ? {} : { tabId: ownerTabId }),
@@ -176,7 +165,6 @@ export function AutomationsPage() {
     setScriptTriggerTopic(rule.topic);
     setScriptSource(rule.scriptSource || "");
     setTranspileErrors([]);
-    setCompletionTier(isConfirmationTier(rule.completionTier) ? rule.completionTier : "");
     setEditingRuleId(rule.id);
     setShowForm(true);
   };
@@ -285,17 +273,6 @@ export function AutomationsPage() {
                   </div>
                 </div>
 
-                {/* Acknowledgement level sits with the trigger setup: it is a
-                    property of the automation itself, decided once at authoring
-                    time, not of any single action inside the Logic. */}
-                <div className="grid grid-cols-2 gap-4">
-                  <CompletionTierField
-                    id="automation-completion-tier"
-                    value={completionTier}
-                    onChange={setCompletionTier}
-                    hint="Applies to every device command this automation dispatches, unless a call passes its own tier."
-                  />
-                </div>
               </div>
 
               <Suspense fallback={<div className="flex items-center justify-center h-64 text-neutral-500">Loading editor...</div>}>
@@ -396,21 +373,6 @@ export function AutomationsPage() {
                 ) : (
                   <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#6B7785]/20 text-[#6B7785]">
                     file
-                  </span>
-                )}
-
-                {/* Acknowledgement level — informational here. It is set in the
-                    authoring panel, so the list stays a summary rather than a
-                    second place the same setting can be changed. */}
-                {tierApplies(rule) && (
-                  <span
-                    title="Acknowledgement level required before this automation treats a command as successful"
-                    className="text-[10px] px-1.5 py-0.5 rounded bg-[#6B7785]/20 text-[#6B7785]"
-                  >
-                    ack:{" "}
-                    {rule.completionTier
-                      ? TIER_LABELS[rule.completionTier].toLowerCase()
-                      : "automatic"}
                   </span>
                 )}
 
