@@ -5,10 +5,10 @@
 // and every lifecycle outcome is derived by Phase 1 from the simulator's wire
 // behaviour. The simulator never writes command history (it has no DB access).
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
 import { restSource } from "../automations/command-service.js";
 import type { ConfirmOptions } from "../core/types.js";
-import { createSimulatorE2E, waitFor, automationEvent, dockerAvailable, AEOLUS_DEVICE_IDS, type SimulatorE2E } from "./simulator-harness.js";
+import { createSimulatorE2E, startDockerBroker, waitFor, automationEvent, dockerAvailable, AEOLUS_DEVICE_IDS, type SimulatorE2E, type DockerBroker } from "./simulator-harness.js";
 import { STIMULUS, PUMP_COMMAND_TOPIC, DEVICE_KEYS } from "../simulator/scenarios/reference-water.js";
 
 // This end-to-end suite runs against a throwaway eclipse-mosquitto:2 container
@@ -36,15 +36,25 @@ function pumpCommand(
 }
 
 describeE2E("Phase 2 simulator command E2E", () => {
+  let broker: DockerBroker;
   let env: SimulatorE2E;
 
+  // ONE mosquitto container for the whole file. Container startup is the slowest and
+  // least reliable step here, and doing it per test is what intermittently overran
+  // the old 60s hook budget — this file alone paid for it eight times.
+  beforeAll(async () => {
+    broker = await startDockerBroker();
+  }, 120000);
+
+  afterAll(() => {
+    broker?.stop();
+  });
+
+  // Per-test wiring only (in-memory DB, services, simulator, clients). Every step is
+  // individually bounded, so 30s is ample without hiding a hang.
   beforeEach(async () => {
-    env = await createSimulatorE2E();
-    // 60s: this hook starts a throwaway mosquitto Docker container per test and
-    // waits for broker + simulator readiness. A loaded CI runner can occasionally
-    // exceed a tighter budget during container start/port-map (the test body then
-    // never runs). 60s gives Docker-backed setup realistic headroom.
-  }, 60000);
+    env = await createSimulatorE2E({ broker });
+  }, 30000);
 
   afterEach(async () => {
     await env.stop();

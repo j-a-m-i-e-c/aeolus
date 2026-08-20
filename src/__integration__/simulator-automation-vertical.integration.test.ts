@@ -22,13 +22,15 @@
 // real MQTT 5 broker, so it runs against a throwaway eclipse-mosquitto:2 container
 // and skips without Docker.
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
 import type { ActionResult, ConfirmOptions, EventContext, Rule } from "../core/types.js";
 import { automationSource } from "../automations/command-service.js";
 import { AutomationEngine } from "../automations/automation-engine.js";
 import { AUTOMATION_FIRED } from "../core/event-bus.js";
 import {
   createSimulatorE2E,
+  startDockerBroker,
+  type DockerBroker,
   waitFor,
   automationEvent,
   dockerAvailable,
@@ -46,15 +48,23 @@ const EVENTS = "aeolus/events/reference-control";
 const RULE_ID = "reference-water-refill-rule";
 
 describeE2E("Phase 2 reference-water vertical E2E (real AutomationEngine)", () => {
+  let broker: DockerBroker;
   let env: SimulatorE2E;
   let engine: AutomationEngine;
 
+  // ONE mosquitto container for the whole file; see simulator-command test.
+  beforeAll(async () => {
+    broker = await startDockerBroker();
+  }, 120000);
+
+  afterAll(() => {
+    broker?.stop();
+  });
+
   beforeEach(async () => {
-    env = await createSimulatorE2E();
+    env = await createSimulatorE2E({ broker });
     engine = new AutomationEngine(env.eventBus, { commandService: env.commandService });
-    // 60s: Docker-backed setup (throwaway mosquitto container + broker/simulator
-    // readiness) needs headroom on loaded CI runners; see simulator-command test.
-  }, 60000);
+  }, 30000);
 
   afterEach(async () => {
     engine.dispose();

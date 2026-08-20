@@ -18,12 +18,12 @@
 //
 // Runs against a throwaway eclipse-mosquitto:2 container; skipped without Docker.
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
 import type { ActionResult, ConfirmOptions } from "../core/types.js";
 import { automationSource } from "../automations/command-service.js";
 import { runInExecutionContext } from "../automations/execution-context.js";
 import { DEVICE_STATE_CHANGE } from "../core/event-bus.js";
-import { createSimulatorE2E, waitFor, automationEvent, dockerAvailable, AEOLUS_DEVICE_IDS, type SimulatorE2E } from "./simulator-harness.js";
+import { createSimulatorE2E, startDockerBroker, waitFor, automationEvent, dockerAvailable, AEOLUS_DEVICE_IDS, type SimulatorE2E, type DockerBroker } from "./simulator-harness.js";
 import { STIMULUS } from "../simulator/scenarios/reference-water.js";
 
 const describeE2E = dockerAvailable() ? describe : describe.skip;
@@ -38,13 +38,21 @@ const EXECUTION_ID = "reference-exec-1";
 const CAUSATION_ID = "reference-cause-1";
 
 describeE2E("Phase 2 reference-water vertical E2E", () => {
+  let broker: DockerBroker;
   let env: SimulatorE2E;
 
+  // ONE mosquitto container for the whole file; see simulator-command test.
+  beforeAll(async () => {
+    broker = await startDockerBroker();
+  }, 120000);
+
+  afterAll(() => {
+    broker?.stop();
+  });
+
   beforeEach(async () => {
-    env = await createSimulatorE2E();
-    // 60s: Docker-backed setup (throwaway mosquitto container + broker/simulator
-    // readiness) needs headroom on loaded CI runners; see simulator-command test.
-  }, 60000);
+    env = await createSimulatorE2E({ broker });
+  }, 30000);
 
   afterEach(async () => {
     await env.stop();

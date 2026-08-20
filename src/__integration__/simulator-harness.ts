@@ -91,10 +91,42 @@ export function automationEvent(name: string, payload: unknown, ruleId = "refere
   });
 }
 
-interface DockerBroker {
+export interface DockerBroker {
   containerName: string;
   port: number;
   stop: () => void;
+}
+
+/**
+ * Ceiling for any single `docker` CLI invocation.
+ *
+ * These calls are SYNCHRONOUS, so while one is blocked it starves the event loop and
+ * vitest cannot fire its own hook timeout — an overrun surfaced only as an opaque
+ * "Hook timed out in Nms" with no indication that Docker was the culprit. Bounding
+ * each call turns that into a named, diagnosable failure.
+ */
+const DOCKER_CMD_TIMEOUT_MS = 60_000;
+
+/** Run a `docker` CLI command with a hard timeout and a diagnosable failure. */
+function dockerExec(args: string[], label: string): string {
+  try {
+    return execFileSync("docker", args, {
+      encoding: "utf8",
+      timeout: DOCKER_CMD_TIMEOUT_MS,
+      stdio: "pipe",
+    });
+  } catch (err) {
+    const e = err as NodeJS.ErrnoException & { signal?: string; stderr?: Buffer | string };
+    // execFileSync reports a timeout as SIGTERM (killed), not as a named code.
+    const timedOut = e.signal === "SIGTERM" || e.code === "ETIMEDOUT";
+    const stderr = e.stderr ? String(e.stderr).trim() : "";
+    throw new Error(
+      timedOut
+        ? `${label}: 'docker ${args[0]}' exceeded ${DOCKER_CMD_TIMEOUT_MS}ms and was killed. ` +
+          `The Docker daemon is unresponsive or the host is heavily loaded.`
+        : `${label}: 'docker ${args[0]}' failed: ${e.message}${stderr ? ` — ${stderr}` : ""}`,
+    );
+  }
 }
 
 async function waitForPort(port: number, timeoutMs = 15_000): Promise<void> {
@@ -117,28 +149,49 @@ async function waitForPort(port: number, timeoutMs = 15_000): Promise<void> {
   }
 }
 
-/** Start a throwaway anonymous MQTT 5 mosquitto broker on a random host port. */
-async function startDockerBroker(): Promise<DockerBroker> {
-  const containerName = `aeolus-sim-itest-${Date.now()}`;
+/**
+ * Start a throwaway anonymous MQTT 5 mosquitto broker on a random host port.
+ *
+ * Container startup is by far the slowest and least reliable step in this harness, so
+ * callers should start ONE broker per test file (`beforeAll`) and hand it to each
+ * `createSimulatorE2E()` call, rather than paying for a container per test.
+ */
+export async function startDockerBroker(): Promise<DockerBroker> {
+  // Random suffix as well as a timestamp: two files starting a broker in the same
+  // millisecond would otherwise collide on the container name.
+  const containerName = `aeolus-sim-itest-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const command = "printf 'listener 1883\\nallow_anonymous true\\n' > /mosquitto/config/mosquitto.conf && exec /usr/sbin/mosquitto -c /mosquitto/config/mosquitto.conf";
-  execFileSync(
-    "docker",
+  dockerExec(
     ["run", "-d", "--name", containerName, "-p", "127.0.0.1::1883", "eclipse-mosquitto:2", "sh", "-c", command],
-    { stdio: "pipe" },
+    "broker start",
   );
-  const portLine = execFileSync("docker", ["port", containerName, "1883"], { encoding: "utf8" }).trim();
-  // e.g. "127.0.0.1:49173"
-  const port = Number.parseInt(portLine.split(":").pop() ?? "", 10);
-  if (!Number.isInteger(port) || port <= 0) {
-    throw new Error(`Could not resolve mapped broker port from "${portLine}"`);
+
+  let port: number;
+  try {
+    const portLine = dockerExec(["port", containerName, "1883"], "broker port lookup").trim();
+    // e.g. "127.0.0.1:49173"
+    port = Number.parseInt(portLine.split(":").pop() ?? "", 10);
+    if (!Number.isInteger(port) || port <= 0) {
+      throw new Error(`Could not resolve mapped broker port from "${portLine}"`);
+    }
+    await waitForPort(port);
+  } catch (err) {
+    // Never leak a container when readiness fails — the next run would then hit a
+    // name collision on top of the original problem.
+    try {
+      dockerExec(["rm", "-f", containerName], "broker cleanup");
+    } catch {
+      // best effort
+    }
+    throw err;
   }
-  await waitForPort(port);
+
   return {
     containerName,
     port,
     stop: () => {
       try {
-        execFileSync("docker", ["rm", "-f", containerName], { stdio: "pipe" });
+        dockerExec(["rm", "-f", containerName], "broker cleanup");
       } catch {
         // best effort cleanup
       }
@@ -146,17 +199,96 @@ async function startDockerBroker(): Promise<DockerBroker> {
   };
 }
 
+/** Connect an MQTT 5 client, bounded so a silent broker cannot hang a hook. */
+async function connectMqttClient(
+  brokerUrl: string,
+  label: string,
+  timeoutMs = 10_000,
+): Promise<MqttClient> {
+  return new Promise<MqttClient>((resolve, reject) => {
+    const client = mqtt.connect(brokerUrl, { protocolVersion: 5 });
+    const timer = setTimeout(() => {
+      client.end(true);
+      reject(new Error(`${label}: MQTT connect did not complete within ${timeoutMs}ms`));
+    }, timeoutMs);
+    client.once("connect", () => {
+      clearTimeout(timer);
+      resolve(client);
+    });
+    client.once("error", (err) => {
+      clearTimeout(timer);
+      client.end(true);
+      reject(err);
+    });
+  });
+}
+
 /**
- * Create a fully wired simulator E2E environment. `observationDelayMs` delays
- * the pump's flow observation so it is published strictly AFTER the ACK, making
- * the observed-tier lifecycle (DISPATCHED → ACKNOWLEDGED → OBSERVED) genuine
- * rather than reached off an ack that carried the state. Defaults to the
- * scenario's own default when omitted.
+ * Delete the scenario's retained state messages.
+ *
+ * Simulator state publications are RETAINED (`retainState` defaults to true), so a
+ * shared broker replays the previous test's final state to the next test's fresh
+ * MqttService the instant it subscribes. That arrives before the new simulator has
+ * republished its initial state, and it is enough to satisfy the "pump discovered"
+ * readiness wait — so setup can return with the registry holding the PREVIOUS test's
+ * tank levels and flow rate. A test asserting an initial value (flow at zero, say)
+ * would then fail depending on timing. A zero-length retained publish clears a topic.
+ *
+ * This is a reasoned race, not one observed failing: the suite also passes with this
+ * step disabled, because the fresh simulator's initial-state publish usually lands
+ * before any assertion runs. It is kept because sharing the broker is what introduced
+ * the ordering coupling, and a narrow timing window is exactly what breaks on a
+ * loaded CI runner.
+ *
+ * Done at setup rather than teardown so it also heals after a test that crashed
+ * without tearing down.
  */
-export async function createSimulatorE2E(options: { observationDelayMs?: number } = {}): Promise<SimulatorE2E> {
-  const broker = await startDockerBroker();
+async function clearRetainedState(brokerUrl: string): Promise<void> {
+  const client = await connectMqttClient(brokerUrl, "retained-state cleanup");
+  try {
+    await Promise.all(
+      Object.values(STATE_TOPICS).map(
+        (topic) =>
+          new Promise<void>((resolve, reject) => {
+            client.publish(topic, "", { retain: true, qos: 1 }, (err) =>
+              err ? reject(err) : resolve(),
+            );
+          }),
+      ),
+    );
+  } finally {
+    // end(false) so the QoS 1 traffic above is flushed before the socket closes.
+    await new Promise<void>((resolve) => client.end(false, {}, () => resolve()));
+  }
+}
+
+/**
+ * Create a fully wired simulator E2E environment.
+ *
+ * `broker` lets a test file start ONE container in `beforeAll` and reuse it for every
+ * test, which is strongly preferred: container startup dominates setup cost and is
+ * the step that intermittently overran the old per-test 60s hook budget. A supplied
+ * broker is BORROWED — `stop()` leaves it running for the next test, and each setup
+ * clears retained state so tests stay independent. When omitted, the environment
+ * starts and owns its own container (kept for one-off use).
+ *
+ * `observationDelayMs` delays the pump's flow observation so it is published strictly
+ * AFTER the ACK, making the observed-tier lifecycle (DISPATCHED → ACKNOWLEDGED →
+ * OBSERVED) genuine rather than reached off an ack that carried the state. Defaults
+ * to the scenario's own default when omitted.
+ */
+export async function createSimulatorE2E(
+  options: { observationDelayMs?: number; broker?: DockerBroker } = {},
+): Promise<SimulatorE2E> {
+  const ownsBroker = options.broker === undefined;
+  const broker = options.broker ?? (await startDockerBroker());
   const brokerUrl = `mqtt://127.0.0.1:${broker.port}`;
   const logger = createSimulatorLogger("silent");
+
+  // A borrowed broker may still hold the previous test's retained state.
+  if (!ownsBroker) {
+    await clearRetainedState(brokerUrl);
+  }
 
   const db = new Database(":memory:");
   db.pragma("foreign_keys = ON");
@@ -224,11 +356,7 @@ export async function createSimulatorE2E(options: { observationDelayMs?: number 
   );
   await simulator.start();
 
-  const controlClient = await new Promise<MqttClient>((resolve, reject) => {
-    const client = mqtt.connect(brokerUrl, { protocolVersion: 5 });
-    client.on("connect", () => resolve(client));
-    client.on("error", reject);
-  });
+  const controlClient = await connectMqttClient(brokerUrl, "control client");
 
   // Wait for the simulator's initial state to reach the Aeolus registry, then
   // configure the pump's Phase 1 ACK profile through the registry store path
@@ -240,7 +368,10 @@ export async function createSimulatorE2E(options: { observationDelayMs?: number 
     await new Promise<void>((resolve) => controlClient.end(true, {}, () => resolve()));
     await simulator.stop();
     await mqttService.disconnect();
-    broker.stop();
+    // A borrowed broker outlives this environment; only tear down one we started.
+    if (ownsBroker) {
+      broker.stop();
+    }
     db.close();
   };
 
