@@ -82,10 +82,9 @@ describe("CollectionDetail", () => {
     });
   });
 
-  it("navigates back by clearing the selected collection", () => {
+  it("navigates back via a labelled control that clears the selected collection", () => {
     render(<CollectionDetail />);
-    // Back button is the first button in the header (ArrowLeft icon).
-    fireEvent.click(screen.getAllByRole("button")[0]);
+    fireEvent.click(screen.getByRole("button", { name: /All collections/i }));
     expect(mockState.selectCollection).toHaveBeenCalledWith(null);
   });
 

@@ -26,14 +26,20 @@ export function DataExplorer() {
   const fetchStats = useDataStoreStore((s) => s.fetchStats);
   const fetchCollections = useDataStoreStore((s) => s.fetchCollections);
   const fetchBuckets = useDataStoreStore((s) => s.fetchBuckets);
+  const selectCollection = useDataStoreStore((s) => s.selectCollection);
   const stats = useDataStoreStore((s) => s.stats);
   const selectedCollection = useDataStoreStore((s) => s.selectedCollection);
 
+  // Entering the Data Store always lands on its home view. `selectedCollection`
+  // lives in a module-level store that outlives this route, so without an
+  // explicit reset, navigating to another tab and back would silently restore
+  // the last-viewed collection detail instead of the collections list.
   useEffect(() => {
+    selectCollection(null);
     fetchStats();
     fetchCollections();
     fetchBuckets();
-  }, [fetchStats, fetchCollections, fetchBuckets]);
+  }, [selectCollection, fetchStats, fetchCollections, fetchBuckets]);
 
   // Determine storage warning level
   const storagePercent = stats?.storagePercent ?? 0;

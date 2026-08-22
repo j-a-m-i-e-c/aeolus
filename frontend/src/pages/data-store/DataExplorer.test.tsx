@@ -11,6 +11,7 @@ vi.mock("../../hooks/useReadOnlyDemo", () => ({
 const mockFetchStats = vi.fn();
 const mockFetchCollections = vi.fn();
 const mockFetchBuckets = vi.fn();
+const mockSelectCollection = vi.fn();
 
 let mockStoreState: Record<string, unknown> = {};
 
@@ -31,10 +32,12 @@ describe("DataExplorer", () => {
     mockFetchStats.mockReset();
     mockFetchCollections.mockReset();
     mockFetchBuckets.mockReset();
+    mockSelectCollection.mockReset();
     mockStoreState = {
       fetchStats: mockFetchStats,
       fetchCollections: mockFetchCollections,
       fetchBuckets: mockFetchBuckets,
+      selectCollection: mockSelectCollection,
       stats: { totalCollections: 3, totalRecords: 1500, totalBucketEntries: 12, storagePercent: 42, estimatedStorageMb: 21.3, maxStorageMb: 50 },
       selectedCollection: null,
     };
@@ -71,6 +74,14 @@ describe("DataExplorer", () => {
   it("shows CollectionList by default on the Collections tab", () => {
     render(<DataExplorer />);
     expect(screen.getByTestId("collection-list")).toBeInTheDocument();
+  });
+
+  it("clears any stale collection selection on mount so re-entry lands on the home view", () => {
+    // The store outlives this route, so a selection left over from a previous
+    // visit must not reopen the detail view when the page is mounted again.
+    mockStoreState = { ...mockStoreState, selectedCollection: "tank-levels" };
+    render(<DataExplorer />);
+    expect(mockSelectCollection).toHaveBeenCalledWith(null);
   });
 
   it("shows CollectionDetail when a collection is selected", () => {

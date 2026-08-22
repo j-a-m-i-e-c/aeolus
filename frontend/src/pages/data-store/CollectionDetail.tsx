@@ -122,23 +122,26 @@ export function CollectionDetail() {
 
   return (
     <div className="space-y-4">
+      {/* Way out of the detail view. A bare arrow tucked against the title reads
+          as decoration, so this is a labelled control on its own row where the
+          eye lands before the collection name. */}
+      <button
+        onClick={handleBack}
+        className="flex items-center gap-1.5 text-[#9AA6B2] hover:text-[#E6EDF3] hover:bg-[#0D1117] border border-[#30363D] rounded-lg pl-2 pr-3 py-1.5 text-xs font-medium transition-colors"
+      >
+        <ArrowLeft size={14} />
+        All collections
+      </button>
+
       {/* Header */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={handleBack}
-            className="text-[#6B7785] hover:text-[#E6EDF3] transition-colors"
-          >
-            <ArrowLeft size={18} />
-          </button>
-          <div>
-            <h2 className="text-lg font-semibold text-[#E6EDF3]">
-              {collection.name}
-            </h2>
-            {collection.description && (
-              <p className="text-xs text-[#6B7785]">{collection.description}</p>
-            )}
-          </div>
+        <div>
+          <h2 className="text-lg font-semibold text-[#E6EDF3]">
+            {collection.name}
+          </h2>
+          {collection.description && (
+            <p className="text-xs text-[#6B7785]">{collection.description}</p>
+          )}
         </div>
 
         {!readOnly && (
