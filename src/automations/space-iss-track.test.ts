@@ -50,7 +50,8 @@ const H = (() => {
       pick("issPhase"),
       pick("issStep"),
       pick("issTrack"),
-      "return { issPeriodS, issLat, issNode, issPhase, issStep, issTrack, ISS_INC };",
+      pick("issSegments"),
+      "return { issPeriodS, issLat, issNode, issPhase, issStep, issTrack, issSegments, wrapLon, ISS_INC };",
     ].join("\n"),
     { loader: "ts" },
   );
@@ -61,6 +62,8 @@ const H = (() => {
     issPhase: (lat: number, ascending: boolean) => number;
     issStep: (u0: number, lon0: number, dt: number, periodS: number) => StepResult;
     issTrack: (u0: number, lon0: number, periodS: number, stepS: number, steps: number) => Fix[];
+    issSegments: (pts: Fix[]) => Fix[][];
+    wrapLon: (lon: number) => number;
     ISS_INC: number;
   };
 })();
@@ -204,11 +207,22 @@ describe("ground track geometry", () => {
           expect(Number.isFinite(p.lat)).toBe(true);
           expect(Number.isFinite(p.lon)).toBe(true);
           expect(Math.abs(p.lat)).toBeLessThanOrEqual(H.ISS_INC + 1e-9);
-          expect(p.lon).toBeGreaterThanOrEqual(-180);
-          expect(p.lon).toBeLessThanOrEqual(180);
+          expect(Math.abs(H.wrapLon(p.lon))).toBeLessThanOrEqual(180);
         }
       }
     }
+  });
+
+  it("keeps longitude continuous so the antimeridian can be handled once, at draw time", () => {
+    // Wrapping during stepping is what produced the visible gap at the map edge.
+    const points = H.issTrack(H.issPhase(20, true), 150, PERIOD, 60, 46);
+    for (let i = 1; i < points.length; i++) {
+      const step = points[i].lon - points[i - 1].lon;
+      expect(step, `step ${i} must be a small eastward advance, not a wrap`).toBeGreaterThan(0);
+      expect(step).toBeLessThan(20);
+    }
+    // Over a full orbit it therefore runs past 180 rather than jumping back.
+    expect(Math.max(...points.map((p) => p.lon))).toBeGreaterThan(180);
   });
 
   it("regresses the node westward by about 23 degrees per orbit", () => {
@@ -226,6 +240,70 @@ describe("ground track geometry", () => {
       const u0 = H.issPhase(lat0, true);
       expect(H.issStep(u0, 0, PERIOD, PERIOD).lat).toBeCloseTo(lat0, 6);
     }
+  });
+});
+
+describe("antimeridian join", () => {
+  const mapX = (lon: number): number => ((H.wrapLon(lon) + 180) / 360) * 480;
+
+  it("ends one polyline exactly on the map edge and resumes on the opposite edge", () => {
+    // The bug: consecutive points sit 5-14 deg apart, so splitting on a large x jump
+    // left the line stopping ~5px short of one edge and resuming ~3px inside the other.
+    const points = H.issTrack(H.issPhase(-47.1, true), -138.04, PERIOD, 60, 46);
+    const segments = H.issSegments(points);
+    expect(segments.length).toBeGreaterThan(1);
+
+    for (let s = 0; s < segments.length; s++) {
+      const seg = segments[s];
+      // Every interior boundary lands precisely on an edge.
+      if (s > 0) expect([0, 480]).toContain(Math.round(mapX(seg[0].lon)));
+      if (s < segments.length - 1) {
+        expect([0, 480]).toContain(Math.round(mapX(seg[seg.length - 1].lon)));
+      }
+    }
+  });
+
+  it("carries the same latitude across the seam", () => {
+    const segments = H.issSegments(H.issTrack(H.issPhase(-47.1, true), -138.04, PERIOD, 60, 46));
+    for (let s = 1; s < segments.length; s++) {
+      const endOfPrev = segments[s - 1][segments[s - 1].length - 1];
+      const startOfNext = segments[s][0];
+      expect(startOfNext.lat).toBeCloseTo(endOfPrev.lat, 9);
+      // ...and on opposite edges of the map.
+      expect(Math.abs(mapX(endOfPrev.lon) - mapX(startOfNext.lon))).toBeCloseTo(480, 6);
+    }
+  });
+
+  it("interpolates the seam latitude between the bracketing points", () => {
+    const points = H.issTrack(H.issPhase(10, true), 150, PERIOD, 60, 46);
+    const segments = H.issSegments(points);
+    const seamLat = segments[0][segments[0].length - 1].lat;
+    // The seam must fall between the two real samples that straddle 180 deg.
+    let bracketing: [number, number] | null = null;
+    for (let i = 1; i < points.length; i++) {
+      if (points[i - 1].lon < 180 && points[i].lon >= 180) {
+        bracketing = [points[i - 1].lat, points[i].lat];
+      }
+    }
+    expect(bracketing).not.toBeNull();
+    const [a, b] = bracketing!;
+    expect(seamLat).toBeGreaterThanOrEqual(Math.min(a, b) - 1e-9);
+    expect(seamLat).toBeLessThanOrEqual(Math.max(a, b) + 1e-9);
+  });
+
+  it("loses no points and keeps every segment drawable", () => {
+    const points = H.issTrack(H.issPhase(33, false), 20, PERIOD, 60, 46);
+    const segments = H.issSegments(points);
+    // Two extra vertices per seam (one each side), and nothing dropped.
+    const seams = segments.length - 1;
+    const total = segments.reduce((n, s) => n + s.length, 0);
+    expect(total).toBe(points.length + 2 * seams);
+    for (const seg of segments) expect(seg.length).toBeGreaterThan(1);
+  });
+
+  it("returns a single segment when the track never crosses the seam", () => {
+    // A short arc well away from 180 deg needs no splitting.
+    expect(H.issSegments(H.issTrack(H.issPhase(0, true), 0, PERIOD, 60, 3))).toHaveLength(1);
   });
 });
 
