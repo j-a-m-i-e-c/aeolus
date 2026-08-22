@@ -223,6 +223,31 @@ export function resolveScriptTier(perCallTier: unknown): ScriptTierResolution {
 }
 
 /**
+ * Reduce a host value to structured-clone-safe plain JSON.
+ *
+ * Needed because a host callback's return value must be TRANSFERABLE. A bare
+ * object is not: `Reference.apply()` defaults to `FallbackReference` semantics
+ * (see isolated-vm's own typings — `Options extends FallbackReference ?
+ * Reference<Result>`), so the isolate receives a `Reference` to the value rather
+ * than the value. A `Reference` is truthy and has none of the expected
+ * properties, so `result.success` reads as `undefined` and every
+ * `if (result.success)` in user Logic silently takes the failure branch while
+ * `result.error` and `result.lifecycleState` report nothing at all.
+ *
+ * An `ActionResult`'s `data` comes from a device handler and may carry values
+ * `ExternalCopy` cannot clone, which would reject the transfer and throw inside
+ * the script. JSON round-tripping drops exactly those (functions, symbols) and
+ * keeps the plain report fields the contract promises.
+ */
+export function toPlainJson<T>(value: T): T {
+  try {
+    return JSON.parse(JSON.stringify(value ?? null)) as T;
+  } catch {
+    return null as unknown as T;
+  }
+}
+
+/**
  * Body of the `devices.action()` host callback, extracted so the completion-tier
  * gate can be property-tested without a live isolate. Validates the tier and,
  * on an invalid value, returns a failing {@link ActionResult} WITHOUT calling
@@ -921,6 +946,18 @@ export class Sandbox {
         confirmTimeoutMs?: number,
         perCallTier?: unknown,
       ): Promise<ActionResult> {
+        // Resolve with a TRANSFERABLE copy, exactly as http.get/state.get do.
+        // Returning the bare ActionResult made the isolate receive a Reference to
+        // it (Reference.apply falls back to reference semantics), so the script
+        // saw `success`/`error`/`lifecycleState` as undefined and could never act
+        // on a command outcome. See toPlainJson().
+        // copyInto() yields a `Copy<ActionResult>` transferable, which isolated-vm
+        // internalises into the isolate AS an ActionResult — so the declared return
+        // type is what the SCRIPT sees, and the cast bridges host and isolate views.
+        const copyOut = (result: ActionResult): ActionResult =>
+          (ivm
+            ? (new ivm.ExternalCopy(toPlainJson(result)).copyInto() as unknown as ActionResult)
+            : result);
         const run = (async (): Promise<ActionResult> => {
           try {
             // params and the confirm condition cross the isolate boundary as JSON
@@ -942,13 +979,15 @@ export class Sandbox {
               confirm,
               perCallTier,
             );
-            // Push the Command_Result into the collector for the running executionId
-            // (Req 2.4, 4.3, 5.3 — script-path commands aggregated via AsyncLocalStorage)
+            // Push the UNCOPIED Command_Result into the collector for the running
+            // executionId (Req 2.4, 4.3, 5.3 — script-path commands aggregated via
+            // AsyncLocalStorage). Host bookkeeping keeps the real object; only the
+            // value handed back to the isolate is copied.
             collector?.pushCurrent(result);
-            return result;
+            return copyOut(result);
           } catch {
             // Should never reach here since execute() never throws, but guard anyway
-            return { success: false, error: "Unexpected error in devices.action()" };
+            return copyOut({ success: false, error: "Unexpected error in devices.action()" });
           }
         })();
         // Track the promise so Sandbox.execute() can drain it before resolving,
@@ -978,18 +1017,23 @@ export class Sandbox {
         confirmTimeoutMs?: number,
         perCallTier?: unknown,
       ): Promise<BulkActionResult> {
+        // Every return below must be a TRANSFERABLE copy — see devices.action().
+        const copyOut = (bulk: BulkActionResult): BulkActionResult =>
+          (ivm
+            ? (new ivm.ExternalCopy(toPlainJson(bulk)).copyInto() as unknown as BulkActionResult)
+            : bulk);
         const run = (async (): Promise<BulkActionResult> => {
           // Completion-tier gate (Req 5.1–5.5): an invalid per-call tier fails
           // validation for the whole call WITHOUT dispatching to any device. Runs
           // before the predicate so no command is issued on failure.
           const tier = resolveScriptTier(perCallTier);
           if (!tier.ok) {
-            return {
+            return copyOut({
               total: 0,
               succeeded: 0,
               failed: 0,
               results: [{ deviceId: "", success: false, error: tier.error }],
-            };
+            });
           }
 
           // Catch predicate throws; filter only the scoped inventory (Req 5.1, 5.6)
@@ -997,16 +1041,16 @@ export class Sandbox {
           try {
             matched = scopedInventory.filter(filter);
           } catch (err) {
-            return {
+            return copyOut({
               total: 0,
               succeeded: 0,
               failed: 0,
               results: [{ deviceId: "", success: false, error: (err as Error).message }],
-            };
+            });
           }
 
           if (matched.length === 0) {
-            return { total: 0, succeeded: 0, failed: 0, results: [] };
+            return copyOut({ total: 0, succeeded: 0, failed: 0, results: [] });
           }
 
           // Each matched device gets its own confirmation (and its own correlationId
@@ -1044,7 +1088,7 @@ export class Sandbox {
           const succeeded = results.filter((r) => r.success).length;
           const failed = results.length - succeeded;
 
-          return { total: results.length, succeeded, failed, results };
+          return copyOut({ total: results.length, succeeded, failed, results });
         })();
         // Track the bulk promise so Sandbox.execute() can drain it before
         // resolving, closing the await gap (Req 11.1, 11.2).

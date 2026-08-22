@@ -308,6 +308,94 @@ describe("Bunker Perimeter Security — floodlight projection", () => {
     expect(summary?.payload).toMatchObject({ lightsOn: true, autoLights: false });
   });
 
+  it("emits at most one summary per run", async () => {
+    // evaluateAutomationEvent submits to the ExecutionGate with an empty deviceId
+    // and a fixed topic, so two summaries in flight together share a dedup key and
+    // the LATER one is suppressed as a duplicate — which would leave the overview
+    // holding the pre-command value. For a boolean that reads as the exact
+    // opposite of the truth, which is the bug this guards.
+    const world = makeWorld();
+    for (const topic of [
+      PERIMETER_TOPIC,
+      "ui/rule/toggle-lights",
+      LIGHTS_TOPIC,
+      "ui/rule/return-auto",
+      "sensor/bunker/power",
+      "ui/rule/simulate-contacts",
+    ]) {
+      const before = world.emitted.length;
+      await run(world, topic);
+      const emitted = world.emitted.filter((e, i) => i >= before && e.topic === "bunker/summary/perimeter");
+      expect(emitted.length, `run for "${topic}" emitted ${emitted.length} summaries`).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it("re-publishes a summary when it observes drift it did not command", async () => {
+    // The self-healing path for the overview: if the pane's own command outcome was
+    // never usable, the floodlight device's state publish must still carry the
+    // observed truth onward to the Continuity Overview.
+    const world = makeWorld();
+    await run(world, PERIMETER_TOPIC);
+    const before = world.emitted.length;
+
+    world.deviceState[LIGHTS_TOPIC] = { on: true, brightness: 100, mode: "auto" };
+    await run(world, LIGHTS_TOPIC);
+
+    const summary = world.emitted
+      .filter((e, i) => i >= before && e.topic === "bunker/summary/perimeter")
+      .pop();
+    expect(summary?.payload).toMatchObject({ lightsOn: true });
+  });
+
+  it("stays silent on an unrelated bunker publish that changes nothing", async () => {
+    const world = makeWorld();
+    await run(world, PERIMETER_TOPIC);
+    const before = world.emitted.length;
+    await run(world, "sensor/bunker/power");
+    expect(world.emitted.filter((e, i) => i >= before && e.topic === "bunker/summary/perimeter")).toHaveLength(0);
+  });
+
+  describe("when the command boundary returns a result the script cannot read", () => {
+    // This was the live failure: devices.action() resolved to an isolated-vm
+    // Reference rather than the ActionResult, so `r.success` was undefined and the
+    // Logic always took the not-verified branch even though the device actuated.
+    // The projection must still converge on observed truth, and the overview with
+    // it, rather than latching one step behind (which reads as inverted).
+    const unreadableResult = () => ({ typeof: "object", copySync: () => undefined });
+
+    it("converges on observed state once the device publishes", async () => {
+      const world = makeWorld();
+      await run(world, PERIMETER_TOPIC);
+
+      // The command reaches the device; only its reported result is unusable.
+      const realAction = world.devices.action;
+      world.devices.action = async (id, type, params, opts) => {
+        await realAction(id, type, params, opts);
+        return unreadableResult() as never;
+      };
+
+      await run(world, "ui/rule/toggle-lights");
+      expect(physicallyOn(world)).toBe(true);
+      expect(pane(world).footer).toContain("not verified");
+
+      // The floodlight state publish must carry the truth to both panes.
+      const before = world.emitted.length;
+      await run(world, LIGHTS_TOPIC);
+      expect(pane(world).lights).toBe(true);
+      const summary = world.emitted
+        .filter((e, i) => i >= before && e.topic === "bunker/summary/perimeter")
+        .pop();
+      expect(summary?.payload).toMatchObject({ lightsOn: true });
+    });
+
+    it("reports a missing result explicitly rather than as 'unknown'", async () => {
+      const world = makeWorld();
+      world.devices.action = async () => unreadableResult() as never;
+      await run(world, "ui/rule/toggle-lights");
+      expect(pane(world).footer).toContain("no result from the command boundary");
+    });
+  });
+
   it("reaches this rule for both the perimeter sensor and the floodlight actuator", () => {
     // Mirrors AutomationEngine.topicMatches so the widened trigger is covered.
     const matches = (pattern: string, topic: string): boolean => {
