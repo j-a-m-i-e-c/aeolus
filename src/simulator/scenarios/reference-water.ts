@@ -74,7 +74,16 @@ interface FlowState {
   litresPerMinute: number;
 }
 
-const INITIAL = {
+/**
+ * The coherent state every device starts in, and returns to on `reference-water.reset`.
+ *
+ * Exported because it is the observable definition of "this scenario is freshly
+ * started": the integration harness gates setup on the Aeolus registry reporting
+ * exactly these values, which is what makes a shared broker safe between tests.
+ * Changing a value here requires no harness change, but DOES change what that gate
+ * waits for.
+ */
+export const INITIAL_STATE = {
   sourceTank: { levelPct: 80, litres: 48000 } as TankState,
   headerTank: { levelPct: 60, litres: 3000 } as TankState,
   pump: { on: false, running: false } as PumpState,
@@ -123,10 +132,10 @@ class ReferenceWaterEnvironment {
   }
 
   resetAll(): void {
-    this.controller(DEVICE_KEYS.sourceTank)?.update({ ...INITIAL.sourceTank }, { forcePublish: true });
-    this.controller(DEVICE_KEYS.headerTank)?.update({ ...INITIAL.headerTank }, { forcePublish: true });
-    this.controller(DEVICE_KEYS.pump)?.update({ ...INITIAL.pump }, { forcePublish: true });
-    this.controller(DEVICE_KEYS.flow)?.update({ ...INITIAL.flow }, { forcePublish: true });
+    this.controller(DEVICE_KEYS.sourceTank)?.update({ ...INITIAL_STATE.sourceTank }, { forcePublish: true });
+    this.controller(DEVICE_KEYS.headerTank)?.update({ ...INITIAL_STATE.headerTank }, { forcePublish: true });
+    this.controller(DEVICE_KEYS.pump)?.update({ ...INITIAL_STATE.pump }, { forcePublish: true });
+    this.controller(DEVICE_KEYS.flow)?.update({ ...INITIAL_STATE.flow }, { forcePublish: true });
     this.suppressNextFlow = false;
   }
 
@@ -194,7 +203,7 @@ export function createReferenceWaterScenario(options: ReferenceWaterOptions = {}
     key: DEVICE_KEYS.sourceTank,
     name: "Source Tank Level",
     stateTopic: STATE_TOPICS.sourceTank,
-    initialState: { ...INITIAL.sourceTank },
+    initialState: { ...INITIAL_STATE.sourceTank },
     createModel: (ctx) => sensorModel(ctx, env),
   };
 
@@ -202,7 +211,7 @@ export function createReferenceWaterScenario(options: ReferenceWaterOptions = {}
     key: DEVICE_KEYS.headerTank,
     name: "Header Tank Level",
     stateTopic: STATE_TOPICS.headerTank,
-    initialState: { ...INITIAL.headerTank },
+    initialState: { ...INITIAL_STATE.headerTank },
     createModel: (ctx) => sensorModel(ctx, env),
   };
 
@@ -210,7 +219,7 @@ export function createReferenceWaterScenario(options: ReferenceWaterOptions = {}
     key: DEVICE_KEYS.flow,
     name: "Transfer Flow",
     stateTopic: STATE_TOPICS.flow,
-    initialState: { ...INITIAL.flow },
+    initialState: { ...INITIAL_STATE.flow },
     createModel: (ctx) => sensorModel(ctx, env),
   };
 
@@ -219,7 +228,7 @@ export function createReferenceWaterScenario(options: ReferenceWaterOptions = {}
     name: "Transfer Pump",
     stateTopic: STATE_TOPICS.pump,
     commandTopic: PUMP_COMMAND_TOPIC,
-    initialState: { ...INITIAL.pump },
+    initialState: { ...INITIAL_STATE.pump },
     commandProfile: { acknowledgement: { supported: true }, qos: 1 },
     createModel: (ctx) => {
       env.register(ctx.key, ctx.state);

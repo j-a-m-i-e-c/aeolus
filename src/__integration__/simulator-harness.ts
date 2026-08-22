@@ -32,7 +32,7 @@ import { AUTOMATION_EVENT_SCHEMA } from "../automations/automation-event-service
 import { SimulatorRuntime } from "../simulator/runtime.js";
 import { loadSimulatorConfig } from "../simulator/config.js";
 import { createSimulatorLogger } from "../simulator/logger.js";
-import { createReferenceWaterScenario, AEOLUS_DEVICE_IDS, STATE_TOPICS } from "../simulator/scenarios/reference-water.js";
+import { createReferenceWaterScenario, AEOLUS_DEVICE_IDS, STATE_TOPICS, INITIAL_STATE } from "../simulator/scenarios/reference-water.js";
 
 /** True when a Docker daemon is reachable (tests skip otherwise). */
 export function dockerAvailable(): boolean {
@@ -224,42 +224,43 @@ async function connectMqttClient(
 }
 
 /**
- * Delete the scenario's retained state messages.
+ * Wait until the Aeolus registry holds the scenario's four devices AT their freshly
+ * started values — the positive definition of "this environment is ready".
  *
- * Simulator state publications are RETAINED (`retainState` defaults to true), so a
- * shared broker replays the previous test's final state to the next test's fresh
- * MqttService the instant it subscribes. That arrives before the new simulator has
- * republished its initial state, and it is enough to satisfy the "pump discovered"
- * readiness wait — so setup can return with the registry holding the PREVIOUS test's
- * tank levels and flow rate. A test asserting an initial value (flow at zero, say)
- * would then fail depending on timing. A zero-length retained publish clears a topic.
+ * Why not just presence: simulator state publications are RETAINED (`retainState`
+ * defaults to true), so on a broker shared between tests the previous test's final
+ * state is replayed to this environment's MqttService the instant it subscribes. A
+ * presence-only check is satisfied by that stale message.
  *
- * This is a reasoned race, not one observed failing: the suite also passes with this
- * step disabled, because the fresh simulator's initial-state publish usually lands
- * before any assertion runs. It is kept because sharing the broker is what introduced
- * the ordering coupling, and a narrow timing window is exactly what breaks on a
- * loaded CI runner.
+ * Honest scope: this was NOT observed failing. `simulator.start()` runs between the
+ * subscribe and this wait, and its initial-state publish reliably lands first — a
+ * deliberate stale-retained-state injection (see
+ * simulator-harness-isolation.integration.test.ts) passes with a presence-only check
+ * too. So the ordering already happens to be safe.
  *
- * Done at setup rather than teardown so it also heals after a test that crashed
- * without tearing down.
+ * It is written this way regardless because the condition costs nothing extra and
+ * states the contract the tests actually depend on, instead of depending on the
+ * incidental ordering of two awaits in this function. It also covers a slow simulator
+ * start or a partial ingest, and fails with a named label rather than proceeding on
+ * wrong data.
  */
-async function clearRetainedState(brokerUrl: string): Promise<void> {
-  const client = await connectMqttClient(brokerUrl, "retained-state cleanup");
-  try {
-    await Promise.all(
-      Object.values(STATE_TOPICS).map(
-        (topic) =>
-          new Promise<void>((resolve, reject) => {
-            client.publish(topic, "", { retain: true, qos: 1 }, (err) =>
-              err ? reject(err) : resolve(),
-            );
-          }),
-      ),
-    );
-  } finally {
-    // end(false) so the QoS 1 traffic above is flushed before the socket closes.
-    await new Promise<void>((resolve) => client.end(false, {}, () => resolve()));
-  }
+async function waitForFreshScenarioState(registry: DeviceRegistry): Promise<void> {
+  const expected: Array<[string, Record<string, unknown>]> = [
+    [AEOLUS_DEVICE_IDS.sourceTank, INITIAL_STATE.sourceTank as unknown as Record<string, unknown>],
+    [AEOLUS_DEVICE_IDS.headerTank, INITIAL_STATE.headerTank as unknown as Record<string, unknown>],
+    [AEOLUS_DEVICE_IDS.pump, INITIAL_STATE.pump as unknown as Record<string, unknown>],
+    [AEOLUS_DEVICE_IDS.flow, INITIAL_STATE.flow as unknown as Record<string, unknown>],
+  ];
+
+  await waitFor(
+    () =>
+      expected.every(([deviceId, initial]) => {
+        const state = registry.getById(deviceId)?.state as Record<string, unknown> | undefined;
+        if (!state) return false;
+        return Object.entries(initial).every(([key, value]) => state[key] === value);
+      }),
+    { label: "simulator devices present at initial state", timeoutMs: 10_000 },
+  );
 }
 
 /**
@@ -284,11 +285,6 @@ export async function createSimulatorE2E(
   const broker = options.broker ?? (await startDockerBroker());
   const brokerUrl = `mqtt://127.0.0.1:${broker.port}`;
   const logger = createSimulatorLogger("silent");
-
-  // A borrowed broker may still hold the previous test's retained state.
-  if (!ownsBroker) {
-    await clearRetainedState(brokerUrl);
-  }
 
   const db = new Database(":memory:");
   db.pragma("foreign_keys = ON");
@@ -358,10 +354,10 @@ export async function createSimulatorE2E(
 
   const controlClient = await connectMqttClient(brokerUrl, "control client");
 
-  // Wait for the simulator's initial state to reach the Aeolus registry, then
+  // Wait for THIS simulator's initial state to reach the Aeolus registry, then
   // configure the pump's Phase 1 ACK profile through the registry store path
   // (the same path the PUT /mqtt-command-profile route uses).
-  await waitFor(() => registry.getById(AEOLUS_DEVICE_IDS.pump) !== undefined, { label: "pump device discovered", timeoutMs: 10_000 });
+  await waitForFreshScenarioState(registry);
   registry.setMqttCommandProfile(AEOLUS_DEVICE_IDS.pump, { acknowledgement: { supported: true }, qos: 1 });
 
   const stop = async (): Promise<void> => {
@@ -378,4 +374,4 @@ export async function createSimulatorE2E(
   return { db, eventBus, registry, mqttService, tracker, store, commandService, simulator, brokerUrl, controlClient, stop };
 }
 
-export { AEOLUS_DEVICE_IDS, STATE_TOPICS };
+export { AEOLUS_DEVICE_IDS, STATE_TOPICS, INITIAL_STATE };
