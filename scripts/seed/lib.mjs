@@ -141,6 +141,48 @@ export async function fireAutomations(api, ruleIds, times = 4) {
 
 // ─── Data Store ──────────────────────────────────────────────────────────────
 
+
+/**
+ * Clear every Data Store collection and bucket entry.
+ *
+ * `seed-demo.mjs` is already a destructive whole-demo rebuild (it deletes all
+ * automations and replaces the layout), so keeping the Data Store deterministic
+ * is safer than accumulating records from previous demo revisions. This is a
+ * seed/deployment concern — it is deliberately not exposed as a public-demo UI
+ * button where one visitor could erase shared state for everyone else.
+ */
+export async function clearDataStore(api) {
+  const collections = await api("GET", "/api/data-store/collections");
+  let deletedCollections = 0;
+  if (Array.isArray(collections)) {
+    for (const collection of collections) {
+      if (!collection || typeof collection.name !== "string") continue;
+      const result = await api("DELETE", `/api/data-store/collections/${encodeURIComponent(collection.name)}`);
+      if (result) deletedCollections += 1;
+    }
+  }
+
+  const buckets = await api("GET", "/api/data-store/buckets");
+  let deletedBucketEntries = 0;
+  if (Array.isArray(buckets)) {
+    for (const bucket of buckets) {
+      if (!bucket || typeof bucket.bucket !== "string") continue;
+      const entries = await api("GET", `/api/data-store/buckets/${encodeURIComponent(bucket.bucket)}`);
+      if (!Array.isArray(entries)) continue;
+      for (const entry of entries) {
+        if (!entry || typeof entry.key !== "string") continue;
+        const result = await api(
+          "DELETE",
+          `/api/data-store/buckets/${encodeURIComponent(bucket.bucket)}/${encodeURIComponent(entry.key)}`,
+        );
+        if (result) deletedBucketEntries += 1;
+      }
+    }
+  }
+
+  console.log(`  ✓ Data Store reset: ${deletedCollections} collections, ${deletedBucketEntries} bucket entries removed`);
+}
+
 /** Enable the Data Store with generous demo limits (idempotent). */
 export async function enableDataStore(api) {
   await api("POST", "/api/data-store/enable", {
@@ -170,6 +212,24 @@ export async function seedCollection(api, collection) {
     });
   }
   console.log(`  ✓ ${collection.name}: ${collection.records.length} records`);
+}
+
+/**
+ * Seed a key/value bucket. Buckets are shared persistent state, so demo buckets
+ * are defined globally rather than pretending they belong to one dashboard tab.
+ * @param {{name:string, entries:Record<string, unknown>}} bucket
+ */
+export async function seedBucket(api, bucket) {
+  let count = 0;
+  for (const [key, value] of Object.entries(bucket.entries || {})) {
+    const result = await api(
+      "PUT",
+      `/api/data-store/buckets/${encodeURIComponent(bucket.name)}/${encodeURIComponent(key)}`,
+      { value },
+    );
+    if (result) count += 1;
+  }
+  console.log(`  ✓ ${bucket.name}: ${count} bucket entries`);
 }
 
 /**

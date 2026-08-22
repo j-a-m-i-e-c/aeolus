@@ -22,15 +22,18 @@ import {
   createApi,
   cleanSlate,
   enableDataStore,
+  clearDataStore,
   publishDevices,
   createAutomations,
   seedCollection,
+  seedBucket,
   buildLayout,
   fireAutomations,
   applyDemoAccess,
   provisionDemoIdentity,
 } from "./seed/lib.mjs";
 import { tabModules } from "./seed/tabs/index.mjs";
+import { demoBuckets } from "./seed/data-store-buckets.mjs";
 import {
   createBootstrapClient,
   configureSimulatedCommandProfiles,
@@ -59,9 +62,11 @@ await login(USER, PASS);
 console.log("\n1. Cleaning existing data...");
 await cleanSlate(api);
 
-// 2. Enable Data Store
-console.log("\n2. Enabling Data Store...");
+// 2. Enable + reset Data Store. seed-demo is a whole-demo rebuild, so stale
+// records from older showcase revisions should never accumulate invisibly.
+console.log("\n2. Preparing Data Store...");
 await enableDataStore(api);
+await clearDataStore(api);
 
 // 3. Create automations (must exist before devices publish so state populates)
 console.log("\n3. Creating automations...");
@@ -82,6 +87,14 @@ for (const mod of tabModules) {
   for (const collection of mod.dataStore || []) {
     await seedCollection(api, collection);
   }
+}
+
+// 5b. Seed shared key/value buckets. Buckets are intentionally global in the
+// current Data Store model, so they are showcase examples rather than tab-owned
+// coordination state.
+console.log("\n5b. Seeding Data Store buckets...");
+for (const bucket of demoBuckets) {
+  await seedBucket(api, bucket);
 }
 
 // 6. Build dashboard layout

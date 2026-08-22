@@ -109,15 +109,12 @@ export function TabLayout({ tabId }: TabLayoutProps) {
 
   return (
     <div ref={containerRef} className="w-full">
-      {/* Header area: admins get structural tools; public-demo visitors get a
-          clearly local drag/resize affordance with a one-click reset. */}
+      {/* Header area: admins get structural tools; public-demo visitors only get
+          the compact reset action. Drag/resize is intentionally discoverable from
+          the pane chrome itself rather than repeated explanatory copy on every tab. */}
       {(canEditLayout || (PUBLIC_DEMO && !isAdmin)) && (
       <div className="flex items-center justify-between gap-2 px-4 py-2">
-        {PUBLIC_DEMO && !isAdmin ? (
-          <div className="text-[11px] text-[#6F7D89]">
-            Drag panes by their headers and resize from the corner. Changes are local to this visit.
-          </div>
-        ) : <div />}
+        <div />
         <div className="flex items-center gap-2">
         {canEditLayout && (<>
         <motion.button

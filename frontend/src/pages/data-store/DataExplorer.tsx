@@ -8,6 +8,7 @@ import {
   Settings,
   AlertTriangle,
   AlertCircle,
+  LockKeyhole,
 } from "lucide-react";
 import { useDataStoreStore } from "../../store/data-store-store";
 import { CollectionList } from "./CollectionList";
@@ -57,6 +58,22 @@ export function DataExplorer() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-[#E6EDF3]">Data Store</h1>
       </div>
+
+      {readOnly && (
+        <div className="flex items-start gap-3 rounded-xl border border-[#31506A] bg-[#0D1822] px-4 py-3">
+          <LockKeyhole size={17} className="mt-0.5 shrink-0 text-[#72B7E6]" />
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-[0.12em] text-[#8CC9F0]">
+              Public demo · read only
+            </div>
+            <p className="mt-1 text-xs leading-relaxed text-[#8B9AAA]">
+              Explore seeded time-series history and key/value buckets from across the showcase. Some demo
+              automations append live records while you interact with them. The demo seed clears and rebuilds
+              this store, so old showcase data does not accumulate between deployments.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Summary Bar */}
       <div className="bg-[#161B22] border border-[#30363D] rounded-xl p-4">

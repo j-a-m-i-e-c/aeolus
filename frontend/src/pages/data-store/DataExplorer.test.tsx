@@ -3,6 +3,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 
+const demoState = vi.hoisted(() => ({ readOnly: false }));
+vi.mock("../../hooks/useReadOnlyDemo", () => ({
+  useReadOnlyDemo: () => demoState.readOnly,
+}));
+
 const mockFetchStats = vi.fn();
 const mockFetchCollections = vi.fn();
 const mockFetchBuckets = vi.fn();
@@ -22,6 +27,7 @@ import { DataExplorer } from "./DataExplorer";
 
 describe("DataExplorer", () => {
   beforeEach(() => {
+    demoState.readOnly = false;
     mockFetchStats.mockReset();
     mockFetchCollections.mockReset();
     mockFetchBuckets.mockReset();
@@ -37,6 +43,14 @@ describe("DataExplorer", () => {
   it("renders the Data Store header", () => {
     render(<DataExplorer />);
     expect(screen.getByText("Data Store")).toBeInTheDocument();
+  });
+
+  it("explains the read-only seeded Data Store in the public demo", () => {
+    demoState.readOnly = true;
+    render(<DataExplorer />);
+    expect(screen.getByText(/Public demo · read only/i)).toBeInTheDocument();
+    expect(screen.getByText(/seeded time-series history and key\/value buckets/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Settings/i })).not.toBeInTheDocument();
   });
 
   it("fetches stats, collections, and buckets on mount", () => {

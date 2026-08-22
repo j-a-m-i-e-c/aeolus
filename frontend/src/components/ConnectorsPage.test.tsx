@@ -9,6 +9,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 
+const demoState = vi.hoisted(() => ({ readOnly: false }));
+vi.mock("../hooks/useReadOnlyDemo", () => ({
+  useReadOnlyDemo: () => demoState.readOnly,
+}));
+
 const api = vi.hoisted(() => ({
   fetchAvailableConnectors: vi.fn(),
   fetchEnabledConnectors: vi.fn(),
@@ -70,6 +75,7 @@ const STEP_DESC = "**Prerequisites:**\n\n• Have your account ready\n• Be on 
 
 beforeEach(() => {
   vi.clearAllMocks();
+  demoState.readOnly = false;
   api.fetchAvailableConnectors.mockResolvedValue(AVAILABLE);
   api.fetchEnabledConnectors.mockResolvedValue(ENABLED);
   api.enableConnector.mockResolvedValue({ success: true, id: "new-1" });
@@ -90,6 +96,14 @@ describe("ConnectorsPage — main", () => {
     // Active connectors section + a disconnected one showing its error.
     expect(screen.getByText("Kasa")).toBeInTheDocument();
     expect(screen.getByText("boom")).toBeInTheDocument();
+  });
+
+  it("labels the hosted public demo as read-only", async () => {
+    demoState.readOnly = true;
+    render(<ConnectorsPage />);
+    await screen.findByText("Connectors");
+    expect(screen.getByText(/Public demo · read only/i)).toBeInTheDocument();
+    expect(screen.getByText(/real hardware, networks or credentials/i)).toBeInTheDocument();
   });
 
   it("refreshes on demand", async () => {

@@ -168,6 +168,36 @@ describe("Public demo mode (integration)", () => {
       expect(res.body[0]).toHaveProperty("role", "user");
     });
 
+    it("read the whole demo-generated Data Store without dashboard-pane ownership", async () => {
+      await request(app)
+        .post("/api/data-store/enable")
+        .set("Authorization", `Bearer ${adminToken()}`)
+        .send({ maxStorageMb: 100, maxRecordsPerCollection: 1000, maxCollections: 20 });
+      await request(app)
+        .post("/api/data-store/collections")
+        .set("Authorization", `Bearer ${adminToken()}`)
+        .send({ name: "demo-history", description: "public showcase data" });
+      await request(app)
+        .post("/api/data-store/collections/demo-history/records")
+        .set("Authorization", `Bearer ${adminToken()}`)
+        .send({ payload: { value: 42 } });
+
+      // No data-collection pane exposes demo-history. A normal user would fail
+      // closed, but the special public-demo session is a read-only admin showcase
+      // surface and may inspect the demo-generated store.
+      const list = await request(app)
+        .get("/api/data-store/collections")
+        .set("Authorization", `Bearer ${demoToken()}`);
+      expect(list.status).toBe(200);
+      expect(list.body.map((c: { name: string }) => c.name)).toContain("demo-history");
+
+      const records = await request(app)
+        .get("/api/data-store/collections/demo-history/records")
+        .set("Authorization", `Bearer ${demoToken()}`);
+      expect(records.status).toBe(200);
+      expect(records.body.total).toBe(1);
+    });
+
     it("read /api/system with host/network identifiers masked", async () => {
       const res = await request(app).get("/api/system").set("Authorization", `Bearer ${demoToken()}`);
       expect(res.status).toBe(200);

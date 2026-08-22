@@ -594,6 +594,22 @@ export function ConnectorsPage() {
         </button>
       </div>
 
+      {readOnly && (
+        <div className="flex items-start gap-3 rounded-xl border border-[#31506A] bg-[#0D1822] px-4 py-3">
+          <icons.LockKeyhole size={17} className="mt-0.5 shrink-0 text-[#72B7E6]" />
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-[0.12em] text-[#8CC9F0]">
+              Public demo · read only
+            </div>
+            <p className="mt-1 text-xs leading-relaxed text-[#8B9AAA]">
+              This page shows the connector types and health surfaces Aeolus supports. Connector setup,
+              configuration, enable/disable and retry actions are disabled in the hosted demo because they
+              would require access to real hardware, networks or credentials.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Setup wizard overlay */}
       <AnimatePresence>
         {setupConnectorId && setupSteps.length > 0 && (

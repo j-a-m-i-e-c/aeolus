@@ -140,13 +140,16 @@ export function createDataStoreRoutes(
   const router = Router();
 
   /**
-   * True when the requesting user may read the named collection. Admins always
-   * may. A non-admin may iff the collection is surfaced by a tab their group can
-   * reach. A collection surfaced by no tab (or one that does not exist) resolves
-   * to no tabs → false, so non-admins fail closed and cannot probe existence.
+   * True when the requesting user may read the named collection. Admins and the
+   * hosted public-demo session may read the whole demo-generated store. Ordinary
+   * non-admins may iff the collection is surfaced by a tab their group can reach.
+   * Unowned collections therefore still fail closed for normal user sessions.
    */
   function canReadCollection(req: Request, name: string): boolean {
-    if (req.user?.role === "admin") {
+    // The hosted public demo deliberately exposes the whole demo-generated Data
+    // Store read-only, just like the other scrubbed admin showcase surfaces.
+    // Normal non-admin sessions still fail closed to tab-owned collections.
+    if (req.user?.role === "admin" || req.user?.sessionType === "public-demo") {
       return true;
     }
     const accessible = new Set(resolver.accessibleTabIds(req.user?.userId ?? ""));
@@ -156,12 +159,13 @@ export function createDataStoreRoutes(
   // ─── Collection Endpoints ────────────────────────────────────────────────
 
   /**
-   * GET /collections — list collections with metadata. Admins see all;
-   * non-admins see only collections surfaced by a tab their group can reach.
+   * GET /collections — list collections with metadata. Admins and the hosted
+   * public demo see all; ordinary non-admins see only collections surfaced by a
+   * tab their group can reach.
    */
   router.get("/collections", (req, res) => {
     const collections = dataStore.listCollections();
-    if (req.user?.role === "admin") {
+    if (req.user?.role === "admin" || req.user?.sessionType === "public-demo") {
       res.json(collections);
       return;
     }
