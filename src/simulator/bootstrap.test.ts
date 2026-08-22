@@ -7,6 +7,24 @@ import {
   profileMatches,
   configureSimulatedCommandProfiles,
 } from "../../scripts/seed/simulator-bootstrap.mjs";
+import { AGRICULTURE_ACTUATOR_SPECS } from "../../scripts/seed/agriculture-simulator-bootstrap.mjs";
+import { RESEARCH_VESSEL_ACTUATOR_SPECS } from "../../scripts/seed/research-vessel-simulator-bootstrap.mjs";
+import { UNDERGROUND_MINING_ACTUATOR_SPECS } from "../../scripts/seed/underground-mining-simulator-bootstrap.mjs";
+import { WILDLIFE_ACTUATOR_SPECS } from "../../scripts/seed/wildlife-simulator-bootstrap.mjs";
+import { STAGE_SHOW_ACTUATOR_SPECS } from "../../scripts/seed/stage-show-simulator-bootstrap.mjs";
+import { ESCAPE_ROOM_ACTUATOR_SPECS } from "../../scripts/seed/escape-room-simulator-bootstrap.mjs";
+import { OFF_GRID_BUNKER_ACTUATOR_SPECS } from "../../scripts/seed/off-grid-bunker-simulator-bootstrap.mjs";
+
+/** Every world's specs, in the order scripts/seed-demo.mjs concatenates them. */
+const WORLD_ACTUATOR_SPECS: Array<readonly [string, readonly unknown[]]> = [
+  ["agriculture", AGRICULTURE_ACTUATOR_SPECS],
+  ["research-vessel", RESEARCH_VESSEL_ACTUATOR_SPECS],
+  ["underground-mining", UNDERGROUND_MINING_ACTUATOR_SPECS],
+  ["wildlife", WILDLIFE_ACTUATOR_SPECS],
+  ["stage-show", STAGE_SHOW_ACTUATOR_SPECS],
+  ["escape-room", ESCAPE_ROOM_ACTUATOR_SPECS],
+  ["off-grid-bunker", OFF_GRID_BUNKER_ACTUATOR_SPECS],
+];
 
 interface FakeDevice {
   id: string;
@@ -124,5 +142,59 @@ describe("configureSimulatedCommandProfiles", () => {
     await expect(
       configureSimulatedCommandProfiles(client, [{ stateTopic: PUMP_STATE, profile: ackProfile }], silentOpts),
     ).rejects.toThrow(/not an MQTT device/i);
+  });
+
+  it("rejects a spec whose acknowledgement/qos was flattened instead of wrapped in `profile`", async () => {
+    // Regression: a flattened spec silently reported the actuator as idempotently
+    // SKIPPED, because profileMatches(undefined, undefined) is a match. The world
+    // then ran with no acknowledgement capability, so CommandService clamped every
+    // `observed` command down to a fire-and-forget dispatch. Fail at seed time.
+    const { client, set } = fakeClient([[{ id: PUMP_ID, integration: "mqtt", topic: PUMP_STATE }]]);
+    const flattened = { stateTopic: PUMP_STATE, commandTopic: "switch/reference-water/transfer-pump/set", acknowledgement: { supported: true }, qos: 1 };
+    await expect(
+      configureSimulatedCommandProfiles(client, [flattened], silentOpts),
+    ).rejects.toThrow(/missing its "profile"/i);
+    expect(set).toHaveLength(0);
+  });
+
+  it("throws on a spec with no stateTopic", async () => {
+    const { client } = fakeClient([[]]);
+    await expect(
+      configureSimulatedCommandProfiles(client, [{ profile: ackProfile }], silentOpts),
+    ).rejects.toThrow(/missing a "stateTopic"/i);
+  });
+});
+
+describe("every demo world's actuator specs are shaped for the bootstrap", () => {
+  // The seed passes all of these to configureSimulatedCommandProfiles as one
+  // list, and a wrongly shaped entry used to be invisible in the seed output (it
+  // landed in `skipped`, indistinguishable from a genuinely idempotent skip).
+  // Lock the shape per world so a new world cannot repeat it.
+  it.each(WORLD_ACTUATOR_SPECS)(
+    "%s declares { stateTopic, profile } with acknowledgement support for every actuator",
+    (world, specs) => {
+      expect(specs.length, `${world} must declare at least one actuator`).toBeGreaterThan(0);
+      for (const spec of specs) {
+        const s = spec as Record<string, unknown>;
+        expect(typeof s.stateTopic, `${world}: stateTopic must be a string`).toBe("string");
+        expect(s.profile, `${world}: ${String(s.stateTopic)} must wrap its profile`).toBeTruthy();
+        expect(
+          (s.profile as { acknowledgement?: { supported?: boolean } }).acknowledgement?.supported,
+          `${world}: ${String(s.stateTopic)} must declare acknowledgement support`,
+        ).toBe(true);
+        // A flattened spec is the exact regression this guards against.
+        expect(
+          s.acknowledgement,
+          `${world}: ${String(s.stateTopic)} must not flatten acknowledgement onto the spec`,
+        ).toBeUndefined();
+      }
+    },
+  );
+
+  it("is the full set the seed actually passes to the bootstrap", () => {
+    // Keeps this guard honest: if a new world is wired into seed-demo.mjs but not
+    // added here, the count drifts and this fails.
+    const declared = WORLD_ACTUATOR_SPECS.reduce((n, [, specs]) => n + specs.length, 0);
+    expect(declared).toBe(23);
   });
 });

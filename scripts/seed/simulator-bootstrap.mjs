@@ -95,6 +95,26 @@ export async function configureSimulatedCommandProfiles(client, specs, options =
   // slug clash), so the persisted id is authoritative and may differ from a
   // naive segment-join. We therefore resolve each device by its EXACT persisted
   // `topic` and use the id Aeolus actually assigned — never a reconstructed one.
+  // Reject a malformed spec BEFORE touching any device. A spec written without
+  // the `profile` wrapper (e.g. acknowledgement/qos flattened onto the spec
+  // itself) used to sail straight through: `spec.profile` was undefined, so
+  // profileMatches() compared "no desired profile" against "no configured
+  // profile", declared a match, and reported the actuator as idempotently
+  // SKIPPED. The world then ran with actuators that declared no acknowledgement
+  // capability, which silently demoted every verified automation command to a
+  // fire-and-forget dispatch. Fail loudly instead.
+  for (const spec of specs) {
+    if (!spec || typeof spec.stateTopic !== "string" || !spec.stateTopic) {
+      throw new Error(`Simulator bootstrap: actuator spec is missing a "stateTopic": ${JSON.stringify(spec)}`);
+    }
+    if (!spec.profile || typeof spec.profile !== "object") {
+      throw new Error(
+        `Simulator bootstrap: actuator spec for "${spec.stateTopic}" is missing its "profile" ` +
+          `({ stateTopic, profile: { acknowledgement, qos } }). Found keys: ${Object.keys(spec).join(", ")}`,
+      );
+    }
+  }
+
   /** @type {Map<string, ActuatorSpec>} */
   const pending = new Map(specs.map((spec) => [spec.stateTopic, spec]));
 

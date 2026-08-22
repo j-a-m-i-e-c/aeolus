@@ -88,11 +88,18 @@ const CONDITION_COMPARATORS: Record<string, (a: number, b: number) => boolean> =
  * passed"). The host reconstructs a native predicate from the spec via
  * {@link evaluateConditionSpec}, so the observed-tier condition is evaluated
  * entirely host-side with nothing but data crossing the boundary.
+ *
+ * `value` may be a boolean as well as a number. Most real actuators report their
+ * commanded field as a boolean (`{ on: true }`, `{ sealed: false }`,
+ * `{ active: true }`), so `{ field: "on", op: "eq", value: true }` is the most
+ * natural way to express "confirm the switch actually reached ON".
+ * {@link evaluateConditionSpec} compares numerically after coercion, and a
+ * boolean coerces to 1/0 on BOTH sides, so the comparison is exact.
  */
 export interface ConditionComparison {
   field: string;
   op: keyof typeof CONDITION_COMPARATORS;
-  value: number;
+  value: number | boolean;
 }
 
 /** True when `spec` is a structurally valid condition spec (recursively). */
@@ -105,7 +112,11 @@ export function isConditionSpec(spec: unknown): boolean {
     typeof s.field === "string" &&
     typeof s.op === "string" &&
     Object.prototype.hasOwnProperty.call(CONDITION_COMPARATORS, s.op) &&
-    typeof s.value === "number"
+    // Booleans are accepted alongside numbers: rejecting them here made every
+    // `value: <boolean>` spec malformed, which silently dropped the caller's
+    // Confirmation_Options and clamped an author's `tier: "observed"` down to a
+    // fire-and-forget dispatch. Coercion happens in evaluateConditionSpec().
+    (typeof s.value === "number" || typeof s.value === "boolean")
   );
 }
 
@@ -113,6 +124,10 @@ export function isConditionSpec(spec: unknown): boolean {
  * Evaluate a {@link ConditionSpec} against an observed device state. A missing
  * or non-numeric observed field yields `false` (the condition is simply not yet
  * satisfied), never a throw. Exported for unit testing without a live isolate.
+ *
+ * Both sides are coerced with `Number`, so a boolean observed field and/or a
+ * boolean `value` compare as 1/0 — `{ field: "on", op: "eq", value: true }` is
+ * satisfied by an observed `{ on: true }` and not by `{ on: false }`.
  */
 export function evaluateConditionSpec(spec: unknown, state: Record<string, unknown>): boolean {
   if (!spec || typeof spec !== "object") return false;

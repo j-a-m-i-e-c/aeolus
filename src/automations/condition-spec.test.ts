@@ -27,6 +27,23 @@ describe("evaluateConditionSpec", () => {
     expect(evaluateConditionSpec({ field: "flow", op: "gt", value: 0 }, { flow: "120" })).toBe(true);
   });
 
+  it("confirms a boolean actuator field against a boolean value", () => {
+    // The common real case: an actuator reports the field it was commanded on as
+    // a boolean ({ on: true } / { sealed: false } / { active: true }), so this is
+    // how an author naturally expresses "confirm the switch reached ON".
+    expect(evaluateConditionSpec({ field: "on", op: "eq", value: true }, { on: true })).toBe(true);
+    expect(evaluateConditionSpec({ field: "on", op: "eq", value: true }, { on: false })).toBe(false);
+    expect(evaluateConditionSpec({ field: "on", op: "eq", value: false }, { on: false })).toBe(true);
+    expect(evaluateConditionSpec({ field: "on", op: "eq", value: false }, { on: true })).toBe(false);
+    expect(evaluateConditionSpec({ field: "sealed", op: "ne", value: false }, { sealed: true })).toBe(true);
+  });
+
+  it("treats an absent boolean field as not-yet-satisfied rather than false-equals-false", () => {
+    // Number(undefined) is NaN, so a device that has not reported the field yet
+    // must not accidentally satisfy `value: false`.
+    expect(evaluateConditionSpec({ field: "on", op: "eq", value: false }, {})).toBe(false);
+  });
+
   it("treats a missing or non-numeric observed field as not-yet-satisfied (false), never throwing", () => {
     expect(evaluateConditionSpec({ field: "flow", op: "gt", value: 0 }, {})).toBe(false);
     expect(evaluateConditionSpec({ field: "flow", op: "gt", value: 0 }, { flow: "abc" })).toBe(false);
@@ -62,6 +79,17 @@ describe("isConditionSpec", () => {
     expect(isConditionSpec({ any: [{ field: "a", op: "lt", value: 5 }] })).toBe(true);
   });
 
+  it("accepts a boolean value, nested in combinators too", () => {
+    // A rejected spec is not an error the author ever sees: buildConfirmOptions
+    // returns undefined, the Confirmation_Options are dropped, and CommandService
+    // clamps the requested `observed` tier down to a fire-and-forget dispatch. So
+    // rejecting `value: <boolean>` silently turned every verified boolean switch
+    // command in the demo worlds into an unverified one.
+    expect(isConditionSpec({ field: "on", op: "eq", value: true })).toBe(true);
+    expect(isConditionSpec({ field: "on", op: "eq", value: false })).toBe(true);
+    expect(isConditionSpec({ all: [{ field: "on", op: "eq", value: true }, { field: "brightness", op: "gt", value: 0 }] })).toBe(true);
+  });
+
   it("rejects functions, empty combinators, and structurally invalid specs", () => {
     expect(isConditionSpec(() => true)).toBe(false);
     expect(isConditionSpec(undefined)).toBe(false);
@@ -69,5 +97,10 @@ describe("isConditionSpec", () => {
     expect(isConditionSpec({ field: "flow", op: "nope", value: 0 })).toBe(false);
     expect(isConditionSpec({ all: [] })).toBe(false);
     expect(isConditionSpec({ all: [{ field: "x", op: "gt" }] })).toBe(false);
+  });
+
+  it("still rejects a non-numeric, non-boolean value", () => {
+    expect(isConditionSpec({ field: "scene", op: "eq", value: "wash" })).toBe(false);
+    expect(isConditionSpec({ field: "on", op: "eq", value: null })).toBe(false);
   });
 });
