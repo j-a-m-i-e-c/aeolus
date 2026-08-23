@@ -6,8 +6,9 @@
 # must NOT use host networking (Public Demo requirements §13, §21). Run it on the
 # demo VM by itself:
 #
+#   # Production host: images are pre-built and loaded/pulled first.
 #   CLOUDFLARE_TUNNEL_TOKEN=... DEMO_PUBLIC_ORIGIN=https://demo.aeolus.com.au \
-#     docker compose -f docker-compose.public-demo.yml up -d --build
+#     docker compose -f docker-compose.public-demo.yml up -d
 #
 # For LOCAL demo-mode testing (no tunnel, no hardening) keep using the base stack
 # with the AEOLUS_PUBLIC_DEMO flag or the docker-compose.demo.yml testing overlay.
@@ -61,13 +62,9 @@ services:
   # ports, production node env, and the fail-closed demo guard enabled.
   backend:
     <<: *hardening
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        BUILD_COMMIT: ${BUILD_COMMIT:-unknown}
-        BUILD_DATE: ${BUILD_DATE:-unknown}
-    image: aeolus-app:local
+    # Production hosts never compile Aeolus. A release image is either pulled
+    # from a registry or loaded from a developer machine before `compose up`.
+    image: ${AEOLUS_APP_IMAGE:-aeolus-demo-app:current}
     container_name: aeolus-demo-backend
     networks:
       - demo
@@ -108,14 +105,7 @@ services:
   # origin (single origin: the tunnel path-routes /api and /ws to the backend).
   frontend:
     <<: *hardening
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-      args:
-        VITE_PUBLIC_DEMO: "true"
-        VITE_API_URL: ${DEMO_PUBLIC_ORIGIN:-https://demo.aeolus.com.au}
-        VITE_WS_URL: ${DEMO_PUBLIC_WS_URL:-wss://demo.aeolus.com.au/ws}
-    image: aeolus-demo-frontend:local
+    image: ${AEOLUS_FRONTEND_IMAGE:-aeolus-demo-frontend:current}
     container_name: aeolus-demo-frontend
     networks:
       - demo
@@ -129,7 +119,7 @@ services:
   # no admin credentials and exposes no ports.
   simulator:
     <<: *hardening
-    image: aeolus-app:local
+    image: ${AEOLUS_APP_IMAGE:-aeolus-demo-app:current}
     container_name: aeolus-demo-simulator
     networks:
       - demo
@@ -146,10 +136,10 @@ services:
     cpus: 0.5
 
   # Cloudflare Tunnel — the ONLY public ingress. It makes outbound connections to
-  # Cloudflare (no inbound ports on the VM). Public-hostname ingress rules are
-  # configured in the Cloudflare dashboard for the token's tunnel and should route
-  # the demo hostname's `/api/*` and `/ws` to http://backend:3001 and everything
-  # else to http://frontend:80. Provide the token via CLOUDFLARE_TUNNEL_TOKEN.
+  # Cloudflare (no inbound ports on the VM). The recommended deployment manages
+  # the tunnel, DNS and ingress rules with infra/public-demo Terraform. Manual
+  # Cloudflare dashboard configuration is still possible if Terraform is disabled.
+  # Provide the resulting tunnel token via CLOUDFLARE_TUNNEL_TOKEN.
   cloudflared:
     <<: *hardening
     image: cloudflare/cloudflared:latest

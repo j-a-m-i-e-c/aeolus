@@ -1,40 +1,52 @@
-name: Deploy Aeolus Demo
+name: Publish Aeolus Demo Release
 
-# Manual, operator-initiated deploy of the public demo (never auto-deploys on a
-# push to main — requirements §23). The operator chooses the ref; the workflow
-# verifies it, then deploys over SSH and gates on a post-deploy health check.
+# Manual release builder. It deliberately DOES NOT SSH to the Lightsail host.
+# The host firewall can therefore keep SSH restricted to the operator's IP.
+# After this publishes immutable GHCR images, deploy them from an operator PC:
 #
-# Required repository/environment configuration (set under Settings → Secrets and
-# variables, scoped to the `demo` environment which should require admin review):
-#   secrets.DEMO_SSH_HOST   demo VM hostname / IP
-#   secrets.DEMO_SSH_USER   SSH user on the demo VM
-#   secrets.DEMO_SSH_KEY    private key authorised on the demo VM
-#   vars.DEMO_APP_DIR       absolute path of the checked-out repo on the VM
-#                           (contains docker-compose.public-demo.yml)
+#   DEMO_IMAGE_MODE=registry \
+#   DEMO_APP_IMAGE=ghcr.io/<owner>/aeolus-demo-app:<sha> \
+#   DEMO_FRONTEND_IMAGE=ghcr.io/<owner>/aeolus-demo-frontend:<sha> \
+#   ./scripts/deploy/deploy-demo-from-pc.sh
 #
-# The demo host holds its own environment (CLOUDFLARE_TUNNEL_TOKEN,
-# DEMO_PUBLIC_ORIGIN, AEOLUS_DEMO_GOLDEN_DB, AEOLUS_DEMO_DATA_DIR) in an .env
-# file next to the compose file — secrets never pass through this workflow.
+# For the first deployment you can skip GHCR entirely; deploy-demo-from-pc.sh
+# defaults to building locally and streaming the images over SSH.
 
 on:
   workflow_dispatch:
     inputs:
       ref:
-        description: "Git ref (branch, tag, or commit SHA) to deploy"
+        description: "Git ref (branch, tag, or commit SHA) to publish"
         required: true
         default: main
 
+permissions:
+  contents: read
+  packages: write
+
 concurrency:
-  group: deploy-demo
+  group: publish-demo-release
   cancel-in-progress: false
 
 jobs:
   verify:
     runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.meta.outputs.sha }}
+      short_sha: ${{ steps.meta.outputs.short_sha }}
+      build_date: ${{ steps.meta.outputs.build_date }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.ref }}
+
+      - id: meta
+        name: Resolve immutable release ID
+        shell: bash
+        run: |
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "short_sha=$(git rev-parse --short=12 HEAD)" >> "$GITHUB_OUTPUT"
+          echo "build_date=$(git show -s --format=%cI HEAD)" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-node@v4
         with:
@@ -43,42 +55,82 @@ jobs:
 
       - run: npm ci
 
-      - name: TypeScript check
+      - name: Backend typecheck
         run: npx tsc --noEmit
 
-      - name: Build (backend + simulator bundles)
+      - name: Build backend + simulator bundles
         run: npm run build
 
-      - name: Tests
+      - name: Backend tests
         run: npx vitest run
 
-  deploy:
+      - name: Frontend install
+        working-directory: frontend
+        run: npm ci
+
+      - name: Frontend typecheck
+        working-directory: frontend
+        run: npx tsc --noEmit -p tsconfig.json
+
+      - name: Frontend tests
+        working-directory: frontend
+        run: npm run test
+
+  publish:
     needs: verify
     runs-on: ubuntu-latest
-    # Gate behind the `demo` environment so a required reviewer must approve
-    # (admin-only deploys). Configure protection rules on the environment.
     environment: demo
     steps:
-      - name: Configure SSH
-        run: |
-          mkdir -p ~/.ssh
-          printf '%s\n' "${{ secrets.DEMO_SSH_KEY }}" > ~/.ssh/id_deploy
-          chmod 600 ~/.ssh/id_deploy
-          ssh-keyscan -H "${{ secrets.DEMO_SSH_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.verify.outputs.sha }}
 
-      - name: Deploy selected ref and health-check
-        env:
-          SSH_HOST: ${{ secrets.DEMO_SSH_HOST }}
-          SSH_USER: ${{ secrets.DEMO_SSH_USER }}
-          APP_DIR: ${{ vars.DEMO_APP_DIR }}
-          DEPLOY_REF: ${{ inputs.ref }}
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Sign in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and publish backend/simulator image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          build-args: |
+            BUILD_COMMIT=${{ needs.verify.outputs.sha }}
+            BUILD_DATE=${{ needs.verify.outputs.build_date }}
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/aeolus-demo-app:${{ needs.verify.outputs.sha }}
+            ghcr.io/${{ github.repository_owner }}/aeolus-demo-app:demo-latest
+
+      - name: Build and publish public frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          push: true
+          build-args: |
+            VITE_PUBLIC_DEMO=true
+            VITE_API_URL=${{ vars.DEMO_PUBLIC_ORIGIN || 'https://demo.aeolus.com.au' }}
+            VITE_WS_URL=${{ vars.DEMO_PUBLIC_WS_URL || 'wss://demo.aeolus.com.au/ws' }}
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/aeolus-demo-frontend:${{ needs.verify.outputs.sha }}
+            ghcr.io/${{ github.repository_owner }}/aeolus-demo-frontend:demo-latest
+
+      - name: Publish deployment instructions
         run: |
-          ssh -i ~/.ssh/id_deploy "${SSH_USER}@${SSH_HOST}" bash -ls <<EOF
-          set -euo pipefail
-          cd "${APP_DIR}"
-          git fetch --all --tags
-          git checkout "${DEPLOY_REF}"
-          git pull --ff-only || true
-          docker compose -f docker-compose.public-demo.yml up -d --build
-          ./scripts/demo-health-check.sh
-          EOF
+          cat >> "$GITHUB_STEP_SUMMARY" <<'SUMMARY'
+          ## Demo release published
+
+          Immutable images:
+          SUMMARY
+          echo '- `ghcr.io/${{ github.repository_owner }}/aeolus-demo-app:${{ needs.verify.outputs.sha }}`' >> "$GITHUB_STEP_SUMMARY"
+          echo '- `ghcr.io/${{ github.repository_owner }}/aeolus-demo-frontend:${{ needs.verify.outputs.sha }}`' >> "$GITHUB_STEP_SUMMARY"
+          cat >> "$GITHUB_STEP_SUMMARY" <<'SUMMARY'
+
+          Deploy from a source-restricted operator PC with `scripts/deploy/deploy-demo-from-pc.sh` in `registry` mode.
+          SUMMARY

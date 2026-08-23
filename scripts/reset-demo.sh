@@ -34,6 +34,11 @@ die() { printf '[reset-demo] ERROR: %s\n' "$*" >&2; exit 1; }
 
 command -v docker >/dev/null 2>&1 || die "docker not found on PATH"
 [ -f "$GOLDEN_DB" ] || die "golden database not found: $GOLDEN_DB"
+if [ -f "${GOLDEN_DB}.sha256" ]; then
+  log "Verifying golden snapshot checksum…"
+  (cd "$(dirname "$GOLDEN_DB")" && sha256sum -c "$(basename "${GOLDEN_DB}.sha256")") >/dev/null \
+    || die "golden database checksum verification failed"
+fi
 
 compose() { docker compose -f "$COMPOSE_FILE" "$@"; }
 
@@ -47,6 +52,7 @@ rm -f "$ACTIVE_DB" "${ACTIVE_DB}-wal" "${ACTIVE_DB}-shm"
 log "Copying immutable golden snapshot -> active database…"
 mkdir -p "$DATA_DIR"
 cp "$GOLDEN_DB" "$ACTIVE_DB"
+chmod 0644 "$ACTIVE_DB"
 # The backend container entrypoint re-chowns /app/data to the app user on start,
 # so root-owned host copies are corrected automatically.
 

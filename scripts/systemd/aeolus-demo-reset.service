@@ -5,10 +5,10 @@
 #   sudo systemctl daemon-reload
 #   sudo systemctl enable --now aeolus-demo-reset.timer
 #
-# Adjust WorkingDirectory to wherever the repo/compose file lives on the host,
-# and the golden/active paths to match your deployment (see the [Service]
-# environment below). The reset is a presentation mechanism only; the demo stays
-# safe even if this never runs (requirements §2.4).
+# The public-demo deploy/bootstrap scripts use /opt/aeolus-demo. If you choose a
+# different DEMO_ROOT, install a matching unit rather than silently relying on
+# these defaults. The reset is a presentation mechanism only; the demo remains
+# fail-closed even if this timer never runs (requirements §2.4).
 
 [Unit]
 Description=Reset the Aeolus public demo to its golden snapshot

@@ -93,77 +93,94 @@ The reference `reference-water` scenario is a conformance fixture, not a public 
 
 ## Public demo deployment (hardened)
 
-The public demo (`demo.aeolus.com.au`) runs from a dedicated, self-contained
-stack, **`docker-compose.public-demo.yml`** — not the base compose file. It is
-separate because the base backend uses host networking for LAN discovery, which
-the public demo must not do. The full policy is `docs/AEOLUS_PUBLIC_DEMO_REQUIREMENTS.md`;
-this section is the operational summary.
+The hosted demo (`demo.aeolus.com.au`) uses the standalone
+`docker-compose.public-demo.yml`. It is intentionally separate from the base
+stack because the public demo must never use host networking or LAN discovery.
 
-Bring it up on the demo VM:
+The deployment is split into two layers:
 
-```bash
-CLOUDFLARE_TUNNEL_TOKEN=... DEMO_PUBLIC_ORIGIN=https://demo.aeolus.com.au \
-  docker compose -f docker-compose.public-demo.yml up -d --build
+```text
+infra/public-demo (Terraform)
+  -> Lightsail + static IP + SSH firewall + Cloudflare Tunnel/DNS/ingress
+
+scripts/deploy + docker-compose.public-demo.yml
+  -> immutable Aeolus release + active/golden demo lifecycle
 ```
 
-What the stack enforces:
+See **`infra/public-demo/README.md`** for the complete first-deployment runbook.
 
-- **bridge networking only** — no host networking, no LAN discovery;
-- the **broker is internal** — port `1883` is never published;
-- the backend and frontend **publish no host ports**; **Cloudflare Tunnel**
-  (`cloudflared`) is the sole public ingress. Configure the tunnel's public
-  hostname to route `/api/*` and `/ws` to `http://backend:3001` and everything
-  else to `http://frontend:80` (token-managed tunnels set ingress in the
-  Cloudflare dashboard);
-- every service runs with `no-new-privileges`, drops all Linux capabilities,
-  has `mem_limit`/`cpus` ceilings, and mounts **no Docker socket**;
-- `AEOLUS_PUBLIC_DEMO=true` enables the in-app fail-closed guard; managed MQTT
-  provisioning stays off (no broker files are written).
+### Runtime / build separation
+
+The Lightsail host does **not** build Aeolus. `docker-compose.public-demo.yml` is
+runtime-only and consumes `AEOLUS_APP_IMAGE` / `AEOLUS_FRONTEND_IMAGE`. Local or
+CI builds use the explicit `docker-compose.public-demo.build.yml` overlay.
+
+For a first deployment, the recommended path is operator-PC `transfer` mode:
+
+```bash
+./scripts/deploy/deploy-demo-from-pc.sh
+```
+
+It builds images locally, streams them over source-restricted SSH, starts the
+hardened stack without `--build`, and health-checks the release. A failed health
+gate attempts to restore the complete previous deployment source + image configuration.
+
+The production stack enforces:
+
+- bridge networking only;
+- no public MQTT/backend/frontend/database ports;
+- Cloudflare Tunnel as the sole application ingress;
+- SSH as the only Lightsail public port, source-restricted by Terraform;
+- `no-new-privileges`, dropped Linux capabilities and resource ceilings;
+- no Docker socket mounts;
+- active DB mounted into Aeolus, golden DB never mounted into Aeolus.
+
+Cloudflare Tunnel/DNS/ingress are preferably managed by Terraform. Manual
+Cloudflare dashboard configuration remains possible by setting
+`manage_cloudflare=false`.
 
 ### Golden / active database and reset
 
-The demo uses two databases (requirements §18):
-
 ```text
 /opt/aeolus-demo/
-├── golden/aeolus-demo.db   # immutable known-good snapshot (NOT mounted into the app)
-└── data/aeolus.db          # active, disposable DB the backend actually uses
+├── app/
+├── golden/aeolus-demo.db   # immutable, verified reset source
+└── data/aeolus.db          # active disposable DB
 ```
 
-Only the active directory (`AEOLUS_DEMO_DATA_DIR`) is bind-mounted into the
-backend, so the running application can never mutate the golden snapshot. Build
-the golden snapshot once by seeding (`--profile seed`) and copying the resulting
-`data/aeolus.db` to `golden/`.
-
-`scripts/reset-demo.sh` restores the demo from golden with the orderly sequence
-(stop app services → delete the active DB and its WAL/SHM → copy golden → active
-→ start → health-check via `scripts/demo-health-check.sh`). The database is only
-swapped while the backend is stopped, so it is never overwritten under a running
-Aeolus. Reset is a presentation mechanism, **not** a security control — the demo
-stays safe even if it never runs.
-
-A nightly reset (~03:30 Australia/Sydney) is scheduled with the systemd units in
-`scripts/systemd/` (`aeolus-demo-reset.{service,timer}`):
+After seeding/reviewing the final release, run on the demo host:
 
 ```bash
-sudo cp scripts/systemd/aeolus-demo-reset.{service,timer} /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now aeolus-demo-reset.timer
+./scripts/deploy/seed-demo-and-create-golden.sh
 ```
 
-### Deploy and manual reset workflows
+`scripts/create-demo-golden.sh` stops DB writers, checkpoints SQLite WAL, runs an
+integrity check, preserves the prior golden, creates the new read-only snapshot,
+and writes a SHA-256 checksum + release metadata. `scripts/reset-demo.sh` verifies
+that checksum before restoring golden -> active while the backend is stopped.
 
-Two `workflow_dispatch` GitHub Actions drive the demo VM over SSH and are gated
-behind the `demo` environment (require admin review):
+The systemd timer in `scripts/systemd/` restores the demo around 03:30 Sydney
+each day. `deploy-demo-from-pc.sh` installs/enables the timer. Manual remote reset
+from an operator machine is:
 
-- **Deploy Aeolus Demo** (`.github/workflows/deploy-demo.yml`) — verify a chosen
-  ref, then deploy and health-check it. Never auto-runs on `main`.
-- **Reset Public Demo** (`.github/workflows/reset-demo.yml`) — run
-  `reset-demo.sh` on demand (emergency restore).
+```bash
+./scripts/deploy/reset-demo-remote.sh
+```
 
-Both need `secrets.DEMO_SSH_HOST` / `DEMO_SSH_USER` / `DEMO_SSH_KEY` and
-`vars.DEMO_APP_DIR`. The `CLOUDFLARE_TUNNEL_TOKEN` and golden/active paths live
-in an `.env` on the demo host, never in the workflow.
+Reset remains a presentation-quality mechanism, not a security boundary.
+
+### GitHub release workflow
+
+`.github/workflows/deploy-demo.yml` no longer SSHes to the VM. A manually
+dispatched workflow verifies the selected ref and publishes commit-addressed
+backend/simulator + frontend images to GHCR. The operator then deploys those
+images from a source-restricted PC in `registry` mode.
+
+This keeps the Lightsail SSH firewall independent of GitHub-hosted runner IPs.
+For the first deployment, GHCR is optional; local image transfer is simpler.
+
+Terraform state under `infra/public-demo` contains sensitive Cloudflare tunnel
+material and is ignored by Git. Treat it as a secret.
 
 ## Logging
 

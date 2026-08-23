@@ -1,0 +1,30 @@
+# Local/CI build overlay for docker-compose.public-demo.yml.
+#
+# The public deployment compose file intentionally contains no build contexts:
+# production hosts pull/load immutable images and only restart containers. Use
+# this overlay when building a release on a developer machine:
+#
+#   docker compose \
+#     -f docker-compose.public-demo.yml \
+#     -f docker-compose.public-demo.build.yml \
+#     build backend frontend
+#
+# The simulator shares the backend image and therefore has no separate build.
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BUILD_COMMIT: ${BUILD_COMMIT:-unknown}
+        BUILD_DATE: ${BUILD_DATE:-unknown}
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_PUBLIC_DEMO: "true"
+        VITE_API_URL: ${DEMO_PUBLIC_ORIGIN:-https://demo.aeolus.com.au}
+        VITE_WS_URL: ${DEMO_PUBLIC_WS_URL:-wss://demo.aeolus.com.au/ws}

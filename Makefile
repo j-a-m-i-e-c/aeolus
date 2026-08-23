@@ -1,4 +1,4 @@
-.PHONY: deploy deploy-demo up up-desktop demo-up demo-reset down restart logs logs-backend status clean dev sim seed seed-demo reset test test-integration e2e e2e-fresh lint check verify verify-all help
+.PHONY: deploy deploy-demo public-demo-preflight public-demo-build public-demo-up public-demo-seed public-demo-golden public-demo-reset up up-desktop demo-up demo-reset down restart logs logs-backend status clean dev sim seed seed-demo reset test test-integration e2e e2e-fresh lint check verify verify-all help
 
 # `USER` is normally set by the shell (your login name), which would leak into
 # the seed command. Ignore the environment value and default to "admin" unless
@@ -7,21 +7,43 @@ ifeq ($(origin USER),environment)
 USER := admin
 endif
 
-# Compose files for the public demo overlay (backend demo mode + Phase 2 simulator).
-# Used by the demo-* / deploy-demo / seed-demo targets so they don't repeat the flags.
+# Local development/demo overlay. This is NOT the hardened internet-facing stack.
 DEMO_COMPOSE := -f docker-compose.yml -f docker-compose.demo.yml
 
-# ─── Production (Pi) ──────────────────────────────────────────────────────────
+# Hardened internet-facing stack. Production hosts consume pre-built images; the
+# build overlay is opt-in for a developer/CI machine only.
+PUBLIC_DEMO_COMPOSE := -f docker-compose.public-demo.yml
+PUBLIC_DEMO_BUILD_COMPOSE := -f docker-compose.public-demo.yml -f docker-compose.public-demo.build.yml
+
+# ─── Production / hosted release ─────────────────────────────────────────────
 
 deploy: ## Pull latest, rebuild, and deploy the BASE stack (run on Pi)
 	git pull && \
 	BUILD_COMMIT=$$(git rev-parse --short HEAD) BUILD_DATE=$$(git log -1 --format=%cI HEAD) \
 	docker compose down && docker compose up -d --build && docker builder prune -f && docker image prune -f
 
-deploy-demo: ## Pull latest, rebuild, and deploy the PUBLIC DEMO overlay (run on the demo Pi)
-	git pull && \
-	BUILD_COMMIT=$$(git rev-parse --short HEAD) BUILD_DATE=$$(git log -1 --format=%cI HEAD) \
-	docker compose $(DEMO_COMPOSE) down && docker compose $(DEMO_COMPOSE) up -d --build && docker builder prune -f && docker image prune -f
+deploy-demo: ## Deploy hardened public demo FROM THIS PC (no compilation on Lightsail)
+	./scripts/deploy/deploy-demo-from-pc.sh
+
+public-demo-preflight: ## Check operator-PC prerequisites for Terraform + public demo deployment
+	./scripts/deploy/check-public-demo-prereqs.sh
+
+public-demo-build: ## Build hardened public-demo images locally (not on the VM)
+	BUILD_COMMIT=$$(git rev-parse --short HEAD 2>/dev/null || echo local) BUILD_DATE=$$(date -u +%Y-%m-%dT%H:%M:%SZ) \
+	docker compose $(PUBLIC_DEMO_BUILD_COMPOSE) build backend frontend
+
+public-demo-up: ## Start hardened public-demo stack using already-built/pulled images
+	docker compose $(PUBLIC_DEMO_COMPOSE) up -d --remove-orphans
+
+public-demo-seed: ## Seed hardened public demo on this host. Usage: make public-demo-seed PASS=... [USER=admin]
+	@if [ -z "$(PASS)" ]; then echo "Error: PASS is required"; exit 1; fi
+	docker compose $(PUBLIC_DEMO_COMPOSE) --profile seed run --rm -e SEED_USER="$(USER)" -e SEED_PASS="$(PASS)" seed
+
+public-demo-golden: ## Create verified immutable golden snapshot (run on demo host)
+	./scripts/create-demo-golden.sh
+
+public-demo-reset: ## Restore hardened public demo from golden snapshot (run on demo host)
+	./scripts/reset-demo.sh
 
 up: ## Start all services
 	docker compose up -d
