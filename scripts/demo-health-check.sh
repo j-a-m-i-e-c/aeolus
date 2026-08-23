@@ -33,4 +33,10 @@ for attempt in $(seq 1 "$ATTEMPTS"); do
 done
 
 echo "[demo-health] backend did not become healthy within budget" >&2
+echo "[demo-health] service state:" >&2
+docker compose -f "$COMPOSE_FILE" ps >&2 || true
+echo "[demo-health] backend logs (last 80 lines):" >&2
+docker compose -f "$COMPOSE_FILE" logs --tail=80 backend >&2 || true
+echo "[demo-health] mosquitto logs (last 40 lines):" >&2
+docker compose -f "$COMPOSE_FILE" logs --tail=40 mosquitto >&2 || true
 exit 1

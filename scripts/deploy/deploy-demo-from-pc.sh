@@ -91,7 +91,10 @@ previous_app="${DEMO_APP_DIR}.previous"
 ssh "${ssh_args[@]}" "$remote" "DEMO_APP_DIR='${DEMO_APP_DIR}' PREVIOUS_APP='${previous_app}' bash -s" <<'SOURCE_BACKUP_EOF'
 set -euo pipefail
 rm -rf "$PREVIOUS_APP"
-if [ -d "$DEMO_APP_DIR" ] && [ -n "$(ls -A "$DEMO_APP_DIR" 2>/dev/null || true)" ]; then
+# A source tree without its host-only .env is not a deployable rollback unit.
+# This matters on the very first release: an interrupted source sync must never
+# masquerade as a previous working deployment.
+if [ -f "$DEMO_APP_DIR/docker-compose.public-demo.yml" ] && [ -s "$DEMO_APP_DIR/.env" ]; then
   cp -a "$DEMO_APP_DIR" "$PREVIOUS_APP"
 fi
 rm -rf "$DEMO_APP_DIR"
@@ -181,7 +184,10 @@ fi
 
 # Rebuild the managed deployment keys while preserving any unrelated operator
 # settings already present in .env.
-grep -v -E '^(AEOLUS_APP_IMAGE|AEOLUS_FRONTEND_IMAGE|DEMO_PUBLIC_ORIGIN|DEMO_PUBLIC_WS_URL|CLOUDFLARE_TUNNEL_TOKEN|AEOLUS_DEMO_DATA_DIR|AEOLUS_DEMO_GOLDEN_DB)=' "$env_file" > "$tmp" || true
+runtime_uid="$(id -u)"
+runtime_gid="$(id -g)"
+
+grep -v -E '^(AEOLUS_APP_IMAGE|AEOLUS_FRONTEND_IMAGE|DEMO_PUBLIC_ORIGIN|DEMO_PUBLIC_WS_URL|CLOUDFLARE_TUNNEL_TOKEN|AEOLUS_DEMO_DATA_DIR|AEOLUS_DEMO_GOLDEN_DB|AEOLUS_RUNTIME_UID|AEOLUS_RUNTIME_GID)=' "$env_file" > "$tmp" || true
 {
   printf 'AEOLUS_APP_IMAGE=%s\n' "$app_image"
   printf 'AEOLUS_FRONTEND_IMAGE=%s\n' "$frontend_image"
@@ -190,6 +196,8 @@ grep -v -E '^(AEOLUS_APP_IMAGE|AEOLUS_FRONTEND_IMAGE|DEMO_PUBLIC_ORIGIN|DEMO_PUB
   printf 'CLOUDFLARE_TUNNEL_TOKEN=%s\n' "$tunnel_token"
   printf 'AEOLUS_DEMO_DATA_DIR=%s/data\n' "$DEMO_ROOT"
   printf 'AEOLUS_DEMO_GOLDEN_DB=%s/golden/aeolus-demo.db\n' "$DEMO_ROOT"
+  printf 'AEOLUS_RUNTIME_UID=%s\n' "$runtime_uid"
+  printf 'AEOLUS_RUNTIME_GID=%s\n' "$runtime_gid"
 } >> "$tmp"
 chmod 600 "$tmp"
 mv "$tmp" "$env_file"
@@ -206,8 +214,8 @@ if ! ssh "${ssh_args[@]}" "$remote" "cd '${DEMO_APP_DIR}' && docker compose -f d
   log "New release failed health checks. Attempting full source + image rollback…"
   ssh "${ssh_args[@]}" "$remote" "DEMO_APP_DIR='${DEMO_APP_DIR}' PREVIOUS_APP='${previous_app}' bash -s" <<'ROLLBACK_EOF' || true
 set -euo pipefail
-if [ ! -d "$PREVIOUS_APP" ] || [ ! -f "$PREVIOUS_APP/docker-compose.public-demo.yml" ]; then
-  echo 'No complete previous deployment exists.' >&2
+if [ ! -d "$PREVIOUS_APP" ] || [ ! -f "$PREVIOUS_APP/docker-compose.public-demo.yml" ] || [ ! -s "$PREVIOUS_APP/.env" ]; then
+  echo 'No complete previous deployment with host configuration exists.' >&2
   exit 1
 fi
 failed="${DEMO_APP_DIR}.failed.$(date -u +%Y%m%dT%H%M%SZ)"

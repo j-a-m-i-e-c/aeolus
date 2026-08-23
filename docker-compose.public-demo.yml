@@ -50,6 +50,9 @@ services:
     <<: *hardening
     image: eclipse-mosquitto:2
     container_name: aeolus-demo-mosquitto
+    # The official image uses UID/GID 1883. Start directly as that user because
+    # the hardened stack drops SETUID/SETGID (and every other capability).
+    user: "1883:1883"
     # Dedicated demo broker config (anonymous, ephemeral). Read-only mount.
     volumes:
       - ./mosquitto/mosquitto.demo.conf:/mosquitto/config/mosquitto.conf:ro
@@ -66,6 +69,10 @@ services:
     # from a registry or loaded from a developer machine before `compose up`.
     image: ${AEOLUS_APP_IMAGE:-aeolus-demo-app:current}
     container_name: aeolus-demo-backend
+    # Public demo bind storage is owned by the deployment user on the host. Run
+    # directly as that numeric UID/GID so no root/chown/setuid capability is
+    # needed inside the container. The deploy script writes these values.
+    user: "${AEOLUS_RUNTIME_UID:-1000}:${AEOLUS_RUNTIME_GID:-1000}"
     networks:
       - demo
     environment:
@@ -121,6 +128,9 @@ services:
     <<: *hardening
     image: ${AEOLUS_APP_IMAGE:-aeolus-demo-app:current}
     container_name: aeolus-demo-simulator
+    # Same unprivileged runtime identity as the backend; unlike normal Aeolus
+    # deployments the hardened public demo intentionally never starts as root.
+    user: "${AEOLUS_RUNTIME_UID:-1000}:${AEOLUS_RUNTIME_GID:-1000}"
     networks:
       - demo
     environment:

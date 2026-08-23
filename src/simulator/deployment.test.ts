@@ -76,7 +76,11 @@ describe("hardened public demo stack (docker-compose.public-demo.yml)", () => {
   it("publishes no host ports — Cloudflare Tunnel is the only public ingress", () => {
     // No `ports:` mapping anywhere; the broker's 1883 is never exposed.
     expect(/^\s{4}ports:/m.test(publicDemoCompose)).toBe(false);
-    expect(publicDemoCompose).not.toMatch(/1883:1883/);
+    // Reject 1883 only where it would be a *published port*, i.e. a `ports:`
+    // sequence entry. A bare `1883:1883` substring search would also flag
+    // mosquitto's `user: "1883:1883"`, which is the image's UID:GID and exposes
+    // nothing to the host.
+    expect(publicDemoCompose).not.toMatch(/^\s*-\s*"?[\d.]+:1883/m);
     expect(backend).not.toContain("ports:");
     expect(frontend).not.toContain("ports:");
     expect(mosquitto).not.toContain("ports:");
@@ -91,6 +95,15 @@ describe("hardened public demo stack (docker-compose.public-demo.yml)", () => {
     expect(publicDemoCompose).toContain("cap_drop");
     expect(publicDemoCompose).toContain("mem_limit");
     expect(publicDemoCompose).toContain("cpus:");
+  });
+
+  it("starts stateful public-demo services directly as unprivileged users", () => {
+    // cap_drop: ALL means root entrypoints cannot chown/setuid. The public demo
+    // therefore starts Aeolus with the host deployment UID/GID and Mosquitto
+    // with the official image's fixed 1883:1883 identity.
+    expect(backend).toContain('user: "${AEOLUS_RUNTIME_UID:-1000}:${AEOLUS_RUNTIME_GID:-1000}"');
+    expect(simulator).toContain('user: "${AEOLUS_RUNTIME_UID:-1000}:${AEOLUS_RUNTIME_GID:-1000}"');
+    expect(mosquitto).toContain('user: "1883:1883"');
   });
 
   it("runs the backend in production public-demo mode against the internal broker", () => {
