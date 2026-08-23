@@ -38,3 +38,12 @@ services:
       # only the broker URL needs overriding for bridge networking.
     networks:
       - aeolus
+
+  # The seed helper has to follow the backend off host networking, or `make seed`
+  # targets its own empty loopback instead of the API. Same `!reset` treatment,
+  # and the target URL becomes the service name now that DNS is available.
+  seed:
+    network_mode: !reset null
+    networks:
+      - aeolus
+    entrypoint: ["sh", "-c", "node scripts/seed-demo.mjs http://backend:$${API_PORT} \"$$SEED_USER\" \"$$SEED_PASS\""]
