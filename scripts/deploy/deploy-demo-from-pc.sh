@@ -233,21 +233,35 @@ ROLLBACK_EOF
 fi
 
 log "Installing/updating nightly reset units…"
-ssh "${ssh_args[@]}" "$remote" "cd '${DEMO_APP_DIR}' && sudo cp scripts/systemd/aeolus-demo-reset.service scripts/systemd/aeolus-demo-reset.timer /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now aeolus-demo-reset.timer"
+ssh "${ssh_args[@]}" "$remote" "cd '${DEMO_APP_DIR}' && sudo cp scripts/systemd/aeolus-demo-reset.service scripts/systemd/aeolus-demo-reset.timer /etc/systemd/system/ && sudo systemctl daemon-reload"
+
+if ssh "${ssh_args[@]}" "$remote" "test -f '${DEMO_ROOT}/golden/aeolus-demo.db'"; then
+  log "Golden snapshot exists; enabling nightly reset timer…"
+  ssh "${ssh_args[@]}" "$remote" "sudo systemctl enable --now aeolus-demo-reset.timer"
+  golden_exists=1
+else
+  # First deploy: do not start a Persistent timer before a golden exists, or
+  # systemd may immediately attempt a catch-up reset with nothing to restore.
+  ssh "${ssh_args[@]}" "$remote" "sudo systemctl disable --now aeolus-demo-reset.timer >/dev/null 2>&1 || true"
+  golden_exists=0
+fi
 
 ssh "${ssh_args[@]}" "$remote" "docker image prune -f >/dev/null || true"
 log "Internal deployment health gate passed."
 if command -v curl >/dev/null 2>&1; then
-  if curl --fail --silent --show-error --max-time 10 "${DEMO_PUBLIC_ORIGIN}/api/health" >/dev/null 2>&1; then
-    log "Public Cloudflare route healthy: ${DEMO_PUBLIC_ORIGIN}"
+  public_ok=1
+  curl --fail --silent --show-error --max-time 10 "${DEMO_PUBLIC_ORIGIN}/api/health" >/dev/null 2>&1 || public_ok=0
+  curl --fail --silent --show-error --max-time 10 "${DEMO_PUBLIC_ORIGIN}/" >/dev/null 2>&1 || public_ok=0
+  if [ "$public_ok" = "1" ]; then
+    log "Public Cloudflare API + frontend healthy: ${DEMO_PUBLIC_ORIGIN}"
   else
-    log "WARNING: internal health is good but the public Cloudflare route is not reachable yet. Check tunnel/DNS with: docker compose -f ${DEMO_APP_DIR}/docker-compose.public-demo.yml logs cloudflared"
+    log "WARNING: internal health is good but the full public Cloudflare route is not reachable yet. Check tunnel/frontend logs on the host."
   fi
 else
   log "curl not available locally; skipping public Cloudflare smoke test."
 fi
-if ssh "${ssh_args[@]}" "$remote" "test -f '${DEMO_ROOT}/golden/aeolus-demo.db'"; then
+if [ "$golden_exists" = "1" ]; then
   log "Golden snapshot already exists. Deployment complete."
 else
-  log "No golden snapshot exists yet. Review/seed the demo, then run scripts/create-demo-golden.sh on the host."
+  log "No golden snapshot exists yet. Nightly reset remains disabled until the golden is created."
 fi

@@ -92,7 +92,9 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "demo" {
   tunnel_id  = cloudflare_zero_trust_tunnel_cloudflared.demo[0].id
   source     = "cloudflare"
 
-  # cloudflared evaluates top-to-bottom. Paths are Go regular expressions, not
+  # cloudflared evaluates top-to-bottom. The frontend uses the unprivileged nginx
+  # runtime on 8080; API/WebSocket traffic stays on backend:3001. Paths are Go
+  # regular expressions, not
   # shell globs, hence ^/api(/.*)?$ and ^/ws$.
   config = {
     ingress = [
@@ -108,7 +110,7 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "demo" {
       },
       {
         hostname = var.demo_hostname
-        service  = "http://frontend:80"
+        service  = "http://frontend:8080"
       },
       {
         service = "http_status:404"

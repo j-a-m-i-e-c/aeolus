@@ -18,8 +18,8 @@ ARG VITE_WS_URL=
 ENV VITE_WS_URL=$VITE_WS_URL
 RUN npm run build
 
-FROM nginx:alpine
-COPY --from=builder /app/dist /usr/share/nginx/html
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-EXPOSE 3000
+FROM nginxinc/nginx-unprivileged:1.30.4-alpine-slim
+COPY --chown=101:0 --from=builder /app/dist /usr/share/nginx/html
+COPY --chown=101:0 nginx.conf /etc/nginx/conf.d/default.conf
+EXPOSE 8080
 CMD ["nginx", "-g", "daemon off;"]

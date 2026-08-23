@@ -124,7 +124,9 @@ services:
     container_name: aeolus-frontend
     restart: unless-stopped
     ports:
-      - "${FRONTEND_PORT:-3000}:80"
+      # The image is built on nginx-unprivileged, which serves on 8080 rather
+      # than 80. The published host port is unchanged.
+      - "${FRONTEND_PORT:-3000}:8080"
     depends_on:
       - backend
     logging:

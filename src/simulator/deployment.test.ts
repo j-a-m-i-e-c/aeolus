@@ -15,6 +15,10 @@ const REPO_ROOT = path.resolve(import.meta.dirname, "..", "..");
 const baseCompose = readFileSync(path.join(REPO_ROOT, "docker-compose.yml"), "utf8");
 const demoCompose = readFileSync(path.join(REPO_ROOT, "docker-compose.demo.yml"), "utf8");
 const publicDemoCompose = readFileSync(path.join(REPO_ROOT, "docker-compose.public-demo.yml"), "utf8");
+const frontendDockerfile = readFileSync(path.join(REPO_ROOT, "frontend", "Dockerfile"), "utf8");
+const frontendNginx = readFileSync(path.join(REPO_ROOT, "frontend", "nginx.conf"), "utf8");
+const demoHealthScript = readFileSync(path.join(REPO_ROOT, "scripts", "demo-health-check.sh"), "utf8");
+const resetTimer = readFileSync(path.join(REPO_ROOT, "scripts", "systemd", "aeolus-demo-reset.timer"), "utf8");
 
 /** Extract the indented block for a named service from a compose file. */
 function serviceBlock(compose: string, service: string): string | undefined {
@@ -104,6 +108,33 @@ describe("hardened public demo stack (docker-compose.public-demo.yml)", () => {
     expect(backend).toContain('user: "${AEOLUS_RUNTIME_UID:-1000}:${AEOLUS_RUNTIME_GID:-1000}"');
     expect(simulator).toContain('user: "${AEOLUS_RUNTIME_UID:-1000}:${AEOLUS_RUNTIME_GID:-1000}"');
     expect(mosquitto).toContain('user: "1883:1883"');
+  });
+
+
+  it("runs the public frontend as unprivileged nginx on a non-privileged port", () => {
+    expect(frontendDockerfile).toContain("nginxinc/nginx-unprivileged");
+    expect(frontendDockerfile).toContain("EXPOSE 8080");
+    expect(frontendNginx).toContain("listen 8080;");
+    // Probes must target 127.0.0.1: nginx binds IPv4 only, and `localhost`
+    // resolves to ::1 first inside the container, which BusyBox wget cannot
+    // fall back from.
+    expect(frontend).toContain("http://127.0.0.1:8080/");
+    expect(frontend).not.toContain("http://localhost:8080/");
+  });
+
+  it("disables the backend HTTP healthcheck inherited by the MQTT-only simulator", () => {
+    expect(simulator).toContain("healthcheck:");
+    expect(simulator).toContain("disable: true");
+  });
+
+  it("gates release health on both the API and frontend", () => {
+    expect(demoHealthScript).toContain("http://localhost:3001/api/health");
+    expect(demoHealthScript).toContain("http://127.0.0.1:8080/");
+  });
+
+  it("uses the host Sydney timezone for a valid 03:30 systemd calendar", () => {
+    expect(resetTimer).toContain("OnCalendar=*-*-* 03:30:00");
+    expect(resetTimer).not.toContain("OnCalendar=Australia/Sydney");
   });
 
   it("runs the backend in production public-demo mode against the internal broker", () => {

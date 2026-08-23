@@ -1,9 +1,8 @@
 # aeolus-demo-reset.timer — schedule the nightly demo reset at ~03:30 Sydney.
 #
-# OnCalendar carries an explicit timezone (systemd v252+), so the reset fires at
-# 03:30 Australia/Sydney regardless of the host's local timezone. On older
-# systemd, drop the timezone prefix and instead set the host timezone
-# (`timedatectl set-timezone Australia/Sydney`) so `*-*-* 03:30:00` is local.
+# The demo host bootstrap sets the machine timezone to Australia/Sydney, so the
+# calendar expression stays deliberately timezone-free and is evaluated in the
+# host's local timezone. This is accepted consistently by systemd timer units.
 #
 # Persistent=true runs a missed reset on next boot (e.g. if the VM was down at
 # 03:30). Enable with:
@@ -13,7 +12,7 @@
 Description=Nightly reset of the Aeolus public demo (03:30 Australia/Sydney)
 
 [Timer]
-OnCalendar=Australia/Sydney *-*-* 03:30:00
+OnCalendar=*-*-* 03:30:00
 Persistent=true
 Unit=aeolus-demo-reset.service
 

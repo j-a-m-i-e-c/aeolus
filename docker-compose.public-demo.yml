@@ -114,12 +114,25 @@ services:
     <<: *hardening
     image: ${AEOLUS_FRONTEND_IMAGE:-aeolus-demo-frontend:current}
     container_name: aeolus-demo-frontend
+    # Built on nginx-unprivileged and listens on 8080, so the public stack can
+    # keep cap_drop: ALL without a root nginx entrypoint trying to chown cache
+    # directories or bind a privileged port.
     networks:
       - demo
     depends_on:
       - backend
     mem_limit: 128m
     cpus: 0.5
+    healthcheck:
+      # Probe 127.0.0.1, not localhost: nginx listens on 0.0.0.0:8080 (IPv4
+      # only) while the container resolves localhost to ::1 first, and BusyBox
+      # wget does not fall back to IPv4. Using localhost here reports a healthy
+      # dashboard as unhealthy.
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "-O", "/dev/null", "http://127.0.0.1:8080/"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
 
   # Simulated hardware runtime — the SAME built backend image, running the
   # compiled simulator entrypoint. Speaks only MQTT to the internal broker; holds
@@ -142,6 +155,11 @@ services:
     depends_on:
       - mosquitto
       - backend
+    # The shared app image carries the backend HTTP healthcheck. The simulator
+    # intentionally exposes no HTTP server, so disable that inherited check
+    # rather than reporting a healthy MQTT simulator as unhealthy.
+    healthcheck:
+      disable: true
     mem_limit: 256m
     cpus: 0.5
 

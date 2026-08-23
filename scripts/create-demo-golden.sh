@@ -79,4 +79,14 @@ restart_needed=0
 if [ -x "$HEALTH_SCRIPT" ]; then
   COMPOSE_FILE="$COMPOSE_FILE" "$HEALTH_SCRIPT"
 fi
+
+# The deploy step installs the units but deliberately leaves the Persistent
+# timer disabled until a verified golden exists. Enable it only after the
+# snapshot and restarted application have both passed health checks.
+if systemctl cat aeolus-demo-reset.timer >/dev/null 2>&1; then
+  log "Enabling nightly reset timer now that the golden snapshot is verified…"
+  sudo systemctl enable --now aeolus-demo-reset.timer
+else
+  log "WARNING: aeolus-demo-reset.timer is not installed; install the systemd units before launch."
+fi
 log "Golden snapshot ready. Nightly resets can now restore it safely."
