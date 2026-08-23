@@ -18,7 +18,16 @@
 
 services:
   backend:
-    network_mode: bridge
+    # The base file puts the backend on `network_mode: host`. Compose treats
+    # `network_mode` and `networks` as mutually exclusive, and an override cannot
+    # silently drop an inherited key, so clear it explicitly with `!reset`
+    # (Compose v2.24+). Without this the merged project is invalid and
+    # `-f docker-compose.yml -f docker-compose.desktop.yml` refuses to run.
+    #
+    # Join the user-defined `aeolus` bridge rather than `network_mode: bridge`:
+    # the default bridge has no DNS for container names, so
+    # `mqtt://mosquitto:1883` below would not resolve.
+    network_mode: !reset null
     ports:
       - "${API_PORT:-3001}:3001"
     # Override MQTT broker URL to use the container name instead of localhost
