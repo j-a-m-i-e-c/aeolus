@@ -145,12 +145,16 @@ scp "${scp_args[@]}" "$config_tmp" "${remote}:${remote_config}" >/dev/null
 ssh "${ssh_args[@]}" "$remote" "chmod 600 '${remote_config}' && DEMO_APP_DIR='${DEMO_APP_DIR}' DEMO_ROOT='${DEMO_ROOT}' CONFIG_FILE='${remote_config}' bash -s" <<'REMOTE_EOF'
 set -euo pipefail
 trap 'rm -f "$CONFIG_FILE"' EXIT
-exec < "$CONFIG_FILE"
-IFS= read -r app_image
-IFS= read -r frontend_image
-IFS= read -r public_origin
-IFS= read -r ws_url
-IFS= read -r supplied_tunnel_token
+# bash -s is itself reading this script from stdin, so keep deployment config
+# on a separate descriptor. Redirecting stdin here would make Bash interpret the
+# first config value (the image tag) as the next shell command.
+exec 3< "$CONFIG_FILE"
+IFS= read -r app_image <&3
+IFS= read -r frontend_image <&3
+IFS= read -r public_origin <&3
+IFS= read -r ws_url <&3
+IFS= read -r supplied_tunnel_token <&3
+exec 3<&-
 
 env_file="${DEMO_APP_DIR}/.env"
 tmp="${env_file}.tmp.$$"
