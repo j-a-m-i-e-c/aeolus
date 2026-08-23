@@ -1,0 +1,21 @@
+# Resolve active IDs instead of blindly copying examples:
+#   aws lightsail get-blueprints --region ap-southeast-2 \
+#     --query 'blueprints[?platform==`LINUX_UNIX` && isActive==`true`].[blueprintId,name,version]' --output table
+#   aws lightsail get-bundles --region ap-southeast-2 \
+#     --query 'bundles[?ramSizeInGb==`4.0`].[bundleId,name,price,ramSizeInGb,cpuCount,diskSizeInGb]' --output table
+
+availability_zone = "ap-southeast-2a"
+blueprint_id      = "REPLACE_WITH_ACTIVE_UBUNTU_BLUEPRINT"
+bundle_id         = "REPLACE_WITH_4GB_BUNDLE_ID"
+
+# Your current public IPv4. Keep this /32 rather than opening SSH to the world.
+admin_cidrs = ["203.0.113.10/32"]
+
+# Optional. Leave empty to use the regional Lightsail default key pair.
+key_pair_name = ""
+
+# Cloudflare IDs are visible in the dashboard. Set the API token via the
+# CLOUDFLARE_API_TOKEN environment variable, never in this file.
+cloudflare_account_id = "REPLACE_ME"
+cloudflare_zone_id    = "REPLACE_ME"
+demo_hostname        = "demo.aeolus.com.au"

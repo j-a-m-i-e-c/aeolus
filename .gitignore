@@ -25,3 +25,11 @@ frontend/.env.production.local
 # Docker Compose auto-override — never commit a locally-created override that
 # would silently change network mode. Use docker-compose.desktop.yml explicitly.
 docker-compose.override.yml
+
+# Terraform local state/cache. Public-demo state contains a sensitive Cloudflare
+# tunnel secret/token and must never be committed.
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+infra/public-demo/terraform.tfvars
