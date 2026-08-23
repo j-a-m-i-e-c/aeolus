@@ -197,19 +197,39 @@ describe("WsServer Authentication", () => {
     });
 
     it("should close the connection when the token expires (close code 4003)", async () => {
-      // Sign a token that is valid now but expires in ~1 second.
+      // Sign a token that is valid now but expires shortly.
+      //
+      // `exp` only has whole-second resolution, so `expiresIn: "1s"` produces a
+      // real TTL of `1000 - (Date.now() % 1000)` ms — anywhere from 1ms to 1s
+      // depending on where in the wall-clock second the test happens to run.
+      // At the low end the server closed the socket before the assertions below
+      // could observe it, which made this test fail intermittently under the
+      // full suite. Pinning `exp` to two seconds past the current second
+      // boundary keeps the wait short while guaranteeing at least ~1s of open
+      // connection to assert against.
       const jwt = await import("jsonwebtoken");
+      const nowSeconds = Math.floor(Date.now() / 1000);
       const shortToken = jwt.default.sign(
-        { userId: "admin-1", username: "admin", role: "admin", groupId: null },
+        {
+          userId: "admin-1",
+          username: "admin",
+          role: "admin",
+          groupId: null,
+          iat: nowSeconds,
+          exp: nowSeconds + 2,
+        },
         "test-ws-secret-key-for-testing",
-        { algorithm: "HS256", expiresIn: "1s" },
+        { algorithm: "HS256" },
       );
       const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${shortToken}`);
+      // Subscribe to `close` before awaiting `open` so an early expiry cannot
+      // fire in the gap between the two and strand the promise.
+      const closed = waitForClose(ws);
       await waitForOpen(ws);
       expect(wsServer.clientCount).toBe(1);
 
       // The server should close the socket at the token's expiry.
-      const { code, reason } = await waitForClose(ws);
+      const { code, reason } = await closed;
       expect(code).toBe(4003);
       expect(reason).toBe("Token expired");
     });
