@@ -341,6 +341,15 @@ async function main(): Promise<void> {
   const app = express();
   app.disable("x-powered-by"); // Don't advertise the framework
 
+  // The hosted public demo is reachable only through the adjacent Cloudflare
+  // Tunnel container. Trust exactly that single proxy hop so Express rate
+  // limiters key public-demo visitors by their forwarded client IP instead of
+  // collapsing every visitor onto the cloudflared container address. Normal
+  // Aeolus installs keep Express' default (trust proxy disabled).
+  if (config.publicDemo.enabled) {
+    app.set("trust proxy", 1);
+  }
+
   // Prometheus metrics endpoint — BEFORE authenticate (uses its own bearer token auth)
   app.use(createPrometheusMetricsRoute(metricsService));
 

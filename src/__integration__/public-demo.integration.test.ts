@@ -100,6 +100,10 @@ describe("Public demo mode (integration)", () => {
     cleanup({ databases: [db] });
   });
 
+  it("trusts exactly one proxy hop in public-demo mode", () => {
+    expect(app.get("trust proxy")).toBe(1);
+  });
+
   // ── Demo session endpoint (Req 2) ──
   describe("demo-session endpoint", () => {
     afterEach(() => { config.publicDemo.enabled = false; });

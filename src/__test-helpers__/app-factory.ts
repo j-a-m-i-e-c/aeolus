@@ -68,6 +68,11 @@ export function createTestApp(
 
   const app = express();
 
+  // Mirror production's single-hop proxy trust for the hosted public demo so
+  // IP-keyed limiters see the forwarded visitor address instead of the tunnel
+  // container. Normal test apps retain Express' default trust-proxy behaviour.
+  if (options?.publicDemo) app.set("trust proxy", 1);
+
   // ─── Core Middleware ─────────────────────────────────────────────────────
 
   app.use(corsMiddleware);
