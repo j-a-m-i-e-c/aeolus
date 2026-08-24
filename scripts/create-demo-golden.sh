@@ -72,6 +72,19 @@ chmod 0444 "$meta"
 log "Golden snapshot created: $GOLDEN_DB"
 log "SHA-256: $(awk '{print $1}' "${GOLDEN_DB}.sha256")"
 
+# Same invariant the nightly reset upholds: the hardened backend runs as an
+# unprivileged numeric user, so every active SQLite file must belong to it before
+# the container starts. This matters here because the WAL checkpoint above can
+# create -wal/-shm as whoever ran this script; under sudo that would hand the
+# backend a readable-but-unwritable database (SQLITE_READONLY on first write).
+# The golden snapshot itself lives outside DATA_DIR and stays read-only.
+runtime_uid="${AEOLUS_RUNTIME_UID:-1000}"
+runtime_gid="${AEOLUS_RUNTIME_GID:-1000}"
+if [ "$(id -u)" -eq 0 ]; then
+  log "Restoring runtime ownership (${runtime_uid}:${runtime_gid}) on ${DATA_DIR}…"
+  chown -R "${runtime_uid}:${runtime_gid}" "$DATA_DIR"
+fi
+
 log "Restarting app services…"
 compose up -d backend simulator
 restart_needed=0
