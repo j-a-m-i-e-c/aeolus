@@ -61,6 +61,9 @@ describe("buildDemoPolicy", () => {
 
     expect(has("GET", "/api/state")).toBe(true);
     expect(has("GET", "/api/automations/:id/ui-module")).toBe(true);
+    // Seeded showcase automations are Automation Projects; the demo's read-only
+    // source viewer fetches this tree, so it must stay allowlisted.
+    expect(has("GET", "/api/automations/:id/project")).toBe(true);
     expect(has("GET", "/api/data-store/collections/:name/records")).toBe(true);
     expect(has("PUT", "/api/automations/:id/state")).toBe(true);
     expect(has("POST", "/api/automations/:id/fire")).toBe(true);
@@ -104,6 +107,9 @@ describe("buildDemoPolicy", () => {
       ["POST", "/api/automations"],
       ["PUT", "/api/automations/:id"],
       ["DELETE", "/api/automations/:id"],
+      // Reading a project tree is allowed; writing one must never be. Public
+      // demo authoring stays a browser-local draft.
+      ["PUT", "/api/automations/:id/project"],
       ["PUT", "/api/layout"],
       ["POST", "/api/mqtt/publish"],
       ["POST", "/api/connectors"],

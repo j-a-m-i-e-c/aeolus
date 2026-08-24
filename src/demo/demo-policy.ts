@@ -102,6 +102,11 @@ export function buildDemoPolicy(deps: DemoValidatorDeps): DemoPolicyEntry[] {
     { method: "GET", pattern: "/api/automations/:id" },
     { method: "GET", pattern: "/api/automations/:id/ui-module" },
     { method: "GET", pattern: "/api/automations/:id/state" },
+    // Read-only Automation Project source browsing. Seeded showcase automations
+    // are projects, so without this the demo's own source viewer is 403'd. This
+    // exposes the same authored source already returned by GET /:id, just as a
+    // file tree. The PUT counterpart stays unlisted so authoring remains blocked.
+    { method: "GET", pattern: "/api/automations/:id/project" },
     { method: "GET", pattern: "/api/automations/history" },
     { method: "GET", pattern: "/api/data-store/collections" },
     { method: "GET", pattern: "/api/data-store/collections/:name/records" },
