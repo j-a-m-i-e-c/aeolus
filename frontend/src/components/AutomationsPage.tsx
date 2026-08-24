@@ -93,6 +93,7 @@ export function AutomationsPage() {
   const [scriptTriggerTopic, setScriptTriggerTopic] = useState("");
   const [scriptSource, setScriptSource] = useState("");
   const [projectSource, setProjectSource] = useState<AutomationProjectSource>(() => createDefaultProject());
+  const [newProjectSession, setNewProjectSession] = useState(0);
   const [transpileErrors, setTranspileErrors] = useState<TranspileError[]>([]);
 
   // Editing state
@@ -114,6 +115,7 @@ export function AutomationsPage() {
     setScriptTriggerTopic("");
     setScriptSource("");
     setProjectSource(createDefaultProject());
+    setNewProjectSession((session) => session + 1);
     setTranspileErrors([]);
     setEditingRuleId(null);
   };
@@ -213,7 +215,7 @@ export function AutomationsPage() {
               className="flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-lg bg-primary/20 text-primary border border-primary/30 hover:bg-primary/30 transition-colors"
             >
               <Plus size={14} />
-              New Rule
+              New Automation
             </button>
           ) : (
             <span className="text-xs text-[#6B7785]">
@@ -305,6 +307,7 @@ export function AutomationsPage() {
                 <div className="h-[420px]">
                   <AutomationProjectEditor
                     project={projectSource}
+                    projectKey={editingRuleId || `new-automation-${newProjectSession}`}
                     onChange={setProjectSource}
                     onSave={() => saveScript(projectSource.files.find((file) => file.path === projectSource.logicEntry)?.content || "")}
                     errors={transpileErrors}

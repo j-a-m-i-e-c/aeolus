@@ -18,7 +18,7 @@
 // Provisioning uses an admin session, which the demo guard does not constrain —
 // it only confines tokens stamped sessionType: "public-demo".
 //
-// NOTE: the browser-level "Explore Code" walkthrough (tree renders, files
+// NOTE: the browser-level "Edit" walkthrough (tree renders, files
 // browsable, draft editable) is not automated here. The two-pane react-grid
 // layout intercepts pointer events into Monaco, which needs more selector work
 // than it is worth; the authenticated multi-file workflow in

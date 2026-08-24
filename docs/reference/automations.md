@@ -12,6 +12,8 @@ Form rules store a trigger, optional condition and action configuration instead 
 
 Script rules contain an Automation Project. `logic/index.ts` is the default backend entrypoint and `ui/index.tsx` is the optional UI entrypoint. Relative imports resolve only within the project (with React provided externally to the UI sandbox). The project is bundled with esbuild in memory when saved, then the compiled Logic is executed in an isolated V8 context when triggered.
 
+The editor presents this progressively: simple automations open as **Logic** with an optional **UI** tab. The complete **Project files** tree stays collapsed until an automation actually needs additional local modules.
+
 New Logic uses a normal module entrypoint:
 
 ```ts

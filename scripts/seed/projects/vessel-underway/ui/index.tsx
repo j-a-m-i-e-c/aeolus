@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import type { CustomComponentProps } from "./types";
+
 export default function UnderwayScience(aeolus: CustomComponentProps) {
   const sst=Number(aeolus.read("sst")??18.4), sal=Number(aeolus.read("salinity")??35.2), flow=Number(aeolus.read("flow")??2.1), chl=Number(aeolus.read("chlorophyll")??.8), turb=Number(aeolus.read("turbidity")??.5); const pumpOn=Boolean(aeolus.read("pumpOn")), front=Boolean(aeolus.read("frontDetected")), pending=Boolean(aeolus.read("commandPending")); const profile=(aeolus.read("profile") as any[])||[]; const last=aeolus.read("lastAction") as any; const action=last?.label?String(last.label):"Surface-water stream online";
   const pts=profile.length?profile:[{sst:18.4,salinity:35.2},{sst:18.35,salinity:35.18},{sst:18.4,salinity:35.2}]; const tempPath=useMemo(()=>pts.map((p:any,i:number)=>{const x=18+i*Math.max(1,245/(Math.max(1,pts.length-1)));const y=112-(Number(p.sst)-15)*15;return(i?"L":"M")+x.toFixed(1)+","+y.toFixed(1)}).join(" "),[profile]); const salPath=useMemo(()=>pts.map((p:any,i:number)=>{const x=18+i*Math.max(1,245/(Math.max(1,pts.length-1)));const y=112-(Number(p.salinity)-34.6)*45;return(i?"L":"M")+x.toFixed(1)+","+y.toFixed(1)}).join(" "),[profile]);

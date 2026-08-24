@@ -84,7 +84,7 @@ function lastCallWithMethod(method: string) {
 /** Open the authoring panel. Waits on the heading by role — the submit button
  *  legitimately carries the same words, so a text-only query is ambiguous. */
 async function openPanel() {
-  fireEvent.click(screen.getByRole("button", { name: "New Rule" }));
+  fireEvent.click(screen.getByRole("button", { name: "New Automation" }));
   await screen.findByRole("heading", { name: "Create Automation" });
 }
 
@@ -270,7 +270,7 @@ describe("AutomationsPage", () => {
 
     render(<AutomationsPage />);
     await screen.findByText("Form Rule");
-    expect(screen.queryByRole("button", { name: "New Rule" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "New Automation" })).not.toBeInTheDocument();
     expect(screen.getByText("Authoring requires write access to a tab.")).toBeInTheDocument();
   });
 });

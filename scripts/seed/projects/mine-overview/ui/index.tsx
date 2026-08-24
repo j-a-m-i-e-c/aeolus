@@ -1,5 +1,5 @@
 import { useEffect,useMemo,useState } from "react";
-import type { CustomComponentProps } from "./types";
+
 import { AIRFLOW_ARROWS, airflowParticle } from "./airflow";
 function clamp(v:number,a:number,b:number){return Math.min(b,Math.max(a,v));}
 export default function MineOverview(aeolus:CustomComponentProps){const ch4=Number(aeolus.read("d7Ch4")??.42),severity=String(aeolus.read("severity")||"safe"),vent=String(aeolus.read("ventMode")||"auto"),airflow=Number(aeolus.read("airflow")??258),refuge=Number(aeolus.read("refuge")??0),underground=Number(aeolus.read("underground")??14),unaccounted=Number(aeolus.read("unaccounted")??0),muster=String(aeolus.read("musterState")||"normal"),sump=Number(aeolus.read("sumpLevel")??1.8),pump=Boolean(aeolus.read("sumpPumpOn")),last=aeolus.read("lastMineEvent") as any;const [phase,setPhase]=useState(0);useEffect(()=>{const id=setInterval(()=>setPhase(v=>(v+1)%100000),90);return()=>clearInterval(id);},[]);const gas=severity==="alarm"?"#F17462":severity==="warning"?"#EFB356":"#73D99A";const fan=vent==="boost"?"#F1B75A":"#62CDE5";const action=last?.label?String(last.label):"Mine operating normally";const workers=useMemo(()=>Array.from({length:14},(_,i)=>({x:155+(i%5)*54,y:[122,190,258][Math.min(2,Math.floor(i/5))]})),[]);

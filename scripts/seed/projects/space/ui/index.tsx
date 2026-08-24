@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { CustomComponentProps } from "./types";
+
 import { WORLD_PATH } from "./world-path";
 import { countdown, dateLabel, moonGlyph, nextShower } from "./calendar";
 import { nightShape, subsolar } from "./astronomy";

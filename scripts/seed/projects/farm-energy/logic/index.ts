@@ -1,57 +1,13 @@
 // farm-energy — Automation Project logic
-// The compiler wraps this module in Aeolus' execution/completion machinery.
+// Opportunity-load command policy lives in its own module; the entry file owns event routing.
+
+import { initialiseEnergyState, setAction, setCharger } from "./charger-policy";
 
 export default async function run(context: EventContext) {
       var topic = String(context.topic || "");
       var evt = topic.split("/").pop();
 
-      function byTopic(wanted) {
-        return devices.list().find(function(d) { return d.topic === wanted; });
-      }
-      function setAction(label) {
-        state.set("lastAction", { label: label, at: Date.now() });
-      }
-      function init(key, value) {
-        if (state.get(key) === undefined) state.set(key, value);
-      }
-
-      init("autoOpportunity", true);
-      init("chargerCommandPending", false);
-      init("demoScenarioPending", "");
-      init("energyMode", "solar-surplus");
-
-      async function setCharger(on, reason) {
-        if (Boolean(state.get("chargerCommandPending"))) return;
-        var charger = byTopic("switch/farm/charger-bank/state");
-        if (!charger) {
-          setAction("Opportunity-load command blocked: charger bank unavailable");
-          return;
-        }
-        var currentlyOn = Boolean(charger.state && charger.state.on);
-        if (currentlyOn === on) return;
-        state.set("chargerCommandPending", true);
-        setAction((on ? "Enabling" : "Shedding") + " shed charger bank · " + reason);
-        var result = await devices.action(
-          charger.id,
-          "command",
-          { payload: { on: on } },
-          {
-            tier: "observed",
-            deviceId: charger.id,
-            condition: on
-              ? { field: "watts", op: "gt", value: 0 }
-              : { field: "watts", op: "eq", value: 0 },
-            timeoutMs: 5000,
-          }
-        );
-        state.set("chargerCommandPending", false);
-        if (result.success) {
-          setAction((on ? "Opportunity charging online" : "Opportunity charging shed") + " · physical state verified");
-          events.emit("farm/energy/opportunity-load", { on: on, reason: reason, lifecycleState: result.lifecycleState });
-        } else {
-          setAction("Charger-bank command not verified: " + String(result.error || result.lifecycleState || "unknown"));
-        }
-      }
+      initialiseEnergyState();
 
       if (topic.indexOf("ui/") === 0) {
         if (evt === "simulate-low-battery") {

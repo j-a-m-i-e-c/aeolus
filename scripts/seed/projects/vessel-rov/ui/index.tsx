@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { CustomComponentProps } from "./types";
+
 export default function RovOperations(aeolus: CustomComponentProps) {
   const depth=Number(aeolus.read("depth")??310), heading=Number(aeolus.read("heading")??88), battery=Number(aeolus.read("battery")??78), tether=Number(aeolus.read("tetherTension")??310), altitude=Number(aeolus.read("altitude")??8.2), visibility=Number(aeolus.read("visibility")??14), thruster=Number(aeolus.read("thrusterPct")??18);
   const mode=String(aeolus.read("mode")||"holding"), lights=aeolus.read("lightsOn")!==false, pending=Boolean(aeolus.read("commandPending"))||Boolean(aeolus.read("tetherProtectionActive")); const last=aeolus.read("lastAction") as any; const [phase,setPhase]=useState(0);

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { CustomComponentProps } from "./types";
+
 
 export default function LivestockFence(aeolus: CustomComponentProps) {
   const strays = Math.max(0, Number(aeolus.read("strays") ?? 0));

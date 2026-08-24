@@ -110,10 +110,14 @@ async function readProject(request: APIRequestContext, seeded: Seeded) {
 async function openProjectEditor(page: Page): Promise<void> {
   await page.goto(`/tab/${TAB_SLUG}`);
   await expect(page.getByText(RULE_NAME).first()).toBeVisible({ timeout: 20_000 });
-  await page.getByRole("button", { name: "Explore Code" }).click();
-  await expect(page.getByText("Automation Project")).toBeVisible({ timeout: 20_000 });
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Logic", exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole("button", { name: "UI", exact: true })).toBeVisible();
   // Monaco is lazy-loaded behind Suspense.
   await expect(page.locator(".monaco-editor").first()).toBeVisible({ timeout: 30_000 });
+  // Multi-file structure is progressive disclosure rather than the default surface.
+  const projectFiles = page.getByRole("button", { name: "Project files", exact: true });
+  if (await projectFiles.isVisible()) await projectFiles.click();
 }
 
 const tree = (page: Page) => page.locator("aside");
@@ -137,7 +141,7 @@ async function replaceActiveContent(page: Page, content: string): Promise<void> 
  * icon button titled "Save project", which a case-insensitive name match would
  * pick up as well.
  */
-const saveButton = (page: Page) => page.getByRole("button", { name: "Save Project", exact: true });
+const saveButton = (page: Page) => page.getByRole("button", { name: "Save Automation", exact: true });
 
 async function saveProject(page: Page): Promise<void> {
   await saveButton(page).click();
@@ -156,7 +160,7 @@ test.describe("Automation Project editor", () => {
       await expect(tree(page).getByTitle(path, { exact: true })).toBeVisible();
     }
     // Entry files are labelled so an author can tell what actually runs.
-    await expect(page.getByText("Logic entry")).toBeVisible();
+    await expect(page.getByText("Entry", { exact: true })).toBeVisible();
 
     // ── Navigate between files ──
     await selectFile(page, "logic/constants.ts");
@@ -187,7 +191,7 @@ test.describe("Automation Project editor", () => {
     // ── Save: the bundle must build with the new cross-module import ──
     await saveProject(page);
     // Returning to status mode is the pane's success signal.
-    await expect(page.getByRole("button", { name: "Explore Code" })).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByRole("button", { name: "Edit", exact: true })).toBeVisible({ timeout: 20_000 });
 
     // ── Server-side truth: the authored tree moved ──
     const stored = await readProject(request, seeded);
@@ -244,7 +248,7 @@ test.describe("Automation Project editor", () => {
       `}`,
     ].join("\n"));
     await saveProject(page);
-    await expect(page.getByRole("button", { name: "Explore Code" })).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByRole("button", { name: "Edit", exact: true })).toBeVisible({ timeout: 20_000 });
 
     const after = await readProject(request, seeded);
     expect(after.files.find((f) => f.path === "logic/index.ts")!.content).toContain(`LABEL + "|repaired"`);

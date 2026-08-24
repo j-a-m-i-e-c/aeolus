@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { CustomComponentProps } from "./types";
+
 
 export default function TroughWatering(aeolus: CustomComponentProps) {
   const average = Math.max(0, Math.min(100, Number(aeolus.read("troughAverage") ?? 83)));

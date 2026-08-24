@@ -74,8 +74,6 @@ const DEFAULT_UI_TEMPLATE = `// Custom Automation UI Component
 // It receives live data from the Aeolus runtime.
 // Open the Docs panel to see all available methods.
 
-import type { CustomComponentProps } from "./types";
-
 export default function MyComponent(aeolus: CustomComponentProps) {
   const value = aeolus.read("myKey");
 
@@ -104,19 +102,11 @@ export default function MyComponent(aeolus: CustomComponentProps) {
 }
 `;
 
-const DEFAULT_PROJECT_TYPES = `export interface CustomComponentProps {
-  devices: any[]; ruleId: string; ruleName: string; lastFired: number | null; enabled: boolean;
-  read(key: string): unknown; save(key: string, value: unknown): void;
-  saveAndFire(key: string, value: unknown): void; fire(eventName: string, payload?: Record<string, unknown>): void;
-  control(deviceId: string, actionType: string, params?: Record<string, unknown>): Promise<void>;
-  publish(topic: string, payload: string): void; history: any[];
-}
-`;
 
 function createDefaultProject(): AutomationProjectSource {
   return {
     logicEntry: "logic/index.ts",
-    uiEntry: "ui/index.tsx",
+    uiEntry: null,
     files: [
       {
         path: "logic/index.ts",
@@ -126,8 +116,6 @@ function createDefaultProject(): AutomationProjectSource {
 }
 `,
       },
-      { path: "ui/index.tsx", content: DEFAULT_UI_TEMPLATE },
-      { path: "ui/types.ts", content: DEFAULT_PROJECT_TYPES },
     ],
   };
 }
@@ -558,7 +546,7 @@ export function AutomationPane({ config, paneId }: Props) {
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg text-[#9AA6B2] hover:text-[#E6EDF3] hover:bg-elevated/50 border border-[#2A3441] transition-colors shrink-0"
           >
             <Pencil size={12} />
-            {rule.projectMode === "project" ? "Explore Code" : "Edit"}
+            Edit
           </button>
         </div>
 
@@ -613,48 +601,57 @@ export function AutomationPane({ config, paneId }: Props) {
       <div className="h-full flex flex-col p-3 sm:p-4 gap-3 overflow-hidden">
         {isPublicVisitor && (
           <div className="shrink-0 rounded-lg border border-[#3BA4FF]/25 bg-[#3BA4FF]/8 px-3 py-2 text-[10px] text-[#9AA6B2]">
-            <span className="font-semibold text-[#5CE1E6]">{isDemoDraft ? "Demo draft" : "Source explorer"}</span>
+            <span className="font-semibold text-[#5CE1E6]">{isDemoDraft ? "Demo draft" : "Shared demo"}</span>
             {isDemoDraft
-              ? " · This project exists only in your browser and never changes the shared demo."
-              : " · Browse the real seeded project; shared source is read-only in the public demo."}
+              ? " · This automation exists only in your browser and never changes the shared demo."
+              : " · You are viewing the real automation. Shared demo source is read-only."}
             {draftSavedAt && isDemoDraft && <span className="ml-2 text-[#73D99A]">Draft kept locally.</span>}
           </div>
         )}
-        <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_minmax(220px,0.8fr)] gap-2 shrink-0">
-          <input
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Automation name"
-            className="w-full px-3 py-2 text-sm rounded-lg bg-[#0B0F14] border border-[#2A3441] text-[#E6EDF3] placeholder-[#6B7785] focus:outline-none focus:border-primary transition-colors"
-          />
-          <div className="min-w-0">
-            <TriggerSelector
-              triggerType={triggerType}
-              mqttTopic={triggerTopic}
-              cronExpression={cronExpression}
-              onTriggerTypeChange={setTriggerType}
-              onMqttTopicChange={setTriggerTopic}
-              onCronExpressionChange={setCronExpression}
-              onValidityChange={setTriggerValid}
+        {isPublicVisitor && !isDemoDraft ? (
+          <div className="shrink-0 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[#2A3441] bg-[#0B0F14] px-3 py-2">
+            <div className="min-w-0">
+              <div className="text-sm font-semibold text-[#E6EDF3] truncate">{name}</div>
+              <div className="text-[10px] text-[#6B7785] mt-0.5">
+                {triggerType === "cron"
+                  ? `Schedule · ${cronExpression || "custom cron"}`
+                  : triggerType === "none"
+                    ? "No automatic trigger"
+                    : `MQTT · ${triggerTopic || "topic not set"}`}
+              </div>
+            </div>
+            <span className="rounded-full border border-[#2A3441] px-2 py-1 text-[9px] uppercase tracking-wider text-[#7E8A98]">Read only</span>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_minmax(220px,0.8fr)] items-start gap-2 shrink-0">
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Automation name"
+              className="w-full h-10 self-start px-3 text-sm rounded-lg bg-[#0B0F14] border border-[#2A3441] text-[#E6EDF3] placeholder-[#6B7785] focus:outline-none focus:border-primary transition-colors"
             />
+            <div className="min-w-0 self-start">
+              <TriggerSelector
+                triggerType={triggerType}
+                mqttTopic={triggerTopic}
+                cronExpression={cronExpression}
+                onTriggerTypeChange={setTriggerType}
+                onMqttTopicChange={setTriggerTopic}
+                onCronExpressionChange={setCronExpression}
+                onValidityChange={setTriggerValid}
+              />
+            </div>
           </div>
-        </div>
-
-        <div className="flex items-center justify-between gap-3 shrink-0">
-          <div>
-            <div className="text-xs font-semibold text-[#E6EDF3]">Automation Project</div>
-            <div className="text-[10px] text-[#6B7785]">Normal TypeScript modules. Aeolus adds the execution wrapper at compile time.</div>
-          </div>
-          <div className="text-[10px] font-mono text-[#5CE1E6] hidden sm:block">logic/ · ui/ · shared/</div>
-        </div>
+        )}
 
         <div className="flex-1 min-h-0">
           <Suspense fallback={<div className="h-full flex items-center justify-center text-xs text-[#6B7785]">Loading project editor…</div>}>
             <AutomationProjectEditor
               project={projectSource}
+              projectKey={rule?.id || ruleId || paneId || "new-automation"}
               onChange={setProjectSource}
-              onSave={isPublicVisitor && !isDemoDraft ? () => setMode("status") : mode === "setup" ? handleSave : handleUpdate}
+              onSave={isPublicVisitor && !isDemoDraft ? undefined : mode === "setup" ? handleSave : handleUpdate}
               errors={errors}
               readOnly={isPublicVisitor && !isDemoDraft}
             />
@@ -662,18 +659,29 @@ export function AutomationPane({ config, paneId }: Props) {
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
-          <button
-            onClick={mode === "setup" ? handleSave : handleUpdate}
-            disabled={saveDisabled}
-            className="flex items-center gap-1.5 px-4 py-2 text-xs font-medium rounded-lg bg-primary/20 text-primary border border-primary/30 hover:bg-primary/30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
-            {isDemoDraft ? "Keep Draft" : isPublicVisitor && isEditing ? "Done Exploring" : "Save Project"}
-          </button>
-          {isEditing && (
-            <button onClick={() => setMode("status")} className="flex items-center gap-1.5 px-4 py-2 text-xs font-medium rounded-lg text-[#9AA6B2] hover:text-[#E6EDF3] hover:bg-elevated/50 border border-[#2A3441] transition-colors">
-              <X size={12} /> {isPublicVisitor ? "Close" : "Cancel"}
+          {isPublicVisitor && isEditing && !isDemoDraft ? (
+            <button
+              onClick={() => setMode("status")}
+              className="flex items-center gap-1.5 px-4 py-2 text-xs font-medium rounded-lg text-[#9AA6B2] hover:text-[#E6EDF3] hover:bg-elevated/50 border border-[#2A3441] transition-colors"
+            >
+              <X size={12} /> Close
             </button>
+          ) : (
+            <>
+              <button
+                onClick={mode === "setup" ? handleSave : handleUpdate}
+                disabled={saveDisabled}
+                className="flex items-center gap-1.5 px-4 py-2 text-xs font-medium rounded-lg bg-primary/20 text-primary border border-primary/30 hover:bg-primary/30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+                {isDemoDraft ? "Keep Draft" : "Save Automation"}
+              </button>
+              {isEditing && (
+                <button onClick={() => setMode("status")} className="flex items-center gap-1.5 px-4 py-2 text-xs font-medium rounded-lg text-[#9AA6B2] hover:text-[#E6EDF3] hover:bg-elevated/50 border border-[#2A3441] transition-colors">
+                  <X size={12} /> Cancel
+                </button>
+              )}
+            </>
           )}
         </div>
       </div>

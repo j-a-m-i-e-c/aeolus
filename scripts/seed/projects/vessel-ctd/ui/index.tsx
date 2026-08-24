@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { CustomComponentProps } from "./types";
+
 function clamp(v:number,a:number,b:number){return Math.min(b,Math.max(a,v));}
 export default function CtdOperations(aeolus: CustomComponentProps) {
   const depth = clamp(Number(aeolus.read("depth") ?? 120),0,500);

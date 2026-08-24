@@ -1,4 +1,4 @@
-import type { CustomComponentProps } from "./types";
+
 function clamp(v:number,a:number,b:number){return Math.min(b,Math.max(a,v));}
 export default function AtmosphericSafety(aeolus: CustomComponentProps) {
   const l3=Number(aeolus.read("l3Ch4")??.30), d7=Number(aeolus.read("d7Ch4")??.42), co=Number(aeolus.read("co")??16), o2=Number(aeolus.read("o2")??20.7), no2=Number(aeolus.read("no2")??1.6);

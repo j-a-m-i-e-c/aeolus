@@ -6,12 +6,11 @@ Aeolus script automations are authored as bounded multi-file **Automation Projec
 Automation Project
 ├── logic/
 │   ├── index.ts       # backend entrypoint
-│   └── helpers.ts
+│   └── helpers.ts     # only when the automation benefits from another module
 ├── ui/
-│   ├── index.tsx      # optional React entrypoint
-│   └── types.ts
+│   └── index.tsx      # optional React entrypoint
 └── shared/
-    └── constants.ts
+    └── constants.ts   # optional shared code
           ↓
   in-memory esbuild bundle
           ↓
@@ -73,7 +72,13 @@ Saving a project stores the authored tree and updates the legacy runtime project
 
 ## Public demo
 
-Seeded showcase automations use the same Automation Project model as normal authoring. Public-demo visitors can browse those project files read-only. “Try a New Automation” creates a browser-local project draft; dashboard persistence is disabled in public-demo mode, and keeping the draft does not call the shared automation create/update APIs.
+Seeded showcase automations use the same Automation Project model as normal authoring. Public-demo visitors open the normal **Edit** surface, with shared source read-only. “Try a New Automation” creates a browser-local project draft; dashboard persistence is disabled in public-demo mode, and keeping the draft does not call the shared automation create/update APIs.
+
+## Authoring experience
+
+The project model is intentionally progressive. A one-file automation should feel like a one-file automation: the editor opens on **Logic**, and an optional **UI** can be added without exposing a file tree. The full **Project files** tree is available when an automation genuinely needs local modules. Multi-file capability is an escape hatch for complexity, not a requirement to manufacture boilerplate files.
+
+Aeolus supplies the Logic and UI runtime type declarations to the editor. Demo projects should not copy those declarations into local `types.ts` files unless they are defining types specific to that automation.
 
 ## Demo source
 

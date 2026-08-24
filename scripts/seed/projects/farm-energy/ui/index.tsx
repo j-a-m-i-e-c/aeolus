@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { CustomComponentProps } from "./types";
+
 
 export default function SiteEnergy(aeolus: CustomComponentProps) {
   const soc = Math.max(0, Math.min(100, Number(aeolus.read("batterySoc") ?? 78)));

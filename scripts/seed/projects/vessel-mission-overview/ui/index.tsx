@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { CustomComponentProps } from "./types";
+
 
 export default function MissionOverview(aeolus: CustomComponentProps) {
   const ctdDepth = Number(aeolus.read("ctdDepth") ?? 120);

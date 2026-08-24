@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { CustomComponentProps } from "./types";
+
 function clamp(v:number,a:number,b:number){return Math.min(b,Math.max(a,v));}
 export default function PersonnelMuster(aeolus: CustomComponentProps){
   const underground=Number(aeolus.read("underground")??14),l1=Number(aeolus.read("l1")??3),l2=Number(aeolus.read("l2")??6),l3=Number(aeolus.read("l3")??5),refuge=Number(aeolus.read("refuge")??0),unaccounted=Number(aeolus.read("unaccounted")??0); const state=String(aeolus.read("musterState")||"normal"),active=Boolean(aeolus.read("musterActive")),pending=Boolean(aeolus.read("commandPending")),last=aeolus.read("lastAction") as any; const [phase,setPhase]=useState(0);useEffect(()=>{const id=setInterval(()=>setPhase(v=>(v+1)%100000),120);return()=>clearInterval(id);},[]);

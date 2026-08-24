@@ -111,11 +111,11 @@ describe("AutomationPane — setup mode", () => {
     updatePaneConfig.mockClear();
   });
 
-  it("renders a project editor and a disabled Save Project button", async () => {
+  it("renders a project editor and a disabled Save Automation button", async () => {
     render(<AutomationPane config={{} as PaneConfig} paneId="p1" />);
     expect(screen.getByPlaceholderText("Automation name")).toBeInTheDocument();
     expect(await screen.findByTestId("project-editor")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save Project" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save Automation" })).toBeDisabled();
   });
 
   it("creates new automations as Automation Projects", async () => {
@@ -123,7 +123,7 @@ describe("AutomationPane — setup mode", () => {
     render(<AutomationPane config={{} as PaneConfig} paneId="p1" />);
 
     fireEvent.change(screen.getByPlaceholderText("Automation name"), { target: { value: "Heat logic" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save Project" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save Automation" }));
 
     await waitFor(() => expect(lastCallWithMethod("POST")).toBeTruthy());
     const [url, init] = lastCallWithMethod("POST")!;
@@ -131,7 +131,7 @@ describe("AutomationPane — setup mode", () => {
     expect(JSON.parse(init!.body as string)).toMatchObject({
       name: "Heat logic",
       ruleType: "script",
-      project: { logicEntry: "logic/index.ts", uiEntry: "ui/index.tsx" },
+      project: { logicEntry: "logic/index.ts", uiEntry: null },
     });
     await waitFor(() =>
       expect(updatePaneConfig).toHaveBeenCalledWith("p1", expect.objectContaining({ ruleId: "new-1", ruleName: "Heat logic" })),
@@ -142,7 +142,7 @@ describe("AutomationPane — setup mode", () => {
     mockAuthFetch.mockResolvedValue(jsonResponse({ details: [{ path: "logic/index.ts", line: 2, column: 4, message: "boom" }] }, 400));
     render(<AutomationPane config={{} as PaneConfig} paneId="p1" />);
     fireEvent.change(screen.getByPlaceholderText("Automation name"), { target: { value: "X" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save Project" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save Automation" }));
     expect(await screen.findByText("boom")).toBeInTheDocument();
     expect(screen.getByTestId("project-editor")).toBeInTheDocument();
   });

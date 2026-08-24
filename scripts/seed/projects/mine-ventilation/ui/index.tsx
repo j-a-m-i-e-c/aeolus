@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { CustomComponentProps } from "./types";
+
 export default function VentilationControl(aeolus: CustomComponentProps) {
   const mode=String(aeolus.read("mode")||"auto"), demand=Number(aeolus.read("demand")??48), requested=Number(aeolus.read("requestedDemand")??48), rpm=Number(aeolus.read("primaryRpm")??1136), booster=Number(aeolus.read("boosterRpm")??840), airflow=Number(aeolus.read("airflow")??258), manual=Boolean(aeolus.read("manualOverride")), pending=Boolean(aeolus.read("commandPending")), severity=String(aeolus.read("atmosphereSeverity")||"safe"), last=aeolus.read("lastAction") as any;
   const [phase,setPhase]=useState(0); useEffect(()=>{const id=setInterval(()=>setPhase(v=>(v+1)%100000),90);return()=>clearInterval(id);},[]); const boost=mode==="boost"; const color=boost?"#F0B85D":"#62D2EA"; const action=last?.label?String(last.label):"Ventilation demand controller online";

@@ -1,16 +1,12 @@
 // farm-livestock — Automation Project logic
-// The compiler wraps this module in Aeolus' execution/completion machinery.
+// Recall command ownership is separated from telemetry/event routing.
+
+import { recallStrays, setAction } from "./recall";
 
 export default async function run(context: EventContext) {
       var topic = String(context.topic || "");
       var evt = topic.split("/").pop();
 
-      function byTopic(wanted) {
-        return devices.list().find(function(d) { return d.topic === wanted; });
-      }
-      function setAction(label) {
-        state.set("lastAction", { label: label, at: Date.now() });
-      }
       if (state.get("demoScenarioPending") === undefined) state.set("demoScenarioPending", "");
 
       if (topic.indexOf("ui/") === 0) {
@@ -40,33 +36,7 @@ export default async function run(context: EventContext) {
           state.set("demoScenarioPending", "");
           setAction("DEMO · livestock system reset to nominal");
         } else if (evt === "recall-strays") {
-          var recall = byTopic("switch/fence/recall/state");
-          var collars = byTopic("sensor/fence/collars");
-          if (!recall || !collars) {
-            setAction("Recall blocked: collar or recall hardware unavailable");
-            return;
-          }
-          state.set("recallInProgress", true);
-          setAction("Recall dispatched · waiting for collars to return inside boundary");
-          var result = await devices.action(
-            recall.id,
-            "command",
-            { payload: { active: true } },
-            {
-              tier: "observed",
-              deviceId: collars.id,
-              condition: { field: "strays", op: "eq", value: 0 },
-              timeoutMs: 5000,
-            }
-          );
-          state.set("recallInProgress", false);
-          if (result.success) {
-            setAction("Recall verified · herd contained");
-            events.emit("farm/livestock/recall-verified", { lifecycleState: result.lifecycleState });
-          } else {
-            setAction("Recall not verified: " + String(result.error || result.lifecycleState || "unknown"));
-            events.emit("farm/livestock/recall-failed", { reason: result.error || "not observed", lifecycleState: result.lifecycleState });
-          }
+          await recallStrays();
         }
         return;
       }

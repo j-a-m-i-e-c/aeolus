@@ -1,63 +1,17 @@
 // farm-troughs — Automation Project logic
-// The compiler wraps this module in Aeolus' execution/completion machinery.
+// Refill command ownership is separated from telemetry/event routing.
+
+import { refill, setAction } from "./refill";
 
 export default async function run(context: EventContext) {
       var topic = String(context.topic || "");
       var evt = topic.split("/").pop();
 
-      function byTopic(wanted) {
-        return devices.list().find(function(d) { return d.topic === wanted; });
-      }
-      function setAction(label) {
-        state.set("lastAction", { label: label, at: Date.now() });
-      }
-      function init(key, value) {
-        if (state.get(key) === undefined) state.set(key, value);
-      }
-
-      init("autoRefill", true);
-      init("refillCommandActive", false);
-      init("drinkScenarioRequested", false);
-      init("drinkingActive", false);
-      init("drinkingProgress", 0);
-
-      async function refill(source) {
-        if (Boolean(state.get("refillCommandActive")) || Boolean(state.get("drinkingActive"))) return;
-        var troughs = byTopic("sensor/farm/troughs");
-        var actuator = byTopic("switch/farm/trough-refill/state");
-        if (!actuator || !troughs) {
-          setAction("Refill blocked: trough hardware unavailable");
-          return;
-        }
-        var lowIds = Array.isArray(troughs.state && troughs.state.lowIds)
-          ? troughs.state.lowIds.filter(function(id) { return typeof id === "string"; })
-          : [];
-        if (lowIds.length === 0) {
-          setAction("No low troughs require refill");
-          return;
-        }
-        state.set("refillCommandActive", true);
-        setAction((source === "automatic" ? "AUTO · " : "") + "opening refill manifold for " + lowIds.length + " low troughs");
-        var result = await devices.action(
-          actuator.id,
-          "command",
-          { payload: { active: true, targets: lowIds } },
-          {
-            tier: "observed",
-            deviceId: troughs.id,
-            condition: { all: [{ field: "low", op: "eq", value: 0 }, { field: "refilling", op: "eq", value: 0 }] },
-            timeoutMs: 5000,
-          }
-        );
-        state.set("refillCommandActive", false);
-        if (result.success) {
-          setAction((source === "automatic" ? "Automatic" : "Operator") + " refill verified · targeted troughs recovered");
-          events.emit("farm/troughs/refill-verified", { source: source || "operator", targets: lowIds, lifecycleState: result.lifecycleState });
-        } else {
-          setAction("Refill not verified: " + String(result.error || result.lifecycleState || "unknown"));
-          events.emit("farm/troughs/refill-failed", { reason: result.error || "not observed", lifecycleState: result.lifecycleState });
-        }
-      }
+      if (state.get("autoRefill") === undefined) state.set("autoRefill", true);
+      if (state.get("refillCommandActive") === undefined) state.set("refillCommandActive", false);
+      if (state.get("drinkScenarioRequested") === undefined) state.set("drinkScenarioRequested", false);
+      if (state.get("drinkingActive") === undefined) state.set("drinkingActive", false);
+      if (state.get("drinkingProgress") === undefined) state.set("drinkingProgress", 0);
 
       if (topic.indexOf("ui/") === 0) {
         if (evt === "refill-troughs") {
