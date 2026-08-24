@@ -1,47 +1,15 @@
-const logic = `automation({
-  actions: [
-    async function personnelMuster(context) {
-      var topic=String(context.topic||""); var evt=topic.split("/").pop();
-      function byTopic(wanted){return devices.list().find(function(d){return d.topic===wanted;});}
-      function setAction(label){state.set("lastAction",{label:label,at:Date.now()});}
-      function project(){
-        var people=byTopic("sensor/mine/personnel"); var muster=byTopic("switch/mine/muster/state"); var ps=people&&people.state?people.state:{}; var ms=muster&&muster.state?muster.state:{};
-        state.set("underground",Number(ps.underground||0)); state.set("l1",Number(ps.l1||0)); state.set("l2",Number(ps.l2||0)); state.set("l3",Number(ps.l3||0)); state.set("refuge",Number(ps.refuge||0)); state.set("unaccounted",Number(ps.unaccounted||0));
-        state.set("musterState",String(ps.musterState||ms.state||"normal")); state.set("alarmActive",Boolean(ms.alarm)); state.set("musterActive",Boolean(ms.active));
-        events.emit("mine/summary/personnel",{underground:Number(ps.underground||0),l1:Number(ps.l1||0),l2:Number(ps.l2||0),l3:Number(ps.l3||0),refuge:Number(ps.refuge||0),unaccounted:Number(ps.unaccounted||0),musterState:String(ps.musterState||ms.state||"normal"),alarmActive:Boolean(ms.alarm)});
-      }
-      async function commandMuster(active){
-        var controller=byTopic("switch/mine/muster/state"); if(!controller){setAction("Muster controller unavailable");return;}
-        state.set("commandPending",true); setAction(active?"Initiating underground personnel muster":"Clearing muster and returning to normal operations");
-        var result=await devices.action(controller.id,"command",{payload:{active:active}},{tier:"observed",deviceId:controller.id,condition:{field:"active",op:"eq",value:active},timeoutMs:5000});
-        state.set("commandPending",false); if(!result.success)setAction("Muster command not verified: "+String(result.error||result.lifecycleState||"unknown")); else setAction(active?"Muster alarm verified · tracking personnel to refuge":"Muster cleared"); project();
-      }
-      if(topic.indexOf("ui/")===0){
-        if(evt==="initiate-muster")await commandMuster(true); else if(evt==="clear-muster")await commandMuster(false); else if(evt==="simulate-tag-dropout"){events.emit("mine/sim/tag-dropout",{});setAction("Injecting one temporary personnel-tag dropout");} else if(evt==="reset-personnel"){events.emit("mine/sim/personnel-reset",{});setAction("Resetting personnel distribution");}
-        return;
-      }
-      if(topic!=="sensor/mine/personnel")return; project();
-    },
-  ],
-});`;
-
-const ui = `import { useEffect, useMemo, useState } from "react";
-import type { CustomComponentProps } from "./types";
-function clamp(v:number,a:number,b:number){return Math.min(b,Math.max(a,v));}
-export default function PersonnelMuster(aeolus: CustomComponentProps){
-  const underground=Number(aeolus.read("underground")??14),l1=Number(aeolus.read("l1")??3),l2=Number(aeolus.read("l2")??6),l3=Number(aeolus.read("l3")??5),refuge=Number(aeolus.read("refuge")??0),unaccounted=Number(aeolus.read("unaccounted")??0); const state=String(aeolus.read("musterState")||"normal"),active=Boolean(aeolus.read("musterActive")),pending=Boolean(aeolus.read("commandPending")),last=aeolus.read("lastAction") as any; const [phase,setPhase]=useState(0);useEffect(()=>{const id=setInterval(()=>setPhase(v=>(v+1)%100000),120);return()=>clearInterval(id);},[]);
-  const action=last?.label?String(last.label):"14 personnel tags online"; const complete=state==="complete"||refuge>=underground; const statusColor=unaccounted>0?"#F07B68":active&&!complete?"#F0BB59":complete?"#78DB9D":"#79C8DD";
-  const people=useMemo(()=>Array.from({length:14},(_,i)=>i),[]); const startPositions=[{x:95,y:42},{x:132,y:42},{x:170,y:42},{x:87,y:94},{x:122,y:94},{x:157,y:94},{x:192,y:94},{x:228,y:94},{x:265,y:94},{x:90,y:146},{x:128,y:146},{x:168,y:146},{x:210,y:146},{x:255,y:146}];
-  return <div style={{padding:11,minHeight:"100%",background:"linear-gradient(180deg,#0A0C0E,#07090A)",color:"#EDF1F3"}}>
-    <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}><div><div style={{fontSize:12,fontWeight:900}}>PERSONNEL & MUSTER</div><div style={{fontSize:11,color:"#747C81",marginTop:2}}>Tag tracking · refuge accountability · emergency muster controller</div></div><div style={{textAlign:"right"}}><div style={{fontSize:11,fontWeight:850,color:statusColor}}>{unaccounted>0?"TAG EXCEPTION":complete?"MUSTER COMPLETE":active?"MUSTERING":"ALL ACCOUNTED"}</div><div style={{fontSize:11,color:"#697176"}}>{refuge} in refuge · {unaccounted} unaccounted</div></div></div>
-    <div style={{border:"1px solid #303438",borderRadius:10,background:"#0B0D0F",overflow:"hidden"}}><svg width="100%" height="190" viewBox="0 0 420 190"><rect width="420" height="190" fill="#0B0D0F"/>{[[34,"LEVEL 1"],[86,"LEVEL 2"],[138,"LEVEL 3"]].map((x:any)=><g key={x[1]}><path d={"M45 "+x[0]+" H286"} stroke="#353B3E" strokeWidth="18"/><path d={"M45 "+x[0]+" H286"} stroke="#5A6266" strokeWidth="1.5"/><text x="16" y={x[0]+3} fill="#727A7F" fontSize="10">{x[1]}</text></g>)}<path d="M286 138 H330 V164 H374" fill="none" stroke="#353B3E" strokeWidth="18"/><path d="M286 138 H330 V164 H374" fill="none" stroke="#5A6266" strokeWidth="1.5"/><rect x="332" y="143" width="72" height="40" rx="6" fill={active?"#122218":"#111416"} stroke={active?"#4A9A64":"#42494D"}/><text x="368" y="157" textAnchor="middle" fill="#899398" fontSize="10">REFUGE</text><text x="368" y="174" textAnchor="middle" fill={statusColor} fontSize="13" fontFamily="monospace" fontWeight="800">{refuge}/{underground}</text>
-      {people.map((i)=>{const home=startPositions[i];const inRef=i<refuge;const tx=344+(i%5)*10,ty=160+Math.floor(i/5)*7;const pulse=unaccounted>0&&i===13?Math.sin(phase*.25)*2:0;return <g key={i} opacity={unaccounted>0&&i===13?.35:1}><circle cx={(inRef?tx:home.x)+pulse} cy={(inRef?ty:home.y)-3} r="2.6" fill={unaccounted>0&&i===13?"#F07967":active?"#F0C05D":"#D5DDE0"}/><line x1={(inRef?tx:home.x)+pulse} y1={(inRef?ty:home.y)-1} x2={(inRef?tx:home.x)+pulse} y2={(inRef?ty:home.y)+5} stroke={active?"#E3B653":"#AAB3B7"} strokeWidth="1.3"/></g>})}
-      <text x="47" y="178" fill="#60686D" fontSize="10">L1 {l1} · L2 {l2} · L3 {l3}</text></svg></div>
-    <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:5,marginTop:6}}>{[["UNDERGROUND",underground],["REFUGE",refuge],["UNACCOUNTED",unaccounted]].map((x:any)=><div key={x[0]} style={{border:"1px solid #303438",borderRadius:7,padding:6,background:"#0C0F10"}}><div style={{fontSize:11,color:"#6F777B"}}>{x[0]}</div><div style={{fontSize:15,fontWeight:850,fontFamily:"monospace",color:x[0]==="UNACCOUNTED"&&x[1]>0?"#F07B68":"#C5CFD3",marginTop:1}}>{x[1]}</div></div>)}</div>
-    <div style={{marginTop:7,border:"1px solid #343A3D",borderRadius:9,padding:8,background:"#0D1012"}}><div style={{fontSize:11,color:"#8C9599",letterSpacing:".12em",marginBottom:6}}>OPERATOR CONTROLS</div><div style={{display:"flex",gap:5}}><button disabled={pending||active} onClick={()=>aeolus.fire("initiate-muster")} style={{flex:1,padding:"7px",borderRadius:6,border:"1px solid #704638",background:"#251410",color:"#EF8D76",fontSize:11,cursor:"pointer"}}>Initiate muster</button><button disabled={pending||!active} onClick={()=>aeolus.fire("clear-muster")} style={{flex:1,padding:"7px",borderRadius:6,border:"1px solid #3A5745",background:"#102018",color:"#82D39D",fontSize:11,cursor:"pointer"}}>Clear muster</button></div></div>
-    <div style={{marginTop:7,border:"1px dashed #6B5131",borderRadius:9,padding:8,background:"#171209"}}><div style={{fontSize:11,color:"#D4B16A",letterSpacing:".12em"}}>DEMO SCENARIO</div><div style={{fontSize:11,color:"#847052",margin:"3px 0 6px"}}>Simulate a tracking exception without changing the operator muster state.</div><div style={{display:"flex",gap:5}}><button disabled={unaccounted>0} onClick={()=>aeolus.fire("simulate-tag-dropout")} style={{flex:1,padding:"6px",borderRadius:6,border:"1px solid #6A4D30",background:"#22170B",color:"#E2B56A",fontSize:11,cursor:"pointer"}}>Drop one tag</button><button onClick={()=>aeolus.fire("reset-personnel")} style={{padding:"6px 9px",borderRadius:6,border:"1px solid #454139",background:"#171713",color:"#929087",fontSize:11,cursor:"pointer"}}>Reset</button></div></div>
-    <div style={{fontSize:11,color:"#60686C",marginTop:6,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{action}</div>
-  </div>;
-}`;
-
-export const personnelAutomation={key:"mine-personnel",name:"Personnel & Muster",triggerTopic:"sensor/mine/personnel",scriptSource:logic,uiSource:ui,demoAccess:{fireEvents:["initiate-muster","clear-muster","simulate-tag-dropout","reset-personnel"]}};
+// scripts/seed/tabs/underground-mining/personnel.mjs — demo automation manifest (source lives in scripts/seed/projects/mine-personnel)
+export const personnelAutomation = {
+  "key": "mine-personnel",
+  "name": "Personnel & Muster",
+  "triggerTopic": "sensor/mine/personnel",
+  "demoAccess": {
+    "fireEvents": [
+      "initiate-muster",
+      "clear-muster",
+      "simulate-tag-dropout",
+      "reset-personnel"
+    ]
+  },
+  "projectDir": "mine-personnel"
+};

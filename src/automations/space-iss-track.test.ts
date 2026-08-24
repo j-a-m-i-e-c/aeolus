@@ -20,6 +20,10 @@
 import { describe, it, expect } from "vitest";
 import { transformSync } from "esbuild";
 import spaceTab from "../../scripts/seed/tabs/space.mjs";
+import { attachSeedProjectSource } from "../__test-helpers__/seed-project-source.js";
+// Authored source lives in scripts/seed/projects/space; expose it as
+// scriptSource/uiSource for the source-level extraction below.
+attachSeedProjectSource(...spaceTab.automations);
 
 const EARTH_R = 6371;
 const RAD = Math.PI / 180;
@@ -33,8 +37,11 @@ const uiSource = automation.uiSource;
 /** Compile the orbital helpers out of the shipped UI source. */
 const H = (() => {
   const pick = (name: string): string => {
+    // Project UI modules export their helpers, so drop the `export ` prefix
+    // before matching (and before compiling, which rejects module syntax).
     const line = uiSource
       .split("\n")
+      .map((l) => (l.startsWith("export ") ? l.slice("export ".length) : l))
       .find((l) => l.startsWith(`function ${name}(`) || l.startsWith(`const ${name}`));
     if (!line) throw new Error(`helper "${name}" not found in the Live Space UI source`);
     return line;

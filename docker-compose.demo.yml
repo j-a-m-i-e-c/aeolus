@@ -1,6 +1,8 @@
-# docker-compose.demo.yml — Public demo overlay.
+# docker-compose.demo.yml — LOCAL showcase/public-demo-mode testing overlay.
 #
-# Flips the existing stack into public demo mode. Use it as an overlay on top of
+# This is intentionally NOT the hosted demo.aeolus.com.au runtime. It flips a
+# normal Aeolus stack into public-demo application mode and adds the simulator
+# so the showcase can be exercised locally. Use it as an overlay on top of
 # the base compose file:
 #
 #   docker compose -f docker-compose.yml -f docker-compose.demo.yml up -d --build
@@ -15,9 +17,9 @@
 #   docker compose -f docker-compose.yml -f docker-compose.demo.yml \
 #     --profile seed run --rm -e SEED_USER=admin -e SEED_PASS=<pass> seed
 #
-# NOTE: this is the testing overlay for validating demo mode. The hardened
-# public deployment (Cloudflare Tunnel, resource limits, golden/active DB split,
-# nightly reset, no exposed ports) is the remaining Phase B work.
+# The internet-facing runtime is docker-compose.public-demo.yml. It adds the
+# Cloudflare Tunnel, resource limits, golden/active DB split, nightly reset and
+# no-inbound-port deployment model. See demo/README.md.
 
 services:
   backend:

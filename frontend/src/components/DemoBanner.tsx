@@ -12,18 +12,18 @@ export function DemoBanner() {
   return (
     <div
       role="status"
-      className="w-full bg-[#3BA4FF]/10 border-b border-[#3BA4FF]/30 text-[#9AA6B2] text-[11px] px-3 py-1.5 flex items-center justify-center gap-2 flex-wrap"
+      className="w-full bg-[#3BA4FF]/10 border-b border-[#3BA4FF]/30 text-[#9AA6B2] text-[10px] sm:text-[11px] px-2 sm:px-3 py-1.5 flex items-center justify-center gap-1.5 sm:gap-2"
     >
       <span className="font-semibold text-[#3BA4FF]">Public demo</span>
       <span className="text-[#6B7785]">·</span>
-      <span>Simulated devices</span>
-      <span className="text-[#6B7785]">·</span>
-      <span>Shared environment</span>
-      <span className="text-[#6B7785]">·</span>
+      <span className="hidden sm:inline">Simulated devices</span>
+      <span className="hidden sm:inline text-[#6B7785]">·</span>
+      <span className="hidden sm:inline">Shared environment</span>
+      <span className="hidden sm:inline text-[#6B7785]">·</span>
       <span>Resets nightly</span>
       <a
         href="https://aeolus.com.au"
-        className="ml-1 text-[#3BA4FF] hover:underline"
+        className="hidden sm:inline ml-1 text-[#3BA4FF] hover:underline"
         target="_blank"
         rel="noopener noreferrer"
       >

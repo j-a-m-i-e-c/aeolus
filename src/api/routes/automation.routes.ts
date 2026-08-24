@@ -12,6 +12,7 @@ import type { ExecutionLog } from "../../automations/execution-log.js";
 import type { EventContext, NormalizedEvent, Rule } from "../../core/types.js";
 import type { ConditionRegistry } from "../../automations/condition-registry.js";
 import { transpile, transpileUi } from "../../automations/transpiler.js";
+import { compileAutomationProject, readAutomationProject, saveAutomationProject, AutomationProjectCompileError, type AutomationProject } from "../../automations/automation-project.js";
 import { extractStructuredMetadata } from "../../automations/structured-metadata-extractor.js";
 import { buildSnippetCatalog } from "../../automations/snippet-catalog.js";
 import { isValidCron } from "../../automations/cron-utils.js";
@@ -19,7 +20,7 @@ import type { ConnectorRegistry } from "../../connectors/connector-registry.js";
 import { BadRequestError, NotFoundError, ForbiddenError } from "../middleware/error-handler.js";
 import { validate } from "../middleware/validate.js";
 import { asyncHandler } from "../middleware/async-handler.js";
-import { createAutomationBodySchema, updateAutomationBodySchema, automationIdParamsSchema, toggleAutomationBodySchema, automationStateBodySchema, demoAccessBodySchema } from "../schemas/automation.schemas.js";
+import { createAutomationBodySchema, updateAutomationBodySchema, automationProjectSchema, automationIdParamsSchema, toggleAutomationBodySchema, automationStateBodySchema, demoAccessBodySchema } from "../schemas/automation.schemas.js";
 import { requireTabPermission, requireAdmin } from "../../auth/auth-middleware.js";
 import type { RequestHandler } from "express";
 import type { PermissionLevel } from "../../auth/permission-service.js";
@@ -135,6 +136,58 @@ export function createAutomationRoutes(
     res.type("text/plain").send(content);
   }));
 
+  /** GET /api/automations/:id/project — authored multi-file source tree. */
+  router.get("/:id/project", (req, res) => {
+    const id = req.params.id as string;
+    const project = readAutomationProject(db, id);
+    if (!project) {
+      res.status(404).json({ error: "Automation rule not found" });
+      return;
+    }
+    if (!canReadAutomation(req, id)) {
+      res.status(403).json({ error: "Forbidden" });
+      return;
+    }
+    res.json(project);
+  });
+
+  /**
+   * PUT /api/automations/:id/project — compile and atomically replace a project.
+   * The authored file tree is persisted separately while the existing
+   * automation_rules compiled columns remain the runtime projection.
+   */
+  router.put("/:id/project", requireAutomation("write"), validate({ body: automationProjectSchema, params: automationIdParamsSchema }), asyncHandler(async (req, res) => {
+    const id = req.params.id as string;
+    const existing = queryRuleById(db, id);
+    if (!existing) throw new NotFoundError(`Automation rule ${id} not found`);
+    assertMayMutateAuthority(req, existing);
+    if (existing.rule_type !== "script") throw new BadRequestError("Only script automations can use Automation Projects");
+
+    let compiled: Awaited<ReturnType<typeof compileAutomationProject>>;
+    try {
+      compiled = await compileAutomationProject(req.body as AutomationProject);
+    } catch (error) {
+      if (error instanceof AutomationProjectCompileError) {
+        throw compilationError("Automation Project compilation failed", error.details);
+      }
+      throw error;
+    }
+
+    db.transaction(() => {
+      db.prepare(`UPDATE automation_rules
+        SET script_source = ?, compiled_js = ?, structured_metadata = NULL,
+            ui_source = ?, compiled_ui = ?
+        WHERE id = ?`)
+        .run(compiled.logicSource, compiled.compiledJs, compiled.uiSource, compiled.compiledUi, id);
+      saveAutomationProject(db, id, compiled);
+    })();
+
+    engine.unregister(id);
+    const updated = queryRuleById(db, id)!;
+    if (updated.enabled) registerUiRule(engine, registry, actionExecutor, updated, conditionRegistry);
+    res.json({ success: true, id, project: readAutomationProject(db, id) });
+  }));
+
   /**
    * GET /api/automations/history — return execution log entries, filtered by
    * automation read permission. Admins see everything. A `ruleId` query targets
@@ -240,6 +293,7 @@ export function createAutomationRoutes(
     // UI-created rules from DB
     const rows = db.prepare("SELECT * FROM automation_rules ORDER BY created_at DESC").all() as StoredRule[];
     const dbRules: Record<string, unknown>[] = [];
+    const projectIds = new Set((db.prepare("SELECT automation_id FROM automation_projects").all() as { automation_id: string }[]).map((row) => row.automation_id));
     for (const row of rows) {
       const ruleType = row.rule_type || "form";
       const triggerType = row.trigger_type || "mqtt";
@@ -256,6 +310,7 @@ export function createAutomationRoutes(
         cronExpression: cronExpression || null,
         ownerTabId: row.owner_tab_id ?? null,
         authoredUnrestricted: row.authored_unrestricted === 1,
+        projectMode: projectIds.has(row.id) ? "project" : "legacy",
       };
       if (ruleType === "form") {
         entry.actionType = row.action_type;
@@ -294,8 +349,8 @@ export function createAutomationRoutes(
   });
 
   /** POST /api/automations — create a new UI rule (form or script) */
-  router.post("/", requireTabPermission("write"), validate({ body: createAutomationBodySchema }), asyncHandler((req, res) => {
-    const { name, triggerTopic, ruleType, conditionType, conditionValue, actionType, actionTarget, actionParams, scriptSource, uiSource, triggerType: rawTriggerType, cronExpression } = req.body;
+  router.post("/", requireTabPermission("write"), validate({ body: createAutomationBodySchema }), asyncHandler(async (req, res) => {
+    const { name, triggerTopic, ruleType, conditionType, conditionValue, actionType, actionTarget, actionParams, scriptSource, project, uiSource, triggerType: rawTriggerType, cronExpression } = req.body;
 
     if (!name) {
       throw new BadRequestError("name is required");
@@ -322,24 +377,51 @@ export function createAutomationRoutes(
         : ((req.body?.tabId ?? req.query.tabId) as string);
 
     if (ruleType === "script") {
-      // Script rule — transpile and store
-      if (!scriptSource) {
-        throw new BadRequestError("scriptSource is required for script rules");
+      // Automation Projects are the primary authoring model. Legacy single-file
+      // source remains accepted for backwards compatibility and simple rules.
+      let compiledProject: Awaited<ReturnType<typeof compileAutomationProject>> | null = null;
+      let effectiveScriptSource = scriptSource as string | undefined;
+      let effectiveUiSource = uiSourceValue;
+      let compiledJs: string;
+      let compiledUi = compiledUiValue;
+      let structuredJson: string | null = null;
+
+      if (project) {
+        try {
+          compiledProject = await compileAutomationProject(project as AutomationProject);
+        } catch (error) {
+          if (error instanceof AutomationProjectCompileError) {
+            throw compilationError("Automation Project compilation failed", error.details);
+          }
+          throw error;
+        }
+        effectiveScriptSource = compiledProject.logicSource;
+        effectiveUiSource = compiledProject.uiSource;
+        compiledJs = compiledProject.compiledJs;
+        compiledUi = compiledProject.compiledUi;
+      } else {
+        if (!effectiveScriptSource) {
+          throw new BadRequestError("project or scriptSource is required for script rules");
+        }
+        const legacy = compileScriptSource(effectiveScriptSource, effectiveTriggerTopic);
+        compiledJs = legacy.compiledJs;
+        structuredJson = legacy.structuredJson;
       }
 
-      const { compiledJs, structuredJson } = compileScriptSource(scriptSource, effectiveTriggerTopic);
-
-      db.prepare(
-        `INSERT INTO automation_rules (id, name, trigger_topic, condition_type, condition_value, action_type, action_target, action_params, rule_type, script_source, compiled_js, structured_metadata, ui_source, compiled_ui, trigger_type, cron_expression, authored_unrestricted, owner_tab_id, enabled, created_at)
-         VALUES (?, ?, ?, ?, ?, 'script', '', '{}', 'script', ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`
-      ).run(id, name, effectiveTriggerTopic, conditionType || null, conditionValue || null, scriptSource, compiledJs, structuredJson, uiSourceValue, compiledUiValue, triggerType, effectiveCronExpression, authoredUnrestricted, ownerTabId, now);
+      db.transaction(() => {
+        db.prepare(
+          `INSERT INTO automation_rules (id, name, trigger_topic, condition_type, condition_value, action_type, action_target, action_params, rule_type, script_source, compiled_js, structured_metadata, ui_source, compiled_ui, trigger_type, cron_expression, authored_unrestricted, owner_tab_id, enabled, created_at)
+           VALUES (?, ?, ?, ?, ?, 'script', '', '{}', 'script', ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`
+        ).run(id, name, effectiveTriggerTopic, conditionType || null, conditionValue || null, effectiveScriptSource, compiledJs, structuredJson, effectiveUiSource, compiledUi, triggerType, effectiveCronExpression, authoredUnrestricted, ownerTabId, now);
+        if (compiledProject) saveAutomationProject(db, id, compiledProject);
+      })();
 
       registerUiRule(engine, registry, actionExecutor, {
         id, name, trigger_topic: effectiveTriggerTopic,
         condition_type: conditionType || null, condition_value: conditionValue || null,
         action_type: "script", action_target: "", action_params: "{}",
-        rule_type: "script", script_source: scriptSource, compiled_js: compiledJs,
-        structured_metadata: structuredJson, ui_source: uiSourceValue, compiled_ui: compiledUiValue,
+        rule_type: "script", script_source: effectiveScriptSource ?? null, compiled_js: compiledJs,
+        structured_metadata: structuredJson, ui_source: effectiveUiSource, compiled_ui: compiledUi,
         trigger_type: triggerType, cron_expression: effectiveCronExpression,
         authored_unrestricted: authoredUnrestricted, owner_tab_id: ownerTabId,
         enabled: 1, created_at: now,
@@ -376,7 +458,7 @@ export function createAutomationRoutes(
   }));
 
   /** PUT /api/automations/:id — update an existing UI rule */
-  router.put("/:id", requireAutomation("write"), validate({ body: updateAutomationBodySchema, params: automationIdParamsSchema }), asyncHandler((req, res) => {
+  router.put("/:id", requireAutomation("write"), validate({ body: updateAutomationBodySchema, params: automationIdParamsSchema }), asyncHandler(async (req, res) => {
     const id = req.params.id as string;
 
     // Check rule exists
@@ -388,7 +470,7 @@ export function createAutomationRoutes(
     // inherit its system-wide authority (audit Critical 1).
     assertMayMutateAuthority(req, existing);
 
-    const { name, triggerTopic, conditionType, conditionValue, actionType, actionTarget, actionParams, scriptSource, uiSource, triggerType: rawTriggerType, cronExpression } = req.body;
+    const { name, triggerTopic, conditionType, conditionValue, actionType, actionTarget, actionParams, scriptSource, project, uiSource, triggerType: rawTriggerType, cronExpression } = req.body;
 
     const { triggerType, effectiveTriggerTopic, effectiveCronExpression } =
       resolveTriggerConfig({ rawTriggerType, triggerTopic, cronExpression }, existing);
@@ -396,24 +478,52 @@ export function createAutomationRoutes(
     const { uiSourceValue, compiledUiValue } = resolveUiSource(uiSource, existing);
 
     if (existing.rule_type === "script") {
-      // Script rule update — re-transpile
-      const updatedSource = scriptSource ?? existing.script_source;
-      if (!updatedSource) {
-        throw new BadRequestError("scriptSource is required for script rules");
+      let updatedSource = scriptSource ?? existing.script_source;
+      let updatedUiSource = uiSourceValue;
+      let compiledJs: string;
+      let compiledUi = compiledUiValue;
+      let structuredJson: string | null = null;
+      let compiledProject: Awaited<ReturnType<typeof compileAutomationProject>> | null = null;
+
+      if (project) {
+        try {
+          compiledProject = await compileAutomationProject(project as AutomationProject);
+        } catch (error) {
+          if (error instanceof AutomationProjectCompileError) {
+            throw compilationError("Automation Project compilation failed", error.details);
+          }
+          throw error;
+        }
+        updatedSource = compiledProject.logicSource;
+        updatedUiSource = compiledProject.uiSource;
+        compiledJs = compiledProject.compiledJs;
+        compiledUi = compiledProject.compiledUi;
+      } else {
+        if (!updatedSource) {
+          throw new BadRequestError("project or scriptSource is required for script rules");
+        }
+        const legacy = compileScriptSource(updatedSource, effectiveTriggerTopic);
+        compiledJs = legacy.compiledJs;
+        structuredJson = legacy.structuredJson;
       }
 
-      const { compiledJs, structuredJson } = compileScriptSource(updatedSource, effectiveTriggerTopic);
-
-      db.prepare(
-        `UPDATE automation_rules SET name = ?, trigger_topic = ?, condition_type = ?, condition_value = ?, script_source = ?, compiled_js = ?, structured_metadata = ?, ui_source = ?, compiled_ui = ?, trigger_type = ?, cron_expression = ? WHERE id = ?`
-      ).run(
-        name || existing.name,
-        effectiveTriggerTopic,
-        preserveOrReplace(conditionType, existing.condition_type),   // Req 8.5
-        preserveOrReplace(conditionValue, existing.condition_value), // Req 8.5
-        updatedSource, compiledJs, structuredJson, uiSourceValue, compiledUiValue,
-        triggerType, effectiveCronExpression, id,
-      );
+      db.transaction(() => {
+        db.prepare(
+          `UPDATE automation_rules SET name = ?, trigger_topic = ?, condition_type = ?, condition_value = ?, script_source = ?, compiled_js = ?, structured_metadata = ?, ui_source = ?, compiled_ui = ?, trigger_type = ?, cron_expression = ? WHERE id = ?`
+        ).run(
+          name || existing.name,
+          effectiveTriggerTopic,
+          preserveOrReplace(conditionType, existing.condition_type),   // Req 8.5
+          preserveOrReplace(conditionValue, existing.condition_value), // Req 8.5
+          updatedSource, compiledJs, structuredJson, updatedUiSource, compiledUi,
+          triggerType, effectiveCronExpression, id,
+        );
+        if (compiledProject) {
+          saveAutomationProject(db, id, compiledProject);
+        } else if (scriptSource !== undefined || uiSource !== undefined) {
+          db.prepare("DELETE FROM automation_projects WHERE automation_id = ?").run(id);
+        }
+      })();
 
       // Re-register in engine
       engine.unregister(id);

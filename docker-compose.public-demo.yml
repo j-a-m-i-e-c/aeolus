@@ -1,4 +1,4 @@
-# docker-compose.public-demo.yml — Hardened public demo deployment (standalone).
+# docker-compose.public-demo.yml — HOSTED public showcase runtime (standalone).
 #
 # This is the PUBLIC, internet-facing demo stack for demo.aeolus.com.au. It is a
 # self-contained compose file (NOT an overlay of docker-compose.yml) because the

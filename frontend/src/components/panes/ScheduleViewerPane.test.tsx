@@ -78,20 +78,14 @@ describe("ScheduleViewerPane", () => {
     expect(screen.getByText("Nightly Backup")).toBeInTheDocument();
   });
 
-  it("fires an automation via POST", async () => {
+  it("does not expose generic Fire Now controls", async () => {
     mockAuthFetch.mockImplementation((url: string) => {
       if (url.includes("/history")) return Promise.resolve(jsonResponse([]));
       return Promise.resolve(jsonResponse(AUTOMATIONS));
     });
     render(<ScheduleViewerPane config={{} as PaneConfig} />);
     await screen.findByText("Hourly Report");
-    fireEvent.click(screen.getAllByText("Fire Now")[0]);
-    await waitFor(() =>
-      expect(mockAuthFetch).toHaveBeenCalledWith(
-        expect.stringContaining("/api/automations/a1/fire"),
-        expect.objectContaining({ method: "POST" }),
-      ),
-    );
+    expect(screen.queryByText("Fire Now")).not.toBeInTheDocument();
   });
 
   it("toggles an automation via PATCH", async () => {

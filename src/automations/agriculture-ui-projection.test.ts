@@ -19,6 +19,10 @@ import { waterAutomation } from "../../scripts/seed/tabs/agriculture/water.mjs";
 import { livestockAutomation } from "../../scripts/seed/tabs/agriculture/livestock.mjs";
 import { troughAutomation } from "../../scripts/seed/tabs/agriculture/troughs.mjs";
 import { energyAutomation } from "../../scripts/seed/tabs/agriculture/energy.mjs";
+import { attachSeedProjectSource } from "../__test-helpers__/seed-project-source.js";
+// Authored source lives in scripts/seed/projects/<projectDir>; expose it as
+// scriptSource/uiSource for the source-level assertions below.
+attachSeedProjectSource(waterAutomation, livestockAutomation, troughAutomation, energyAutomation);
 
 interface SeedAutomation {
   key: string;

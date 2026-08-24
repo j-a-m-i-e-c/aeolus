@@ -19,8 +19,8 @@ export interface ScriptEditorProps {
   onChange?: (value: string) => void;
   onSave?: (value: string) => void;
   errors?: TranspileError[];
-  /** Ref callback to expose the insertText method to parent components. */
-  onEditorReady?: (api: { insertText: (text: string) => void }) => void;
+  /** Ref callback exposing editor helpers to parent components. */
+  onEditorReady?: (api: { insertText: (text: string) => void; formatDocument: () => Promise<void> }) => void;
 }
 
 const DEFAULT_TEMPLATE = `automation({
@@ -165,6 +165,10 @@ export function ScriptEditor({
 
     // Expose insertText API to parent
     if (onEditorReady) {
+      const formatDocument = async () => {
+        await ed.getAction("editor.action.formatDocument")?.run();
+        ed.focus();
+      };
       onEditorReady({
         insertText: (text: string) => {
           const position = ed.getPosition();
@@ -182,7 +186,9 @@ export function ScriptEditor({
           ]);
           ed.focus();
         },
+        formatDocument,
       });
+      window.setTimeout(() => { void formatDocument(); }, 250);
     }
   }, [onSave, onEditorReady]);
 
@@ -240,7 +246,9 @@ export function ScriptEditor({
           smoothScrolling: true,
           tabSize: 2,
           automaticLayout: true,
-          wordWrap: "on",
+          wordWrap: window.innerWidth < 768 ? "on" : "off",
+          formatOnPaste: true,
+          formatOnType: true,
           bracketPairColorization: { enabled: true },
           suggest: {
             showKeywords: true,

@@ -17,7 +17,12 @@
 // stubbed sandbox APIs — no isolated-vm (unavailable on Windows dev) and no broker.
 
 import { describe, it, expect } from "vitest";
+import { transformSync } from "esbuild";
 import { bunkerPerimeterAutomation } from "../../scripts/seed/tabs/off-grid-bunker/perimeter.mjs";
+import { attachSeedProjectSource } from "../__test-helpers__/seed-project-source.js";
+// Authored source lives in scripts/seed/projects/<projectDir>; expose it as
+// scriptSource/uiSource for the source-level assertions below.
+attachSeedProjectSource(bunkerPerimeterAutomation);
 
 const LIGHTS_TOPIC = "switch/bunker/floodlights/state";
 const PERIMETER_TOPIC = "sensor/bunker/perimeter";
@@ -90,15 +95,16 @@ async function run(world: World, topic: string): Promise<void> {
   const automation = (config: { actions: Array<(ctx: unknown) => unknown> }) => {
     actions = config.actions;
   };
-  // The Logic is a string of ES5 destined for the isolate; compiling it here is
-  // how the test exercises the real authored source without isolated-vm.
-  const load = new Function(
-    "automation",
-    "devices",
-    "state",
-    "events",
-    `${bunkerPerimeterAutomation.scriptSource}\nreturn null;`,
+  // The Logic is now an Automation Project entrypoint: a TypeScript module that
+  // default-exports its run function. Mirror what the project compiler does —
+  // strip the module syntax, transpile away the annotations, and register the
+  // default export as the single action. Compiling it here is how the test
+  // exercises the real authored source without isolated-vm.
+  const { code } = transformSync(
+    `${bunkerPerimeterAutomation.scriptSource.replace(/export\s+default\s+/, "const __entry = ")}\nautomation({ actions: [__entry] });`,
+    { loader: "ts" },
   );
+  const load = new Function("automation", "devices", "state", "events", `${code}\nreturn null;`);
   load(automation, world.devices, world.state, world.events);
   expect(actions).toHaveLength(1);
   await actions[0]({ topic, state: {}, deviceId: "test", timestamp: Date.now() });

@@ -21,6 +21,17 @@ vi.mock("./ScriptEditor", () => ({
   ),
 }));
 
+// New automations (and existing project automations) author through the
+// multi-file project editor. Stub it for the same reason as ScriptEditor: it
+// wraps Monaco, which does not run in jsdom.
+vi.mock("./AutomationProjectEditor", () => ({
+  AutomationProjectEditor: ({ onSave }: { onSave: () => void }) => (
+    <div data-testid="project-editor">
+      <button onClick={() => onSave()}>project-editor-save</button>
+    </div>
+  ),
+}));
+
 // framer-motion: render children synchronously, strip animation-only props.
 // The component type per key MUST be stable (cached) — returning a fresh
 // function each access would remount the subtree on every render.
@@ -111,7 +122,10 @@ describe("AutomationsPage", () => {
     await openPanel();
 
     // Lazy-loaded behind Suspense, so this resolves rather than being immediate.
-    expect(await screen.findByTestId("script-editor")).toBeInTheDocument();
+    // A new automation is authored as an Automation Project, so the project
+    // editor is the panel here; the single-file editor is only for existing
+    // legacy automations.
+    expect(await screen.findByTestId("project-editor")).toBeInTheDocument();
     // The retired form-based "Quick Rule" mode must not come back.
     expect(screen.queryByRole("button", { name: /Quick Rule/ })).not.toBeInTheDocument();
     expect(screen.queryByPlaceholderText("e.g. Night motion alert")).not.toBeInTheDocument();

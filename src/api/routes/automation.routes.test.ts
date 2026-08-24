@@ -124,6 +124,8 @@ function createMockDb() {
 
   return {
     prepare: vi.fn(() => mockStatement),
+    transaction: vi.fn((fn: () => unknown) => fn),
+    inTransaction: false,
     _rows: rows,
     _statement: mockStatement,
   };

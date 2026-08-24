@@ -53,8 +53,16 @@ log "Copying immutable golden snapshot -> active database…"
 mkdir -p "$DATA_DIR"
 cp "$GOLDEN_DB" "$ACTIVE_DB"
 chmod 0644 "$ACTIVE_DB"
-# The backend container entrypoint re-chowns /app/data to the app user on start,
-# so root-owned host copies are corrected automatically.
+
+# The hardened public-demo backend starts directly as an unprivileged numeric
+# user. systemd runs this reset as root, so restore bind-mount ownership before
+# starting the container. Manual resets by the deployment user already create a
+# correctly owned copy.
+runtime_uid="${AEOLUS_RUNTIME_UID:-1000}"
+runtime_gid="${AEOLUS_RUNTIME_GID:-1000}"
+if [ "$(id -u)" -eq 0 ]; then
+  chown "${runtime_uid}:${runtime_gid}" "$DATA_DIR" "$ACTIVE_DB"
+fi
 
 log "Starting app services…"
 compose up -d backend simulator

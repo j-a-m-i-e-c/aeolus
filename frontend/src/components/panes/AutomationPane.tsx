@@ -10,7 +10,6 @@ import {
   Loader2,
   AlertTriangle,
   RotateCcw,
-  Zap,
   Blocks,
   BookOpen,
 } from "lucide-react";
@@ -18,6 +17,8 @@ import { authFetch } from "../../lib/auth-fetch";
 import type { TranspileError } from "../ScriptEditor";
 const ScriptEditor = lazy(() => import("../ScriptEditor").then(m => ({ default: m.ScriptEditor })));
 const UiEditor = lazy(() => import("../UiEditor").then(m => ({ default: m.UiEditor })));
+const AutomationProjectEditor = lazy(() => import("../AutomationProjectEditor").then(m => ({ default: m.AutomationProjectEditor })));
+import type { AutomationProjectSource } from "../AutomationProjectEditor";
 import { FlowDiagram } from "../FlowDiagram";
 import { ActivityFeed } from "../ActivityFeed";
 import { SnippetPicker } from "../SnippetPicker";
@@ -32,7 +33,7 @@ import { useDeviceStore } from "../../store/device-store";
 import { useAutomationStateStore } from "../../store/automation-state-store";
 import type { PaneConfig } from "../../types/dashboard";
 
-import { API_URL } from "../../lib/env";
+import { API_URL, PUBLIC_DEMO } from "../../lib/env";
 
 type PaneMode = "setup" | "status" | "editing";
 
@@ -50,6 +51,7 @@ interface AutomationRule {
   uiSource?: string;
   triggerType?: "mqtt" | "cron" | "none";
   cronExpression?: string | null;
+  projectMode?: "project" | "legacy";
   structured?: {
     trigger: string;
     conditions: string[];
@@ -62,39 +64,8 @@ interface Props {
   paneId?: string;
 }
 
-const DEFAULT_SCRIPT = `// ─── Option 1: Free-form (use the globals however you like) ───
-//
-// const temp = context.state.value;
-// const bedroom = devices.get("light-bedroom");
-// if (temp > 30 && bedroom && !bedroom.state.on) {
-//   devices.action("light-bedroom", "toggle");
-//   mqtt.publish("alerts/temp", JSON.stringify({ temp, room: "kitchen" }));
-//   log.warn("High temp — turned on bedroom fan");
-// }
-//
-// Push data to your custom UI component via the state store:
-// Anything you state.set() here appears as aeolus.read() in the UI tab.
-// state.set("lastTemp", temp);
-// state.set("lastCheck", Date.now());
-//
-// ─── Option 2: Structured helper (generates a flow diagram) ───
-//
-// The automation() helper is optional. If you use it with named functions,
-// the pane will render a visual flow diagram of your conditions and actions.
-// All conditions must pass (AND logic) for the actions to run.
-
-automation({
-  conditions: [
-    function check(context) {
-      return context.state.value !== undefined;
-    },
-  ],
-  actions: [
-    function act(context) {
-      log.info(\`Event: \${context.topic} → \${JSON.stringify(context.state)}\`);
-    },
-  ],
-});
+const DEFAULT_SCRIPT = `// Legacy single-file automation. New automations use Automation Projects.
+log.info("Event: " + context.topic);
 `;
 
 const DEFAULT_UI_TEMPLATE = `// Custom Automation UI Component
@@ -133,12 +104,42 @@ export default function MyComponent(aeolus: CustomComponentProps) {
 }
 `;
 
+const DEFAULT_PROJECT_TYPES = `export interface CustomComponentProps {
+  devices: any[]; ruleId: string; ruleName: string; lastFired: number | null; enabled: boolean;
+  read(key: string): unknown; save(key: string, value: unknown): void;
+  saveAndFire(key: string, value: unknown): void; fire(eventName: string, payload?: Record<string, unknown>): void;
+  control(deviceId: string, actionType: string, params?: Record<string, unknown>): Promise<void>;
+  publish(topic: string, payload: string): void; history: any[];
+}
+`;
+
+function createDefaultProject(): AutomationProjectSource {
+  return {
+    logicEntry: "logic/index.ts",
+    uiEntry: "ui/index.tsx",
+    files: [
+      {
+        path: "logic/index.ts",
+        content: `export default async function run(context: EventContext) {
+  log.info(\`Event: \${context.topic}\`);
+  state.set("lastEvent", { topic: context.topic, at: Date.now() });
+}
+`,
+      },
+      { path: "ui/index.tsx", content: DEFAULT_UI_TEMPLATE },
+      { path: "ui/types.ts", content: DEFAULT_PROJECT_TYPES },
+    ],
+  };
+}
+
 export function AutomationPane({ config, paneId }: Props) {
   const ruleId = (config.ruleId as string) || "";
   const updatePaneConfig = useDashboardStore((s) => s.updatePaneConfig);
   const panes = useDashboardStore((s) => s.panes);
   const activeTabId = useDashboardStore((s) => s.activeTabId);
   const isAdmin = useAuthStore((s) => s.user?.role) === "admin";
+  const isPublicVisitor = PUBLIC_DEMO && !isAdmin;
+  const isDemoDraft = isPublicVisitor && !ruleId && config.demoDraft === true;
 
   // Custom-UI interactivity is gated by the tab's RBAC level: a visitor holding
   // only `read` on the pane's tab (e.g. a look-only public-demo tab) gets a
@@ -152,13 +153,21 @@ export function AutomationPane({ config, paneId }: Props) {
   const [mode, setMode] = useState<PaneMode>(ruleId ? "status" : "setup");
 
   // Setup / editing fields
-  const [name, setName] = useState("");
-  const [triggerTopic, setTriggerTopic] = useState("");
-  const [triggerType, setTriggerType] = useState<"mqtt" | "cron" | "none">("mqtt");
-  const [cronExpression, setCronExpression] = useState("");
+  const [name, setName] = useState(() => isDemoDraft ? String(config.ruleName || "Demo Draft") : "");
+  const [triggerTopic, setTriggerTopic] = useState(() => isDemoDraft ? String(config.draftTriggerTopic || "") : "");
+  const [triggerType, setTriggerType] = useState<"mqtt" | "cron" | "none">(() =>
+    isDemoDraft && (config.draftTriggerType === "mqtt" || config.draftTriggerType === "cron" || config.draftTriggerType === "none")
+      ? config.draftTriggerType
+      : "mqtt",
+  );
+  const [cronExpression, setCronExpression] = useState(() => isDemoDraft ? String(config.draftCronExpression || "") : "");
   const [triggerValid, setTriggerValid] = useState(true);
   const [scriptSource, setScriptSource] = useState(DEFAULT_SCRIPT);
   const [uiSource, setUiSource] = useState("");
+  const [projectSource, setProjectSource] = useState<AutomationProjectSource>(() => {
+    const draft = config.draftProject as AutomationProjectSource | undefined;
+    return isDemoDraft && draft?.files?.length ? draft : createDefaultProject();
+  });
   const [errors, setErrors] = useState<TranspileError[]>([]);
   const [saving, setSaving] = useState(false);
 
@@ -169,8 +178,8 @@ export function AutomationPane({ config, paneId }: Props) {
   const [lastFired, setLastFired] = useState<number | null>(null);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
-  const [firing, setFiring] = useState(false);
   const [executionHistory, setExecutionHistory] = useState<ExecutionEntry[]>([]);
+  const [draftSavedAt, setDraftSavedAt] = useState<number | null>(null);
 
   // Track ruleId changes to switch modes
   useEffect(() => {
@@ -294,6 +303,21 @@ export function AutomationPane({ config, paneId }: Props) {
   // ── Save handler (setup mode) — includes uiSource (15.4) ──
   const handleSave = useCallback(async () => {
     if (!name.trim() || saving) return;
+    if (isDemoDraft) {
+      if (paneId) {
+        updatePaneConfig(paneId, {
+          ...config,
+          demoDraft: true,
+          ruleName: name.trim(),
+          draftTriggerTopic: triggerTopic,
+          draftTriggerType: triggerType,
+          draftCronExpression: cronExpression,
+          draftProject: projectSource,
+        });
+      }
+      setDraftSavedAt(Date.now());
+      return;
+    }
     setSaving(true);
     setErrors([]);
     try {
@@ -306,8 +330,7 @@ export function AutomationPane({ config, paneId }: Props) {
           triggerType,
           cronExpression: triggerType === "cron" ? cronExpression : undefined,
           ruleType: "script",
-          scriptSource,
-          uiSource: uiSource || undefined,
+          project: projectSource,
           // A non-admin author binds the automation's scope to the tab this pane
           // lives on (the pane's owning tab, falling back to the active tab).
           // Admins author unrestricted, so no owning tab is sent.
@@ -332,11 +355,16 @@ export function AutomationPane({ config, paneId }: Props) {
     } finally {
       setSaving(false);
     }
-  }, [name, triggerTopic, triggerType, cronExpression, scriptSource, uiSource, saving, paneId, config, updatePaneConfig, panes, activeTabId, isAdmin]);
+  }, [name, triggerTopic, triggerType, cronExpression, projectSource, saving, paneId, config, updatePaneConfig, panes, activeTabId, isAdmin, isDemoDraft]);
 
   // ── Update handler (editing mode) — includes uiSource (15.4) ──
   const handleUpdate = useCallback(async () => {
     if (!name.trim() || saving || !ruleId) return;
+    if (isPublicVisitor) {
+      setErrors([]);
+      setMode("status");
+      return;
+    }
     setSaving(true);
     setErrors([]);
     try {
@@ -348,8 +376,9 @@ export function AutomationPane({ config, paneId }: Props) {
           triggerTopic: triggerTopic.trim() || undefined,
           triggerType,
           cronExpression: triggerType === "cron" ? cronExpression : undefined,
-          scriptSource,
-          uiSource: uiSource || undefined,
+          ...(rule?.projectMode === "project"
+            ? { project: projectSource }
+            : { scriptSource, uiSource: uiSource || undefined }),
         }),
       });
       const data = await res.json();
@@ -373,7 +402,7 @@ export function AutomationPane({ config, paneId }: Props) {
     } finally {
       setSaving(false);
     }
-  }, [name, triggerTopic, triggerType, cronExpression, scriptSource, uiSource, saving, ruleId, fetchRule, paneId, config, updatePaneConfig]);
+  }, [name, triggerTopic, triggerType, cronExpression, scriptSource, uiSource, projectSource, rule, saving, ruleId, fetchRule, paneId, config, updatePaneConfig, isPublicVisitor]);
 
   // ── Toggle handler ──
   const handleToggle = useCallback(async () => {
@@ -399,33 +428,30 @@ export function AutomationPane({ config, paneId }: Props) {
     }
   }, [rule, toggling]);
 
-  // ── Fire Now handler ──
-  const handleFireNow = useCallback(async () => {
-    if (!rule || firing) return;
-    setFiring(true);
-    try {
-      await authFetch(`${API_URL}/api/automations/${rule.id}/fire`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
-      });
-      setLastFired(Date.now());
-    } catch {
-      // Fire-and-forget
-    }
-    setTimeout(() => setFiring(false), 600);
-  }, [rule, firing]);
 
   // ── Enter editing mode — populate uiSource from rule (15.4) ──
-  const handleEdit = useCallback(() => {
+  const handleEdit = useCallback(async () => {
     if (!rule) return;
     setName(rule.name);
     setTriggerTopic(rule.topic);
     setTriggerType(rule.triggerType || "mqtt");
     setCronExpression(rule.cronExpression || "");
-    setScriptSource(rule.scriptSource || DEFAULT_SCRIPT);
-    setUiSource(rule.uiSource || "");
     setErrors([]);
+
+    if (rule.projectMode === "project") {
+      try {
+        const response = await authFetch(`${API_URL}/api/automations/${rule.id}/project`);
+        if (!response.ok) throw new Error("Failed to load Automation Project");
+        const project = await response.json() as AutomationProjectSource;
+        setProjectSource(project);
+      } catch {
+        setErrors([{ line: 0, column: 0, message: "Failed to load Automation Project source" }]);
+        return;
+      }
+    } else {
+      setScriptSource(rule.scriptSource || DEFAULT_SCRIPT);
+      setUiSource(rule.uiSource || "");
+    }
     setMode("editing");
   }, [rule]);
 
@@ -443,6 +469,7 @@ export function AutomationPane({ config, paneId }: Props) {
     setTriggerValid(true);
     setScriptSource(DEFAULT_SCRIPT);
     setUiSource("");
+    setProjectSource(createDefaultProject());
     setErrors([]);
   }, [paneId, config, updatePaneConfig]);
 
@@ -452,9 +479,9 @@ export function AutomationPane({ config, paneId }: Props) {
   const handleEditorSave = useCallback(
     (_value: string) => {
       if (mode === "setup") handleSave();
-      else if (mode === "editing") handleUpdate();
+      else if (mode === "editing" && !isPublicVisitor) handleUpdate();
     },
-    [mode, handleSave, handleUpdate],
+    [mode, handleSave, handleUpdate, isPublicVisitor],
   );
 
   // NOTE: The custom-component privileged callbacks (control / publish / read /
@@ -531,11 +558,11 @@ export function AutomationPane({ config, paneId }: Props) {
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg text-[#9AA6B2] hover:text-[#E6EDF3] hover:bg-elevated/50 border border-[#2A3441] transition-colors shrink-0"
           >
             <Pencil size={12} />
-            Edit
+            {rule.projectMode === "project" ? "Explore Code" : "Edit"}
           </button>
         </div>
 
-        {/* Toggle + Fire Now + last fired — hidden for trigger-less automations */}
+        {/* Runtime status. Deliberate interactions belong in the project UI, not a generic bypass button. */}
         {rule.triggerType !== "none" && (
         <div className="flex items-center gap-2">
           <button
@@ -549,15 +576,6 @@ export function AutomationPane({ config, paneId }: Props) {
           >
             {rule.enabled ? <Power size={12} /> : <PowerOff size={12} />}
             {rule.enabled ? "Enabled" : "Disabled"}
-          </button>
-
-          <button
-            onClick={handleFireNow}
-            disabled={firing}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-primary/20 text-primary border border-primary/30 hover:bg-primary/30 transition-colors disabled:opacity-50"
-          >
-            <Zap size={12} />
-            {firing ? "Fired!" : "Fire Now"}
           </button>
 
           <div className="text-[10px] text-[#6B7785]">
@@ -588,8 +606,81 @@ export function AutomationPane({ config, paneId }: Props) {
 
   // ── Setup Mode / Editing Mode ──
   const isEditing = mode === "editing";
+  const usesProjectEditor = mode === "setup" || rule?.projectMode === "project";
 
-  // Populate default UI template if uiSource is empty
+  if (usesProjectEditor) {
+    return (
+      <div className="h-full flex flex-col p-3 sm:p-4 gap-3 overflow-hidden">
+        {isPublicVisitor && (
+          <div className="shrink-0 rounded-lg border border-[#3BA4FF]/25 bg-[#3BA4FF]/8 px-3 py-2 text-[10px] text-[#9AA6B2]">
+            <span className="font-semibold text-[#5CE1E6]">{isDemoDraft ? "Demo draft" : "Source explorer"}</span>
+            {isDemoDraft
+              ? " · This project exists only in your browser and never changes the shared demo."
+              : " · Browse the real seeded project; shared source is read-only in the public demo."}
+            {draftSavedAt && isDemoDraft && <span className="ml-2 text-[#73D99A]">Draft kept locally.</span>}
+          </div>
+        )}
+        <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_minmax(220px,0.8fr)] gap-2 shrink-0">
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Automation name"
+            className="w-full px-3 py-2 text-sm rounded-lg bg-[#0B0F14] border border-[#2A3441] text-[#E6EDF3] placeholder-[#6B7785] focus:outline-none focus:border-primary transition-colors"
+          />
+          <div className="min-w-0">
+            <TriggerSelector
+              triggerType={triggerType}
+              mqttTopic={triggerTopic}
+              cronExpression={cronExpression}
+              onTriggerTypeChange={setTriggerType}
+              onMqttTopicChange={setTriggerTopic}
+              onCronExpressionChange={setCronExpression}
+              onValidityChange={setTriggerValid}
+            />
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between gap-3 shrink-0">
+          <div>
+            <div className="text-xs font-semibold text-[#E6EDF3]">Automation Project</div>
+            <div className="text-[10px] text-[#6B7785]">Normal TypeScript modules. Aeolus adds the execution wrapper at compile time.</div>
+          </div>
+          <div className="text-[10px] font-mono text-[#5CE1E6] hidden sm:block">logic/ · ui/ · shared/</div>
+        </div>
+
+        <div className="flex-1 min-h-0">
+          <Suspense fallback={<div className="h-full flex items-center justify-center text-xs text-[#6B7785]">Loading project editor…</div>}>
+            <AutomationProjectEditor
+              project={projectSource}
+              onChange={setProjectSource}
+              onSave={isPublicVisitor && !isDemoDraft ? () => setMode("status") : mode === "setup" ? handleSave : handleUpdate}
+              errors={errors}
+              readOnly={isPublicVisitor && !isDemoDraft}
+            />
+          </Suspense>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            onClick={mode === "setup" ? handleSave : handleUpdate}
+            disabled={saveDisabled}
+            className="flex items-center gap-1.5 px-4 py-2 text-xs font-medium rounded-lg bg-primary/20 text-primary border border-primary/30 hover:bg-primary/30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+            {isDemoDraft ? "Keep Draft" : isPublicVisitor && isEditing ? "Done Exploring" : "Save Project"}
+          </button>
+          {isEditing && (
+            <button onClick={() => setMode("status")} className="flex items-center gap-1.5 px-4 py-2 text-xs font-medium rounded-lg text-[#9AA6B2] hover:text-[#E6EDF3] hover:bg-elevated/50 border border-[#2A3441] transition-colors">
+              <X size={12} /> {isPublicVisitor ? "Close" : "Cancel"}
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // Populate default UI template if uiSource is empty (legacy single-file editor)
   const effectiveUiSource = uiSource || DEFAULT_UI_TEMPLATE;
 
   return (
@@ -728,10 +819,10 @@ export function AutomationPane({ config, paneId }: Props) {
               <div className="space-y-3 text-[11px] font-mono">
                 {/* automation() helper */}
                 <div>
-                  <div className="text-primary font-semibold mb-1">automation()</div>
+                  <div className="text-[#9AA6B2] font-semibold mb-1">automation() legacy helper</div>
                   <div className="text-[#9AA6B2] pl-2 space-y-0.5">
                     <div className="text-[#E6EDF3]">{"automation({ conditions: [...], actions: [...] })"}</div>
-                    <div className="text-[10px] text-[#6B7785] mt-1">Optional structured helper — enables flow diagram</div>
+                    <div className="text-[10px] text-[#6B7785] mt-1">Backwards-compatible simple-rule helper; Automation Projects do not require it</div>
                   </div>
                 </div>
 

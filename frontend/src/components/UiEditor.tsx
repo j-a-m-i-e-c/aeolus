@@ -12,7 +12,7 @@ export interface UiEditorProps {
   initialValue?: string;
   onChange?: (value: string) => void;
   onSave?: (value: string) => void;
-  onEditorReady?: (api: { insertText: (text: string) => void }) => void;
+  onEditorReady?: (api: { insertText: (text: string) => void; formatDocument: () => Promise<void> }) => void;
 }
 
 /** Define the Aeolus dark theme for Monaco (reuses same theme as ScriptEditor) */
@@ -155,6 +155,10 @@ export function UiEditor({
 
     // Expose insertText API to parent
     if (onEditorReady) {
+      const formatDocument = async () => {
+        await ed.getAction("editor.action.formatDocument")?.run();
+        ed.focus();
+      };
       onEditorReady({
         insertText: (text: string) => {
           const position = ed.getPosition();
@@ -172,7 +176,9 @@ export function UiEditor({
           ]);
           ed.focus();
         },
+        formatDocument,
       });
+      window.setTimeout(() => { void formatDocument(); }, 250);
     }
   }, [onSave, onEditorReady]);
 
@@ -215,7 +221,9 @@ export function UiEditor({
           smoothScrolling: true,
           tabSize: 2,
           automaticLayout: true,
-          wordWrap: "on",
+          wordWrap: window.innerWidth < 768 ? "on" : "off",
+          formatOnPaste: true,
+          formatOnType: true,
           bracketPairColorization: { enabled: true },
           suggest: {
             showKeywords: true,

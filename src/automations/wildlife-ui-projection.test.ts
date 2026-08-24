@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest";
 import { wildlifeDetectionAutomation } from "../../scripts/seed/tabs/wildlife/detection.mjs";
 import { predatorResponseAutomation } from "../../scripts/seed/tabs/wildlife/predator-response.mjs";
 import { nestMonitoringAutomation } from "../../scripts/seed/tabs/wildlife/nest-monitoring.mjs";
+import { attachSeedProjectSource } from "../__test-helpers__/seed-project-source.js";
+// Authored source lives in scripts/seed/projects/<projectDir>; expose it as
+// scriptSource/uiSource for the source-level assertions below.
+attachSeedProjectSource(wildlifeDetectionAutomation, predatorResponseAutomation, nestMonitoringAutomation);
 
 const rules=[wildlifeDetectionAutomation,predatorResponseAutomation,nestMonitoringAutomation];
 describe("Wildlife showcase architecture",()=>{

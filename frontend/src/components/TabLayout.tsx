@@ -33,7 +33,6 @@ export function TabLayout({ tabId }: TabLayoutProps) {
   // a local workspace experiment. dashboard-store deliberately never persists
   // those public-demo mutations, so another visitor can never inherit them.
   const canEditLayout = isAdmin;
-  const canArrangeLayout = isAdmin || PUBLIC_DEMO;
 
   // PanePicker visibility
   const [showPicker, setShowPicker] = useState(false);
@@ -61,6 +60,9 @@ export function TabLayout({ tabId }: TabLayoutProps) {
     return () => ro.disconnect();
   }, []);
 
+  const isMobile = containerWidth < 768;
+  const canArrangeLayout = (isAdmin || PUBLIC_DEMO) && !isMobile;
+
   const tabPanes = useMemo(
     () => panes.filter((p) => p.tabId === tabId),
     [panes, tabId],
@@ -73,7 +75,7 @@ export function TabLayout({ tabId }: TabLayoutProps) {
       y: p.y,
       w: p.w,
       h: p.h,
-      minW: 2,
+      minW: 1,
       minH: 2,
     }));
     return { lg };
@@ -137,14 +139,12 @@ export function TabLayout({ tabId }: TabLayoutProps) {
           Browse Panes
         </button>
         </>)}
-        {PUBLIC_DEMO && !isAdmin && (
-          <button
-            onClick={() => void resetLayout()}
-            className="px-3 py-1.5 rounded-lg text-xs font-medium text-[#9AA6B2] hover:text-[#E6EDF3] hover:bg-elevated/50 border border-[#2A3441] transition-colors"
-          >
-            Reset layout
+        {PUBLIC_DEMO && !isAdmin && (<>
+          <button onClick={() => addPane(tabId, "automation", { demoDraft: true, ruleName: "Demo Draft" })} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-[#5CE1E6] bg-[#3BA4FF]/10 hover:bg-[#3BA4FF]/20 border border-[#3BA4FF]/30 transition-colors">
+            <Zap size={13} /> Try a New Automation
           </button>
-        )}
+          <button onClick={() => void resetLayout()} className="px-3 py-1.5 rounded-lg text-xs font-medium text-[#9AA6B2] hover:text-[#E6EDF3] hover:bg-elevated/50 border border-[#2A3441] transition-colors">Reset layout</button>
+        </>)}
         </div>
       </div>
       )}
@@ -159,9 +159,9 @@ export function TabLayout({ tabId }: TabLayoutProps) {
         width={containerWidth}
         layouts={layouts}
         breakpoints={{ lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 }}
-        cols={{ lg: 12, md: 12, sm: 6, xs: 4, xxs: 2 }}
+        cols={{ lg: 12, md: 12, sm: 6, xs: 1, xxs: 1 }}
         rowHeight={60}
-        onLayoutChange={handleLayoutChange}
+        onLayoutChange={(layout) => { if (!isMobile) handleLayoutChange(layout); }}
         dragConfig={{ enabled: canArrangeLayout, handle: ".pane-drag-handle" }}
         resizeConfig={{ enabled: canArrangeLayout, handles: ["se"] }}
         compactor={verticalCompactor}
@@ -179,24 +179,10 @@ export function TabLayout({ tabId }: TabLayoutProps) {
                 <span className="text-xs font-medium text-[#9AA6B2] truncate select-none">
                   {(pane.config.ruleName as string) || entry?.displayName || pane.paneType}
                 </span>
-                {canEditLayout && (
+                {(canEditLayout || (PUBLIC_DEMO && pane.config.demoDraft === true)) && (
                 <div className="flex items-center gap-1 shrink-0">
-                  <button
-                    className="p-1 rounded text-[#6B7785] hover:text-[#9AA6B2] hover:bg-elevated transition-colors"
-                    title="Pane settings"
-                    onMouseDown={(e) => e.stopPropagation()}
-                    onClick={() => setConfigPaneId(pane.id)}
-                  >
-                    <Settings size={13} />
-                  </button>
-                  <button
-                    className="p-1 rounded text-[#6B7785] hover:text-[#EF4444] hover:bg-elevated transition-colors"
-                    title="Remove pane"
-                    onMouseDown={(e) => e.stopPropagation()}
-                    onClick={() => handleRemovePane(pane.id)}
-                  >
-                    <X size={13} />
-                  </button>
+                  {canEditLayout && <button className="p-1 rounded text-[#6B7785] hover:text-[#9AA6B2] hover:bg-elevated transition-colors" title="Pane settings" onMouseDown={(e) => e.stopPropagation()} onClick={() => setConfigPaneId(pane.id)}><Settings size={13} /></button>}
+                  <button className="p-1 rounded text-[#6B7785] hover:text-[#EF4444] hover:bg-elevated transition-colors" title={PUBLIC_DEMO && pane.config.demoDraft === true ? "Discard local draft" : "Remove pane"} onMouseDown={(e) => e.stopPropagation()} onClick={() => handleRemovePane(pane.id)}><X size={13} /></button>
                 </div>
                 )}
               </div>

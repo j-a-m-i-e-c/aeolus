@@ -98,6 +98,28 @@ export function initSchema(database: DatabaseType): void {
       created_at INTEGER NOT NULL
     );
   `);
+  // Multi-file Automation Project authored source. The legacy automation_rules
+  // columns remain the compiled/runtime projection for backwards compatibility.
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS automation_projects (
+      automation_id TEXT PRIMARY KEY REFERENCES automation_rules(id) ON DELETE CASCADE,
+      logic_entry TEXT NOT NULL DEFAULT 'logic/index.ts',
+      ui_entry TEXT DEFAULT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS automation_project_files (
+      automation_id TEXT NOT NULL REFERENCES automation_rules(id) ON DELETE CASCADE,
+      path TEXT NOT NULL,
+      content TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (automation_id, path)
+    );
+    CREATE INDEX IF NOT EXISTS idx_automation_project_files_automation
+      ON automation_project_files(automation_id);
+  `);
+
   database.exec(`
     CREATE TABLE IF NOT EXISTS panes (
       id TEXT PRIMARY KEY,

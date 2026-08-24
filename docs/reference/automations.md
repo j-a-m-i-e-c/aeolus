@@ -1,6 +1,6 @@
 # Automation runtime
 
-Aeolus automations are authored as free-form Logic with an optional custom UI.
+Aeolus script automations are authored as bounded multi-file Automation Projects with backend Logic and an optional custom UI. See [Automation Projects](../architecture/AUTOMATION_PROJECTS.md) for the source, compilation and compatibility model.
 
 ## Rule types
 
@@ -10,9 +10,17 @@ Form rules store a trigger, optional condition and action configuration instead 
 
 ### Script rules
 
-Script rules contain TypeScript or JavaScript source. Source is transpiled with esbuild when saved, then executed in an isolated V8 context when triggered.
+Script rules contain an Automation Project. `logic/index.ts` is the default backend entrypoint and `ui/index.tsx` is the optional UI entrypoint. Relative imports resolve only within the project (with React provided externally to the UI sandbox). The project is bundled with esbuild in memory when saved, then the compiled Logic is executed in an isolated V8 context when triggered.
 
-The Logic editor is the primary authoring surface. The `automation()` helper is optional shorthand, not a requirement.
+New Logic uses a normal module entrypoint:
+
+```ts
+export default async function run(context: EventContext) {
+  log.info(`Triggered by ${context.topic}`);
+}
+```
+
+The compiler adds the existing completion wrapper internally. The `automation()` helper remains optional backwards-compatible shorthand for legacy/simple rules rather than the default scaffold.
 
 ## Triggers
 
@@ -61,7 +69,7 @@ The exposed API includes:
 
 The sandbox returns an explicit result for success, runtime failure, timeout, memory failure or runtime unavailability.
 
-The `automation()` helper awaits each action callback in order. If a device action fails (including TIMED_OUT, STATE_MISMATCH, or FAILED lifecycle states), subsequent actions are not invoked — fail-fast. To override this, pass `continueOnFailure: true` in the automation config. After the script body returns, the sandbox drains every in-flight device-action promise before resolving, bounded by a 30-second completion budget separate from the 5-second CPU timeout. This ensures command results are never lost to a premature resolution.
+For module-style Automation Projects, the compiler routes the exported Logic function through the same internal completion machinery used by the legacy `automation()` helper. The helper itself awaits each action callback in order. If a device action fails (including TIMED_OUT, STATE_MISMATCH, or FAILED lifecycle states), subsequent actions are not invoked — fail-fast. To override this, pass `continueOnFailure: true` in the automation config. After the script body returns, the sandbox drains every in-flight device-action promise before resolving, bounded by a 30-second completion budget separate from the 5-second CPU timeout. This ensures command results are never lost to a premature resolution.
 
 ## Logic and UI state
 
@@ -259,6 +267,8 @@ src/automations/command-service.ts
 src/automations/command-result-collector.ts
 src/automations/command-lifecycle.ts
 src/automations/pending-command-tracker.ts
+src/automations/automation-project.ts
+frontend/src/components/AutomationProjectEditor.tsx
 frontend/src/components/ScriptEditor.tsx
 frontend/src/components/UiEditor.tsx
 frontend/src/sandbox/

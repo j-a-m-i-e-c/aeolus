@@ -182,12 +182,23 @@ Show: the same custom tab resizing from desktop width to tablet/mobile width, de
 
 ## Automations
 
-An Aeolus automation can contain two user-authored parts:
+An Aeolus automation is an **Automation Project**: a bounded local source tree with backend Logic and, optionally, a React UI. Small automations can stay in one file; larger ones can split into sensible modules without becoming separate services.
 
-1. **Logic**: free-form backend JavaScript/TypeScript that responds to MQTT topics, connector events, schedules, or manual/UI events.
-2. **UI**: an optional React/TSX component that becomes the automation’s live control and status surface.
+```text
+my-automation/
+├── logic/
+│   ├── index.ts
+│   └── helpers.ts
+├── ui/
+│   ├── index.tsx
+│   └── types.ts
+└── shared/
+    └── constants.ts
+```
 
-Together they behave like a small edge application. Each automation has its own persistent state namespace, giving its Logic and UI a simple shared channel without exposing the UI directly to the backend process.
+Logic and UI are bundled in memory and then run through Aeolus' existing isolated backend and opaque-origin UI sandboxes. The project model improves authoring and organisation; it does not widen the runtime privilege boundary. See [Automation Projects](docs/architecture/AUTOMATION_PROJECTS.md).
+
+Together the two sides behave like a small edge application. Each automation has its own persistent state namespace, giving its Logic and UI a simple shared channel without exposing the UI directly to the backend process.
 
 ### How data flows between Logic and UI
 
@@ -211,30 +222,26 @@ Together they behave like a small edge application. Each automation has its own 
 - **UI → Logic, immediate:** `aeolus.fire(eventName, payload)` runs the associated Logic now with `context.topic = "ui/{ruleId}/{eventName}"` and `context.state = payload`.
 - **Save and run:** `aeolus.saveAndFire(key, value)` requests both persistence and an immediate `state-set` Logic event carrying `{ key, value }`. The immediate run can use `context.state`; later runs can read the stored value.
 
-### Logic tab: free-form code
+### Logic: normal module-style TypeScript
 
-```javascript
-const puzzleId = context.deviceId ?? context.topic.split("/").at(-1);
-const solved = Boolean(context.state.solved);
-const completed = new Set(state.get("completedPuzzles") ?? []);
+```ts
+// logic/index.ts
+export default async function run(context: EventContext) {
+  const puzzleId = context.deviceId ?? context.topic.split("/").at(-1);
+  const solved = Boolean(context.state.solved);
+  const completed = new Set(state.get("completedPuzzles") ?? []);
 
-if (context.topic.endsWith("/send-hint")) {
-  const hint = String(context.state.text ?? "");
-  mqtt.publish("escape-room/display/hint", JSON.stringify({ text: hint }));
-  state.set("lastHint", hint);
-}
-
-if (solved && puzzleId && !completed.has(puzzleId)) {
-  completed.add(puzzleId);
-  state.set("completedPuzzles", [...completed]);
-  state.set("lastEvent", `${puzzleId} solved`);
-  mqtt.publish(`escape-room/locks/${puzzleId}/command`, "unlock");
+  if (solved && puzzleId && !completed.has(puzzleId)) {
+    completed.add(puzzleId);
+    state.set("completedPuzzles", [...completed]);
+    await devices.action(`lock-${puzzleId}`, "unlock");
+  }
 }
 ```
 
-Free-form code is the main authoring model. Use the sandbox APIs directly, structure the program in the way that suits the workflow, and keep its state close to the automation. The same script can request device actions, publish MQTT messages, call HTTP services and write longer-term data when needed.
+New projects use ordinary modules and relative imports. Aeolus adds the existing completion/action wrapper when it bundles the Logic entrypoint, so authors do not need to understand or write the helper scaffold.
 
-Aeolus also includes an optional `automation()` helper for straightforward condition/action rules. It uses the same APIs and can generate a simple flow view, but it is there as a convenience rather than the main way to write Aeolus applications.
+The legacy `automation()` helper remains available for backwards compatibility and deliberately simple condition/action rules. It is no longer the default authoring experience or the source model used by the seeded demos.
 
 ### UI tab: purpose-built React
 
@@ -261,7 +268,7 @@ export default function GameMaster(aeolus: CustomComponentProps) {
 }
 ```
 
-The Logic editor runs on Monaco and receives Aeolus-specific definitions for autocomplete, parameter hints and inline documentation. UI components are transpiled on save and loaded into an `allow-scripts` iframe with an opaque origin. Privileged operations go through a broker in the host, so the frame never receives the user’s authentication token or general access to the host application.
+The project editor uses Monaco with a real file tree and Aeolus-specific definitions for autocomplete, parameter hints and inline documentation. UI components are transpiled on save and loaded into an `allow-scripts` iframe with an opaque origin. Privileged operations go through a broker in the host, so the frame never receives the user’s authentication token or general access to the host application.
 
 ### Sandbox APIs
 

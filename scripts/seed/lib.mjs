@@ -5,6 +5,10 @@
 // the dashboard layout, and generating execution history. Tab modules stay
 // declarative — all the HTTP plumbing lives here.
 
+// Project source loading is shared with the showcase architecture tests so the
+// tree layout and entry resolution are defined in exactly one place.
+import { loadProject } from "./project-loader.mjs";
+
 /**
  * Create an authenticated API client bound to a base URL.
  * @param {string} baseUrl - e.g. "http://localhost:3001"
@@ -12,42 +16,67 @@
 export function createApi(baseUrl) {
   let token = null;
 
-  async function api(method, path, body) {
-    const headers = { "Content-Type": "application/json" };
-    if (token) headers["Authorization"] = `Bearer ${token}`;
-    const opts = { method, headers };
-    if (body) opts.body = JSON.stringify(body);
-    const res = await fetch(`${baseUrl}${path}`, opts);
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      console.error(`  ✗ ${method} ${path} → ${res.status}`, data);
-      return null;
-    }
-    return data;
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  function retryDelayMs(res, attempt) {
+    const retryAfter = Number(res.headers.get("retry-after"));
+    if (Number.isFinite(retryAfter) && retryAfter > 0) return retryAfter * 1000;
+    const reset = Number(res.headers.get("ratelimit-reset"));
+    if (Number.isFinite(reset) && reset > 0) return reset * 1000;
+    return Math.min(1000 * (2 ** attempt), 15_000);
   }
 
-  /** Authenticate against an already-set-up admin account. Exits on failure. */
+  async function request(method, path, body, { authenticated = true, retries = 6 } = {}) {
+    for (let attempt = 0; ; attempt++) {
+      const headers = { "Content-Type": "application/json" };
+      if (authenticated && token) headers.Authorization = `Bearer ${token}`;
+      const opts = { method, headers };
+      if (body !== undefined) opts.body = JSON.stringify(body);
+
+      let res;
+      try {
+        res = await fetch(`${baseUrl}${path}`, opts);
+      } catch (err) {
+        if (attempt >= 3) throw err;
+        const delay = Math.min(500 * (2 ** attempt), 3000);
+        console.warn(`  ↻ ${method} ${path} connection failed; retrying in ${delay}ms`);
+        await sleep(delay);
+        continue;
+      }
+
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) return data;
+
+      if (res.status === 429 && attempt < retries) {
+        const delay = retryDelayMs(res, attempt);
+        console.warn(`  ↻ ${method} ${path} rate-limited; retrying in ${Math.ceil(delay / 1000)}s`);
+        await sleep(delay + 100);
+        continue;
+      }
+
+      const detail = data && typeof data === "object" && "error" in data
+        ? String(data.error)
+        : `HTTP ${res.status}`;
+      throw new Error(`${method} ${path} → ${res.status}: ${detail}`);
+    }
+  }
+
+  async function api(method, path, body) {
+    return request(method, path, body, { authenticated: true });
+  }
+
+  /** Authenticate an admin, creating the first admin on a pristine database. */
   async function login(username, password) {
-    const status = await fetch(`${baseUrl}/api/auth/status`)
-      .then((r) => r.json())
-      .catch(() => ({}));
+    const status = await request("GET", "/api/auth/status", undefined, { authenticated: false });
     if (status.needsSetup) {
-      console.error("  ✗ Admin account not set up yet.");
-      console.error("    Create your admin account in the dashboard first, then re-run:");
-      console.error(`    node scripts/seed-demo.mjs ${baseUrl} <username> <password>`);
-      process.exit(1);
+      const setup = await request("POST", "/api/auth/setup", { username, password }, { authenticated: false, retries: 2 });
+      if (!setup?.accessToken) throw new Error("Initial admin setup returned no access token");
+      token = setup.accessToken;
+      console.log(`  ✓ Created initial admin account and logged in as ${username}`);
+      return;
     }
-    const res = await fetch(`${baseUrl}/api/auth/login`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      console.error(`  ✗ Login failed for "${username}".`);
-      console.error("    Usage: node scripts/seed-demo.mjs [url] [username] [password]");
-      process.exit(1);
-    }
+    const data = await request("POST", "/api/auth/login", { username, password }, { authenticated: false, retries: 2 });
+    if (!data?.accessToken) throw new Error(`Login for "${username}" returned no access token`);
     token = data.accessToken;
     console.log(`  ✓ Logged in as ${username}`);
   }
@@ -100,9 +129,9 @@ export async function publishDevices(api, devices) {
  * Create script automations. Returns a map of { key → ruleId } so layout
  * panes can reference automations by their stable module key.
  *
- * Each automation: { key, name, scriptSource, uiSource?, and EITHER
- *   triggerTopic (MQTT) OR cron (cron expression) }.
- * @param {{key: string, name: string, triggerTopic?: string, cron?: string, scriptSource: string, uiSource?: string}[]} automations
+ * Demo automations use the same multi-file Automation Project model as normal
+ * Aeolus authoring. Legacy scriptSource/uiSource descriptors are still accepted
+ * so older third-party seed modules remain compatible.
  */
 export async function createAutomations(api, automations) {
   const ids = {};
@@ -110,8 +139,9 @@ export async function createAutomations(api, automations) {
     const body = {
       name: a.name,
       ruleType: "script",
-      scriptSource: a.scriptSource,
-      uiSource: a.uiSource || undefined,
+      ...(a.projectDir
+        ? { project: loadProject(a.projectDir) }
+        : { scriptSource: a.scriptSource, uiSource: a.uiSource || undefined }),
     };
     if (a.cron) {
       body.triggerType = "cron";

@@ -6,6 +6,10 @@ import { missionOverviewAutomation } from "../../scripts/seed/tabs/research-vess
 import { ctdAutomation } from "../../scripts/seed/tabs/research-vessel/ctd.mjs";
 import { rovAutomation } from "../../scripts/seed/tabs/research-vessel/rov.mjs";
 import { underwayAutomation } from "../../scripts/seed/tabs/research-vessel/underway.mjs";
+import { attachSeedProjectSource } from "../__test-helpers__/seed-project-source.js";
+// Authored source lives in scripts/seed/projects/<projectDir>; expose it as
+// scriptSource/uiSource for the source-level assertions below.
+attachSeedProjectSource(missionOverviewAutomation, ctdAutomation, rovAutomation, underwayAutomation);
 
 interface SeedAutomation { key: string; name: string; scriptSource: string; uiSource: string; demoAccess?: unknown }
 const commandAutomations: SeedAutomation[] = [ctdAutomation, rovAutomation, underwayAutomation] as SeedAutomation[];

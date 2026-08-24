@@ -1,4 +1,5 @@
-# Local/CI build overlay for docker-compose.public-demo.yml.
+# Build-only overlay for the HOSTED public showcase runtime.
+# Not used by ordinary Aeolus or the local docker-compose.demo.yml showcase.
 #
 # The public deployment compose file intentionally contains no build contexts:
 # production hosts pull/load immutable images and only restart containers. Use

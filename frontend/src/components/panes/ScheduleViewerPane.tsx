@@ -1,7 +1,7 @@
 // frontend/src/components/panes/ScheduleViewerPane.tsx — Schedule Viewer pane for cron-triggered automations
 
 import { useState, useEffect, useCallback } from "react";
-import { CalendarClock, Search, Play, Loader2 } from "lucide-react";
+import { CalendarClock, Search, Loader2 } from "lucide-react";
 import type { PaneConfig } from "../../types/dashboard";
 import { describeCron } from "../../lib/cron-utils";
 import { authFetch } from "../../lib/auth-fetch";
@@ -29,7 +29,6 @@ export function ScheduleViewerPane({ config: _config }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<FilterMode>("all");
-  const [firingIds, setFiringIds] = useState<Set<string>>(new Set());
   const [togglingIds, setTogglingIds] = useState<Set<string>>(new Set());
 
   const fetchAutomations = useCallback(async () => {
@@ -73,21 +72,6 @@ export function ScheduleViewerPane({ config: _config }: Props) {
     const interval = setInterval(fetchAutomations, 30_000);
     return () => clearInterval(interval);
   }, [fetchAutomations]);
-
-  const handleFire = async (id: string) => {
-    setFiringIds((prev) => new Set(prev).add(id));
-    try {
-      await authFetch(`${API_URL}/api/automations/${id}/fire`, { method: "POST" });
-    } catch {}
-    setTimeout(() => {
-      setFiringIds((prev) => {
-        const next = new Set(prev);
-        next.delete(id);
-        return next;
-      });
-      fetchAutomations();
-    }, 800);
-  };
 
   const handleToggle = async (id: string, currentEnabled: boolean) => {
     setTogglingIds((prev) => new Set(prev).add(id));
@@ -190,7 +174,6 @@ export function ScheduleViewerPane({ config: _config }: Props) {
           filtered.map((automation) => {
             const cron = getCronExpression(automation);
             const lastFired = lastFiredMap[automation.id];
-            const isFiring = firingIds.has(automation.id);
             const isToggling = togglingIds.has(automation.id);
 
             return (
@@ -244,19 +227,6 @@ export function ScheduleViewerPane({ config: _config }: Props) {
                     {automation.enabled ? "Disable" : "Enable"}
                   </button>
 
-                  {/* Fire Now */}
-                  <button
-                    onClick={() => handleFire(automation.id)}
-                    disabled={isFiring}
-                    className="flex items-center gap-1 px-2 py-1 text-[10px] font-medium rounded-lg bg-[#3D8BFF]/20 text-[#3D8BFF] hover:bg-[#3D8BFF]/30 transition-colors disabled:opacity-50"
-                  >
-                    {isFiring ? (
-                      <Loader2 size={10} className="animate-spin" />
-                    ) : (
-                      <Play size={10} />
-                    )}
-                    Fire Now
-                  </button>
                 </div>
               </div>
             );

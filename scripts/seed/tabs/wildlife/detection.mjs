@@ -1,57 +1,15 @@
-const logic = `automation({
-  actions: [
-    function wildlifeDetection(context) {
-      var topic=String(context.topic||""); var evt=topic.split("/").pop();
-      function byTopic(wanted){return devices.list().find(function(d){return d.topic===wanted;});}
-      function n(device,field,fallback){var v=Number(device&&device.state&&device.state[field]);return isNaN(v)?fallback:v;}
-      function setAction(label){state.set("lastAction",{label:label,at:Date.now()});}
-      function project(){
-        var camera=byTopic("sensor/wildlife/camera"), detection=byTopic("sensor/wildlife/detection"), power=byTopic("sensor/wildlife/site-power"), den=byTopic("sensor/wildlife/nest");
-        var ds=detection&&detection.state?detection.state:{}; var cs=camera&&camera.state?camera.state:{}; var ps=power&&power.state?power.state:{}; var ns=den&&den.state?den.state:{};
-        state.set("cameraOnline",cs.online!==false); state.set("accelerator",String(cs.accelerator||"Hailo-8L")); state.set("fps",n(camera,"fps",30)); state.set("inferenceMs",n(camera,"inferenceMs",17)); state.set("framesToday",n(camera,"framesToday",18432));
-        state.set("species",String(ds.species||"ringtail-possum")); state.set("label",String(ds.label||"Ringtail Possum")); state.set("category",String(ds.category||"native")); state.set("confidence",n(detection,"confidence",.91)); state.set("distanceM",n(detection,"distanceM",7.2)); state.set("direction",String(ds.direction||"east")); state.set("detectedAt",n(detection,"ts",Date.now()-16000));
-        state.set("battery",n(power,"battery",87)); state.set("solarW",n(power,"solarW",41)); state.set("nodeW",n(power,"nodeW",8.4));
-        state.set("denOccupied",ns.occupied!==false); state.set("denAdultPresent",Boolean(ns.adultPresent)); state.set("denJoeys",n(den,"joeys",2)); state.set("denTemp",n(den,"temp",31.8));
-        var eventId=String(ds.eventId||""); var previous=String(state.get("lastEventId")||"");
-        if(eventId&&eventId!==previous){
-          state.set("lastEventId",eventId); var total=Number(state.get("detectionsToday")||47)+1; var nativeCount=Number(state.get("nativeToday")||39); var predatorCount=Number(state.get("predatorsToday")||8);
-          if(String(ds.category)==="native") nativeCount+=1; else if(String(ds.category)==="predator") predatorCount+=1;
-          state.set("detectionsToday",total); state.set("nativeToday",nativeCount); state.set("predatorsToday",predatorCount);
-          setAction(String(ds.label||"Wildlife")+" classified locally · "+Math.round(n(detection,"confidence",0)*100)+"% confidence");
-          events.emit("wildlife/detection/classified",{eventId:eventId,species:String(ds.species||"unknown"),label:String(ds.label||"Unknown"),category:String(ds.category||"unknown"),confidence:n(detection,"confidence",0),distanceM:n(detection,"distanceM",0),ts:n(detection,"ts",Date.now())});
-          try{if(db)db.write("wildlife-events",{eventId:eventId,species:String(ds.label||"Unknown"),category:String(ds.category||"unknown"),confidence:n(detection,"confidence",0)});}catch(e){}
-        }
-      }
-      if(topic.indexOf("ui/")===0){
-        if(evt==="simulate-native") events.emit("wildlife/sim/native-detection",{});
-        else if(evt==="simulate-fox") events.emit("wildlife/sim/fox-detection",{});
-        else if(evt==="simulate-cat") events.emit("wildlife/sim/cat-detection",{});
-        else if(evt==="reset-wildlife") {events.emit("wildlife/sim/reset",{});setAction("Resetting edge station to dusk conditions");}
-        return;
-      }
-      if(topic.indexOf("sensor/wildlife/")!==0)return; project();
-    }
-  ]
-});`;
-
-const ui = `import {useEffect,useState} from "react";
-import type {CustomComponentProps} from "./types";
-function Animal({kind,x,y,predator}:{kind:string;x:number;y:number;predator:boolean}){const c=predator?"#E67B5D":"#C8D5C5";if(kind==="red-fox")return <g transform={"translate("+x+" "+y+")"} fill={c} stroke={c}><ellipse rx="28" ry="11"/><circle cx="25" cy="-8" r="9"/><path d="M19 -15 L23 -27 L28 -16 M29 -16 L36 -26 L35 -12"/><path d="M-25 -2 Q-54 -20 -63 -3 Q-48 4 -28 7" fill="none" strokeWidth="9" strokeLinecap="round"/><line x1="-14" y1="9" x2="-17" y2="24" strokeWidth="4"/><line x1="14" y1="9" x2="17" y2="24" strokeWidth="4"/></g>;if(kind==="feral-cat")return <g transform={"translate("+x+" "+y+")"} fill={c} stroke={c}><ellipse rx="22" ry="9"/><circle cx="20" cy="-8" r="8"/><path d="M14 -14 L17 -24 L22 -15 M22 -15 L28 -23 L28 -11"/><path d="M-20 -4 Q-43 -18 -42 -34" fill="none" strokeWidth="5"/><line x1="-10" y1="7" x2="-12" y2="22" strokeWidth="4"/><line x1="11" y1="7" x2="13" y2="22" strokeWidth="4"/></g>;if(kind==="echidna")return <g transform={"translate("+x+" "+y+")"} fill={c} stroke={c}><path d="M-28 7 Q-22 -16 5 -17 Q25 -16 30 3 Q18 15 -6 15 Q-21 15 -28 7 Z"/>{[-20,-12,-4,4,12,20].map(v=><line key={v} x1={v} y1="-10" x2={v-5} y2="-26" strokeWidth="2"/>)}<path d="M27 0 L43 5 L29 8"/></g>;if(kind==="lyrebird")return <g transform={"translate("+x+" "+y+")"} fill={c} stroke={c}><ellipse rx="14" ry="10"/><circle cx="13" cy="-8" r="6"/><path d="M17 -9 L27 -6 L17 -4"/><path d="M-12 -3 Q-38 -25 -48 -15 M-12 -1 Q-41 -8 -51 4 M-12 2 Q-37 13 -46 24" fill="none" strokeWidth="3"/></g>;return <g transform={"translate("+x+" "+y+")"} fill={c} stroke={c}><ellipse rx="23" ry="12"/><circle cx="21" cy="-9" r="8"/><circle cx="17" cy="-17" r="4"/><circle cx="25" cy="-17" r="4"/><path d="M-21 -3 Q-47 -18 -51 -2 Q-52 12 -39 12" fill="none" strokeWidth="4"/><line x1="-9" y1="9" x2="-10" y2="23" strokeWidth="4"/><line x1="11" y1="9" x2="12" y2="23" strokeWidth="4"/></g>}
-function Glider({x,y}:{x:number;y:number}){return <g transform={"translate("+x+" "+y+") scale(.7)"} fill="#AAB6A1" stroke="#AAB6A1"><ellipse rx="14" ry="8"/><circle cx="13" cy="-7" r="6"/><circle cx="10" cy="-12" r="3"/><circle cx="17" cy="-12" r="3"/><path d="M-12 -1 Q-29 -12 -34 0 Q-31 12 -19 11" fill="none" strokeWidth="3"/></g>}
-export default function WildlifeDetection(aeolus:CustomComponentProps){
- const species=String(aeolus.read("species")||"ringtail-possum"),label=String(aeolus.read("label")||"Ringtail Possum"),category=String(aeolus.read("category")||"native"),confidence=Number(aeolus.read("confidence")??.91),distance=Number(aeolus.read("distanceM")??7.2),detectedAt=Number(aeolus.read("detectedAt")??0),battery=Number(aeolus.read("battery")??87),solar=Number(aeolus.read("solarW")??41),fps=Number(aeolus.read("fps")??30),inference=Number(aeolus.read("inferenceMs")??17),total=Number(aeolus.read("detectionsToday")??47),native=Number(aeolus.read("nativeToday")??39),predators=Number(aeolus.read("predatorsToday")??8),denOccupied=aeolus.read("denOccupied")!==false,denAdult=Boolean(aeolus.read("denAdultPresent")),joeys=Number(aeolus.read("denJoeys")??2),denTemp=Number(aeolus.read("denTemp")??31.8),last=aeolus.read("lastAction") as any;
- const [now,setNow]=useState(Date.now());useEffect(()=>{const id=setInterval(()=>setNow(Date.now()),100);return()=>clearInterval(id)},[]);const age=Math.max(0,now-detectedAt),travel=Math.min(1,age/6500),x=104+travel*330,y=213+Math.sin(travel*Math.PI*3)*4,predator=category==="predator",active=age<9500,color=predator?"#F08A68":"#83D49A";
- return <div style={{padding:14,minHeight:"100%",background:"linear-gradient(180deg,#07110E,#050A08)",color:"#EDF4EF"}}>
-  <div style={{display:"flex",justifyContent:"space-between",marginBottom:10,gap:12}}><div><div style={{fontSize:18,fontWeight:900}}>WILDLIFE DETECTION</div><div style={{fontSize:12,color:"#82958A",marginTop:3}}>Trail camera → on-device inference → classified domain event · no cloud required</div></div><div style={{textAlign:"right"}}><div style={{fontSize:12,fontWeight:850,color}}>{predator?"PREDATOR DETECTED":"NATIVE FAUNA"}</div><div style={{fontSize:11,color:"#718278",marginTop:2}}>edge node {battery}% · solar {Math.round(solar)}W</div></div></div>
-  <div style={{display:"grid",gridTemplateColumns:"1.45fr .55fr",gap:10}}>
-   <div style={{border:"1px solid #20372C",borderRadius:13,overflow:"hidden",background:"#08150F"}}><svg width="100%" height="300" viewBox="0 0 560 270"><defs><linearGradient id="wsky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#10251A"/><stop offset="1" stopColor="#203321"/></linearGradient><linearGradient id="wground" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#1B2E1A"/><stop offset="1" stopColor="#0B160E"/></linearGradient></defs><rect width="560" height="180" fill="url(#wsky)"/><rect y="180" width="560" height="90" fill="url(#wground)"/>{[20,82,158,250,337,430,510].map((tx,i)=><g key={tx} opacity={.72}><rect x={tx} y={42+(i%3)*13} width={9+i%2*4} height={156} fill="#172619"/><circle cx={tx+5} cy={38+(i%3)*13} r={30+i%2*8} fill="#18301F"/><circle cx={tx-15} cy={58+(i%2)*8} r="24" fill="#16301E"/></g>)}<path d="M0 226 Q80 207 156 225 T315 218 T560 223 V270 H0Z" fill="#101C12"/><g transform="translate(39 112)"><rect width="28" height="42" rx="4" fill="#1D2922" stroke="#79917F"/><circle cx="14" cy="14" r="7" fill="#08100B" stroke="#68C890"/><circle cx="14" cy="14" r="2" fill="#80E8A8"/><path d="M28 17 L43 10 L43 31 L28 25Z" fill="#142119" stroke="#506A58"/></g>
-   <g transform="translate(470 71)"><rect x="-28" y="-25" width="54" height="66" rx="4" fill="#5C482D" stroke="#A18457"/><path d="M-34 -22 L0 -39 L33 -22" fill="#3F321F" stroke="#A18457"/><circle cx="8" cy="-2" r="10" fill="#14150F" stroke="#9B855F"/>{denAdult&&<Glider x={8} y={-1}/>}<text x="0" y="57" textAnchor="middle" fill="#B2B99B" fontSize="10">SUGAR GLIDER DEN</text><text x="0" y="69" textAnchor="middle" fill="#7F927E" fontSize="10">{denOccupied?joeys+" joeys · "+denTemp.toFixed(1)+"°C":"unoccupied"}</text></g>
-   {active&&<Animal kind={species} x={x} y={y} predator={predator}/>} {active&&<g><rect x={Math.min(342,x+40)} y={Math.max(35,y-74)} width="170" height="54" rx="6" fill="#07110E" stroke={color}/><text x={Math.min(354,x+52)} y={Math.max(52,y-57)} fill={color} fontSize="11" fontWeight="800">{label.toUpperCase()}</text><text x={Math.min(354,x+52)} y={Math.max(70,y-39)} fill="#9BAD9F" fontSize="10">{Math.round(confidence*100)}% · {distance.toFixed(1)}m · LOCAL</text></g>}<text x="13" y="257" fill="#7E9588" fontSize="10">TRAILCAM-01 · IR/visible fusion · frame inference {inference} ms</text></svg></div>
-   <div style={{display:"grid",gridTemplateRows:"auto auto 1fr",gap:8}}><div style={{border:"1px solid #263B30",borderRadius:11,padding:10,background:"#09120E"}}><div style={{fontSize:11,color:"#81958A",letterSpacing:".1em"}}>EDGE INFERENCE</div><div style={{fontSize:27,fontWeight:900,color,marginTop:4}}>{Math.round(confidence*100)}%</div><div style={{fontSize:12,color:"#C0CDC5"}}>{label}</div><div style={{fontSize:11,color:"#74867B",marginTop:7}}>{fps} fps · {inference} ms · Hailo-8L</div></div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:5}}>{[["TODAY",total],["NATIVE",native],["PREDATOR",predators]].map((m:any)=><div key={m[0]} style={{border:"1px solid #263B30",borderRadius:8,padding:8,background:"#09120E"}}><div style={{fontSize:11,color:"#778A7F"}}>{m[0]}</div><div style={{fontSize:17,fontFamily:"monospace",fontWeight:800,color:"#D3DED7"}}>{m[1]}</div></div>)}</div><div style={{border:"1px solid #20372C",borderRadius:11,padding:10,background:"#07100C"}}><div style={{fontSize:11,color:"#81958A",letterSpacing:".1em"}}>PIPELINE</div>{[["01","CAMERA","motion + frame"],["02","LOCAL AI","species classification"],["03","AEOLUS","domain event"],["04","CONSUMERS","response / history"]].map((r:any,i)=><div key={r[0]} style={{display:"grid",gridTemplateColumns:"25px 66px 1fr",gap:6,alignItems:"center",marginTop:8}}><span style={{fontFamily:"monospace",fontSize:11,color:i<3?"#72C991":"#819088"}}>{r[0]}</span><span style={{fontSize:11,fontWeight:800,color:"#B7C3BB"}}>{r[1]}</span><span style={{fontSize:11,color:"#75877C"}}>{r[2]}</span></div>)}</div></div>
-  </div>
-  <div style={{marginTop:10,border:"1px dashed #5C5131",borderRadius:10,padding:9,background:"#151207"}}><div style={{fontSize:11,color:"#D4B66A",letterSpacing:".1em"}}>DEMO SCENARIO</div><div style={{fontSize:11,color:"#9A8961",margin:"4px 0 7px"}}>Inject an animal entering the trail-camera field. The simulator publishes the physical detection; this automation classifies and emits the domain event.</div><div style={{display:"flex",gap:6,flexWrap:"wrap"}}><button onClick={()=>aeolus.fire("simulate-native")} style={{flex:1,minWidth:110,padding:"9px",borderRadius:7,border:"1px solid #3D6049",background:"#102018",color:"#8FD6A4",fontSize:12,cursor:"pointer"}}>Native animal</button><button onClick={()=>aeolus.fire("simulate-fox")} style={{flex:1,minWidth:110,padding:"9px",borderRadius:7,border:"1px solid #704332",background:"#24110C",color:"#F09A7A",fontSize:12,cursor:"pointer"}}>Red fox</button><button onClick={()=>aeolus.fire("simulate-cat")} style={{flex:1,minWidth:110,padding:"9px",borderRadius:7,border:"1px solid #704332",background:"#24110C",color:"#F09A7A",fontSize:12,cursor:"pointer"}}>Feral cat</button><button onClick={()=>aeolus.fire("reset-wildlife")} style={{padding:"9px 12px",borderRadius:7,border:"1px solid #4A493C",background:"#161712",color:"#A0A59A",fontSize:12,cursor:"pointer"}}>Reset</button></div></div>
-  <div style={{fontSize:11,color:"#718278",marginTop:7}}>{last?.label?String(last.label):"Edge station scanning locally"}</div>
- </div>;
-}`;
-
-export const wildlifeDetectionAutomation={key:"wildlife-detection",name:"Wildlife Detection",triggerTopic:"sensor/wildlife/#",scriptSource:logic,uiSource:ui,demoAccess:{fireEvents:["simulate-native","simulate-fox","simulate-cat","reset-wildlife"]}};
+// scripts/seed/tabs/wildlife/detection.mjs — demo automation manifest (source lives in scripts/seed/projects/wildlife-detection)
+export const wildlifeDetectionAutomation = {
+  "key": "wildlife-detection",
+  "name": "Wildlife Detection",
+  "triggerTopic": "sensor/wildlife/#",
+  "demoAccess": {
+    "fireEvents": [
+      "simulate-native",
+      "simulate-fox",
+      "simulate-cat",
+      "reset-wildlife"
+    ]
+  },
+  "projectDir": "wildlife-detection"
+};

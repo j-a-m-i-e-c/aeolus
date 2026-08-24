@@ -3,7 +3,7 @@
 // Covers the three modes (setup / status / editing) and their branches. All the
 // heavy children (Monaco editors, flow diagram, activity feed, snippet picker,
 // dynamic custom component) and the zustand stores are mocked so the pane's own
-// logic — fetching, save/update/toggle/fire, mode transitions, error/notFound —
+// logic — fetching, project save/update/toggle, mode transitions, error/notFound —
 // runs in jsdom.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -12,9 +12,17 @@ import type { PaneConfig } from "../../types/dashboard";
 
 const { mockAuthFetch } = vi.hoisted(() => ({ mockAuthFetch: vi.fn() }));
 vi.mock("../../lib/auth-fetch", () => ({ authFetch: mockAuthFetch }));
-vi.mock("../../lib/env", () => ({ API_URL: "http://test.local:3001" }));
+vi.mock("../../lib/env", () => ({ API_URL: "http://test.local:3001", PUBLIC_DEMO: false }));
 
 // Heavy child stubs
+vi.mock("../AutomationProjectEditor", () => ({
+  AutomationProjectEditor: ({ onSave, errors = [] }: { onSave?: () => void; errors?: Array<{ message: string }> }) => (
+    <div data-testid="project-editor">
+      <button onClick={() => onSave?.()}>project-save</button>
+      {errors.map((error, index) => <span key={index}>{error.message}</span>)}
+    </div>
+  ),
+}));
 vi.mock("../ScriptEditor", () => ({
   ScriptEditor: ({ onSave }: { onSave: (s: string) => void }) => (
     <div data-testid="script-editor">
@@ -103,54 +111,40 @@ describe("AutomationPane — setup mode", () => {
     updatePaneConfig.mockClear();
   });
 
-  it("renders the setup form with the logic editor and a disabled Save", async () => {
+  it("renders a project editor and a disabled Save Project button", async () => {
     render(<AutomationPane config={{} as PaneConfig} paneId="p1" />);
     expect(screen.getByPlaceholderText("Automation name")).toBeInTheDocument();
-    expect(await screen.findByTestId("script-editor")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(await screen.findByTestId("project-editor")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save Project" })).toBeDisabled();
   });
 
-  it("enables Save once a name is entered and POSTs a new automation", async () => {
+  it("creates new automations as Automation Projects", async () => {
     mockAuthFetch.mockResolvedValue(jsonResponse({ id: "new-1" }));
     render(<AutomationPane config={{} as PaneConfig} paneId="p1" />);
 
     fireEvent.change(screen.getByPlaceholderText("Automation name"), { target: { value: "Heat logic" } });
-    const save = screen.getByRole("button", { name: "Save" });
-    expect(save).toBeEnabled();
-    fireEvent.click(save);
+    fireEvent.click(screen.getByRole("button", { name: "Save Project" }));
 
     await waitFor(() => expect(lastCallWithMethod("POST")).toBeTruthy());
     const [url, init] = lastCallWithMethod("POST")!;
     expect(url).toBe("http://test.local:3001/api/automations");
-    expect(JSON.parse(init!.body as string)).toMatchObject({ name: "Heat logic", ruleType: "script" });
+    expect(JSON.parse(init!.body as string)).toMatchObject({
+      name: "Heat logic",
+      ruleType: "script",
+      project: { logicEntry: "logic/index.ts", uiEntry: "ui/index.tsx" },
+    });
     await waitFor(() =>
       expect(updatePaneConfig).toHaveBeenCalledWith("p1", expect.objectContaining({ ruleId: "new-1", ruleName: "Heat logic" })),
     );
   });
 
-  it("switches to the UI tab and toggles the snippets/docs panels", async () => {
-    render(<AutomationPane config={{} as PaneConfig} paneId="p1" />);
-    fireEvent.click(screen.getByRole("button", { name: "UI" }));
-    expect(await screen.findByTestId("ui-editor")).toBeInTheDocument();
-
-    // Snippets panel is open by default; close it via its own control.
-    expect(screen.getByTestId("snippet-picker")).toBeInTheDocument();
-    fireEvent.click(screen.getByText("close-snippets"));
-    expect(screen.queryByTestId("snippet-picker")).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "Docs" }));
-    expect(screen.getByText("Component Props")).toBeInTheDocument();
-  });
-
-  it("renders server transpile errors on a 400 save", async () => {
-    mockAuthFetch.mockResolvedValue(
-      jsonResponse({ details: [{ line: 2, column: 4, message: "boom" }] }, 400),
-    );
+  it("shows project compile errors without falling back to the helper editor", async () => {
+    mockAuthFetch.mockResolvedValue(jsonResponse({ details: [{ path: "logic/index.ts", line: 2, column: 4, message: "boom" }] }, 400));
     render(<AutomationPane config={{} as PaneConfig} paneId="p1" />);
     fireEvent.change(screen.getByPlaceholderText("Automation name"), { target: { value: "X" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    expect(await screen.findByText("Transpilation errors")).toBeInTheDocument();
-    expect(screen.getByText(/Line 2:4 — boom/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Save Project" }));
+    expect(await screen.findByText("boom")).toBeInTheDocument();
+    expect(screen.getByTestId("project-editor")).toBeInTheDocument();
   });
 });
 
@@ -177,13 +171,11 @@ describe("AutomationPane — status mode", () => {
     expect(lastCallWithMethod("PATCH")![0]).toBe("http://test.local:3001/api/automations/r1/toggle");
   });
 
-  it("fires the rule via POST", async () => {
+  it("does not expose a generic Fire Now bypass", async () => {
     routeStatus();
     render(<AutomationPane config={{ ruleId: "r1" } as unknown as PaneConfig} />);
     await screen.findByText("a/b");
-    fireEvent.click(screen.getByRole("button", { name: "Fire Now" }));
-    await waitFor(() => expect(lastCallWithMethod("POST")).toBeTruthy());
-    expect(lastCallWithMethod("POST")![0]).toBe("http://test.local:3001/api/automations/r1/fire");
+    expect(screen.queryByRole("button", { name: "Fire Now" })).not.toBeInTheDocument();
   });
 
   it("enters editing mode and updates via PUT", async () => {

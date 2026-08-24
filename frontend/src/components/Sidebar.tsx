@@ -8,7 +8,7 @@ import { useAuthStore } from "../store/auth-store";
 import { usePermissionsStore } from "../store/permissions-store";
 import { useNavigate, useLocation } from "react-router-dom";
 import * as icons from "lucide-react";
-import { Plus, Trash2, GripVertical, LogOut } from "lucide-react";
+import { Plus, Trash2, GripVertical, LogOut, X } from "lucide-react";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { fetchHealth } from "../lib/api-client";
 import { PUBLIC_DEMO } from "../lib/env";
@@ -40,7 +40,12 @@ const ICON_CHOICES = [
 // Sidebar component
 // ---------------------------------------------------------------------------
 
-export function Sidebar() {
+interface SidebarProps {
+  mobileOpen?: boolean;
+  onClose?: () => void;
+}
+
+export function Sidebar({ mobileOpen = false, onClose }: SidebarProps) {
   const wsConnected = useDeviceStore((s) => s.wsConnected);
   const health = useDeviceStore((s) => s.health);
   const dataStoreConfig = useDataStoreStore((s) => s.config);
@@ -150,6 +155,7 @@ export function Sidebar() {
     setNewTabIcon("cpu");
     setShowAddForm(false);
     navigate(`/tab/${slug}`);
+    onClose?.();
   };
 
   const handleAddKeyDown = (e: React.KeyboardEvent) => {
@@ -177,6 +183,7 @@ export function Sidebar() {
       if (wasActive) {
         const newSlug = tabNameToSlug(renameValue);
         navigate(`/tab/${newSlug}`, { replace: true });
+        onClose?.();
       }
     }
     setRenamingTabId(null);
@@ -243,6 +250,7 @@ export function Sidebar() {
       const wasActive = tab && isTabActive({ ...tab, pinned: false });
       deleteTab(tabId);
       if (wasActive) navigate("/dashboard");
+      onClose?.();
     }
   };
 
@@ -260,7 +268,7 @@ export function Sidebar() {
         className={`group flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
           isActive ? "bg-elevated text-[#E6EDF3]" : "text-[#6B7785] hover:text-[#9AA6B2] hover:bg-elevated/50"
         } ${isDragOver ? "border border-primary/50" : ""} ${dragTabId === tab.id ? "opacity-50" : ""}`}
-        onClick={() => navigate(getTabRoute(tab))}
+        onClick={() => { navigate(getTabRoute(tab)); onClose?.(); }}
         onDoubleClick={!isPinned && isAdmin ? () => startRename(tab.id, tab.name) : undefined}
         draggable={!isPinned && isAdmin}
         onDragStart={!isPinned && isAdmin ? (e) => handleDragStart(e, tab.id) : undefined}
@@ -313,11 +321,12 @@ export function Sidebar() {
   };
 
   return (
-    <aside className="w-64 h-screen bg-surface border-r border-[#2A3441] flex flex-col p-4 gap-6 sticky top-0">
+    <aside className={`${mobileOpen ? "flex" : "hidden"} md:flex w-[min(86vw,20rem)] md:w-64 h-dvh md:h-screen bg-surface border-r border-[#2A3441] flex-col p-4 gap-6 fixed md:sticky inset-y-0 left-0 z-50 md:z-auto top-0 overflow-hidden shadow-2xl md:shadow-none`} aria-label="Aeolus navigation">
       {/* Logo */}
       <div className="flex items-center gap-3 px-2 shrink-0">
         <AeolusLogo size={40} />
-        <span className="text-xl font-semibold text-primary">Aeolus</span>
+        <span className="text-xl font-semibold text-primary flex-1">Aeolus</span>
+        <button type="button" onClick={onClose} className="md:hidden w-9 h-9 inline-flex items-center justify-center rounded-lg text-[#6B7785] hover:text-[#E6EDF3] hover:bg-elevated/60" aria-label="Close navigation"><X size={18} /></button>
       </div>
 
       {/* Pinned system tabs */}
@@ -420,7 +429,7 @@ export function Sidebar() {
               {user.username} {isAdmin && <span className="text-[#3BA4FF]">(admin)</span>}
             </span>
             <button
-              onClick={() => logout()}
+              onClick={() => { logout(); onClose?.(); }}
               className="text-[#6B7785] hover:text-[#EF4444] transition-colors shrink-0"
               title="Sign out"
             >

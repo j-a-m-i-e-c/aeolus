@@ -53,6 +53,7 @@ export default defineConfig({
         // unit tests.
         "src/components/ScriptEditor.tsx", // Monaco editor
         "src/components/UiEditor.tsx", // Monaco editor
+        "src/components/AutomationProjectEditor.tsx", // Monaco editor (multi-file project tree)
         "src/lib/monaco-setup.ts", // Monaco worker/env wiring
         "src/components/MetricSparkline.tsx", // SVG chart
         "src/components/StateHistoryChart.tsx", // SVG chart

@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { showSequencerAutomation } from "../../scripts/seed/tabs/stage-show/sequencer.mjs";
+import { attachSeedProjectSource } from "../__test-helpers__/seed-project-source.js";
+// Authored source lives in scripts/seed/projects/<projectDir>; expose it as
+// scriptSource/uiSource for the source-level assertions below.
+attachSeedProjectSource(showSequencerAutomation);
 
 describe("Stage & Show showcase", () => {
   it("uses one coherent Show Control automation instead of splitting one console into artificial silos", () => {

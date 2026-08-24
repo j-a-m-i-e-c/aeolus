@@ -26,6 +26,8 @@ import {
 } from "lucide-react";
 import type { TranspileError } from "./ScriptEditor";
 const ScriptEditor = lazy(() => import("./ScriptEditor").then(m => ({ default: m.ScriptEditor })));
+const AutomationProjectEditor = lazy(() => import("./AutomationProjectEditor").then(m => ({ default: m.AutomationProjectEditor })));
+import type { AutomationProjectSource } from "./AutomationProjectEditor";
 import { authFetch } from "../lib/auth-fetch";
 import { useAuthStore } from "../store/auth-store";
 import { usePermissionsStore } from "../store/permissions-store";
@@ -49,6 +51,18 @@ interface AutomationRule {
   scriptSource?: string;
   ownerTabId?: string | null;
   authoredUnrestricted?: boolean;
+  projectMode?: "project" | "legacy";
+}
+
+function createDefaultProject(): AutomationProjectSource {
+  return {
+    logicEntry: "logic/index.ts",
+    uiEntry: null,
+    files: [{ path: "logic/index.ts", content: `export default async function run(context: EventContext) {
+  log.info(\`Event: \${context.topic}\`);
+}
+` }],
+  };
 }
 
 export function AutomationsPage() {
@@ -78,6 +92,7 @@ export function AutomationsPage() {
   const [scriptName, setScriptName] = useState("");
   const [scriptTriggerTopic, setScriptTriggerTopic] = useState("");
   const [scriptSource, setScriptSource] = useState("");
+  const [projectSource, setProjectSource] = useState<AutomationProjectSource>(() => createDefaultProject());
   const [transpileErrors, setTranspileErrors] = useState<TranspileError[]>([]);
 
   // Editing state
@@ -98,6 +113,7 @@ export function AutomationsPage() {
     setScriptName("");
     setScriptTriggerTopic("");
     setScriptSource("");
+    setProjectSource(createDefaultProject());
     setTranspileErrors([]);
     setEditingRuleId(null);
   };
@@ -120,7 +136,9 @@ export function AutomationsPage() {
           name: scriptName,
           triggerTopic: scriptTriggerTopic,
           ruleType: "script",
-          scriptSource: source,
+          ...((editingRuleId && rules.find((rule) => rule.id === editingRuleId)?.projectMode !== "project")
+            ? { scriptSource: source }
+            : { project: projectSource }),
           // Owning tab only matters on create; a non-admin binds scope to a tab
           // they can write. On edit (PUT) the server ignores scope fields.
           ...(isEditing || isAdmin ? {} : { tabId: ownerTabId }),
@@ -160,11 +178,18 @@ export function AutomationsPage() {
     fetchRules();
   };
 
-  const openForEditing = (rule: AutomationRule) => {
+  const openForEditing = async (rule: AutomationRule) => {
     setScriptName(rule.name);
     setScriptTriggerTopic(rule.topic);
-    setScriptSource(rule.scriptSource || "");
     setTranspileErrors([]);
+    if (rule.projectMode === "project") {
+      try {
+        const response = await authFetch(`${API_URL}/api/automations/${rule.id}/project`);
+        if (response.ok) setProjectSource(await response.json() as AutomationProjectSource);
+      } catch {}
+    } else {
+      setScriptSource(rule.scriptSource || "");
+    }
     setEditingRuleId(rule.id);
     setShowForm(true);
   };
@@ -276,12 +301,23 @@ export function AutomationsPage() {
               </div>
 
               <Suspense fallback={<div className="flex items-center justify-center h-64 text-neutral-500">Loading editor...</div>}>
-              <ScriptEditor
-                initialValue={scriptSource || undefined}
-                onChange={(val) => setScriptSource(val)}
-                onSave={saveScript}
-                errors={transpileErrors}
-              />
+              {(!editingRuleId || rules.find((rule) => rule.id === editingRuleId)?.projectMode === "project") ? (
+                <div className="h-[420px]">
+                  <AutomationProjectEditor
+                    project={projectSource}
+                    onChange={setProjectSource}
+                    onSave={() => saveScript(projectSource.files.find((file) => file.path === projectSource.logicEntry)?.content || "")}
+                    errors={transpileErrors}
+                  />
+                </div>
+              ) : (
+                <ScriptEditor
+                  initialValue={scriptSource || undefined}
+                  onChange={(val) => setScriptSource(val)}
+                  onSave={saveScript}
+                  errors={transpileErrors}
+                />
+              )}
               </Suspense>
 
               {transpileErrors.length > 0 && (
@@ -305,7 +341,7 @@ export function AutomationsPage() {
                   Cancel
                 </button>
                 <button
-                  onClick={() => saveScript(scriptSource)}
+                  onClick={() => saveScript((!editingRuleId || rules.find((rule) => rule.id === editingRuleId)?.projectMode === "project") ? (projectSource.files.find((file) => file.path === projectSource.logicEntry)?.content || "") : scriptSource)}
                   disabled={!scriptName || !scriptTriggerTopic}
                   className="flex-1 py-2 text-xs font-medium rounded-lg bg-primary/20 text-primary border border-primary/30 hover:bg-primary/30 transition-colors disabled:opacity-40"
                 >

@@ -15,7 +15,8 @@
  * Example:
  *   node scripts/seed-demo.mjs http://localhost:3001 admin mypass
  *
- * Prerequisites: Aeolus running, and an admin account already created.
+ * Prerequisites: Aeolus running. On a pristine database the supplied admin
+ * credentials are used to create the initial administrator automatically.
  */
 
 import {
@@ -141,18 +142,26 @@ if (process.env.AEOLUS_SIMULATOR_BOOTSTRAP === "true") {
   } catch (err) {
     console.error(`  ✗ Simulator bootstrap failed: ${err.message}`);
     console.error("    Ensure the simulator service is running and has published its devices.");
-    process.exitCode = 1;
+    throw err;
   }
 }
 
-// Done
+const finalAutomations = await api("GET", "/api/automations");
+const finalDevices = await api("GET", "/api/devices");
+if (!Array.isArray(finalAutomations) || finalAutomations.length !== allAutomations.length) {
+  throw new Error(`Seed verification failed: expected ${allAutomations.length} automations, found ${Array.isArray(finalAutomations) ? finalAutomations.length : "invalid response"}`);
+}
+if (process.env.AEOLUS_SIMULATOR_BOOTSTRAP === "true" && (!Array.isArray(finalDevices) || finalDevices.length === 0)) {
+  throw new Error("Seed verification failed: simulator bootstrap is enabled but no devices are registered");
+}
+
 console.log(`
-✅ Multi-domain demo seeded!
+✅ Multi-domain demo seeded and verified!
 
    Dashboard: ${API.replace(":3001", ":3000")}
    Tabs:        ${tabModules.map((m) => m.tab.name).join(" · ")}
-   Automations: ${allAutomations.length}
-   Devices:     ${allDevices.length}
+   Automations: ${finalAutomations.length}
+   Devices:     ${Array.isArray(finalDevices) ? finalDevices.length : allDevices.length}
 
    Custom UI components render instantly — just open the dashboard.
 `);

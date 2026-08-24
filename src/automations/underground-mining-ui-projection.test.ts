@@ -5,6 +5,10 @@ import { atmosphereAutomation } from "../../scripts/seed/tabs/underground-mining
 import { ventilationAutomation } from "../../scripts/seed/tabs/underground-mining/ventilation.mjs";
 import { personnelAutomation } from "../../scripts/seed/tabs/underground-mining/personnel.mjs";
 import { dewateringAutomation } from "../../scripts/seed/tabs/underground-mining/dewatering.mjs";
+import { attachSeedProjectSource } from "../__test-helpers__/seed-project-source.js";
+// Authored source lives in scripts/seed/projects/<projectDir>; expose it as
+// scriptSource/uiSource for the source-level assertions below.
+attachSeedProjectSource(mineOverviewAutomation, atmosphereAutomation, ventilationAutomation, personnelAutomation, dewateringAutomation);
 
 interface SeedAutomation{key:string;name:string;scriptSource:string;uiSource:string;demoAccess?:unknown}
 const owning:SeedAutomation[]=[atmosphereAutomation,ventilationAutomation,personnelAutomation,dewateringAutomation] as SeedAutomation[];
