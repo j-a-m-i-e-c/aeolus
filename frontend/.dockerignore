@@ -1,0 +1,20 @@
+# frontend/ is its own Docker build context: `docker build … "$ROOT/frontend"`
+# (scripts/deploy/deploy-demo-from-pc.sh, docker-compose*.yml). The repo-root
+# .dockerignore does NOT apply here, so this file has to stand on its own.
+#
+# The Dockerfile runs `npm ci` and *then* `COPY . .`. Without these exclusions a
+# host node_modules/ (built for Windows/macOS) would be copied over the clean
+# Linux dependencies that npm ci just installed, and a stale host dist/ would
+# shadow the freshly built bundle. Host .env files must never be baked into a
+# public image either — Vite inlines them into the static bundle.
+node_modules
+dist
+coverage
+.env
+.env.*
+*.log
+npm-debug.log*
+.vite
+.DS_Store
+Dockerfile
+.dockerignore

@@ -16,8 +16,14 @@ mosquitto/password_file
 # Seed dev scratch files (validation harness + extracted legacy seed)
 scripts/seed/_*.mjs
 
-# Local working notes
+# Local working notes — pasted assistant transcripts and scratch patch files.
+# Kept out of the repo so a release tree can be verified clean before deploying
+# (the deploy tags images from HEAD, so an uncommitted tree makes release
+# identity ambiguous and breaks rollback).
 docs/temp-chatgpt-convo
+docs/temp/
+docs/chat-about-demo.md
+docs/website-assessment.md
 
 # Site-specific frontend build endpoints
 frontend/.env.production.local

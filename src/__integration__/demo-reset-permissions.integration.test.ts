@@ -116,6 +116,44 @@ describe("demo reset — runtime ownership contract", () => {
   });
 });
 
+describe("public demo release gate", () => {
+  it("gives the frontend build context its own ignore file", () => {
+    // The deploy builds `$ROOT/frontend` as an INDEPENDENT Docker context, so the
+    // repo-root .dockerignore does not apply. The Dockerfile runs `npm ci` and
+    // then `COPY . .`, so without these exclusions a host node_modules/ (wrong
+    // platform) or a stale dist/ silently overwrites the clean Linux install, and
+    // a host .env would be inlined into the public static bundle by Vite.
+    const ignore = readFileSync(path.join(REPO_ROOT, "frontend", ".dockerignore"), "utf8")
+      .split("\n")
+      .map((line) => line.trim());
+
+    for (const entry of ["node_modules", "dist", ".env", ".env.*"]) {
+      expect(ignore, `frontend/.dockerignore must exclude ${entry}`).toContain(entry);
+    }
+
+    // The guard only matters while the Dockerfile still copies the whole context
+    // after installing dependencies. If that changes, revisit this together.
+    const dockerfile = readFileSync(path.join(REPO_ROOT, "frontend", "Dockerfile"), "utf8");
+    expect(dockerfile).toMatch(/RUN npm ci[\s\S]*COPY \. \./);
+  });
+
+  it("smoke-tests anonymous demo session creation, not just / and /api/health", () => {
+    // Regression guard for the outage this file documents: the frontend served
+    // and /api/health answered while every anonymous visitor got a 502 from
+    // /api/auth/demo-session. A public gate that cannot see that is not a gate.
+    expect(DEPLOY_SCRIPT).toMatch(/\/api\/auth\/demo-session/);
+    const demoSessionCheck = DEPLOY_SCRIPT.split("\n").findIndex((line) =>
+      /\$\{DEMO_PUBLIC_ORIGIN\}\/api\/auth\/demo-session/.test(line),
+    );
+    expect(demoSessionCheck).toBeGreaterThanOrEqual(0);
+    // It must be a POST (the endpoint only mints sessions on POST) and it must
+    // feed the same pass/fail variable as the other public checks.
+    const block = DEPLOY_SCRIPT.split("\n").slice(demoSessionCheck - 6, demoSessionCheck + 3).join("\n");
+    expect(block).toMatch(/-X POST/);
+    expect(block).toMatch(/public_ok=0/);
+  });
+});
+
 describeDocker("demo reset — actual resulting ownership (root reset)", () => {
   it("leaves the active database and its directory owned by the runtime UID/GID", () => {
     // Run the real script as root with `docker compose` stubbed out, so the only

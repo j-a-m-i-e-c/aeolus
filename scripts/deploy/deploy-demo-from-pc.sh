@@ -250,12 +250,29 @@ ssh "${ssh_args[@]}" "$remote" "docker image prune -f >/dev/null || true"
 log "Internal deployment health gate passed."
 if command -v curl >/dev/null 2>&1; then
   public_ok=1
-  curl --fail --silent --show-error --max-time 10 "${DEMO_PUBLIC_ORIGIN}/api/health" >/dev/null 2>&1 || public_ok=0
-  curl --fail --silent --show-error --max-time 10 "${DEMO_PUBLIC_ORIGIN}/" >/dev/null 2>&1 || public_ok=0
+  public_failed=""
+  curl --fail --silent --show-error --max-time 10 "${DEMO_PUBLIC_ORIGIN}/api/health" >/dev/null 2>&1 \
+    || { public_ok=0; public_failed="${public_failed} GET /api/health"; }
+  curl --fail --silent --show-error --max-time 10 "${DEMO_PUBLIC_ORIGIN}/" >/dev/null 2>&1 \
+    || { public_ok=0; public_failed="${public_failed} GET /"; }
+  # A public demo can serve / and /api/health while anonymous demo auth is dead
+  # (e.g. the backend is up but the tunnel route to it 502s, or demo mode was not
+  # actually enabled in the running app). Nothing in the demo is reachable without
+  # this endpoint, so it is part of the public gate rather than a manual check.
+  curl --fail --silent --show-error --max-time 10 \
+    -X POST \
+    -H 'Content-Type: application/json' \
+    -d '{}' \
+    "${DEMO_PUBLIC_ORIGIN}/api/auth/demo-session" >/dev/null 2>&1 \
+    || { public_ok=0; public_failed="${public_failed} POST /api/auth/demo-session"; }
   if [ "$public_ok" = "1" ]; then
-    log "Public Cloudflare API + frontend healthy: ${DEMO_PUBLIC_ORIGIN}"
+    log "Public Cloudflare route healthy (/, /api/health, /api/auth/demo-session): ${DEMO_PUBLIC_ORIGIN}"
   else
-    log "WARNING: internal health is good but the full public Cloudflare route is not reachable yet. Check tunnel/frontend logs on the host."
+    log "WARNING: internal health is good but the public Cloudflare route failed:${public_failed}"
+    log "         Check tunnel/frontend/backend logs on the host before announcing this release."
+    if [ "${public_failed#*demo-session}" != "$public_failed" ]; then
+      log "         A failing demo-session means anonymous visitors cannot use the demo at all."
+    fi
   fi
 else
   log "curl not available locally; skipping public Cloudflare smoke test."
@@ -264,4 +281,9 @@ if [ "$golden_exists" = "1" ]; then
   log "Golden snapshot already exists. Deployment complete."
 else
   log "No golden snapshot exists yet. Nightly reset remains disabled until the golden is created."
+fi
+# Last word on screen, so a failed public gate cannot scroll past unnoticed
+# behind the golden-snapshot guidance above.
+if [ "${public_ok:-1}" != "1" ]; then
+  log "RELEASE GATE NOT MET: public checks failed:${public_failed}. Do not announce this release."
 fi
