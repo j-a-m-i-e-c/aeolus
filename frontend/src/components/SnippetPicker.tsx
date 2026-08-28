@@ -42,6 +42,8 @@ interface SnippetPickerProps {
   onClose?: () => void;
   /** Which editor tab is active — filters snippets to show relevant ones */
   mode?: "logic" | "ui";
+  /** Optional heading used by newer authoring surfaces. */
+  title?: string;
 }
 
 const ICON_MAP: Record<string, typeof Radio> = {
@@ -192,7 +194,7 @@ const UI_SNIPPETS: SnippetGroup[] = [
   },
 ];
 
-export function SnippetPicker({ onInsert, onClose, mode }: SnippetPickerProps) {
+export function SnippetPicker({ onInsert, onClose, mode, title = "Snippets" }: SnippetPickerProps) {
   const [groups, setGroups] = useState<SnippetGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -279,7 +281,7 @@ export function SnippetPicker({ onInsert, onClose, mode }: SnippetPickerProps) {
       {/* Header */}
       <div className="flex items-center gap-2 px-3 py-2 border-b border-[#2A3441]">
         <Blocks size={14} className="text-primary shrink-0" />
-        <span className="text-xs font-semibold text-[#E6EDF3] flex-1">Snippets</span>
+        <span className="text-xs font-semibold text-[#E6EDF3] flex-1">{title}</span>
         {onClose && (
           <button
             onClick={onClose}

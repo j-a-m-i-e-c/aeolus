@@ -623,14 +623,17 @@ export function AutomationPane({ config, paneId }: Props) {
             <span className="rounded-full border border-[#2A3441] px-2 py-1 text-[9px] uppercase tracking-wider text-[#7E8A98]">Read only</span>
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_minmax(220px,0.8fr)] items-start gap-2 shrink-0">
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Automation name"
-              className="w-full h-10 self-start px-3 text-sm rounded-lg bg-[#0B0F14] border border-[#2A3441] text-[#E6EDF3] placeholder-[#6B7785] focus:outline-none focus:border-primary transition-colors"
-            />
+          <div className="grid grid-cols-1 sm:grid-cols-[minmax(220px,0.72fr)_minmax(360px,1.28fr)] items-start gap-3 shrink-0">
+            <div className="min-w-0">
+              <label className="text-[10px] text-[#6B7785] uppercase tracking-wider font-medium block mb-2">Name</label>
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Automation name"
+                className="w-full h-10 px-3 text-sm rounded-lg bg-[#0B0F14] border border-[#2A3441] text-[#E6EDF3] placeholder-[#6B7785] focus:outline-none focus:border-primary transition-colors"
+              />
+            </div>
             <div className="min-w-0 self-start">
               <TriggerSelector
                 triggerType={triggerType}
@@ -654,11 +657,12 @@ export function AutomationPane({ config, paneId }: Props) {
               onSave={isPublicVisitor && !isDemoDraft ? undefined : mode === "setup" ? handleSave : handleUpdate}
               errors={errors}
               readOnly={isPublicVisitor && !isDemoDraft}
+              liveState={ruleState}
             />
           </Suspense>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center justify-end gap-2 shrink-0">
           {isPublicVisitor && isEditing && !isDemoDraft ? (
             <button
               onClick={() => setMode("status")}

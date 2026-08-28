@@ -145,10 +145,10 @@ declare const log: {
 /**
  * The event that triggered this automation.
  *
- * Contains the MQTT topic, device ID, device state snapshot,
- * and the timestamp when the event occurred.
+ * Automation Project entry functions may use this type directly:
+ * `export default async function run(context: EventContext) { ... }`.
  */
-declare const context: {
+interface EventContext {
   /** The MQTT topic or synthetic connector topic that fired. */
   topic: string;
   /** The device ID that triggered the event. */
@@ -157,7 +157,10 @@ declare const context: {
   state: Record<string, unknown>;
   /** Unix timestamp (ms) when the event occurred. */
   timestamp: number;
-};
+}
+
+/** The event that triggered this automation. */
+declare const context: EventContext;
 
 /**
  * Declare a structured automation with optional conditions and required actions.

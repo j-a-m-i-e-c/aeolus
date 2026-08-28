@@ -3,12 +3,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Editor, { type OnMount } from "@monaco-editor/react";
 import type { editor } from "monaco-editor";
-import { FileCode2, Folder, FolderTree, Plus, Save, Trash2, WandSparkles, X } from "lucide-react";
+import {
+  Blocks,
+  BookOpen,
+  FileCode2,
+  FolderTree,
+  Plus,
+  Trash2,
+  WandSparkles,
+  X,
+} from "lucide-react";
 import { authFetch } from "../lib/auth-fetch";
 import { API_URL } from "../lib/env";
 import { automationProjectModelUri } from "../lib/automation-project-model";
 import "../lib/monaco-setup";
 import type { TranspileError } from "./ScriptEditor";
+import { SnippetPicker } from "./SnippetPicker";
 
 export interface AutomationProjectFile {
   path: string;
@@ -30,10 +40,14 @@ interface Props {
   readOnly?: boolean;
   /** Stable automation identity used to isolate Monaco models between projects. */
   projectKey?: string;
+  /** Live state written by Logic. Shown contextually while authoring UI. */
+  liveState?: Record<string, unknown>;
 }
 
 const CODE_EXTENSIONS = [".ts", ".tsx", ".js", ".jsx", ".json"];
 type Monaco = Parameters<OnMount>[1];
+type ToolPanel = "insert" | "api" | "files" | null;
+type AuthoringSurface = "logic" | "ui";
 
 const DEFAULT_UI_SOURCE = `export default function AutomationView(aeolus: CustomComponentProps) {
   return (
@@ -47,6 +61,33 @@ const DEFAULT_UI_SOURCE = `export default function AutomationView(aeolus: Custom
 }
 `;
 
+const LOGIC_API = [
+  ["context", "Trigger topic, device, state and timestamp"],
+  ["devices.get(id)", "Read a device snapshot"],
+  ["devices.list()", "List registered devices"],
+  ["devices.action(id, type, params?)", "Control a device"],
+  ["mqtt.publish(topic, payload)", "Publish an MQTT message"],
+  ["state.get(key)", "Read automation state"],
+  ["state.set(key, value)", "Persist automation state"],
+  ["state.getAll()", "Read all automation state"],
+  ["services.get(type)", "Find a registered service"],
+  ["http.get(url, opts?)", "Make an HTTP GET request"],
+  ["http.post(url, opts?)", "Make an HTTP POST request"],
+  ["log.info / warn / error", "Write to the Aeolus event log"],
+] as const;
+
+const UI_API = [
+  ["aeolus.devices", "Live device registry"],
+  ["aeolus.read(key)", "Read state written by Logic"],
+  ["aeolus.save(key, value)", "Persist state for Logic"],
+  ["aeolus.saveAndFire(key, value)", "Persist state and fire Logic"],
+  ["aeolus.fire(eventName, payload?)", "Fire Logic from the UI"],
+  ["aeolus.control(id, type, params?)", "Control a device"],
+  ["aeolus.publish(topic, payload)", "Publish an MQTT message"],
+  ["aeolus.history", "Recent automation executions"],
+  ["aeolus.ruleName / enabled / lastFired", "Automation metadata"],
+] as const;
+
 function languageFor(filePath: string): string {
   if (filePath.endsWith(".tsx") || filePath.endsWith(".ts")) return "typescript";
   if (filePath.endsWith(".jsx") || filePath.endsWith(".js")) return "javascript";
@@ -54,6 +95,20 @@ function languageFor(filePath: string): string {
   return "plaintext";
 }
 
+function surfaceForPath(project: AutomationProjectSource, path: string): AuthoringSurface {
+  if (path === project.uiEntry || path.startsWith("ui/")) return "ui";
+  return "logic";
+}
+
+function formatStateValue(value: unknown): string {
+  try {
+    const rendered = typeof value === "string" ? `"${value}"` : JSON.stringify(value);
+    if (rendered === undefined) return String(value);
+    return rendered.length > 72 ? `${rendered.slice(0, 69)}…` : rendered;
+  } catch {
+    return String(value);
+  }
+}
 
 function syncProjectModels(monaco: Monaco, projectKey: string, project: AutomationProjectSource) {
   const namespace = `file:///aeolus-project/${encodeURIComponent(projectKey || "project")}/`;
@@ -110,6 +165,50 @@ async function loadAeolusTypes(monaco: Parameters<OnMount>[1]) {
   }
 }
 
+function ApiReference({ mode, liveState }: { mode: AuthoringSurface; liveState: Record<string, unknown> }) {
+  const entries = mode === "ui" ? UI_API : LOGIC_API;
+  const stateEntries = Object.entries(liveState);
+
+  return (
+    <div className="h-full flex flex-col overflow-hidden">
+      <div className="h-11 shrink-0 flex items-center gap-2 px-3 border-b border-[#2A3441]">
+        <BookOpen size={14} className="text-[#5CE1E6]" />
+        <div>
+          <div className="text-xs font-semibold text-[#E6EDF3]">{mode === "ui" ? "UI API" : "Logic API"}</div>
+          <div className="text-[9px] text-[#6B7785]">Available without imports</div>
+        </div>
+      </div>
+      <div className="flex-1 overflow-auto p-3 space-y-4">
+        {mode === "ui" && stateEntries.length > 0 && (
+          <div>
+            <div className="text-[9px] uppercase tracking-[0.14em] text-[#6B7785] mb-2">Live state</div>
+            <div className="space-y-1.5">
+              {stateEntries.map(([key, value]) => (
+                <div key={key} className="rounded-md bg-[#0B0F14] border border-[#202A36] px-2 py-1.5 font-mono text-[10px]">
+                  <div className="text-[#5CE1E6]">aeolus.read(&quot;{key}&quot;)</div>
+                  <div className="text-[#778493] truncate" title={formatStateValue(value)}>{formatStateValue(value)}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div>
+          <div className="text-[9px] uppercase tracking-[0.14em] text-[#6B7785] mb-2">Reference</div>
+          <div className="space-y-3">
+            {entries.map(([signature, description]) => (
+              <div key={signature}>
+                <div className="text-[10px] font-mono font-semibold text-[#E6EDF3]">{signature}</div>
+                <div className="mt-0.5 text-[10px] leading-relaxed text-[#7E8A98]">{description}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function AutomationProjectEditor({
   project,
   onChange,
@@ -117,10 +216,11 @@ export function AutomationProjectEditor({
   errors = [],
   readOnly = false,
   projectKey = "project",
+  liveState = {},
 }: Props) {
   const firstPath = project.logicEntry || project.files[0]?.path || "logic/index.ts";
   const [activePath, setActivePath] = useState(firstPath);
-  const [filesOpen, setFilesOpen] = useState(false);
+  const [toolPanel, setToolPanel] = useState<ToolPanel>(null);
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
   const monacoRef = useRef<Monaco | null>(null);
 
@@ -130,10 +230,9 @@ export function AutomationProjectEditor({
 
   useEffect(() => {
     setActivePath(project.logicEntry || project.files[0]?.path || "logic/index.ts");
-    setFilesOpen(false);
+    setToolPanel(null);
     // Deliberately keyed on automation identity alone. `project` is a new object on
-    // every keystroke, so depending on it would reset the open tab and collapse the
-    // file tree while the author is typing.
+    // every keystroke, so depending on it would reset the open tab while typing.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectKey]);
 
@@ -179,12 +278,12 @@ export function AutomationProjectEditor({
     }
     if (project.files.some((file) => file.path === requested)) {
       setActivePath(requested);
-      setFilesOpen(true);
+      setToolPanel("files");
       return;
     }
     onChange({ ...project, files: [...project.files, { path: requested, content: "" }] });
     setActivePath(requested);
-    setFilesOpen(true);
+    setToolPanel("files");
   }, [onChange, project]);
 
   const addUi = useCallback(() => {
@@ -209,6 +308,15 @@ export function AutomationProjectEditor({
     onChange({ ...project, files: next });
     setActivePath(project.logicEntry || next[0]?.path || "logic/index.ts");
   }, [activeFile, onChange, project]);
+
+  const insertText = useCallback((text: string) => {
+    const ed = editorRef.current;
+    if (!ed || readOnly) return;
+    const selection = ed.getSelection();
+    if (!selection) return;
+    ed.executeEdits("aeolus-insert", [{ range: selection, text, forceMoveMarkers: true }]);
+    ed.focus();
+  }, [readOnly]);
 
   const handleMount: OnMount = useCallback((ed, monaco) => {
     editorRef.current = ed;
@@ -255,97 +363,91 @@ export function AutomationProjectEditor({
   const activeErrors = errors.filter((error) => !error.path || error.path.replace(/^\//, "") === activeFile.path);
   const logicSelected = activeFile.path === project.logicEntry;
   const uiSelected = !!project.uiEntry && activeFile.path === project.uiEntry;
+  const activeSurface = surfaceForPath(project, activeFile.path);
+  const extraFileSelected = !logicSelected && !uiSelected;
+  const liveStateEntries = Object.entries(liveState);
 
-  const closeFiles = () => {
-    setFilesOpen(false);
-    if (!logicSelected && !uiSelected) setActivePath(project.logicEntry);
+  const toggleTool = (panel: Exclude<ToolPanel, null>) => {
+    setToolPanel((current) => current === panel ? null : panel);
   };
 
   return (
-    <div className="h-full min-h-[280px] flex flex-col overflow-hidden rounded-xl border border-[#2A3441] bg-[#0B0F14]">
-      {/* Logic and UI are the stable top-level authoring model. The full file tree
-          is progressive disclosure for automations that actually need modules. */}
-      <div className="h-10 shrink-0 flex items-center gap-1.5 px-2 border-b border-[#2A3441] bg-[#10161F]">
-        <button
-          onClick={() => setActivePath(project.logicEntry)}
-          className={`px-3 py-1.5 rounded-md text-[11px] font-semibold transition-colors ${logicSelected ? "bg-[#1A2330] text-[#5CE1E6]" : "text-[#7E8A98] hover:text-[#B9C4CF] hover:bg-[#171E28]"}`}
-        >
-          Logic
-        </button>
-        <button
-          onClick={() => project.uiEntry ? setActivePath(project.uiEntry) : (!readOnly && addUi())}
-          disabled={readOnly && !project.uiEntry}
-          className={`px-3 py-1.5 rounded-md text-[11px] font-semibold transition-colors ${uiSelected ? "bg-[#1A2330] text-[#3BA4FF]" : "text-[#7E8A98] hover:text-[#B9C4CF] hover:bg-[#171E28] disabled:hover:text-[#7E8A98] disabled:hover:bg-transparent"}`}
-          title={project.uiEntry ? "Edit automation UI" : readOnly ? "This automation has no custom UI" : "Create automation UI"}
-        >
-          UI
-        </button>
+    <div className="h-full min-h-[300px] flex flex-col overflow-hidden rounded-xl border border-[#2A3441] bg-[#0B0F14] shadow-[0_10px_30px_rgba(0,0,0,0.12)]">
+      {/* Logic + UI are the product. Insert/API/Files progressively reveal power. */}
+      <div className="min-h-12 shrink-0 flex flex-wrap items-stretch border-b border-[#2A3441] bg-[#10161F]">
+        <div className="flex items-stretch px-2">
+          <button
+            onClick={() => setActivePath(project.logicEntry)}
+            className={`relative min-w-24 px-4 text-xs font-semibold transition-colors ${logicSelected ? "text-[#5CE1E6]" : "text-[#7E8A98] hover:text-[#C3CDD7]"}`}
+          >
+            Logic
+            {logicSelected && <span className="absolute inset-x-3 bottom-0 h-0.5 rounded-full bg-[#5CE1E6]" />}
+          </button>
+          <button
+            onClick={() => project.uiEntry ? setActivePath(project.uiEntry) : (!readOnly && addUi())}
+            disabled={readOnly && !project.uiEntry}
+            className={`relative min-w-24 px-4 text-xs font-semibold transition-colors ${uiSelected ? "text-[#3BA4FF]" : "text-[#7E8A98] hover:text-[#C3CDD7] disabled:opacity-40 disabled:hover:text-[#7E8A98]"}`}
+            title={project.uiEntry ? "Edit automation UI" : readOnly ? "This automation has no custom UI" : "Create automation UI"}
+          >
+            UI
+            {uiSelected && <span className="absolute inset-x-3 bottom-0 h-0.5 rounded-full bg-[#3BA4FF]" />}
+          </button>
+        </div>
 
         <div className="flex-1" />
 
-        {canRevealFiles && (
+        <div className="flex items-center gap-1 px-2 py-1.5">
+          {!readOnly && (
+            <button
+              onClick={() => toggleTool("insert")}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[10px] font-medium transition-colors ${toolPanel === "insert" ? "bg-[#1A2330] text-[#E6EDF3]" : "text-[#7E8A98] hover:text-[#C3CDD7] hover:bg-[#171E28]"}`}
+              title="Insert an Aeolus pattern at the cursor"
+            >
+              <Blocks size={12} /> Insert
+            </button>
+          )}
           <button
-            onClick={() => filesOpen ? closeFiles() : setFilesOpen(true)}
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[10px] transition-colors ${filesOpen ? "bg-[#1A2330] text-[#E6EDF3]" : "text-[#7E8A98] hover:text-[#B9C4CF] hover:bg-[#171E28]"}`}
-            title="Show the complete Automation Project file tree"
+            onClick={() => toggleTool("api")}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[10px] font-medium transition-colors ${toolPanel === "api" ? "bg-[#1A2330] text-[#E6EDF3]" : "text-[#7E8A98] hover:text-[#C3CDD7] hover:bg-[#171E28]"}`}
+            title="Show the API available to this file"
           >
-            <FolderTree size={12} />
-            Project files
+            <BookOpen size={12} /> API
           </button>
-        )}
+          {canRevealFiles && (
+            <button
+              onClick={() => toggleTool("files")}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[10px] font-medium transition-colors ${toolPanel === "files" ? "bg-[#1A2330] text-[#E6EDF3]" : "text-[#7E8A98] hover:text-[#C3CDD7] hover:bg-[#171E28]"}`}
+              title="Show the complete Automation Project"
+            >
+              <FolderTree size={12} /> Project files
+            </button>
+          )}
+          {!readOnly && (
+            <button
+              onClick={() => editorRef.current?.getAction("editor.action.formatDocument")?.run()}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[10px] font-medium text-[#7E8A98] hover:text-[#C3CDD7] hover:bg-[#171E28] transition-colors"
+              title="Format current file"
+            >
+              <WandSparkles size={12} /> Format
+            </button>
+          )}
+        </div>
       </div>
 
-      <div className="flex-1 min-h-0 flex flex-col sm:flex-row overflow-hidden">
-        {filesOpen && (
-          <aside className="sm:w-52 sm:min-w-52 max-h-32 sm:max-h-none border-b sm:border-b-0 sm:border-r border-[#2A3441] bg-[#10161F] flex flex-col">
-            <div className="flex items-center gap-2 px-3 py-2 border-b border-[#2A3441]">
-              <Folder size={13} className="text-[#5CE1E6]" />
-              <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#9AA6B2] flex-1">Files</span>
-              {!readOnly && (
-                <button onClick={addFile} className="p-1 rounded text-[#6B7785] hover:text-[#E6EDF3] hover:bg-[#1A2330]" title="Add file">
-                  <Plus size={13} />
-                </button>
-              )}
-              <button onClick={closeFiles} className="p-1 rounded text-[#6B7785] hover:text-[#E6EDF3] hover:bg-[#1A2330]" title="Hide file tree">
-                <X size={13} />
-              </button>
-            </div>
-            <div className="flex-1 overflow-auto p-1.5 flex sm:block gap-1">
-              {sortedFiles.map((file) => {
-                const selected = file.path === activeFile.path;
-                const count = errorCountByPath.get(file.path) ?? 0;
-                return (
-                  <button
-                    key={file.path}
-                    onClick={() => setActivePath(file.path)}
-                    className={`shrink-0 sm:w-full flex items-center gap-1.5 px-2 py-1.5 rounded text-[10px] font-mono text-left transition-colors ${selected ? "bg-[#1A2330] text-[#E6EDF3]" : "text-[#7E8A98] hover:bg-[#171E28] hover:text-[#B9C4CF]"}`}
-                    title={file.path}
-                  >
-                    <FileCode2 size={11} className={file.path === project.logicEntry ? "text-[#5CE1E6]" : file.path === project.uiEntry ? "text-[#3BA4FF]" : "text-[#6B7785]"} />
-                    <span className="truncate">{file.path}</span>
-                    {count > 0 && <span className="ml-auto text-[#EF4444]">{count}</span>}
-                  </button>
-                );
-              })}
-            </div>
-          </aside>
-        )}
+      {extraFileSelected && (
+        <div className="h-8 shrink-0 flex items-center gap-2 px-3 border-b border-[#202A36] bg-[#0E141C]">
+          <FileCode2 size={11} className="text-[#6B7785]" />
+          <span className="text-[10px] font-mono text-[#9AA6B2] truncate flex-1">{activeFile.path}</span>
+          {!readOnly && (
+            <button onClick={removeActiveFile} className="flex items-center gap-1 text-[9px] text-[#6B7785] hover:text-[#EF4444] transition-colors" title="Delete current file">
+              <Trash2 size={11} /> Delete
+            </button>
+          )}
+        </div>
+      )}
 
+      <div className="flex-1 min-h-0 flex overflow-hidden">
         <section className="flex-1 min-w-0 flex flex-col">
-          <div className="h-8 shrink-0 flex items-center gap-2 px-3 border-b border-[#202A36] bg-[#0E141C]">
-            <span className="text-[10px] font-mono text-[#778493] truncate flex-1">{activeFile.path}</span>
-            {activeFile.path === project.logicEntry && <span className="text-[9px] uppercase tracking-wider text-[#5CE1E6]/80">Entry</span>}
-            {activeFile.path === project.uiEntry && <span className="text-[9px] uppercase tracking-wider text-[#3BA4FF]/80">Entry</span>}
-            {!readOnly && (
-              <>
-                <button onClick={() => editorRef.current?.getAction("editor.action.formatDocument")?.run()} className="p-1 text-[#6B7785] hover:text-[#E6EDF3]" title="Format file"><WandSparkles size={12} /></button>
-                <button onClick={onSave} className="p-1 text-[#6B7785] hover:text-[#5CE1E6]" title="Save automation"><Save size={12} /></button>
-                {filesOpen && (
-                  <button disabled={activeFile.path === project.logicEntry || activeFile.path === project.uiEntry} onClick={removeActiveFile} className="p-1 text-[#6B7785] hover:text-[#EF4444] disabled:opacity-20" title="Delete file"><Trash2 size={12} /></button>
-                )}
-              </>
-            )}
-          </div>
           <div className="flex-1 min-h-0">
             <Editor
               path={automationProjectModelUri(projectKey, activeFile.path)}
@@ -359,17 +461,33 @@ export function AutomationProjectEditor({
                 readOnly,
                 fontFamily: "'JetBrains Mono', monospace",
                 fontSize: 13,
-                lineHeight: 20,
+                lineHeight: 21,
                 minimap: { enabled: false },
                 automaticLayout: true,
                 scrollBeyondLastLine: false,
-                padding: { top: 14, bottom: 14 },
+                padding: { top: 18, bottom: 18 },
                 tabSize: 2,
                 wordWrap: readOnly ? "on" : "off",
                 bracketPairColorization: { enabled: true },
+                renderLineHighlight: "line",
+                smoothScrolling: true,
               }}
             />
           </div>
+
+          {activeSurface === "ui" && liveStateEntries.length > 0 && (
+            <div className="shrink-0 flex items-center gap-3 overflow-x-auto border-t border-[#202A36] bg-[#0E141C] px-3 py-2">
+              <span className="shrink-0 text-[9px] uppercase tracking-[0.12em] text-[#6B7785]">Live state</span>
+              {liveStateEntries.map(([key, value]) => (
+                <div key={key} className="shrink-0 text-[10px] font-mono" title={`aeolus.read(\"${key}\") → ${formatStateValue(value)}`}>
+                  <span className="text-[#5CE1E6]">{key}</span>
+                  <span className="text-[#566170] mx-1">→</span>
+                  <span className="text-[#B9C4CF]">{formatStateValue(value)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
           {activeErrors.length > 0 && (
             <div className="max-h-24 overflow-auto border-t border-[#EF4444]/30 bg-[#EF4444]/5 px-3 py-2">
               {activeErrors.map((error, index) => (
@@ -380,6 +498,70 @@ export function AutomationProjectEditor({
             </div>
           )}
         </section>
+
+        {toolPanel && (
+          <aside className="w-[280px] max-w-[42%] shrink-0 border-l border-[#2A3441] bg-[#10161F] overflow-hidden">
+            {toolPanel === "insert" && (
+              <SnippetPicker
+                title="Insert"
+                mode={activeSurface}
+                onClose={() => setToolPanel(null)}
+                onInsert={insertText}
+              />
+            )}
+
+            {toolPanel === "api" && (
+              <div className="h-full relative">
+                <ApiReference mode={activeSurface} liveState={liveState} />
+                <button
+                  onClick={() => setToolPanel(null)}
+                  className="absolute right-2.5 top-2.5 p-1 rounded text-[#6B7785] hover:text-[#C3CDD7] hover:bg-[#1A2330] transition-colors"
+                  title="Close API reference"
+                >
+                  <X size={13} />
+                </button>
+              </div>
+            )}
+
+            {toolPanel === "files" && (
+              <div className="h-full flex flex-col">
+                <div className="h-11 shrink-0 flex items-center gap-2 px-3 border-b border-[#2A3441]">
+                  <FolderTree size={14} className="text-[#5CE1E6]" />
+                  <div className="flex-1">
+                    <div className="text-xs font-semibold text-[#E6EDF3]">Project files</div>
+                    <div className="text-[9px] text-[#6B7785]">Add modules only when you need them</div>
+                  </div>
+                  {!readOnly && (
+                    <button onClick={addFile} className="flex items-center gap-1 px-2 py-1 rounded text-[9px] text-[#7E8A98] hover:text-[#E6EDF3] hover:bg-[#1A2330]" title="Add project file">
+                      <Plus size={11} /> New
+                    </button>
+                  )}
+                  <button onClick={() => setToolPanel(null)} className="p-1 rounded text-[#6B7785] hover:text-[#C3CDD7] hover:bg-[#1A2330]" title="Close project files">
+                    <X size={13} />
+                  </button>
+                </div>
+                <div className="flex-1 overflow-auto p-2">
+                  {sortedFiles.map((file) => {
+                    const selected = file.path === activeFile.path;
+                    const count = errorCountByPath.get(file.path) ?? 0;
+                    return (
+                      <button
+                        key={file.path}
+                        onClick={() => setActivePath(file.path)}
+                        className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-md text-[10px] font-mono text-left transition-colors ${selected ? "bg-[#1A2330] text-[#E6EDF3]" : "text-[#7E8A98] hover:bg-[#171E28] hover:text-[#B9C4CF]"}`}
+                        title={file.path}
+                      >
+                        <FileCode2 size={12} className={file.path === project.logicEntry ? "text-[#5CE1E6]" : file.path === project.uiEntry ? "text-[#3BA4FF]" : "text-[#6B7785]"} />
+                        <span className="truncate">{file.path}</span>
+                        {count > 0 && <span className="ml-auto text-[#EF4444]">{count}</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </aside>
+        )}
       </div>
     </div>
   );
