@@ -41,6 +41,14 @@ the entrypoint can `chown` the data directory (`DB_PATH`'s parent, default
 `/app/data`) to the unprivileged `aeolus` user, then drops privileges with
 `gosu` and execs Node. The Node process itself never runs as root.
 
+The backend must be launched with `--no-node-snapshot`, which `isolated-vm`
+requires on Node 20 and later. The image `CMD` already carries it, so normal
+Compose deployments need no action — but if you override the backend command or
+run `node dist/index.js` by hand, carry the flag across. Omitting it does not
+reliably fail: the backend usually starts and serves normally while the
+automation sandbox runs an unsupported V8 configuration. See
+[ADR-0010](../adr/0010-node-24-runtime.md).
+
 This exists because the SQLite database runs in WAL mode and must create
 `-wal`/`-shm` sidecar files *in the data directory*. A named volume that was
 first created root-owned by an earlier image or run stays root-owned — Docker

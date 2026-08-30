@@ -46,4 +46,9 @@ EXPOSE 3001
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD wget --no-verbose --tries=1 -O /dev/null http://localhost:3001/api/health || exit 1
 ENTRYPOINT ["docker-entrypoint.sh"]
-CMD ["node", "--max-old-space-size=1024", "dist/index.js"]
+# --no-node-snapshot is REQUIRED by isolated-vm on Node 20+ (its README marks this
+# as mandatory). Without it the automation sandbox runs an unsupported V8 startup
+# configuration, and the failure mode is silent rather than a crash. No compose
+# file overrides this command, so every deployment — base, demo, desktop and
+# public-demo — inherits the flag from here.
+CMD ["node", "--no-node-snapshot", "--max-old-space-size=1024", "dist/index.js"]

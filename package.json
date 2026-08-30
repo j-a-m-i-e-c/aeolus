@@ -20,7 +20,7 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsup src/index.ts src/simulator/index.ts --format esm --target node24 --external isolated-vm --external better-sqlite3 --external bcrypt --external esbuild",
-    "start": "node dist/index.js",
+    "start": "node --no-node-snapshot dist/index.js",
     "sim": "tsx src/simulator/index.ts",
     "sim:watch": "tsx watch src/simulator/index.ts",
     "test": "vitest run",
@@ -61,7 +61,7 @@
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",
     "@types/jsonwebtoken": "^9.0.10",
-    "@types/node": "^22.0.0",
+    "@types/node": "^24.13.3",
     "@types/node-cron": "^3.0.11",
     "@types/supertest": "^7.2.0",
     "@types/ws": "^8.5.14",
