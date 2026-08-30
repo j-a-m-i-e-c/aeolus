@@ -795,17 +795,29 @@ export class Sandbox {
 
       // Capture the active execution context HERE, on the host stack, where the
       // AsyncLocalStorage set by AutomationEngine.executeScriptRule() is still
-      // in scope. The context does NOT survive a synchronous host callback
-      // invoked from inside the isolate (isolated-vm crosses a native boundary
-      // that async_hooks does not track), so events.emit — which runs during
+      // in scope. The context does NOT survive a host callback invoked from
+      // inside the isolate (isolated-vm crosses a native boundary that
+      // async_hooks does not track), so events.emit — which runs during
       // script.run() and reads the source rule id from this context — would
       // otherwise see `undefined` and refuse. We re-establish it in the emit
-      // callback below. (devices.action is unaffected: its rule id is passed in
-      // directly, and its command results settle on the host's own async stack.)
+      // callback below.
+      //
+      // The device-action callbacks are invoked the same way and are NOT exempt:
+      // a promise chain created inside an isolate-invoked callback inherits that
+      // callback's empty context, not the engine's. Without re-establishing it,
+      // CommandService stamps no executionId/causationId on commands issued by
+      // authored Logic.
       const executionContext = currentExecutionContext();
 
+      // The collector keeps its own AsyncLocalStorage, and it is lost across the
+      // same boundary: pushCurrent() resolves no executionId there and is
+      // documented to no-op, so every script-issued Command_Result would be
+      // dropped and assembleExecutionResult() would see an empty list. Capture
+      // the id on the host stack and attribute explicitly instead.
+      const collectorExecutionId = this.collector?.context.getStore();
+
       // Set raw data and references on the global scope
-      await this.setDevicesRefs(jail, ruleId, inFlight, scope);
+      await this.setDevicesRefs(jail, ruleId, inFlight, scope, executionContext, collectorExecutionId);
       await this.setMqttRefs(jail, ruleId);
       await this.setEventsRefs(jail, executionContext);
       await this.setLogRefs(jail, ruleId);
@@ -914,6 +926,8 @@ export class Sandbox {
     ruleId: string,
     inFlight: Set<Promise<unknown>>,
     scope: AuthorizationScope = { kind: "unrestricted" },
+    executionContext?: ActiveExecutionContext,
+    collectorExecutionId?: string,
   ): Promise<void> {
     if (!ivm) return;
 
@@ -940,6 +954,20 @@ export class Sandbox {
     // Requirements: 1.5, 1.6, 9.1
     const commandService = this.commandService;
     const collector = this.collector;
+
+    // These callbacks run outside the host's AsyncLocalStorage contexts (see the
+    // capture site in execute()), so both are re-established explicitly here.
+
+    /** Attribute a Command_Result to the execution captured on the host stack. */
+    const record = (result: ActionResult): void => {
+      if (collectorExecutionId !== undefined) collector?.push(collectorExecutionId, result);
+      else collector?.pushCurrent(result);
+    };
+
+    /** Run a dispatch inside the captured execution context so commands are stamped. */
+    const inContext = <T>(fn: () => T): T =>
+      executionContext !== undefined ? runInExecutionContext(executionContext, fn) : fn();
+
     await jail.set(
       "__actionRef",
       new ivm.Reference(function (
@@ -977,18 +1005,17 @@ export class Sandbox {
             // Completion-tier gate (Req 5.1–5.5): fail-on-invalid before dispatch,
             // otherwise dispatch with this call's tier (undefined ⇒ the highest
             // tier this device can prove).
-            const result = await dispatchScriptAction(
+            const result = await inContext(() => dispatchScriptAction(
               commandService,
               { type: "device_action", target: deviceId, params: { actionType, ...(params ?? {}) } },
               ruleId,
               confirm,
               perCallTier,
-            );
+            ));
             // Push the UNCOPIED Command_Result into the collector for the running
-            // executionId (Req 2.4, 4.3, 5.3 — script-path commands aggregated via
-            // AsyncLocalStorage). Host bookkeeping keeps the real object; only the
-            // value handed back to the isolate is copied.
-            collector?.pushCurrent(result);
+            // executionId (Req 2.4, 4.3, 5.3). Host bookkeeping keeps the real
+            // object; only the value handed back to the isolate is copied.
+            record(result);
             return copyOut(result);
           } catch (err) {
             // CommandService is specified never to throw, but preserve execution
@@ -998,7 +1025,7 @@ export class Sandbox {
               error: `Unexpected error in devices.action(): ${(err as Error).message}`,
               failureKind: "execution",
             };
-            collector?.pushCurrent(failure);
+            record(failure);
             return copyOut(failure);
           }
         })();
@@ -1039,7 +1066,7 @@ export class Sandbox {
           // is still a genuine command failure for the Automation execution.
           // Push one synthetic CommandResult so assembleExecutionResult() cannot
           // accidentally report success merely because dispatch never began.
-          collector?.pushCurrent({ success: false, error, failureKind });
+          record({ success: false, error, failureKind });
           return copyOut({ total: 0, succeeded: 0, failed: 0, results: [], error });
         };
 
@@ -1074,25 +1101,25 @@ export class Sandbox {
           const confirm = buildConfirmOptions(conditionSpec, confirmDeviceId, confirmTimeoutMs);
           const settled = await Promise.allSettled(
             matched.map((device) =>
-              commandService.execute(
+              inContext(() => commandService.execute(
                 { type: "device_action", target: device.id, params: { actionType, ...(params ?? {}) } },
                 ruleId,
                 confirm,
                 tier.chosen,
-              ).then((result): { deviceId: string } & ActionResult => {
-                collector?.pushCurrent(result);
+              )).then((result): { deviceId: string } & ActionResult => {
+                record(result);
                 return { deviceId: device.id, ...result };
               }).catch((err): { deviceId: string } & ActionResult => {
                 // CommandService normally resolves failures rather than rejecting,
                 // but an unexpected host rejection must still reach the execution
                 // collector instead of becoming only a bulk-result bookkeeping row.
-                const failure: ActionResult = {
+                const bulkFailure: ActionResult = {
                   success: false,
                   error: (err as Error).message,
                   failureKind: "execution",
                 };
-                collector?.pushCurrent(failure);
-                return { deviceId: device.id, ...failure };
+                record(bulkFailure);
+                return { deviceId: device.id, ...bulkFailure };
               }),
             ),
           );

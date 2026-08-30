@@ -84,6 +84,15 @@ describe("action callbacks return a transferable copy", () => {
 
   it("still pushes the uncopied result into the collector for host bookkeeping", () => {
     // The durable command record must keep the real object, not the sanitised copy.
-    expect(source).toContain("collector?.pushCurrent(result)");
+    expect(source).toContain("record(result)");
+    expect(source).toContain("return copyOut(result)");
+  });
+
+  it("attributes collector pushes to an explicitly captured executionId", () => {
+    // Isolate-invoked callbacks lose the collector's AsyncLocalStorage, where
+    // pushCurrent() silently no-ops. The host must capture the id up front and
+    // push explicitly, or every script-issued Command_Result is dropped.
+    expect(source).toContain("const collectorExecutionId = this.collector?.context.getStore()");
+    expect(source).toContain("collector?.push(collectorExecutionId, result)");
   });
 });
