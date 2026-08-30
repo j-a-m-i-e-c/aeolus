@@ -163,7 +163,16 @@ function virtualProjectPlugin(files: Map<string, string>, mode: "logic" | "ui", 
         if (args.path === "__aeolus_entry__") {
           const q = JSON.stringify(`./${entry}`);
           return mode === "logic"
-            ? { contents: `import run from ${q};\nautomation({ actions: [run] });`, loader: "ts", resolveDir: "/" }
+            ? {
+                // Project Logic supports both the preferred module-style default export
+                // and legacy `automation({...})` source. A namespace import is valid
+                // even when the legacy entry has no default export; importing it runs
+                // its existing registration side effect, while modern projects are
+                // registered here from their default function.
+                contents: `import * as entryModule from ${q};\nconst run = entryModule.default;\nif (typeof run === "function") automation({ actions: [run] });`,
+                loader: "ts",
+                resolveDir: "/",
+              }
             : { contents: `import Component from ${q};\nexport default Component;`, loader: "tsx", resolveDir: "/" };
         }
         const contents = files.get(args.path);

@@ -27,7 +27,6 @@ export const createAutomationBodySchema = z.object({
   actionType: z.string().max(100).optional(),
   actionTarget: z.string().max(500).optional(),
   actionParams: z.record(z.string(), z.unknown()).optional(),
-  scriptSource: z.string().max(102_400).optional(), // legacy/simple-rule source
   project: automationProjectSchema.optional(),
   uiSource: z.string().max(102_400).optional().nullable(),
   enabled: z.boolean().optional(),
@@ -43,7 +42,6 @@ export const updateAutomationBodySchema = z.object({
   actionType: z.string().max(100).optional(),
   actionTarget: z.string().max(500).optional(),
   actionParams: z.record(z.string(), z.unknown()).optional(),
-  scriptSource: z.string().max(102_400).optional(),
   project: automationProjectSchema.optional(),
   uiSource: z.string().max(102_400).optional().nullable(),
 });

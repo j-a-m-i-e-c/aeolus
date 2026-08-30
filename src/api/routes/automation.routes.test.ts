@@ -6,7 +6,7 @@ import { createAutomationRoutes, loadUiRules } from "./automation.routes.js";
 import { errorHandler } from "../middleware/error-handler.js";
 import type { AutomationEngine } from "../../automations/automation-engine.js";
 import type { DeviceRegistry } from "../../core/device-registry.js";
-import type { ActionExecutor } from "../../automations/action-executor.js";
+import type { CommandService } from "../../automations/command-service.js";
 import type { ExecutionLog } from "../../automations/execution-log.js";
 import type { AutomationStateStore } from "../../automations/automation-state-store.js";
 import type { ConditionRegistry } from "../../automations/condition-registry.js";
@@ -43,6 +43,36 @@ vi.mock("../../automations/transpiler.js", () => ({
   transpile: vi.fn((source: string) => ({ success: true, js: `compiled:${source}` })),
   transpileUi: vi.fn((source: string) => ({ success: true, js: `ui-compiled:${source}` })),
 }));
+
+// Route unit tests exercise the API contract without invoking esbuild. Dedicated
+// Automation Project compiler/atomicity suites cover real compilation.
+vi.mock("../../automations/automation-project.js", () => {
+  class AutomationProjectCompileError extends Error {
+    constructor(public details: unknown[]) {
+      super("Automation Project compilation failed");
+    }
+  }
+  return {
+    AutomationProjectCompileError,
+    compileAutomationProject: vi.fn(async (project: any) => {
+      const logicEntry = project.logicEntry || "logic/index.ts";
+      const uiEntry = project.uiEntry ?? null;
+      const logicSource = project.files.find((file: any) => file.path === logicEntry)?.content ?? "";
+      const uiSource = uiEntry ? project.files.find((file: any) => file.path === uiEntry)?.content ?? null : null;
+      return {
+        compiledJs: `compiled:${logicSource}`,
+        compiledUi: uiSource == null ? null : `ui-compiled:${uiSource}`,
+        logicSource,
+        uiSource,
+        files: project.files,
+        logicEntry,
+        uiEntry,
+      };
+    }),
+    saveAutomationProject: vi.fn(),
+    readAutomationProject: vi.fn(() => null),
+  };
+});
 
 // Mock structured metadata extractor
 vi.mock("../../automations/structured-metadata-extractor.js", () => ({
@@ -148,7 +178,7 @@ function createMockRegistry() {
   };
 }
 
-function createMockActionExecutor() {
+function createMockCommandService() {
   return {
     execute: vi.fn(),
   };
@@ -197,7 +227,7 @@ describe("automation.routes", () => {
   let mockDb: ReturnType<typeof createMockDb>;
   let mockEngine: ReturnType<typeof createMockEngine>;
   let mockDeviceRegistry: ReturnType<typeof createMockRegistry>;
-  let mockActionExecutor: ReturnType<typeof createMockActionExecutor>;
+  let mockCommandService: ReturnType<typeof createMockCommandService>;
   let mockExecutionLog: ReturnType<typeof createMockExecutionLog>;
   let mockStateStore: ReturnType<typeof createMockStateStore>;
   let mockConditionRegistry: ReturnType<typeof createMockConditionRegistry>;
@@ -206,7 +236,7 @@ describe("automation.routes", () => {
     mockDb = createMockDb();
     mockEngine = createMockEngine();
     mockDeviceRegistry = createMockRegistry();
-    mockActionExecutor = createMockActionExecutor();
+    mockCommandService = createMockCommandService();
     mockExecutionLog = createMockExecutionLog();
     mockStateStore = createMockStateStore();
     mockConditionRegistry = createMockConditionRegistry();
@@ -219,7 +249,7 @@ describe("automation.routes", () => {
         mockEngine as unknown as AutomationEngine,
         mockDb as unknown as DatabaseType,
         mockDeviceRegistry as unknown as DeviceRegistry,
-        mockActionExecutor as unknown as ActionExecutor,
+        mockCommandService as unknown as CommandService,
         mockExecutionLog as unknown as ExecutionLog,
         "", // sandboxTypesPath
         passthroughGuard,
@@ -323,6 +353,36 @@ describe("automation.routes", () => {
       expect(body[0].actionType).toBe("publish");
       expect(body[0].actionParams).toEqual({ state: "on" });
     });
+
+    it("returns hasUi for script rules without leaking authored UI source", async () => {
+      mockDb._rows.push({
+        id: "script-list-1",
+        name: "Script with UI",
+        trigger_topic: "none",
+        condition_type: null,
+        condition_value: null,
+        action_type: "script",
+        action_target: "",
+        action_params: "{}",
+        rule_type: "script",
+        script_source: "export default async function run() {}",
+        compiled_js: "compiled",
+        structured_metadata: null,
+        ui_source: "SECRET_AUTHORED_SOURCE",
+        compiled_ui: "compiled-ui",
+        trigger_type: "none",
+        cron_expression: null,
+        enabled: 1,
+        created_at: 1000,
+      });
+
+      const res = await request(app, "GET", "/api/automations");
+      expect(res.status).toBe(200);
+      const [rule] = res.body as any[];
+      expect(rule.hasUi).toBe(true);
+      expect(rule).not.toHaveProperty("uiSource");
+      expect(JSON.stringify(rule)).not.toContain("SECRET_AUTHORED_SOURCE");
+    });
   });
 
   // ─── POST /api/automations ───────────────────────────────────────────────
@@ -344,12 +404,16 @@ describe("automation.routes", () => {
       expect(typeof body.id).toBe("string");
     });
 
-    it("should create a script rule and return success with id", async () => {
+    it("should create a Project-backed script rule and return success with id", async () => {
       const res = await request(app, "POST", "/api/automations", {
         name: "Script Rule",
         triggerTopic: "sensors/temp",
         ruleType: "script",
-        scriptSource: "export default function run() {}",
+        project: {
+          logicEntry: "logic/index.ts",
+          uiEntry: null,
+          files: [{ path: "logic/index.ts", content: "export default function run() {}" }],
+        },
       });
       expect(res.status).toBe(200);
       const body = res.body as any;
@@ -394,13 +458,26 @@ describe("automation.routes", () => {
       expect((res.body as any).error).toContain("Invalid cron");
     });
 
-    it("should return 400 when scriptSource is missing for script rules", async () => {
+    it("should return 400 when project is missing for script rules", async () => {
       const res = await request(app, "POST", "/api/automations", {
         name: "Script Rule",
         ruleType: "script",
       });
       expect(res.status).toBe(400);
-      expect((res.body as any).error).toContain("scriptSource");
+      expect((res.body as any).error).toContain("project");
+    });
+
+    it("rejects the removed single-blob UI field for script rules", async () => {
+      const res = await request(app, "POST", "/api/automations", {
+        name: "Script Rule",
+        ruleType: "script",
+        project: {
+          files: [{ path: "logic/index.ts", content: "export default function run() {}" }],
+        },
+        uiSource: "export default function LegacyUi() { return null; }",
+      });
+      expect(res.status).toBe(400);
+      expect((res.body as any).error).toContain("Automation Project");
     });
 
     it("should return 400 when actionType/actionTarget missing for form rules", async () => {
@@ -481,7 +558,11 @@ describe("automation.routes", () => {
 
       const res = await request(app, "PUT", "/api/automations/script-1", {
         name: "Updated Script",
-        scriptSource: "export default function updated() {}",
+        project: {
+          logicEntry: "logic/index.ts",
+          uiEntry: null,
+          files: [{ path: "logic/index.ts", content: "export default function updated() {}" }],
+        },
       });
       expect(res.status).toBe(200);
       const body = res.body as any;
@@ -764,7 +845,7 @@ describe("loadUiRules", () => {
   it("loads enabled rules from database and registers them in engine", () => {
     const mockEngine = createMockEngine();
     const mockDeviceRegistry = createMockRegistry();
-    const mockActionExecutor = createMockActionExecutor();
+    const mockCommandService = createMockCommandService();
     const mockConditionRegistry = createMockConditionRegistry();
 
     const rows = [
@@ -820,7 +901,7 @@ describe("loadUiRules", () => {
       mockEngine as unknown as AutomationEngine,
       mockDb as unknown as DatabaseType,
       mockDeviceRegistry as unknown as DeviceRegistry,
-      mockActionExecutor as unknown as ActionExecutor,
+      mockCommandService as unknown as CommandService,
       mockConditionRegistry as unknown as ConditionRegistry,
     );
 
@@ -830,7 +911,7 @@ describe("loadUiRules", () => {
   it("does nothing when no enabled rules exist", () => {
     const mockEngine = createMockEngine();
     const mockDeviceRegistry = createMockRegistry();
-    const mockActionExecutor = createMockActionExecutor();
+    const mockCommandService = createMockCommandService();
 
     const mockDb = {
       prepare: vi.fn(() => ({
@@ -842,7 +923,7 @@ describe("loadUiRules", () => {
       mockEngine as unknown as AutomationEngine,
       mockDb as unknown as DatabaseType,
       mockDeviceRegistry as unknown as DeviceRegistry,
-      mockActionExecutor as unknown as ActionExecutor,
+      mockCommandService as unknown as CommandService,
     );
 
     expect(mockEngine.register).not.toHaveBeenCalled();

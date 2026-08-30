@@ -13,11 +13,11 @@ import type { Migration } from "./index.js";
  *     no-op when already present; existing rows read as NULL (dispatch-only).
  *
  *  2. `command_records`: one durable summary row per Verified Command, keyed by
- *     the stable `command_id`. `terminal_at` is authoritative for lifecycle
- *     completeness — a command needs no further transition iff `terminal_at` is
- *     set (see design §1.2). The lifecycle-state name alone is NOT authoritative
- *     because `DISPATCHED` is terminal for a dispatch-only command and
- *     non-terminal for an acknowledged/observed command.
+ *     the stable `command_id`. `terminal_at` is the historical schema name for
+ *     completion of the configured command wait: it is stamped when the caller's
+ *     selected evidence tier succeeds or a final failure occurs. Do not infer
+ *     lifecycle finality from that column: DISPATCHED and ACKNOWLEDGED can be
+ *     successful completion states without being lifecycle-final states.
  *
  *  3. `command_transitions`: append-only, immutable record of every lifecycle
  *     transition for a command, ordered by autoincrement `id`.

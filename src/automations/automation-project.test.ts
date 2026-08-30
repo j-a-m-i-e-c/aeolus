@@ -26,6 +26,20 @@ describe("Automation Projects", () => {
     expect(compiled.uiEntry).toBeNull();
   });
 
+  it("also bundles legacy helper-style Logic when promoted into a project", async () => {
+    const compiled = await compileAutomationProject({
+      files: [
+        {
+          path: "logic/index.ts",
+          content: `automation({ actions: [async () => { log.info("legacy helper"); }] });`,
+        },
+      ],
+    });
+
+    expect(compiled.logicSource).toContain("automation({");
+    expect(compiled.compiledJs).toContain("legacy helper");
+  });
+
   it("bundles an optional React UI with project-local imports", async () => {
     const compiled = await compileAutomationProject({
       files: [

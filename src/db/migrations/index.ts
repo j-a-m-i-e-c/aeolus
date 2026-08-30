@@ -53,6 +53,7 @@ import { automationDemoAccess } from "./012-automation-demo-access.js";
 import { commandHistoryAndMqttProfile } from "./013-command-history-and-mqtt-profile.js";
 import { automationRulesDropCompletionTier } from "./014-automation-rules-drop-completion-tier.js";
 import { automationProjects } from "./015-automation-projects.js";
+import { promoteLegacyAutomationProjects } from "./016-promote-legacy-automation-projects.js";
 
 export const migrations: Migration[] = [
   baseline,                      // id 1
@@ -70,4 +71,5 @@ export const migrations: Migration[] = [
   commandHistoryAndMqttProfile,  // id 13
   automationRulesDropCompletionTier, // id 14
   automationProjects,                // id 15
+  promoteLegacyAutomationProjects,   // id 16
 ];
