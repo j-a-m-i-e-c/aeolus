@@ -19,6 +19,7 @@
 
 import { describe, it, expect } from "vitest";
 import { transformSync } from "esbuild";
+import { pickDeclaration } from "../__test-helpers__/pick-source-declaration.js";
 import spaceTab from "../../demo/seed/tabs/space.mjs";
 import { attachSeedProjectSource } from "../__test-helpers__/seed-project-source.js";
 // Authored source lives in demo/seed/projects/space; expose it as
@@ -36,16 +37,9 @@ const uiSource = automation.uiSource;
 
 /** Compile the orbital helpers out of the shipped UI source. */
 const H = (() => {
-  const pick = (name: string): string => {
-    // Project UI modules export their helpers, so drop the `export ` prefix
-    // before matching (and before compiling, which rejects module syntax).
-    const line = uiSource
-      .split("\n")
-      .map((l) => (l.startsWith("export ") ? l.slice("export ".length) : l))
-      .find((l) => l.startsWith(`function ${name}(`) || l.startsWith(`const ${name}`));
-    if (!line) throw new Error(`helper "${name}" not found in the Live Space UI source`);
-    return line;
-  };
+  // Project UI modules export their helpers and may wrap a declaration across
+  // lines, so lift the whole balanced declaration rather than a single line.
+  const pick = (name: string): string => pickDeclaration(uiSource, name);
   const { code } = transformSync(
     [
       pick("clamp"),
@@ -443,7 +437,9 @@ describe("marker propagation between fetches", () => {
 
   it("labels a propagated position rather than passing it off as a fresh fix", () => {
     expect(uiSource).toContain("propagated to now");
-    // And it stops extrapolating once the fix is far too old to trust.
-    expect(uiSource).toContain("fixAgeS<=900");
+    // And it stops extrapolating once the fix is far too old to trust. Matched
+    // whitespace-insensitively so reformatting the showcase source cannot fail a
+    // test that is really about the 900-second freshness ceiling.
+    expect(uiSource).toMatch(/fixAgeS\s*<=\s*900/);
   });
 });

@@ -459,10 +459,13 @@ export function AutomationProjectEditor({
             <Editor
               path={automationProjectModelUri(projectKey, activeFile.path)}
               language={languageFor(activeFile.path)}
-              value={activeFile.content}
+              // Models are synchronised explicitly by syncProjectModels(). Keeping
+              // Monaco uncontrolled avoids @monaco-editor/react replaying `value`
+              // through the previous model while Logic/UI paths are switching.
+              defaultValue={activeFile.content}
               theme="aeolus-project-dark"
               onMount={handleMount}
-              onChange={(value) => updateFile(activeFile.path, value ?? "")}
+              onChange={readOnly ? undefined : (value) => updateFile(activeFile.path, value ?? "")}
               keepCurrentModel
               options={{
                 readOnly,

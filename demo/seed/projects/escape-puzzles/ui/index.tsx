@@ -1,7 +1,25 @@
-import {useEffect,useState} from "react";
-const META=[["CIPHER BOOKCASE","Library","Rotary code"],["LASER GRID","Laser Hall","Beam sequence"],["STAR WHEEL","Observatory","Celestial alignment"],["BALANCE VAULT","Vault","Weighted mechanism"]];
-function fmt(sec:number){if(!sec)return "—";const m=Math.floor(sec/60),s=sec%60;return m+":"+String(s).padStart(2,"0")}
-export default function Puzzles(aeolus:CustomComponentProps){const p=[Boolean(aeolus.read("p1")),Boolean(aeolus.read("p2")),Boolean(aeolus.read("p3")),Boolean(aeolus.read("p4"))],solved=Number(aeolus.read("solved")??0),room=String(aeolus.read("currentRoom")||"Library"),attempts=(aeolus.read("attempts") as number[])||[0,0,0,0],times=(aeolus.read("solveSeconds") as number[])||[0,0,0,0],last=aeolus.read("lastAction") as any;const[now,setNow]=useState(Date.now());useEffect(()=>{const id=setInterval(()=>setNow(Date.now()),1000);return()=>clearInterval(id)},[]);const active=Math.min(3,solved);const elapsedBase=[0,402,899,1235][active]||0;const pseudoActive=Math.max(0,Math.floor((now/1000)%240)+elapsedBase);return <div style={{padding:13,minHeight:"100%",background:"#0D0B10",color:"#EFEAF3"}}><div style={{display:"flex",justifyContent:"space-between",gap:10}}><div><div style={{fontSize:17,fontWeight:900}}>PUZZLE PROGRESS</div><div style={{fontSize:12,color:"#8C8191",marginTop:3}}>Physical puzzle sensors → solve metrics → Game Master progress event</div></div><div style={{textAlign:"right"}}><div style={{fontSize:12,fontWeight:850,color:solved===4?"#73DA94":"#C08AEC"}}>{solved}/4 SOLVED</div><div style={{fontSize:11,color:"#817787",marginTop:2}}>{solved===4?"team at exit":"team in "+room}</div></div></div>
-<div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginTop:10}}>{META.map((m:any,i)=>{const done=p[i],isActive=!done&&i===solved;return <div key={m[0]} style={{border:"1px solid "+(done?"#356047":isActive?"#725083":"#3B3340"),borderRadius:10,padding:10,background:done?"#0F1B14":isActive?"#1A1020":"#121016",boxShadow:isActive?"0 0 0 1px #B976D533 inset":"none"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}><div style={{width:29,height:29,borderRadius:99,display:"grid",placeItems:"center",background:done?"#183C26":"#211A26",color:done?"#79E09A":isActive?"#D9A5EA":"#A694AF",fontSize:14,fontWeight:900}}>{done?"✓":i+1}</div><span style={{fontSize:11,color:isActive?"#D6A9E7":"#786E7D"}}>{done?"SOLVED":isActive?"ACTIVE":"LOCKED"}</span></div><div style={{fontSize:12,fontWeight:800,color:done?"#A5DDB4":isActive?"#E0C0EA":"#C1B3C6",marginTop:8}}>{m[0]}</div><div style={{fontSize:11,color:"#83788A",marginTop:3}}>{m[1]} · {m[2]}</div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:4,marginTop:9}}><div style={{borderTop:"1px solid #332B38",paddingTop:5}}><div style={{fontSize:11,color:"#766C7B"}}>ATTEMPTS</div><div style={{fontSize:12,fontFamily:"monospace",color:"#C5B7CA"}}>{done?attempts[i]||1:isActive?Math.max(1,attempts[i]||1):"—"}</div></div><div style={{borderTop:"1px solid #332B38",paddingTop:5}}><div style={{fontSize:11,color:"#766C7B"}}>TIME</div><div style={{fontSize:12,fontFamily:"monospace",color:done?"#84D79D":"#C5B7CA"}}>{done?fmt(Number(times[i]||0)):isActive?fmt(pseudoActive):"—"}</div></div></div></div>})}</div>
-<div style={{marginTop:9,border:"1px solid #322A36",borderRadius:10,padding:9,background:"#100D12"}}><div style={{fontSize:11,color:"#9B90A0",letterSpacing:".08em",marginBottom:7}}>SOLVE TIMELINE</div><div style={{display:"flex",alignItems:"center",gap:7}}>{META.map((m:any,i)=><div key={m[0]} style={{display:"contents"}}><div style={{minWidth:82,textAlign:"center"}}><div style={{height:7,borderRadius:5,background:p[i]?"#68D18D":i===solved?"#B776D5":"#302A34"}}/><div style={{fontSize:11,color:p[i]?"#98D8AA":"#817786",marginTop:4}}>{p[i]?fmt(Number(times[i]||0)):i===solved?"in progress":"waiting"}</div></div>{i<3&&<span style={{color:"#55495C"}}>→</span>}</div>)}</div></div>
-<div style={{marginTop:9,border:"1px dashed #685337",borderRadius:10,padding:9,background:"#18130A"}}><div style={{fontSize:11,color:"#D9B973",letterSpacing:".1em"}}>DEMO SCENARIO</div><div style={{fontSize:11,color:"#9A865F",margin:"4px 0 7px"}}>Pretend the players physically solve the next puzzle. Aeolus only sees the resulting sensor state, attempts and completion time.</div><div style={{display:"flex",gap:6}}><button disabled={solved===4} onClick={()=>aeolus.fire("simulate-solve")} style={{flex:1,padding:"9px",borderRadius:7,border:"1px solid #62467A",background:"#1C1025",color:"#CFA1E8",fontSize:12,cursor:"pointer"}}>Players solve next puzzle</button><button onClick={()=>aeolus.fire("reset-puzzles")} style={{padding:"9px 12px",borderRadius:7,border:"1px solid #4A463E",background:"#171613",color:"#A29D97",fontSize:12,cursor:"pointer"}}>Reset room</button></div></div><div style={{fontSize:11,color:"#777079",marginTop:7}}>{last?.label?String(last.label):"Puzzle sensor network online"}</div></div>}
+// Puzzle Progress — UI composition entry point.
+// State selection and operator intent stay visible; rendering detail lives in Files.
+
+import PuzzleProgressPanel from "./PuzzleProgressPanel";
+
+export default function PuzzleProgress(aeolus: CustomComponentProps) {
+  const model = {
+    p1: aeolus.read("p1"),
+    p2: aeolus.read("p2"),
+    p3: aeolus.read("p3"),
+    p4: aeolus.read("p4"),
+    solved: aeolus.read("solved"),
+    currentRoom: aeolus.read("currentRoom"),
+    attempts: aeolus.read("attempts"),
+    solveSeconds: aeolus.read("solveSeconds"),
+    lastAction: aeolus.read("lastAction"),
+  };
+
+  const actions = {
+    simulateSolve: () => aeolus.fire("simulate-solve"),
+    resetPuzzles: () => aeolus.fire("reset-puzzles"),
+  };
+
+  return <PuzzleProgressPanel model={model} actions={actions} />;
+}

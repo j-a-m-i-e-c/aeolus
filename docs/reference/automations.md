@@ -14,6 +14,8 @@ Script rules contain an Automation Project. `logic/index.ts` is the default back
 
 The editor presents one consistent project surface: **Logic**, optional **UI**, and **Files** are primary navigation, with the file tree available when an automation needs additional local modules.
 
+For non-trivial projects, **Logic and UI should be readable orchestration entry points rather than implementation buckets**. They are also not meant to be empty forwarding shims. `logic/index.ts` should expose the important trigger routing and control flow; `ui/index.tsx` should expose state selection, operator intents and high-level composition. Policy internals, device/command plumbing, data projection, demo scaffolding, SVGs and substantial visual components belong in named local modules. The goal is that a reader can understand the project before opening Files, then use Files to inspect how it is implemented.
+
 New Logic uses a normal module entrypoint:
 
 ```ts

@@ -103,6 +103,8 @@ node demo/seed/seed.mjs http://localhost:3001 admin '<password>'
 
 The authored project source under `seed/projects/` is the source of truth for the seeded Automation Projects. Tab modules carry metadata and project references rather than duplicating authored source.
 
+The showcase has an additional authoring rule: `logic/index.ts` and `ui/index.tsx` are readable orchestration/composition roots. They intentionally show the project's main control flow, state inputs and operator intents, while lower-level domain behaviour and visual complexity live in clearly named files behind them. Opening **Logic**, **UI**, then **Files** should answer “how does it think?”, “how does it present itself?” and “how is it implemented?”. See [`seed/projects/README.md`](seed/projects/README.md).
+
 ## Hosted operations
 
 The main entry points are:

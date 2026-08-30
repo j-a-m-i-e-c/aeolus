@@ -11,6 +11,7 @@
 
 import { describe, it, expect } from "vitest";
 import { transformSync } from "esbuild";
+import { pickDeclaration } from "../__test-helpers__/pick-source-declaration.js";
 import spaceTab from "../../demo/seed/tabs/space.mjs";
 import { attachSeedProjectSource } from "../__test-helpers__/seed-project-source.js";
 // Authored source lives in demo/seed/projects/space; expose it as
@@ -31,16 +32,9 @@ const uiSource: string = (spaceTab.automations[0] as { uiSource: string }).uiSou
  * rather than a copy of the algorithm, which would prove nothing.
  */
 const { subsolar, nightShape } = (() => {
-  const pick = (name: string): string => {
-    // Project UI modules export their helpers, so drop the `export ` prefix
-    // before matching (and before compiling, which rejects module syntax).
-    const line = uiSource
-      .split("\n")
-      .map((l) => (l.startsWith("export ") ? l.slice("export ".length) : l))
-      .find((l) => l.startsWith(`function ${name}(`));
-    if (!line) throw new Error(`helper "${name}" not found in the Live Space UI source`);
-    return line;
-  };
+  // Project UI modules export their helpers and may wrap a declaration across
+  // lines, so lift the whole balanced declaration rather than a single line.
+  const pick = (name: string): string => pickDeclaration(uiSource, name);
   const { code } = transformSync(
     `${pick("subsolar")}\n${pick("nightShape")}\nreturn { subsolar, nightShape };`,
     { loader: "ts" },
@@ -77,8 +71,12 @@ describe("Live Space map is not a decorative sweep", () => {
 
   it("recomputes only about once a minute, not every animation frame", () => {
     // The terminator moves 0.25 deg/min, so per-second recomputation is pointless
-    // work; the memo key must be minute-resolution.
-    expect(uiSource).toContain("useMemo(()=>subsolar(now),[Math.floor(now/60000)])");
+    // work; the memo key must be minute-resolution. Matched whitespace-insensitively
+    // so reformatting the showcase source cannot fail a test that is really about
+    // the memo key resolution.
+    expect(uiSource).toMatch(
+      /useMemo\(\s*\(\)\s*=>\s*subsolar\(now\)\s*,\s*\[\s*Math\.floor\(\s*now\s*\/\s*60000\s*\)\s*\]\s*\)/,
+    );
   });
 });
 

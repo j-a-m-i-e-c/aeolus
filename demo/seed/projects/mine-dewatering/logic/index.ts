@@ -1,13 +1,32 @@
-// mine-dewatering — Automation Project logic
-// The compiler wraps this module in Aeolus' execution/completion machinery.
+// Dewatering — orchestration entry point.
+// AUTO policy is intentionally obvious: start high, stop after recovery.
+
+import {
+  commandSumpPump,
+  handleDewateringOperatorEvent,
+  initialiseDewatering,
+  projectDewateringState,
+} from "./dewatering-control";
 
 export default async function run(context: EventContext) {
-      var topic=String(context.topic||"");var evt=topic.split("/").pop();
-      function byTopic(wanted){return devices.list().find(function(d){return d.topic===wanted;});}
-      function setAction(label){state.set("lastAction",{label:label,at:Date.now()});}
-      function project(){var sump=byTopic("sensor/mine/sump/deep"),pump=byTopic("switch/mine/sump-pump/state");var ss=sump&&sump.state?sump.state:{},ps=pump&&pump.state?pump.state:{};state.set("levelM",Number(ss.levelM||0));state.set("inflowLps",Number(ss.inflowLps||0));state.set("dischargeLps",Number(ss.dischargeLps||0));state.set("sumpStatus",String(ss.status||"normal"));state.set("pumpOn",Boolean(ps.on));state.set("pumpFlowLps",Number(ps.flowLps||0));events.emit("mine/summary/dewatering",{levelM:Number(ss.levelM||0),inflowLps:Number(ss.inflowLps||0),dischargeLps:Number(ss.dischargeLps||0),pumpOn:Boolean(ps.on),pumpFlowLps:Number(ps.flowLps||0),autoEnabled:state.get("autoEnabled")!==false});}
-      async function commandPump(on,reason){var pump=byTopic("switch/mine/sump-pump/state");if(!pump){setAction("Sump pump unavailable");return;}if(Boolean(pump.state&&pump.state.on)===on){setAction(reason);project();return;}state.set("commandPending",true);setAction(reason);var result=await devices.action(pump.id,"command",{payload:{on:on}},{tier:"observed",deviceId:pump.id,condition:{field:"on",op:"eq",value:on},timeoutMs:5000});state.set("commandPending",false);if(!result.success)setAction("Pump command not verified: "+String(result.error||result.lifecycleState||"unknown"));project();}
-      if(state.get("autoEnabled")===undefined)state.set("autoEnabled",true);
-      if(topic.indexOf("ui/")===0){if(evt==="pump-on")await commandPump(true,"Manual sump pump start");else if(evt==="pump-off")await commandPump(false,"Manual sump pump stop");else if(evt==="toggle-auto"){var next=state.get("autoEnabled")===false;state.set("autoEnabled",next);setAction(next?"Automatic dewatering enabled":"Automatic dewatering disabled");project();}else if(evt==="simulate-heavy-inflow"){events.emit("mine/sim/heavy-inflow",{});setAction("Injecting heavy groundwater inflow into deep sump");}else if(evt==="reset-sump"){events.emit("mine/sim/sump-reset",{});state.set("autoEnabled",true);setAction("Resetting sump to nominal level");}return;}
-      if(topic!=="sensor/mine/sump/deep")return;project();var level=Number(state.get("levelM")||0),on=Boolean(state.get("pumpOn"));if(state.get("autoEnabled")!==false){if(level>=3.5&&!on)await commandPump(true,"High sump level · automatic pump start");else if(level<=1.5&&on)await commandPump(false,"Sump recovered · automatic pump stop");}
+  const topic = String(context.topic || "");
+  const event = topic.split("/").pop();
+
+  initialiseDewatering();
+
+  if (topic.startsWith("ui/")) {
+    await handleDewateringOperatorEvent(event);
+    return;
+  }
+
+  if (topic !== "sensor/mine/sump/deep") return;
+
+  const { levelM, pumpOn } = projectDewateringState();
+  if (state.get("autoEnabled") === false) return;
+
+  if (levelM >= 3.5 && !pumpOn) {
+    await commandSumpPump(true, "High sump level · automatic pump start");
+  } else if (levelM <= 1.5 && pumpOn) {
+    await commandSumpPump(false, "Sump recovered · automatic pump stop");
+  }
 }

@@ -1,5 +1,27 @@
+// Sugar Glider Den — UI composition entry point.
+// State selection and operator intent stay visible; rendering detail lives in Files.
 
-function Glider({x,y,small=false}:{x:number;y:number;small?:boolean}){const s=small?.72:1;return <g transform={"translate("+x+" "+y+") scale("+s+")"} fill="#A8B39E" stroke="#A8B39E"><ellipse rx="14" ry="8"/><circle cx="13" cy="-7" r="6"/><circle cx="10" cy="-12" r="3"/><circle cx="17" cy="-12" r="3"/><circle cx="15" cy="-8" r="1.4" fill="#10130F" stroke="none"/><path d="M-12 -1 Q-29 -12 -34 0 Q-31 12 -19 11" fill="none" strokeWidth="3"/><path d="M-1 5 L-11 13 L7 9 Z" opacity=".65"/></g>}
-export default function GliderDen(aeolus:CustomComponentProps){const temp=Number(aeolus.read("temp")??31.8),humidity=Number(aeolus.read("humidity")??61),adult=Boolean(aeolus.read("adultPresent")),adults=Number(aeolus.read("adultGliders")??2),joeys=Number(aeolus.read("joeys")??2),visits=Number(aeolus.read("visits")??7),alert=Boolean(aeolus.read("thermalAlert")),ack=Boolean(aeolus.read("acknowledged")),last=aeolus.read("lastAction") as any;const color=alert?"#ED8A68":"#79D39B";return <div style={{padding:13,minHeight:"100%",background:"linear-gradient(180deg,#0C100C,#080A08)",color:"#EFF3EC"}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:10,gap:10}}><div><div style={{fontSize:17,fontWeight:900}}>SUGAR GLIDER DEN</div><div style={{fontSize:12,color:"#89958A",marginTop:3}}>Den-box microclimate · occupancy · nocturnal visits</div></div><div style={{textAlign:"right"}}><div style={{fontSize:12,fontWeight:850,color}}>{alert?(ack?"ALERT ACKNOWLEDGED":"THERMAL ALERT"):adult?"ADULT AT DEN":"DEN NORMAL"}</div><div style={{fontSize:11,color:"#7A847B",marginTop:2}}>{visits} visits tonight · {joeys} joeys</div></div></div><div style={{display:"grid",gridTemplateColumns:"1.1fr .9fr",gap:9}}><div style={{border:"1px solid #30382F",borderRadius:11,background:"#0D120D",padding:7}}><svg width="100%" height="185" viewBox="0 0 300 180"><rect x="34" y="20" width="18" height="153" rx="6" fill="#392C1E"/><path d="M46 70 Q95 46 128 74" stroke="#59452D" strokeWidth="9" fill="none"/><rect x="118" y="35" width="116" height="116" rx="7" fill="#59462C" stroke="#9A8055"/><path d="M108 39 L176 10 L244 39" fill="#40321F" stroke="#9A8055"/><circle cx="188" cy="69" r="20" fill="#17150E" stroke="#A48A5D"/>{adult&&<Glider x={189} y={69}/>}<Glider x={152} y={122} small/><Glider x={185} y={125} small/><text x="176" y="168" textAnchor="middle" fill="#92856B" fontSize="10">DEN BOX SG-01 · {adults} adults · {joeys} joeys</text></svg></div><div style={{display:"grid",gap:7}}>{[["TEMPERATURE",temp.toFixed(1)+"°C",color],["HUMIDITY",Math.round(humidity)+"%","#8FC4D6"],["COLONY",adults+" adults · "+joeys+" joeys","#CBB47A"]].map((m:any)=><div key={m[0]} style={{border:"1px solid #30382F",borderRadius:9,padding:9,background:"#0D120D"}}><div style={{fontSize:11,color:"#8B958B"}}>{m[0]}</div><div style={{fontSize:17,fontFamily:"monospace",fontWeight:850,color:m[2],marginTop:3}}>{m[1]}</div></div>)}</div></div>
-<div style={{marginTop:9,border:"1px solid #373D35",borderRadius:10,padding:9,background:"#0D100D"}}><div style={{fontSize:11,color:"#A0A89F",letterSpacing:".1em",marginBottom:7}}>OPERATOR CONTROLS</div><button disabled={!alert||ack} onClick={()=>aeolus.fire("acknowledge-alert")} style={{width:"100%",padding:"9px",borderRadius:7,border:"1px solid "+(alert&&!ack?"#704838":"#3C413B"),background:alert&&!ack?"#21110D":"#121412",color:alert&&!ack?"#EB9A7E":"#777F77",fontSize:12,cursor:"pointer"}}>{alert?(ack?"Thermal alert acknowledged":"Acknowledge thermal alert"):"No active alert"}</button></div>
-<div style={{marginTop:9,border:"1px dashed #5E5333",borderRadius:10,padding:9,background:"#151208"}}><div style={{fontSize:11,color:"#D3B76F",letterSpacing:".1em"}}>DEMO SCENARIO</div><div style={{fontSize:11,color:"#9B8B65",margin:"4px 0 7px"}}>Inject physical den-box conditions. Monitoring logic only reacts to resulting sensor telemetry.</div><div style={{display:"flex",gap:6,flexWrap:"wrap"}}><button disabled={adult} onClick={()=>aeolus.fire("simulate-visit")} style={{flex:1,minWidth:120,padding:"9px",borderRadius:7,border:"1px solid #4E6245",background:"#111C10",color:"#9DCEA0",fontSize:12,cursor:"pointer"}}>Glider returns to den</button><button disabled={alert} onClick={()=>aeolus.fire("simulate-heat")} style={{flex:1,minWidth:120,padding:"9px",borderRadius:7,border:"1px solid #6A4B33",background:"#21150C",color:"#E3AC72",fontSize:12,cursor:"pointer"}}>Hot afternoon</button><button onClick={()=>aeolus.fire("reset-nest")} style={{padding:"9px 12px",borderRadius:7,border:"1px solid #49483D",background:"#161712",color:"#A2A69B",fontSize:12,cursor:"pointer"}}>Reset</button></div></div><div style={{fontSize:11,color:"#778078",marginTop:7}}>{last?.label?String(last.label):"Den box telemetry online"}</div></div>}
+import SugarGliderDenPanel from "./SugarGliderDenPanel";
+
+export default function SugarGliderDen(aeolus: CustomComponentProps) {
+  const model = {
+    temp: aeolus.read("temp"),
+    humidity: aeolus.read("humidity"),
+    adultPresent: aeolus.read("adultPresent"),
+    adultGliders: aeolus.read("adultGliders"),
+    joeys: aeolus.read("joeys"),
+    visits: aeolus.read("visits"),
+    thermalAlert: aeolus.read("thermalAlert"),
+    acknowledged: aeolus.read("acknowledged"),
+    lastAction: aeolus.read("lastAction"),
+  };
+
+  const actions = {
+    acknowledgeAlert: () => aeolus.fire("acknowledge-alert"),
+    simulateVisit: () => aeolus.fire("simulate-visit"),
+    simulateHeat: () => aeolus.fire("simulate-heat"),
+    resetNest: () => aeolus.fire("reset-nest"),
+  };
+
+  return <SugarGliderDenPanel model={model} actions={actions} />;
+}

@@ -1,19 +1,30 @@
-// stage-show-sequencer — Automation Project logic
-// The compiler wraps this module in Aeolus' execution/completion machinery.
+// Show Control — orchestration entry point.
+// Lighting cues execute first; physical FX run only after safety permissives pass.
+
+import {
+  executeCue,
+  fireOperatorEffect,
+  handleStageDemoEvent,
+  projectStageState,
+  stopPhysicalEffects,
+} from "./show-control";
 
 export default async function run(context: EventContext) {
- var topic=String(context.topic||"");var evt=topic.split("/").pop();
- function by(w){return devices.list().find(function(x){return x.topic===w;});}
- function action(l){state.set("lastAction",{label:l,at:Date.now()});}
- function project(){var dmx=by("switch/stage/dmx/state"),fx=by("switch/stage/fx/state"),safe=by("sensor/stage/safety");var ds=dmx&&dmx.state?dmx.state:{},fs=fx&&fx.state?fx.state:{},ss=safe&&safe.state?safe.state:{};state.set("scene",String(ds.scene||"wash"));state.set("master",Number(ds.master??72));state.set("fixtures",Number(ds.fixturesOnline??12));state.set("cueNumber",Number(ds.cueNumber??1));state.set("transitioning",Boolean(ds.transitioning));state.set("fxActive",Boolean(fs.active));state.set("effect",String(fs.effect||"none"));state.set("lastEffect",String(fs.lastEffect||"none"));state.set("haze",Number(fs.haze??28));state.set("safe",!Boolean(ss.estop)&&ss.fxLoopHealthy!==false);state.set("estop",Boolean(ss.estop));state.set("loopHealthy",ss.fxLoopHealthy!==false);state.set("doorClosed",ss.doorClosed!==false);state.set("pyroArmed",ss.pyroArmed===true);state.set("exclusionClear",ss.exclusionZoneClear===true);state.set("waterReady",ss.waterFxReady===true);}
- function safeFor(effect){var s=by("sensor/stage/safety"),x=s&&s.state?s.state:{};if(Boolean(x.estop)||x.fxLoopHealthy===false)return "FX safety loop open";if(effect==="pyro"&&(x.pyroArmed!==true||x.exclusionZoneClear!==true))return "Pyro permissive unavailable";if(effect==="rain"&&x.waterFxReady!==true)return "Water FX not ready";return "";}
- async function runLighting(scene,master,transitionMs,label){var d=by("switch/stage/dmx/state");if(!d){action("DMX controller unavailable");return false;}state.set("pending",true);state.set("requestedScene",scene);var r=await devices.action(d.id,"command",{payload:{scene:scene,master:master,transitionMs:transitionMs}},{tier:"observed",deviceId:d.id,condition:{field:"transitioning",op:"eq",value:false},timeoutMs:7000});state.set("pending",false);if(r.success){project();action(label+" · lighting transition verified");try{if(db)db.write("show-cues",{type:"cue",scene:scene,label:label,master:master});}catch(e){}return true;}action("Lighting cue not verified: "+String(r.error||r.lifecycleState||"unknown"));return false;}
- async function runFx(effect,pulseMs,label){var reason=safeFor(effect);if(reason){action(label+" blocked · "+reason);return false;}var d=by("switch/stage/fx/state");if(!d){action("Stage FX rack unavailable");return false;}state.set("pendingFx",true);var haze=effect==="haze"?62:Number(state.get("haze")||28);var r=await devices.action(d.id,"command",{payload:{active:true,effect:effect,pulseMs:pulseMs,haze:haze}},{tier:"observed",deviceId:d.id,condition:{field:"active",op:"eq",value:true},timeoutMs:5000});state.set("pendingFx",false);if(r.success){project();state.set("lastFxVerifiedAt",Date.now());action(label+" · physical effect verified");return true;}action(label+" not verified: "+String(r.error||r.lifecycleState||"unknown"));return false;}
- async function stopFx(){var d=by("switch/stage/fx/state");if(!d)return;await devices.action(d.id,"command",{payload:{active:false}},{tier:"observed",deviceId:d.id,condition:{field:"active",op:"eq",value:false},timeoutMs:5000});project();action("Physical effects stopped");}
- if(topic.indexOf("ui/")===0){var p=context.state&&typeof context.state==="object"?context.state:{};
-   if(evt==="run-cue"){var scene=String(p.scene||"wash"),label=String(p.label||"Cue"),effect=String(p.effect||"none"),master=Number(p.master??72),transition=Number(p.transitionMs??900),pulse=Number(p.pulseMs??1200);var scenes=["wash","verse","chorus","red","blackout","blue","gold","uv"],effects=["none","haze","strobe","confetti","pyro","rain"];if(scenes.indexOf(scene)<0||effects.indexOf(effect)<0||!isFinite(master)){action("Rejected invalid local cue payload");return;}var ok=await runLighting(scene,Math.max(0,Math.min(100,master)),Math.max(150,Math.min(4000,transition)),label);if(ok&&effect!=="none")await runFx(effect,Math.max(300,Math.min(7000,pulse)),label+" / "+effect);}
-   else if(evt==="fire-effect"){var effect2=String(p.effect||"haze"),dur={haze:2600,strobe:850,confetti:1100,pyro:700,rain:3600};if(["haze","strobe","confetti","pyro","rain"].indexOf(effect2)>=0)await runFx(effect2,dur[effect2]||1200,effect2.toUpperCase());}
-   else if(evt==="stop-fx")await stopFx();else if(evt==="simulate-trip"){events.emit("stage/sim/safety-trip",{});action("Injecting physical stage safety trip");}else if(evt==="reset-safety"){events.emit("stage/sim/safety-reset",{});action("Resetting physical stage safety loop");}return;
- }
- if(topic.indexOf("/stage/")<0)return;project();
+  const topic = String(context.topic || "");
+  const event = topic.split("/").pop();
+  const payload = context.state && typeof context.state === "object"
+    ? context.state as Record<string, unknown>
+    : {};
+
+  if (topic.startsWith("ui/")) {
+    if (event === "run-cue") await executeCue(payload);
+    else if (event === "fire-effect") await fireOperatorEffect(payload);
+    else if (event === "stop-fx") await stopPhysicalEffects();
+    else handleStageDemoEvent(event);
+    return;
+  }
+
+  if (topic.includes("/stage/")) {
+    projectStageState();
+  }
 }

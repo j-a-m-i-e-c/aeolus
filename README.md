@@ -172,16 +172,18 @@ Show: the same custom tab resizing from desktop width to tablet/mobile width, de
 
 ## Automations
 
-An Aeolus automation is an **Automation Project**: a bounded local source tree with backend Logic and, optionally, a React UI. Small automations can stay in one file; larger ones can split into sensible modules without becoming separate services.
+An Aeolus automation is an **Automation Project**: a bounded local source tree with backend Logic and, optionally, a React UI. Small automations can stay in one file; larger ones can split into sensible modules without becoming separate services. For non-trivial projects, treat `logic/index.ts` and `ui/index.tsx` as **readable orchestration entry points rather than implementation buckets**. They should show enough of the project to understand its control flow and UI composition at a glance, while detailed policy, command handling, data projection and substantial visual components live in named project files.
 
 ```text
 my-automation/
 ├── logic/
-│   ├── index.ts
-│   └── helpers.ts
+│   ├── index.ts          # readable control-flow entry point
+│   ├── policy.ts
+│   └── commands.ts
 ├── ui/
-│   ├── index.tsx
-│   └── types.ts
+│   ├── index.tsx         # readable UI composition entry point
+│   ├── Dashboard.tsx
+│   └── hooks.ts
 └── shared/
     └── constants.ts
 ```
@@ -214,20 +216,29 @@ Together the two sides behave like a small edge application. Each automation has
 
 ### Logic: normal module-style TypeScript
 
+For a non-trivial project, the Logic tab should read like a good `main()` method: enough orchestration to explain how the automation thinks, without burying the reader in implementation detail.
+
 ```ts
 // logic/index.ts
-export default async function run(context: EventContext) {
-  const puzzleId = context.deviceId ?? context.topic.split("/").at(-1);
-  const solved = Boolean(context.state.solved);
-  const completed = new Set(state.get("completedPuzzles") ?? []);
+import { handleOperatorEvent, projectPuzzleNetwork, publishPuzzleProgress } from "./puzzle-progress";
 
-  if (solved && puzzleId && !completed.has(puzzleId)) {
-    completed.add(puzzleId);
-    state.set("completedPuzzles", [...completed]);
-    await devices.action(`lock-${puzzleId}`, "unlock");
+export default async function run(context: EventContext) {
+  const topic = String(context.topic || "");
+  const event = topic.split("/").pop();
+
+  if (topic.startsWith("ui/")) {
+    handleOperatorEvent(event);
+    return;
   }
+
+  if (topic !== "sensor/escape/puzzles") return;
+
+  const progress = projectPuzzleNetwork();
+  publishPuzzleProgress(progress);
 }
 ```
+
+The device lookups, state projection, transition tracking, persistence and demo plumbing remain ordinary TypeScript in Files.
 
 New projects use ordinary modules and relative imports. Aeolus adds the existing completion/action wrapper when it bundles the Logic entrypoint, so authors do not need to understand or write the helper scaffold.
 
@@ -235,26 +246,26 @@ The legacy `automation()` helper remains available for backwards compatibility a
 
 ### UI tab: purpose-built React
 
+The same convention applies to UI. The entry should reveal the state the view consumes, the important operator intents it can fire, and the high-level component being composed. Styling, SVGs, charts and large component trees stay behind Files.
+
 ```tsx
+// ui/index.tsx
+import GameMasterConsole from "./GameMasterConsole";
+
 export default function GameMaster(aeolus: CustomComponentProps) {
-  const completed = (aeolus.read("completedPuzzles") ?? []) as string[];
-  const lastEvent = String(aeolus.read("lastEvent") ?? "Game ready");
+  const model = {
+    solved: aeolus.read("solved"),
+    remaining: aeolus.read("remaining"),
+    currentRoom: aeolus.read("currentRoom"),
+    lastHint: aeolus.read("lastHint"),
+  };
 
-  return (
-    <section className="p-4 space-y-3">
-      <h3 className="font-semibold">Game master</h3>
-      <p>{completed.length} puzzles complete</p>
-      <p>{lastEvent}</p>
+  const actions = {
+    sendHint: (strength: string) => aeolus.fire(`hint-${strength}`),
+    pause: () => aeolus.fire("pause"),
+  };
 
-      <button
-        onClick={() =>
-          aeolus.fire("send-hint", { text: "Look beneath the clock." })
-        }
-      >
-        Send hint
-      </button>
-    </section>
-  );
+  return <GameMasterConsole model={model} actions={actions} />;
 }
 ```
 

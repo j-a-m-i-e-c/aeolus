@@ -28,6 +28,34 @@ The editor has one consistent hierarchy:
 
 `Logic` opens first. `UI` is optional. `Files` exposes the complete project tree when local modules are useful; it is a first-party part of the same project rather than a second authoring product.
 
+### Readable orchestration entry points
+
+Treat `logic/index.ts` and `ui/index.tsx` as the project's **composition roots**, not as implementation buckets and not as empty forwarding shims. A reader should be able to open either tab and understand the shape of that side of the automation without first opening Files.
+
+A useful mental model is:
+
+- **Logic answers “How does this automation think?”** Keep trigger routing, the important policy sequence and calls to meaningful domain operations visible. Move device lookup plumbing, command/acknowledgement mechanics, detailed calculations, persistence and demo fixtures into focused modules.
+- **UI answers “How does this automation present itself?”** Keep state selection, important operator intents and high-level component composition visible. Move large JSX trees, SVGs, charts, styling, animation maths and reusable hooks/components into focused modules.
+- **Files answers “How is all of that implemented?”** Complexity is not hidden; it is organised and named.
+
+For the seeded showcase, entry points will commonly land around 10–50 lines and can be somewhat longer when the orchestration genuinely reads better that way. That is guidance, not a runtime limit or a line-count contest. A clear 60-line control flow is better than a six-line shim that tells the reader nothing. Likewise, a genuinely tiny user automation may remain in one file.
+
+A larger project should read more like this:
+
+```text
+water-management/
+├── logic/
+│   ├── index.ts          # trigger routing + main control flow
+│   ├── water-control.ts  # telemetry/policy implementation
+│   ├── transfer.ts       # verified transfer commands
+│   └── distribution.ts   # downstream policy
+└── ui/
+    ├── index.tsx                  # state + actions + composition
+    ├── WaterManagementDashboard.tsx
+    ├── WaterSchematic.tsx
+    └── hooks.ts
+```
+
 New projects use one canonical scaffold everywhere:
 
 ```ts
@@ -83,7 +111,7 @@ Multi-file authoring does not widen runtime privileges. Logic is bundled and exe
 
 ## Public demo
 
-Seeded showcase automations use the same Automation Project model as normal authoring. Shared demo source is read-only. “Try a New Automation” creates a browser-local Project draft; the public demo does not persist arbitrary visitor source into the shared backend.
+Seeded showcase automations use the same Automation Project model as normal authoring. Every seeded project keeps its visible Logic and UI entry files readable as orchestration/composition roots and moves lower-level domain/visual implementation into named project files. This is a showcase convention enforced by regression tests, not a special runtime mode. Shared demo source is read-only. “Try a New Automation” creates a browser-local Project draft; the public demo does not persist arbitrary visitor source into the shared backend.
 
 ## Demo source
 

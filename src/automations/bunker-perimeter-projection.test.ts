@@ -17,12 +17,26 @@
 // stubbed sandbox APIs — no isolated-vm (unavailable on Windows dev) and no broker.
 
 import { describe, it, expect } from "vitest";
-import { transformSync } from "esbuild";
 import { bunkerPerimeterAutomation } from "../../demo/seed/tabs/off-grid-bunker/perimeter.mjs";
 import { attachSeedProjectSource } from "../__test-helpers__/seed-project-source.js";
+import { loadProject } from "../../demo/seed/project-loader.mjs";
+import { compileAutomationProject } from "./automation-project.js";
 // Authored source lives in demo/seed/projects/<projectDir>; expose it as
 // scriptSource/uiSource for the source-level assertions below.
 attachSeedProjectSource(bunkerPerimeterAutomation);
+
+/**
+ * Bundle this project's Logic once with the production compiler.
+ *
+ * Cached because every case below runs the automation, and bundling is the
+ * expensive part.
+ */
+let logicBundle: Promise<string> | undefined;
+function compiledLogic(): Promise<string> {
+  return (logicBundle ??= compileAutomationProject(
+    loadProject(bunkerPerimeterAutomation.projectDir),
+  ).then((compiled) => compiled.compiledJs));
+}
 
 const LIGHTS_TOPIC = "switch/bunker/floodlights/state";
 const PERIMETER_TOPIC = "sensor/bunker/perimeter";
@@ -95,16 +109,12 @@ async function run(world: World, topic: string): Promise<void> {
   const automation = (config: { actions: Array<(ctx: unknown) => unknown> }) => {
     actions = config.actions;
   };
-  // The Logic is now an Automation Project entrypoint: a TypeScript module that
-  // default-exports its run function. Mirror what the project compiler does —
-  // strip the module syntax, transpile away the annotations, and register the
-  // default export as the single action. Compiling it here is how the test
-  // exercises the real authored source without isolated-vm.
-  const { code } = transformSync(
-    `${bunkerPerimeterAutomation.scriptSource.replace(/export\s+default\s+/, "const __entry = ")}\nautomation({ actions: [__entry] });`,
-    { loader: "ts" },
-  );
-  const load = new Function("automation", "devices", "state", "events", `${code}\nreturn null;`);
+  // The Logic is a multi-module Automation Project, so it is bundled with the
+  // PRODUCTION compiler rather than transpiled by hand. The bundle registers its
+  // own default export via `automation({ actions: [...] })`, so evaluating it here
+  // exercises exactly the code a deployment runs — just without isolated-vm, which
+  // is unavailable on a Windows dev machine.
+  const load = new Function("automation", "devices", "state", "events", `${await compiledLogic()}\nreturn null;`);
   load(automation, world.devices, world.state, world.events);
   expect(actions).toHaveLength(1);
   await actions[0]({ topic, state: {}, deviceId: "test", timestamp: Date.now() });

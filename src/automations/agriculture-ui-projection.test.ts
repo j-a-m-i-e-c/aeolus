@@ -110,7 +110,9 @@ describe("Agriculture demo UI projection contract", () => {
   });
 
   it("Trough Watering never auto-refills while the herd is still drinking", () => {
-    expect(troughAutomation.scriptSource).toContain('!drinkingActive');
+    // The guard may be read off a snapshot object or straight from state, so match
+    // the negation of the flag rather than one spelling of the receiver.
+    expect(troughAutomation.scriptSource).toMatch(/!\s*(?:\w+\.)*drinkingActive/);
     expect(troughAutomation.scriptSource).toContain('Automatic refill enabled · acts after cattle leave');
   });
 

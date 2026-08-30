@@ -1,14 +1,28 @@
-import { useMemo } from "react";
+// Underway Science — UI composition entry point.
+// State selection and operator intent stay visible; rendering detail lives in Files.
+
+import UnderwayScienceDashboard from "./UnderwayScienceDashboard";
 
 export default function UnderwayScience(aeolus: CustomComponentProps) {
-  const sst=Number(aeolus.read("sst")??18.4), sal=Number(aeolus.read("salinity")??35.2), flow=Number(aeolus.read("flow")??2.1), chl=Number(aeolus.read("chlorophyll")??.8), turb=Number(aeolus.read("turbidity")??.5); const pumpOn=Boolean(aeolus.read("pumpOn")), front=Boolean(aeolus.read("frontDetected")), pending=Boolean(aeolus.read("commandPending")); const profile=(aeolus.read("profile") as any[])||[]; const last=aeolus.read("lastAction") as any; const action=last?.label?String(last.label):"Surface-water stream online";
-  const pts=profile.length?profile:[{sst:18.4,salinity:35.2},{sst:18.35,salinity:35.18},{sst:18.4,salinity:35.2}]; const tempPath=useMemo(()=>pts.map((p:any,i:number)=>{const x=18+i*Math.max(1,245/(Math.max(1,pts.length-1)));const y=112-(Number(p.sst)-15)*15;return(i?"L":"M")+x.toFixed(1)+","+y.toFixed(1)}).join(" "),[profile]); const salPath=useMemo(()=>pts.map((p:any,i:number)=>{const x=18+i*Math.max(1,245/(Math.max(1,pts.length-1)));const y=112-(Number(p.salinity)-34.6)*45;return(i?"L":"M")+x.toFixed(1)+","+y.toFixed(1)}).join(" "),[profile]);
-  return <div style={{padding:11,minHeight:"100%",background:"linear-gradient(180deg,#0A1517,#071012)",color:"#EDF2EF"}}>
-    <div style={{display:"flex",justifyContent:"space-between",marginBottom:7}}><div><div style={{fontSize:12,fontWeight:900}}>UNDERWAY SCIENCE</div><div style={{color:"#687D7D",fontSize:11,marginTop:2}}>Flow-through seawater · frontal detection · opportunistic transect</div></div><div style={{textAlign:"right"}}><div style={{color:front?"#A4E699":pumpOn?"#69D5C8":"#E3A66A",fontSize:11,fontWeight:850}}>{front?"FRONT DETECTED":pumpOn?"SAMPLING":"INTAKE STOPPED"}</div><div style={{color:"#627676",fontSize:11}}>{flow.toFixed(1)} L/min</div></div></div>
-    <div style={{display:"grid",gridTemplateColumns:"1.2fr .8fr",gap:7}}><div style={{border:"1px solid #24403F",borderRadius:10,background:"#081719",padding:7}}><svg width="100%" height="165" viewBox="0 0 280 165"><rect width="280" height="165" rx="7" fill="#071315"/><text x="15" y="17" fill="#6A8583" fontSize="10" letterSpacing="1">RECENT SURFACE TRANSECT</text>{[45,75,105,135].map(y=><line key={y} x1="15" y1={y} x2="266" y2={y} stroke="#1C3434"/>)}<path d={tempPath} fill="none" stroke="#F0AF5C" strokeWidth="2"/><path d={salPath} fill="none" stroke="#58D2D0" strokeWidth="1.7" strokeDasharray="4 3"/><text x="16" y="153" fill="#F0AF5C" fontSize="10">SST {sst.toFixed(1)}°C</text><text x="98" y="153" fill="#58D2D0" fontSize="10">SAL {sal.toFixed(2)}</text>{front&&<g><rect x="200" y="25" width="63" height="19" rx="9" fill="#17311F" stroke="#579E67"/><text x="231" y="37" textAnchor="middle" fill="#A3E29C" fontSize="10">FRONT</text></g>}</svg></div>
-      <div style={{border:"1px solid #24403F",borderRadius:10,background:"#081719",padding:9}}><div style={{color:"#718785",fontSize:11,letterSpacing:".12em"}}>LIVE STREAM</div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,marginTop:9}}>{[["SST",sst.toFixed(1)+"°C","#F0B05D"],["SAL",sal.toFixed(2),"#66D3D0"],["CHL",chl.toFixed(2),"#8DD49A"],["TURB",turb.toFixed(2),"#B8C7B5"]].map(([l,v,c])=><div key={l}><div style={{color:"#637774",fontSize:11}}>{l}</div><div style={{color:c,fontFamily:"monospace",fontSize:12,fontWeight:800,marginTop:2}}>{v}</div></div>)}</div><div style={{marginTop:12,paddingTop:8,borderTop:"1px solid #203534",color:pumpOn?"#79D7CB":"#8E8D82",fontSize:11}}>{pumpOn?"INTAKE PUMP RUNNING":"NO SAMPLE FLOW"}</div></div></div>
-    <div style={{marginTop:7,border:"1px solid #294442",borderRadius:9,padding:8,background:"#081618"}}><div style={{color:"#809592",fontSize:11,letterSpacing:".12em",marginBottom:6}}>OPERATOR CONTROLS</div><div style={{display:"flex",gap:5}}><button disabled={pending||pumpOn} onClick={()=>aeolus.fire("sampling-start")} style={{flex:1,padding:"7px",borderRadius:6,border:"1px solid #315D53",background:"#10231F",color:"#80D7C9",fontSize:11,cursor:"pointer"}}>Start sampling</button><button disabled={pending||!pumpOn} onClick={()=>aeolus.fire("sampling-stop")} style={{flex:1,padding:"7px",borderRadius:6,border:"1px solid #5B4935",background:"#211A11",color:"#DDBA7A",fontSize:11,cursor:"pointer"}}>Stop sampling</button></div></div>
-    <div style={{marginTop:7,border:"1px dashed #69502E",borderRadius:9,padding:8,background:"#171309"}}><div style={{color:"#D8B66D",fontSize:11,letterSpacing:".12em"}}>DEMO SCENARIO</div><div style={{color:"#806F50",fontSize:11,margin:"3px 0 6px"}}>Move the simulated vessel across a water-mass boundary. Aeolus detects the gradient from real stream telemetry.</div><div style={{display:"flex",gap:5}}><button disabled={!pumpOn} onClick={()=>aeolus.fire("simulate-front")} style={{flex:1,padding:"6px",borderRadius:6,border:"1px solid #6A5130",background:"#21180B",color:"#E3B866",fontSize:11,cursor:"pointer"}}>Cross hydrographic front</button><button onClick={()=>aeolus.fire("reset-underway")} style={{padding:"6px 9px",borderRadius:6,border:"1px solid #454138",background:"#171713",color:"#898B82",fontSize:11,cursor:"pointer"}}>Reset transect</button></div></div>
-    <div style={{color:"#5C706E",fontSize:11,marginTop:6,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{action}</div>
-  </div>;
+  const model = {
+    sst: aeolus.read("sst"),
+    salinity: aeolus.read("salinity"),
+    flow: aeolus.read("flow"),
+    chlorophyll: aeolus.read("chlorophyll"),
+    turbidity: aeolus.read("turbidity"),
+    pumpOn: aeolus.read("pumpOn"),
+    frontDetected: aeolus.read("frontDetected"),
+    commandPending: aeolus.read("commandPending"),
+    profile: aeolus.read("profile"),
+    lastAction: aeolus.read("lastAction"),
+  };
+
+  const actions = {
+    samplingStart: () => aeolus.fire("sampling-start"),
+    samplingStop: () => aeolus.fire("sampling-stop"),
+    simulateFront: () => aeolus.fire("simulate-front"),
+    resetUnderway: () => aeolus.fire("reset-underway"),
+  };
+
+  return <UnderwayScienceDashboard model={model} actions={actions} />;
 }

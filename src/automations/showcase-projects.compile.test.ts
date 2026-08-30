@@ -50,6 +50,74 @@ describe("seeded Automation Projects", () => {
     expect(referenced).toEqual(actual);
   });
 
+  it("keeps showcase Logic and UI as readable orchestration entry points", () => {
+    const failures: string[] = [];
+
+    for (const projectDir of actualProjectDirs()) {
+      const source = loadProject(projectDir);
+      const logic = source.files.find((file) => file.path === source.logicEntry);
+      const ui = source.uiEntry
+        ? source.files.find((file) => file.path === source.uiEntry)
+        : undefined;
+
+      if (!logic) {
+        failures.push(`${projectDir}: missing Logic entry`);
+        continue;
+      }
+
+      // These are deliberately generous regression ceilings, not style targets.
+      // A clear main-method-style entry may be longer than 50 lines; this only
+      // catches a return to the old monolithic showcase source.
+      const logicLines = logic.content.trim().split(/\r?\n/).length;
+      if (logicLines > 90 || logic.content.length > 5_000) {
+        failures.push(`${projectDir}: Logic entry has become monolithic (${logicLines} lines, ${logic.content.length} chars)`);
+      }
+      if (/<(?:div|svg|button|section|article|span)\b/.test(logic.content)) {
+        failures.push(`${projectDir}: Logic entry contains UI markup`);
+      }
+      if (/export\s+default\s+[A-Za-z_$][\w$]*\s*;/.test(logic.content)) {
+        failures.push(`${projectDir}: Logic entry is only a forwarding shim`);
+      }
+
+      if (ui) {
+        const uiLines = ui.content.trim().split(/\r?\n/).length;
+        if (uiLines > 90 || ui.content.length > 5_000) {
+          failures.push(`${projectDir}: UI entry has become monolithic (${uiLines} lines, ${ui.content.length} chars)`);
+        }
+        if (/<svg\b|style=\{\{/.test(ui.content)) {
+          failures.push(`${projectDir}: UI entry contains low-level visual implementation`);
+        }
+        if (/export\s+default\s+[A-Za-z_$][\w$]*\s*;/.test(ui.content)) {
+          failures.push(`${projectDir}: UI entry is only a forwarding shim`);
+        }
+        if (!ui.content.includes("aeolus.read(")) {
+          failures.push(`${projectDir}: UI entry does not expose its state selection`);
+        }
+      }
+
+      const logicModules = source.files.filter(
+        (file) => file.path.startsWith("logic/") && file.path !== source.logicEntry,
+      );
+      const uiModules = source.files.filter(
+        (file) => file.path.startsWith("ui/") && file.path !== source.uiEntry,
+      );
+      if (logicModules.length === 0) {
+        failures.push(`${projectDir}: showcase Logic has no supporting project file`);
+      }
+      if (ui && uiModules.length === 0) {
+        failures.push(`${projectDir}: showcase UI has no supporting project file`);
+      }
+
+      for (const module of uiModules) {
+        if (/\baeolus\.(?:read|fire|save|saveAndFire)\s*\(/.test(module.content)) {
+          failures.push(`${projectDir}: ${module.path} bypasses the UI composition entry point`);
+        }
+      }
+    }
+
+    expect(failures, failures.join("\n")).toEqual([]);
+  });
+
   it("compiles every currently seeded Automation Project with the production compiler", async () => {
     const projects = actualProjectDirs();
     const failures: string[] = [];

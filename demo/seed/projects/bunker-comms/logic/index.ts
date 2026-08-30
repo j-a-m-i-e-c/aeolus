@@ -1,6 +1,18 @@
-// bunker-comms — Automation Project logic
-// The compiler wraps this module in Aeolus' execution/completion machinery.
+// Communications — orchestration entry point.
+
+import { projectRadioState, simulateRadioContact, transmitCheckIn } from "./radio-control";
 
 export default async function run(context: EventContext) {
-var topic=String(context.topic||"");var evt=topic.split("/").pop();function by(w){return devices.list().find(function(d){return d.topic===w;});}function action(l){state.set("lastAction",{label:l,at:Date.now()});}if(topic.indexOf("ui/")===0){if(evt==="transmit-checkin"){var r=by("switch/bunker/radio/state");if(!r)return;state.set("pending",true);var result=await devices.action(r.id,"command",{payload:{tx:true}},{tier:"observed",deviceId:r.id,condition:{field:"tx",op:"eq",value:true},timeoutMs:5000});state.set("pending",false);if(result.success){state.set("txUntil",Date.now()+1200);action("146.52 MHz check-in transmitted");}else action("Radio transmission not verified");}else if(evt==="simulate-contact"){events.emit("bunker/sim/radio-contact",{});action("Injecting a weak external VHF transmission");}return;}if(topic.indexOf("sensor/bunker/radio/")!==0)return;var d=by("sensor/bunker/radio/rx"),s=d&&d.state?d.state:{};state.set("frequency",Number(s.frequency??146.52));state.set("signal",String(s.signal||"quiet"));state.set("message",String(s.message||""));state.set("contactsToday",Number(s.contactsToday??3));if(String(s.signal||"quiet")!=="quiet")action("Weak VHF contact received");events.emit("bunker/summary/comms",{frequency:Number(s.frequency??146.52),signal:String(s.signal||"quiet"),contactsToday:Number(s.contactsToday??3)});
+  const topic = String(context.topic || "");
+  const event = topic.split("/").pop();
+
+  if (topic.startsWith("ui/")) {
+    if (event === "transmit-checkin") await transmitCheckIn();
+    if (event === "simulate-contact") simulateRadioContact();
+    return;
+  }
+
+  if (topic.startsWith("sensor/bunker/radio/")) {
+    projectRadioState();
+  }
 }

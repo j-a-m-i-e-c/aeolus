@@ -1,23 +1,29 @@
-// escape-game-master — Automation Project logic
-// The compiler wraps this module in Aeolus' execution/completion machinery.
+// Game Master — orchestration entry point.
+// Session state, operator actions and physical exit control are intentionally visible.
+
+import {
+  handleGameMasterAction,
+  initialiseGameSession,
+  projectPuzzleStatus,
+  reconcileExitForCompletion,
+} from "./game-master";
 
 export default async function run(context: EventContext) {
- var topic=String(context.topic||"");var evt=topic.split("/").pop();
- function byTopic(w){return devices.list().find(function(d){return d.topic===w;});}
- function action(l){state.set("lastAction",{label:l,at:Date.now()});}
- function init(){if(state.get("remaining")===undefined){state.set("remaining",2700);state.set("timerStartedAt",Date.now());state.set("paused",false);state.set("p1",false);state.set("p2",false);state.set("p3",false);state.set("p4",false);state.set("solved",0);state.set("currentRoom","Library");state.set("hintsSent",0);state.set("lastHint","No hint sent yet.");state.set("lastHintId",0);state.set("hintRoom","Library");state.set("exitUnlocked",false);state.set("requestedLook","puzzle");state.set("intercomTx",false);state.set("intercomRoom","Library");}}
- async function setExit(unlocked){var d=byTopic("switch/escape/exit/state");if(!d)return;var r=await devices.action(d.id,"command",{payload:{locked:!unlocked}},{tier:"observed",deviceId:d.id,condition:{field:"locked",op:"eq",value:!unlocked},timeoutMs:5000});if(r.success){state.set("exitUnlocked",unlocked);action(unlocked?"All puzzles solved · exit maglock released":"Exit maglock secured");}else action("Exit command not verified: "+String(r.error||r.lifecycleState||"unknown"));}
- function hintText(room,level){var map={"Library":["The book spines are not ordered randomly.","Try reading the coloured symbols from darkest to lightest.","Use the year stamped inside the atlas as the rotary code."],"Laser Hall":["The beams react to sequence, not speed.","Watch which receiver flashes after each correct beam.","Cross blue → amber → red, then hold the floor plate for three seconds."],"Observatory":["The stars above the desk form a pattern seen elsewhere in the room.","Rotate the brass sky wheel until Orion aligns with the window marks.","Set the wheel to 21:40 and press the illuminated southern star."],"Vault":["The scale cares about balance, not total weight.","One brass weight is hollow; compare the engraved symbols.","Place moon + key on the left and hourglass on the right."]};var a=map[room]||map["Library"];return a[Math.max(0,Math.min(2,level-1))];}
- async function sendHint(level){var d=byTopic("switch/escape/hint-screen/state");if(!d)return;var room=String(state.get("currentRoom")||"Library"),text=hintText(room,level),id=Number(state.get("lastHintId")||0)+1;state.set("pendingHint",true);var r=await devices.action(d.id,"command",{payload:{message:text,room:room,hintId:id}},{tier:"acknowledged",deviceId:d.id,timeoutMs:5000});state.set("pendingHint",false);if(r.success){state.set("hintsSent",Number(state.get("hintsSent")||0)+1);state.set("lastHint",text);state.set("lastHintId",id);state.set("hintRoom",room);state.set("hintLevel",level);action("Hint #"+id+" delivered to "+room);}else action("Hint delivery not acknowledged");}
- async function intercom(tx){var d=byTopic("switch/escape/intercom/state");if(!d)return;var room=String(state.get("currentRoom")||"Library");state.set("intercomPending",true);var r=await devices.action(d.id,"command",{payload:{tx:tx,room:room}},{tier:"observed",deviceId:d.id,condition:{field:"tx",op:"eq",value:tx},timeoutMs:5000});state.set("intercomPending",false);if(r.success){state.set("intercomTx",tx);state.set("intercomRoom",room);action(tx?"Game Master live to "+room:"Game Master intercom released");}else action("Intercom command not verified");}
- init();
- if(topic.indexOf("ui/")===0){var remaining=Number(context.state&&context.state.remaining);if(!Number.isFinite(remaining))remaining=Number(state.get("remaining")||2700);
-   if(evt==="add-time"||evt==="sub-time"||evt==="pause"){if(evt==="add-time")remaining=Math.min(7200,remaining+60);if(evt==="sub-time")remaining=Math.max(0,remaining-60);state.set("remaining",remaining);state.set("timerStartedAt",Date.now());if(evt==="pause")state.set("paused",!Boolean(state.get("paused")));action(evt==="pause"?(Boolean(state.get("paused"))?"Game timer paused":"Game timer resumed"):(evt==="add-time"?"Game master added one minute":"Game master removed one minute"));}
-   else if(evt==="hint-nudge")await sendHint(1);else if(evt==="hint-strong")await sendHint(2);else if(evt==="hint-solve")await sendHint(3);
-   else if(evt==="look-calm"||evt==="look-puzzle"||evt==="look-tension"){var look=evt.split("-").pop();state.set("requestedLook",look);events.emit("escape/game/look-request",{scene:look});action("Requested "+look+" room look");}
-   else if(evt==="talk-start")await intercom(true);else if(evt==="talk-stop")await intercom(false);return;
- }
- if(topic.indexOf("/escape/puzzles/status")<0)return;var p=context.state&&typeof context.state==="object"?context.state:{};["p1","p2","p3","p4"].forEach(function(k){state.set(k,Boolean(p[k]));});state.set("solved",Number(p.solved||0));state.set("currentRoom",String(p.currentRoom||"Library"));if(Array.isArray(p.solveSeconds))state.set("solveSeconds",p.solveSeconds);if(Array.isArray(p.attempts))state.set("attempts",p.attempts);var complete=Boolean(p.complete);
- if(complete&&!Boolean(state.get("exitUnlocked"))){await setExit(true);state.set("requestedLook","victory");events.emit("escape/game/completed",{scene:"victory",solved:4});}
- else if(!complete&&Boolean(state.get("exitUnlocked"))){await setExit(false);state.set("requestedLook","puzzle");events.emit("escape/game/look-request",{scene:"puzzle"});}
+  const topic = String(context.topic || "");
+  const event = topic.split("/").pop();
+  const payload = context.state && typeof context.state === "object"
+    ? context.state as Record<string, unknown>
+    : {};
+
+  initialiseGameSession();
+
+  if (topic.startsWith("ui/")) {
+    await handleGameMasterAction(event, payload);
+    return;
+  }
+
+  if (!topic.includes("/escape/puzzles/status")) return;
+
+  const complete = projectPuzzleStatus(payload);
+  await reconcileExitForCompletion(complete);
 }

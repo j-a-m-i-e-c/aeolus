@@ -1,7 +1,23 @@
-// bunker-power — Automation Project logic
-// The compiler wraps this module in Aeolus' execution/completion machinery.
+// Power & Supplies — orchestration entry point.
+// Telemetry is projected first; generator policy stays obvious here.
+
+import { handlePowerDemoEvent, projectPowerAndSupplies, setGenerator } from "./power-control";
 
 export default async function run(context: EventContext) {
-var topic=String(context.topic||"");var evt=topic.split("/").pop();function by(w){return devices.list().find(function(d){return d.topic===w;});}function action(l){state.set("lastAction",{label:l,at:Date.now()});}async function generator(on,reason){var g=by("switch/bunker/generator/state");if(!g)return;state.set("pending",true);var r=await devices.action(g.id,"command",{payload:{on:on}},{tier:"observed",deviceId:g.id,condition:{field:"on",op:"eq",value:on},timeoutMs:5000});state.set("pending",false);if(r.success){state.set("generatorOn",on);action(reason);}else action("Generator command not verified");}
-if(topic.indexOf("ui/")===0){if(evt==="generator-on")await generator(true,"Generator started by operator");else if(evt==="generator-off")await generator(false,"Generator stopped by operator");else if(evt==="simulate-low-power"){events.emit("bunker/sim/low-power",{});action("Injecting cloud cover + low battery reserve");}else if(evt==="reset-power"){events.emit("bunker/sim/power-reset",{});action("Resetting power system to nominal");}return;}if(topic.indexOf("sensor/bunker/")!==0)return;var p=by("sensor/bunker/power"),s=by("sensor/bunker/supplies"),ps=p&&p.state?p.state:{},ss=s&&s.state?s.state:{};var battery=Number(ps.battery??74),solar=Number(ps.solarW??1800),load=Number(ps.loadW??1200),net=Number(ps.netW??(solar-load)),g=by("switch/bunker/generator/state"),gen=Boolean(g&&g.state&&g.state.on);state.set("battery",battery);state.set("solar",solar);state.set("load",load);state.set("net",net);state.set("generatorOn",gen);state.set("fuel",Number((g&&g.state&&g.state.fuel)??62));state.set("foodDays",Number(ss.foodDays??64));state.set("waterDays",Number(ss.waterDays??80));state.set("meds",Number(ss.meds??45));state.set("beans",Number(ss.beans??312));if(battery<=30&&!gen)await generator(true,"Low reserve detected · backup generator started automatically");events.emit("bunker/summary/power",{battery:battery,solar:solar,load:load,net:net,generatorOn:Boolean(state.get("generatorOn")),foodDays:Number(ss.foodDays??64),waterDays:Number(ss.waterDays??80)});
+  const topic = String(context.topic || "");
+  const event = topic.split("/").pop();
+
+  if (topic.startsWith("ui/")) {
+    if (event === "generator-on") await setGenerator(true, "Generator started by operator");
+    else if (event === "generator-off") await setGenerator(false, "Generator stopped by operator");
+    else handlePowerDemoEvent(event);
+    return;
+  }
+
+  if (!topic.startsWith("sensor/bunker/")) return;
+
+  const { battery, generatorOn } = projectPowerAndSupplies();
+  if (battery <= 30 && !generatorOn) {
+    await setGenerator(true, "Low reserve detected · backup generator started automatically");
+  }
 }

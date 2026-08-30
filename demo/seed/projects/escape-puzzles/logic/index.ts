@@ -1,7 +1,19 @@
-// escape-puzzles — Automation Project logic
-// The compiler wraps this module in Aeolus' execution/completion machinery.
+// Puzzle Progress — orchestration entry point.
+// Physical puzzle state is projected, then changes are published to Game Master.
+
+import { handlePuzzleDemoEvent, projectPuzzleNetwork, publishPuzzleProgress } from "./puzzle-progress";
 
 export default async function run(context: EventContext) {
-var topic=String(context.topic||"");var evt=topic.split("/").pop();function d(){return devices.list().find(function(x){return x.topic==="sensor/escape/puzzles";});}function action(l){state.set("lastAction",{label:l,at:Date.now()});}function project(){var x=d(),s=x&&x.state?x.state:{};var keys=["p1","p2","p3","p4"],vals=keys.map(function(k){return Boolean(s[k]);}),solved=vals.filter(Boolean).length;keys.forEach(function(k,i){state.set(k,vals[i]);});state.set("solved",solved);state.set("lastSolved",Number(s.lastSolved||0));state.set("currentRoom",String(s.currentRoom||"Library"));state.set("teamProgress",String(s.teamProgress||"searching"));var attempts=Array.isArray(s.attempts)?s.attempts:[0,0,0,0],times=Array.isArray(s.solveSeconds)?s.solveSeconds:[0,0,0,0];state.set("attempts",attempts);state.set("solveSeconds",times);if(Number(state.get("previousSolved")||0)!==solved){state.set("previousSolved",solved);action(solved===4?"Final puzzle physically solved":"Puzzle "+Number(s.lastSolved||solved)+" solved by team");events.emit("escape/puzzles/status",{p1:vals[0],p2:vals[1],p3:vals[2],p4:vals[3],solved:solved,complete:solved===4,lastSolved:Number(s.lastSolved||0),currentRoom:String(s.currentRoom||"Library"),attempts:attempts,solveSeconds:times});}else if(state.get("publishedInitial")!==true){state.set("publishedInitial",true);events.emit("escape/puzzles/status",{p1:vals[0],p2:vals[1],p3:vals[2],p4:vals[3],solved:solved,complete:solved===4,lastSolved:Number(s.lastSolved||0),currentRoom:String(s.currentRoom||"Library"),attempts:attempts,solveSeconds:times});}}
-if(topic.indexOf("ui/")===0){if(evt==="simulate-solve"){events.emit("escape/sim/solve-next",{});action("Injecting the next participant puzzle solve");}else if(evt==="reset-puzzles"){events.emit("escape/sim/reset",{});state.set("previousSolved",-1);state.set("publishedInitial",false);action("Resetting physical puzzle network");}return;}if(topic!=="sensor/escape/puzzles")return;project();
+  const topic = String(context.topic || "");
+  const event = topic.split("/").pop();
+
+  if (topic.startsWith("ui/")) {
+    handlePuzzleDemoEvent(event);
+    return;
+  }
+
+  if (topic !== "sensor/escape/puzzles") return;
+
+  const progress = projectPuzzleNetwork();
+  publishPuzzleProgress(progress);
 }

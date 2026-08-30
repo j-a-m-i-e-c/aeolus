@@ -1,6 +1,21 @@
-// bunker-overview — Automation Project logic
-// The compiler wraps this module in Aeolus' execution/completion machinery.
+// Continuity Overview — read-only aggregation entry point.
+// Each subsystem owns its hardware; this project only composes their summaries.
+
+import {
+  projectAirSummary,
+  projectCommsSummary,
+  projectPerimeterSummary,
+  projectPowerSummary,
+} from "./continuity-summary";
 
 export default async function run(context: EventContext) {
-var topic=String(context.topic||"");var s=context.state&&typeof context.state==="object"?context.state:{};function copy(k){if(s[k]!==undefined)state.set(k,s[k]);}if(topic.indexOf("/bunker/summary/perimeter")>=0)["contacts","sector","classification","lightsOn"].forEach(copy);else if(topic.indexOf("/bunker/summary/air")>=0)["sealed","overpressure","filterLife"].forEach(copy);else if(topic.indexOf("/bunker/summary/power")>=0)["battery","solar","load","net","generatorOn","foodDays","waterDays"].forEach(copy);else if(topic.indexOf("/bunker/summary/comms")>=0)["frequency","signal","contactsToday"].forEach(copy);
+  const topic = String(context.topic || "");
+  const summary = context.state && typeof context.state === "object"
+    ? context.state as Record<string, unknown>
+    : {};
+
+  if (topic.includes("/bunker/summary/perimeter")) projectPerimeterSummary(summary);
+  else if (topic.includes("/bunker/summary/air")) projectAirSummary(summary);
+  else if (topic.includes("/bunker/summary/power")) projectPowerSummary(summary);
+  else if (topic.includes("/bunker/summary/comms")) projectCommsSummary(summary);
 }

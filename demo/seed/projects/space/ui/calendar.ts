@@ -1,5 +1,18 @@
-export function countdown(net:string,now:number){const ts=Date.parse(net||"");if(!Number.isFinite(ts))return "T− --:--";let seconds=Math.round((ts-now)/1000),past=seconds<0;seconds=Math.abs(seconds);const d=Math.floor(seconds/86400),h=Math.floor((seconds%86400)/3600),m=Math.floor((seconds%3600)/60),s=seconds%60,p=(n:number)=>String(n).padStart(2,"0");return (past?"T+ ":"T− ")+(d>0?d+"d "+p(h)+":"+p(m):p(h)+":"+p(m)+":"+p(s));}
-export function dateLabel(v:any){if(!v)return "—";const d=new Date(String(v).replace(" ","T")+(String(v).includes("Z")?"":"Z"));return Number.isFinite(d.getTime())?d.toLocaleString([], {month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}):String(v);}
-export function moonGlyph(phase:string){const p=phase.toLowerCase();if(p.includes("new"))return "●";if(p.includes("first"))return "◐";if(p.includes("full"))return "○";if(p.includes("last")||p.includes("third"))return "◑";if(p.includes("wax"))return "◔";if(p.includes("wan"))return "◕";return "◒";}
-const SHOWERS=[{name:"Quadrantids",m:1,d:3},{name:"Lyrids",m:4,d:22},{name:"Eta Aquariids",m:5,d:6},{name:"Perseids",m:8,d:12},{name:"Orionids",m:10,d:21},{name:"Leonids",m:11,d:17},{name:"Geminids",m:12,d:14}];
-export function nextShower(now:number){const n=new Date(now);let best:any=null;for(const y of [n.getUTCFullYear(),n.getUTCFullYear()+1])for(const s of SHOWERS){const t=Date.UTC(y,s.m-1,s.d,12);if(t>=now&&(!best||t<best.t))best={...s,t};}return best;}
+export function countdown(net: string, now: number) { const ts = Date.parse(net || ""); if (!Number.isFinite(ts))
+    return "T− --:--"; let seconds = Math.round((ts - now) / 1000), past = seconds < 0; seconds = Math.abs(seconds); const d = Math.floor(seconds / 86400), h = Math.floor((seconds % 86400) / 3600), m = Math.floor((seconds % 3600) / 60), s = seconds % 60, p = (n: number) => String(n).padStart(2, "0"); return (past ? "T+ " : "T− ") + (d > 0 ? d + "d " + p(h) + ":" + p(m) : p(h) + ":" + p(m) + ":" + p(s)); }
+export function dateLabel(v: any) { if (!v)
+    return "—"; const d = new Date(String(v).replace(" ", "T") + (String(v).includes("Z") ? "" : "Z")); return Number.isFinite(d.getTime()) ? d.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : String(v); }
+export function moonGlyph(phase: string) { const p = phase.toLowerCase(); if (p.includes("new"))
+    return "●"; if (p.includes("first"))
+    return "◐"; if (p.includes("full"))
+    return "○"; if (p.includes("last") || p.includes("third"))
+    return "◑"; if (p.includes("wax"))
+    return "◔"; if (p.includes("wan"))
+    return "◕"; return "◒"; }
+const SHOWERS = [{ name: "Quadrantids", m: 1, d: 3 }, { name: "Lyrids", m: 4, d: 22 }, { name: "Eta Aquariids", m: 5, d: 6 }, { name: "Perseids", m: 8, d: 12 }, { name: "Orionids", m: 10, d: 21 }, { name: "Leonids", m: 11, d: 17 }, { name: "Geminids", m: 12, d: 14 }];
+export function nextShower(now: number) { const n = new Date(now); let best: any = null; for (const y of [n.getUTCFullYear(), n.getUTCFullYear() + 1])
+    for (const s of SHOWERS) {
+        const t = Date.UTC(y, s.m - 1, s.d, 12);
+        if (t >= now && (!best || t < best.t))
+            best = { ...s, t };
+    } return best; }
