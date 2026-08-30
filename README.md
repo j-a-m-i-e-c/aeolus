@@ -499,7 +499,7 @@ For the component-level view and a walkthrough of the internal event flow, sandb
 
 | Layer | Stack |
 |---|---|
-| Backend | Node.js 22, TypeScript, Express, SQLite, mqtt.js, `ws`, `isolated-vm`, pino, prom-client |
+| Backend | Node.js 24, TypeScript, Express, SQLite, mqtt.js, `ws`, `isolated-vm`, pino, prom-client |
 | Frontend | React 19, Vite, Zustand, Tailwind CSS, Monaco Editor, react-grid-layout |
 | Infrastructure | Docker Compose, Eclipse Mosquitto, Linux host networking |
 

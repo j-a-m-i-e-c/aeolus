@@ -192,7 +192,7 @@ services:
   #     run --rm -e SEED_PASS=... seed
   seed:
     profiles: ["seed"]
-    image: node:22.22.1-slim
+    image: node:24.20.0-slim
     working_dir: /repo
     volumes:
       - .:/repo

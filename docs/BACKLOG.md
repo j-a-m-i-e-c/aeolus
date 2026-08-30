@@ -211,12 +211,14 @@ model, but should remain visible:
   Node's `fetch` may resolve the host again when connecting; close that only if a
   pinned-address transport becomes necessary for the threat model.
 - Dependency posture is deliberate rather than "green at any cost": `ws` is on
-  the safe 8.21.3 line, while `isolated-vm` remains on the 5.x line that the
-  pinned Node 22 runtime supports. Treat an `isolated-vm` major as a runtime
-  migration, not a Dependabot merge — the 6.x line (6.0.1+) supports both Node 22
-  and newer, so it is the bridge to take first, while 7.x requires Node 24.
-  Rationale and the migration order are recorded in
-  [ADR-0009](adr/0009-pinned-node-22-runtime.md).
+  the safe 8.21.3 line, and `isolated-vm` is on 6.2.0, which carries the fix for
+  the GHSA-864f-rcv7-6rh4 sandbox escape. Both are current; the note stays because
+  the *method* is the reusable part. An `isolated-vm` major is a runtime migration,
+  not a Dependabot merge, and the way through is to adopt a line that supports both
+  the old and new Node versions first, then move the runtime pin separately — which
+  is how 6.2.0 landed on Node 22 before the move to Node 24. `isolated-vm` 7.x
+  currently requires Node 24 or newer. See
+  [ADR-0010](adr/0010-node-24-runtime.md).
 - Internal automation MQTT publish bypasses the REST raw-publish namespace
   policy — acceptable for admin-authored code; scoped (non-admin) automations are
   already denied raw publish by the `AutomationScopeResolver`. A per-automation

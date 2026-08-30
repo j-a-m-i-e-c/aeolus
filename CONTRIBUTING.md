@@ -5,12 +5,12 @@ Thanks for your interest in contributing to Aeolus! This guide will help you get
 ## Getting Started
 
 1. Use the pinned Node version. `.nvmrc` holds it (`nvm use` picks it up), and both
-   `package.json` files enforce it via `engines`. Aeolus pins one exact Node 22 patch
-   release because the `isolated-vm` automation runtime is a native V8 addon that does
-   not build on newer Node lines — and a mismatch disables the sandbox with only a log
-   warning rather than failing loudly. See
-   [ADR-0009](docs/adr/0009-pinned-node-22-runtime.md). If `npm ci` prints an
-   `EBADENGINE` warning, stop and switch Node rather than continuing.
+   `package.json` files enforce it via `engines`. Aeolus pins one exact Node patch
+   release because the `isolated-vm` automation runtime is a native V8 addon tied to a
+   specific ABI — and a mismatch disables the sandbox with only a log warning rather
+   than failing loudly, so automations silently stop running. See
+   [ADR-0010](docs/adr/0010-node-24-runtime.md). If `npm ci` prints an `EBADENGINE`
+   warning, stop and switch Node rather than continuing.
 2. Fork the repository
 3. Clone your fork: `git clone https://github.com/YOUR_USERNAME/aeolus.git`
 4. Install dependencies:

@@ -1,7 +1,13 @@
 # ADR-0009: Pin one exact Node 22 runtime across dev, CI and Docker
 
-- **Status:** Accepted
+- **Status:** Superseded by [ADR-0010](0010-node-24-runtime.md)
 - **Date:** 2026-08-30
+
+> Superseded on 2026-08-30. The pinning discipline described here still stands and is
+> still the reason the pin exists; only the pinned version moved. The specific
+> constraint below — that `isolated-vm` 5.x cannot build on Node 24 — was removed when
+> GHSA-864f-rcv7-6rh4 forced the upgrade to 6.2.0, which supports both runtimes.
+> See [ADR-0010](0010-node-24-runtime.md).
 
 ## Context
 

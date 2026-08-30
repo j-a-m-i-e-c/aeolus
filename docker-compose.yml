@@ -145,7 +145,7 @@ services:
   # needed on the host. Credentials are injected via SEED_USER / SEED_PASS.
   seed:
     profiles: ["seed"]
-    image: node:22.22.1-slim
+    image: node:24.20.0-slim
     network_mode: host
     working_dir: /repo
     volumes:

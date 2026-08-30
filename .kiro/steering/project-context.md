@@ -80,7 +80,7 @@ For the component-level diagram, see `docs/reference/architecture.md` or the det
 
 | Layer | Technology |
 |---|---|
-| Backend | Node.js 22, Express, TypeScript, `better-sqlite3`, mqtt.js, `ws`, `isolated-vm`, pino |
+| Backend | Node.js 24, Express, TypeScript, `better-sqlite3`, mqtt.js, `ws`, `isolated-vm`, pino |
 | Frontend | React 19, Vite, Zustand, Tailwind CSS, Monaco, `react-grid-layout` |
 | Testing | Vitest, fast-check, supertest, Testing Library, Playwright |
 | Infrastructure | Docker Compose, Eclipse Mosquitto, nginx, GitHub Actions |
