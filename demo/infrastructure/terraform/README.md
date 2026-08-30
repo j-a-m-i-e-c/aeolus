@@ -126,6 +126,19 @@ cloudflare_tunnel_token   # sensitive
 The instance's user-data installs Docker Engine + Compose, SQLite tooling, creates
 `/opt/aeolus-demo/{app,data,golden}`, and marks bootstrap completion.
 
+## Upgrading a host from the legacy demo layout
+
+Hosts deployed before the demo subsystem reorganisation may still have
+`docker-compose.public-demo.yml` at `/opt/aeolus-demo/app` rather than
+`demo/compose/hosted-runtime.yml`. The deployment helper recognises that legacy
+layout on the first upgrade, preserves the complete source tree plus host-only
+`.env` as the rollback unit, and can restore it with the legacy health-check path
+if the new release fails its internal health gate.
+
+Do not manually move or delete the live host source before running the helper.
+After one successful deployment, subsequent releases use the current layout
+normally.
+
 ## 4. First deployment from the operator PC
 
 The first deployment deliberately does not need a container registry. From the

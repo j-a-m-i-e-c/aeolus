@@ -92,10 +92,16 @@ ssh "${ssh_args[@]}" "$remote" "DEMO_APP_DIR='${DEMO_APP_DIR}' PREVIOUS_APP='${p
 set -euo pipefail
 rm -rf "$PREVIOUS_APP"
 # A source tree without its host-only .env is not a deployable rollback unit.
-# This matters on the very first release: an interrupted source sync must never
-# masquerade as a previous working deployment.
-if [ -f "$DEMO_APP_DIR/demo/compose/hosted-runtime.yml" ] && [ -s "$DEMO_APP_DIR/.env" ]; then
-  cp -a "$DEMO_APP_DIR" "$PREVIOUS_APP"
+# Accept both the current layout and the pre-demo-subsystem legacy layout so the
+# first deployment after the repository reorganisation keeps a real rollback
+# target and preserves the existing Cloudflare tunnel token.
+if [ -s "$DEMO_APP_DIR/.env" ]; then
+  if [ -f "$DEMO_APP_DIR/demo/compose/hosted-runtime.yml" ]; then
+    cp -a "$DEMO_APP_DIR" "$PREVIOUS_APP"
+  elif [ -f "$DEMO_APP_DIR/docker-compose.public-demo.yml" ]; then
+    echo '[deploy-demo] Legacy hosted-demo layout detected; preserving it as the rollback unit.'
+    cp -a "$DEMO_APP_DIR" "$PREVIOUS_APP"
+  fi
 fi
 rm -rf "$DEMO_APP_DIR"
 mkdir -p "$DEMO_APP_DIR"
@@ -214,10 +220,21 @@ if ! ssh "${ssh_args[@]}" "$remote" "cd '${DEMO_APP_DIR}' && docker compose --pr
   log "New release failed health checks. Attempting full source + image rollback…"
   ssh "${ssh_args[@]}" "$remote" "DEMO_APP_DIR='${DEMO_APP_DIR}' PREVIOUS_APP='${previous_app}' bash -s" <<'ROLLBACK_EOF' || true
 set -euo pipefail
-if [ ! -d "$PREVIOUS_APP" ] || [ ! -f "$PREVIOUS_APP/demo/compose/hosted-runtime.yml" ] || [ ! -s "$PREVIOUS_APP/.env" ]; then
+if [ ! -d "$PREVIOUS_APP" ] || [ ! -s "$PREVIOUS_APP/.env" ]; then
   echo 'No complete previous deployment with host configuration exists.' >&2
   exit 1
 fi
+
+rollback_layout=''
+if [ -f "$PREVIOUS_APP/demo/compose/hosted-runtime.yml" ]; then
+  rollback_layout='current'
+elif [ -f "$PREVIOUS_APP/docker-compose.public-demo.yml" ]; then
+  rollback_layout='legacy'
+else
+  echo 'Previous deployment has no recognised hosted-demo Compose definition.' >&2
+  exit 1
+fi
+
 failed="${DEMO_APP_DIR}.failed.$(date -u +%Y%m%dT%H%M%SZ)"
 if [ -f "$DEMO_APP_DIR/demo/compose/hosted-runtime.yml" ]; then
   (cd "$DEMO_APP_DIR" && docker compose --project-directory . -f demo/compose/hosted-runtime.yml down --remove-orphans) || true
@@ -225,8 +242,16 @@ fi
 mv "$DEMO_APP_DIR" "$failed"
 mv "$PREVIOUS_APP" "$DEMO_APP_DIR"
 cd "$DEMO_APP_DIR"
-docker compose --project-directory . -f demo/compose/hosted-runtime.yml up -d --remove-orphans
-./demo/operations/health-check.sh
+
+if [ "$rollback_layout" = 'current' ]; then
+  docker compose --project-directory . -f demo/compose/hosted-runtime.yml up -d --remove-orphans
+  ./demo/operations/health-check.sh
+else
+  echo '[deploy-demo] Restoring pre-reorganisation hosted-demo layout.'
+  docker compose -f docker-compose.public-demo.yml up -d --remove-orphans
+  COMPOSE_FILE=docker-compose.public-demo.yml ./scripts/demo-health-check.sh
+fi
+
 echo "Previous release restored. Failed release preserved at $failed"
 ROLLBACK_EOF
   die "deployment failed; full rollback was attempted"
