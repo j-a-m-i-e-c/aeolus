@@ -136,7 +136,7 @@ describe("ConnectorManager", () => {
         metadata: { displayName: "Test", icon: "plug" },
         configSchema: [],
         createConnector: vi.fn().mockReturnValue(mockConnector),
-        actionHandlers: { custom_action: vi.fn() },
+        actionHandlers: { custom_action: { handler: vi.fn(), physical: false } },
         conditions: { custom_condition: vi.fn() },
       });
 
@@ -144,7 +144,7 @@ describe("ConnectorManager", () => {
       expect(mockExecutor.registerHandler).toHaveBeenCalledWith(
         "custom_action",
         expect.any(Function),
-        { physical: true },
+        { physical: false },
       );
       expect(mockConditionReg.registerCondition).toHaveBeenCalledWith("custom_condition", expect.any(Function));
     });
@@ -193,7 +193,7 @@ describe("ConnectorManager", () => {
         metadata: { displayName: "Test", icon: "plug" },
         configSchema: [],
         createConnector: vi.fn().mockReturnValue(mockConnector),
-        actionHandlers: { custom_action: vi.fn() },
+        actionHandlers: { custom_action: { handler: vi.fn(), physical: false } },
         conditions: { custom_cond: vi.fn() },
       });
 

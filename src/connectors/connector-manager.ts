@@ -55,7 +55,7 @@ export class ConnectorManager {
    * that type is disabled — a sibling instance keeps them alive.
    */
   private activeInstanceCountByType = new Map<string, number>();
-  private actionExecutor?: CommandService;
+  private commandService?: CommandService;
   private conditionRegistry?: ConditionRegistry;
   private readonly actionRouter: ActionRouter;
 
@@ -80,8 +80,8 @@ export class ConnectorManager {
    * ConnectorManager and CommandService. Must be called before
    * `restoreFromStore()` so contributed handlers are registered on startup.
    */
-  setRegistries(actionExecutor: CommandService, conditionRegistry: ConditionRegistry): void {
-    this.actionExecutor = actionExecutor;
+  setRegistries(commandService: CommandService, conditionRegistry: ConditionRegistry): void {
+    this.commandService = commandService;
     this.conditionRegistry = conditionRegistry;
   }
 
@@ -94,12 +94,11 @@ export class ConnectorManager {
   private registerContributions(connectorType: string, mod: ConnectorModule): void {
     const count = this.activeInstanceCountByType.get(connectorType) ?? 0;
     if (count === 0) {
-      if (mod.actionHandlers && this.actionExecutor) {
-        for (const [type, handler] of Object.entries(mod.actionHandlers)) {
-          // Connector-contributed handlers dispatch physical device commands
-          // (e.g. hue_scene, hue_color_loop), so they are Verified Physical
-          // Commands and warrant a commandId + durable history (phase-1 Task 3).
-          this.actionExecutor.registerHandler(type, handler, { physical: true });
+      if (mod.actionHandlers && this.commandService) {
+        for (const [type, contribution] of Object.entries(mod.actionHandlers)) {
+          this.commandService.registerHandler(type, contribution.handler, {
+            physical: contribution.physical,
+          });
         }
       }
       if (mod.conditions && this.conditionRegistry) {
@@ -119,9 +118,9 @@ export class ConnectorManager {
   private unregisterContributions(connectorType: string, mod: ConnectorModule): void {
     const remaining = (this.activeInstanceCountByType.get(connectorType) ?? 1) - 1;
     if (remaining <= 0) {
-      if (mod.actionHandlers && this.actionExecutor) {
+      if (mod.actionHandlers && this.commandService) {
         for (const type of Object.keys(mod.actionHandlers)) {
-          this.actionExecutor.unregisterHandler(type);
+          this.commandService.unregisterHandler(type);
         }
       }
       if (mod.conditions && this.conditionRegistry) {

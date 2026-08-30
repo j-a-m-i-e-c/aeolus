@@ -81,7 +81,7 @@ describe("connector multi-instance ownership (integration)", () => {
       connectorsByInstanceConfig.set(bridge, connector);
       return connector;
     },
-    actionHandlers: { "hue.scene": vi.fn() as never },
+    actionHandlers: { "hue.scene": { handler: vi.fn() as never, physical: true } },
     conditions: { "hue.reachable": vi.fn() as never },
   };
 

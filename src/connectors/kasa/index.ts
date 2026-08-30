@@ -5,8 +5,9 @@ import type {
   ConnectorConfigSchema,
   Connector,
   SnippetDescriptor,
+  ConnectorActionContribution,
 } from "../connector.interface.js";
-import type { ActionHandler } from "../../automations/command-service.js";
+
 import type { ConditionFactory } from "../../automations/condition-registry.js";
 import { KasaConnector } from "./kasa-connector.js";
 
@@ -47,57 +48,43 @@ export const snippets: SnippetDescriptor[] = [
     id: "toggle-plug",
     name: "Toggle Kasa Plug",
     description: "Toggle a specific Kasa smart plug on or off",
-    code: `function toggleKasaPlug(context) {
-  devices.action("kasa-my-plug", "toggle");
-  log.info("Toggled Kasa plug");
-  state.set("lastToggled", "kasa-my-plug");
-}`,
+    code: `const result = await devices.action("kasa-my-plug", "toggle");
+if (!result.success) throw new Error(result.error ?? "Kasa command failed");
+state.set("lastToggled", "kasa-my-plug");`,
   },
   {
     id: "turn-on-plug",
     name: "Turn On Kasa Plug",
     description: "Turn on a specific Kasa smart plug",
-    code: `function turnOnKasaPlug(context) {
-  devices.action("kasa-my-plug", "on");
-  log.info("Turned on Kasa plug");
-  state.set("plugState", "on");
-}`,
+    code: `const result = await devices.action("kasa-my-plug", "on");
+if (!result.success) throw new Error(result.error ?? "Kasa command failed");
+state.set("plugState", "on");`,
   },
   {
     id: "turn-off-plug",
     name: "Turn Off Kasa Plug",
     description: "Turn off a specific Kasa smart plug",
-    code: `function turnOffKasaPlug(context) {
-  devices.action("kasa-my-plug", "off");
-  log.info("Turned off Kasa plug");
-  state.set("plugState", "off");
-}`,
+    code: `const result = await devices.action("kasa-my-plug", "off");
+if (!result.success) throw new Error(result.error ?? "Kasa command failed");
+state.set("plugState", "off");`,
   },
   {
     id: "check-energy",
     name: "Condition: High Power Draw",
     description: "Check if a Kasa plug is drawing more than a threshold wattage",
-    code: `function isHighPowerDraw(context) {
-  const plug = devices.get("kasa-my-plug");
-  const power = (plug?.state?.power as number) ?? 0;
-  return power > 100; // watts
-}`,
+    code: `const plug = devices.get("kasa-my-plug");
+const power = Number(plug?.state?.power ?? 0);
+if (power <= 100) return; // watts`,
   },
   {
     id: "all-plugs-off",
     name: "All Kasa Plugs Off",
     description: "Turn off every Kasa plug in the system",
-    code: `function allKasaPlugsOff(context) {
-  const plugs = devices.filter(d => d.integration === "kasa" && d.type === "plug");
-  for (const plug of plugs) {
-    if (plug.state.on) {
-      devices.action(plug.id, "off");
-    }
-  }
-  log.info(\`Turned off \${plugs.length} Kasa plugs\`);
-  state.set("allPlugsOff", true);
-  state.set("plugsControlled", plugs.length);
-}`,
+    code: `const result = await devices.actionAll(
+  (device) => device.integration === "kasa" && device.type === "plug" && device.state.on === true,
+  "off",
+);
+log.info(\`Turned off \${result.succeeded} Kasa plugs; \${result.failed} failed\`);`,
   },
   // ── UI snippets ──
   {
@@ -164,15 +151,18 @@ export const snippets: SnippetDescriptor[] = [
 
 // ── Contributed action handlers ─────────────────────────────────────────────
 
-export const actionHandlers: Record<string, ActionHandler> = {
-  /** Log current energy usage for a Kasa device. */
-  kasa_energy_report: (action, ruleId, deps) => {
+export const actionHandlers: Record<string, ConnectorActionContribution> = {
+  /** Log current energy usage; reporting does not change a physical device. */
+  kasa_energy_report: {
+    physical: false,
+    handler: (action, ruleId, deps) => {
     const deviceId = action.target;
     const energy = action.params.energy ?? "no energy data available";
     deps.logger.info(
       { ruleId, deviceId, energy },
       `Kasa energy report for ${deviceId}: ${JSON.stringify(energy)}`,
     );
+    },
   },
 };
 

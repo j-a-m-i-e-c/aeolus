@@ -62,12 +62,14 @@ describe("hue/index module exports", () => {
   describe("actionHandlers", () => {
     it("exports hue_scene handler", () => {
       expect(actionHandlers.hue_scene).toBeDefined();
-      expect(typeof actionHandlers.hue_scene).toBe("function");
+      expect(actionHandlers.hue_scene.physical).toBe(true);
+      expect(typeof actionHandlers.hue_scene.handler).toBe("function");
     });
 
     it("exports hue_color_loop handler", () => {
       expect(actionHandlers.hue_color_loop).toBeDefined();
-      expect(typeof actionHandlers.hue_color_loop).toBe("function");
+      expect(actionHandlers.hue_color_loop.physical).toBe(true);
+      expect(typeof actionHandlers.hue_color_loop.handler).toBe("function");
     });
 
     it("hue_scene calls connectorManager.executeAction and returns its result", async () => {
@@ -78,7 +80,7 @@ describe("hue/index module exports", () => {
       };
       const action = { target: "hue-light-1", params: { sceneName: "Relax" } };
 
-      const result = await actionHandlers.hue_scene(action as any, "rule-1", mockDeps as any);
+      const result = await actionHandlers.hue_scene.handler(action as any, "rule-1", mockDeps as any);
       expect(mockDeps.connectorManager.executeAction).toHaveBeenCalledWith(
         "hue-light-1",
         expect.objectContaining({ type: "scene", params: { sceneName: "Relax" } }),
@@ -95,7 +97,7 @@ describe("hue/index module exports", () => {
       };
       const action = { target: "hue-light-1", params: { sceneName: "Relax" } };
 
-      const result = await actionHandlers.hue_scene(action as any, "rule-1", mockDeps as any);
+      const result = await actionHandlers.hue_scene.handler(action as any, "rule-1", mockDeps as any);
       expect(result).toEqual(failure);
     });
 
@@ -106,7 +108,7 @@ describe("hue/index module exports", () => {
       };
       const action = { target: "hue-light-1", params: { sceneName: 123 } };
 
-      await actionHandlers.hue_scene(action as any, "rule-1", mockDeps as any);
+      await actionHandlers.hue_scene.handler(action as any, "rule-1", mockDeps as any);
       expect(mockDeps.connectorManager.executeAction).toHaveBeenCalledWith(
         "hue-light-1",
         expect.objectContaining({ type: "scene", params: { sceneName: "unknown" } }),
@@ -121,7 +123,7 @@ describe("hue/index module exports", () => {
       };
       const action = { target: "hue-light-1", params: { enable: true } };
 
-      const result = await actionHandlers.hue_color_loop(action as any, "rule-1", mockDeps as any);
+      const result = await actionHandlers.hue_color_loop.handler(action as any, "rule-1", mockDeps as any);
       expect(mockDeps.connectorManager.executeAction).toHaveBeenCalledWith(
         "hue-light-1",
         expect.objectContaining({ type: "color_loop", params: { enable: true } }),

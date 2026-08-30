@@ -72,7 +72,8 @@ describe("kasa/index module exports", () => {
   describe("actionHandlers", () => {
     it("exports kasa_energy_report handler", () => {
       expect(actionHandlers.kasa_energy_report).toBeDefined();
-      expect(typeof actionHandlers.kasa_energy_report).toBe("function");
+      expect(actionHandlers.kasa_energy_report.physical).toBe(false);
+      expect(typeof actionHandlers.kasa_energy_report.handler).toBe("function");
     });
 
     it("kasa_energy_report logs energy data", () => {
@@ -82,7 +83,7 @@ describe("kasa/index module exports", () => {
       };
       const action = { target: "kasa-plug-1", params: { energy: { power: 100 } } };
 
-      actionHandlers.kasa_energy_report(action as any, "rule-1", mockDeps as any);
+      actionHandlers.kasa_energy_report.handler(action as any, "rule-1", mockDeps as any);
       expect(mockDeps.logger.info).toHaveBeenCalled();
     });
   });

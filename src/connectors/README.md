@@ -124,7 +124,7 @@ Code snippets for the automation editor. These appear grouped under your connect
 
 Connectors should provide **both logic and UI snippets**:
 - **Logic snippets** (`mode: "logic"` or omitted) — shown in the Logic tab. Use sandbox globals (`devices`, `mqtt`, `log`, `state`, etc.) to control devices and react to events.
-- **UI snippets** (`mode: "ui"`) — shown in the UI tab. Use `props.*` to render connector-specific controls (toggles, sliders, status displays) in the custom component.
+- **UI snippets** (`mode: "ui"`) — shown in the UI tab. Use the Automation UI props object (conventionally named `aeolus`) to render connector-specific controls and call `aeolus.control`, `aeolus.fire`, `aeolus.read`, and related UI APIs.
 
 ```typescript
 export const snippets: SnippetDescriptor[] = [
@@ -133,13 +133,13 @@ export const snippets: SnippetDescriptor[] = [
     id: "toggle-device",
     name: "Toggle Zigbee Device",
     description: "Toggle a Zigbee device on or off",
-    code: `function toggleZigbeeDevice(ctx) {\n  devices.action("zigbee-device-1", "toggle");\n  log.info("Toggled Zigbee device");\n}`,
+    code: `const result = await devices.action("zigbee-device-1", "toggle");\nif (!result.success) throw new Error(result.error ?? "Toggle failed");\nlog.info("Toggled Zigbee device");`,
   },
   {
     id: "check-battery",
     name: "Condition: Low Battery",
     description: "Check if a Zigbee sensor has low battery",
-    code: `function isLowBattery(ctx) {\n  const sensor = devices.get("zigbee-sensor-1");\n  return (sensor?.state?.battery as number) < 20;\n}`,
+    code: `const sensor = devices.get("zigbee-sensor-1");\nif (Number(sensor?.state?.battery ?? 100) >= 20) return;\nlog.warn("Low Zigbee sensor battery");`,
   },
   // UI snippet — shown in the UI tab
   {
@@ -147,7 +147,7 @@ export const snippets: SnippetDescriptor[] = [
     name: "Device Status Card",
     description: "Card showing Zigbee device state with toggle",
     mode: "ui",
-    code: `const zigbeeDevices = props.devices.filter(d => d.integration === "zigbee");\n// In JSX:\n// {zigbeeDevices.map(d => (\n//   <div key={d.id}>{d.name}: {d.state.on ? "On" : "Off"}</div>\n// ))}`,
+    code: `const zigbeeDevices = aeolus.devices.filter(d => d.integration === "zigbee");\n// In JSX:\n// {zigbeeDevices.map(d => (\n//   <div key={d.id}>{d.name}: {d.state.on ? "On" : "Off"}</div>\n// ))}`,
   },
 ];
 ```
@@ -157,7 +157,7 @@ export const snippets: SnippetDescriptor[] = [
 | `id` | `string` | Unique snippet identifier scoped to your connector (e.g. `"toggle-device"`). |
 | `name` | `string` | Short display name shown in the snippet picker. |
 | `description` | `string` | One-line description of what the snippet does. |
-| `code` | `string` | TypeScript code inserted at the cursor position. Use named functions so they work as `automation()` condition/action blocks. |
+| `code` | `string` | TypeScript code inserted at the cursor position. Logic snippets should be cursor-insertable statements for the current module-style `run(context)` editor; do not wrap them in a second whole-script function. |
 | `mode` | `"logic" \| "ui"` | Which editor tab this snippet appears in. Defaults to `"logic"` if omitted. |
 
 Include snippets for:
@@ -172,30 +172,35 @@ Include snippets for:
 - Control buttons (toggle, sliders, colour pickers using `aeolus.control`)
 - Data displays (energy stats, sensor readings, battery levels)
 
-### 5. `actionHandlers: Record<string, ActionHandler>` (optional)
+### 5. `actionHandlers: Record<string, ConnectorActionContribution>` (optional)
 
-Custom action handlers that extend the automation system. These are registered with the `ActionExecutor` when your connector is enabled and unregistered when it's disabled. They become available as action types in form-based and script-based automations.
+Most Automation Logic should control connector devices through the normal `devices.action()` API. Add a contributed handler only when the connector genuinely needs a connector-specific command type that is not represented by its normal device action catalog. Contributed handlers are an advanced extension point registered with the `CommandService`.
+
+Every contribution must explicitly classify whether it represents a physical command. This keeps command IDs/history truthful: reporting, logging or query helpers must use `physical: false`; handlers that command real hardware use `physical: true`.
 
 ```typescript
-import type { ActionHandler } from "../../automations/action-executor.js";
+import type { ConnectorActionContribution } from "../connector.interface.js";
 
-export const actionHandlers: Record<string, ActionHandler> = {
-  zigbee_group_action: async (action, ruleId, deps) => {
-    deps.logger.info({ ruleId, group: action.params.group }, "Executing Zigbee group action");
-    await deps.connectorManager.executeAction(action.target, {
-      type: "group",
-      deviceId: action.target,
-      params: action.params,
-    });
+export const actionHandlers: Record<string, ConnectorActionContribution> = {
+  zigbee_group_action: {
+    physical: true,
+    handler: async (action, ruleId, deps) => {
+      deps.logger.info({ ruleId, group: action.params.group }, "Executing Zigbee group action");
+      return deps.connectorManager.executeAction(action.target, {
+        type: "group",
+        deviceId: action.target,
+        params: action.params,
+      });
+    },
   },
 };
 ```
 
-Prefix handler names with your connector ID to avoid collisions (e.g. `zigbee_group_action`, not just `group_action`).
+Prefix handler names with your connector ID to avoid collisions (for example `zigbee_group_action`, not `group_action`).
 
-### 6. `conditions: Record<string, ConditionFactory>` (optional)
+### 6. `conditions: Record<string, ConditionFactory>` (legacy compatibility only)
 
-Custom condition factories that extend the form-based automation builder. These are registered with the `ConditionRegistry` when your connector is enabled and unregistered when it's disabled.
+Custom condition factories extend the retained form-rule runtime for historical records. New Automation Projects express guards directly in Logic and do not need connector condition factories. When present, these factories are registered with the `ConditionRegistry` while the connector is enabled and unregistered when it is disabled.
 
 ```typescript
 import type { ConditionFactory } from "../../automations/condition-registry.js";
@@ -277,7 +282,7 @@ When returning devices from `discoverDevices()`, each device must conform to the
 {
   id: "my-connector-living-room-light",  // Stable, unique ID (prefix with connector name)
   name: "Living Room Light",              // Human-readable display name
-  type: "light",                          // DeviceType: light | sensor | switch | climate | plug
+  type: "light",                          // Connector-defined descriptive string
   capabilities: ["on/off", "brightness"], // What the device can do
   state: { on: true, brightness: 200 },   // Current state as key-value pairs
   integration: "my-connector",            // MUST match metadata.id
@@ -446,8 +451,8 @@ Before shipping your connector:
 - [ ] The connector module is imported and registered in `src/index.ts`
 - [ ] `index.ts` exports `metadata`, `configSchema`, and `createConnector`
 - [ ] `index.ts` exports `snippets` array with logic snippets (device actions, conditions) and UI snippets (component controls, status displays)
-- [ ] `index.ts` exports `actionHandlers` with connector-specific action types (optional but recommended)
-- [ ] `index.ts` exports `conditions` with connector-specific condition factories (optional but recommended)
+- [ ] If needed, `index.ts` exports `actionHandlers` only for advanced connector-specific `CommandService` action types, with an explicit `physical` classification
+- [ ] If legacy form-rule compatibility needs a custom condition type, `index.ts` exports `conditions`; new Automation Projects normally express guards directly in Logic
 - [ ] `metadata.id` is unique and URL-safe
 - [ ] `metadata.id` matches the `integration` field on all discovered devices
 - [ ] Required config fields are validated (the REST API handles this via your schema)

@@ -5,17 +5,19 @@
 //   2. Rename this file's exports to match your connector
 //   3. Update metadata, configSchema, and the createConnector factory below
 //   4. Implement the Connector interface in `connector.ts`
-//   5. The ConnectorRegistry will auto-discover your connector on next startup
+//   5. Register the module in the production connector list in src/index.ts
 //
-// No changes to core files are required — just create the folder and implement.
+// Directory discovery is used by development/tests; production bundles use
+// explicit registration so shipped connector code is deliberate and auditable.
 
 import type {
   ConnectorMetadata,
   ConnectorConfigSchema,
   Connector,
   SnippetDescriptor,
+  ConnectorActionContribution,
 } from "../connector.interface.js";
-import type { ActionHandler } from "../../automations/command-service.js";
+
 import type { ConditionFactory } from "../../automations/condition-registry.js";
 import { TemplateConnector } from "./connector.js";
 
@@ -88,7 +90,7 @@ export const snippets: SnippetDescriptor[] = [
   //   id: "toggle-device",
   //   name: "Toggle My Device",
   //   description: "Toggle a device managed by this connector",
-  //   code: `function toggleMyDevice(context) {\n  devices.action("my-connector-device-1", "toggle");\n  log.info("Toggled device");\n}`,
+  //   code: `const result = await devices.action("my-connector-device-1", "toggle");\nif (!result.success) throw new Error(result.error ?? "Command failed");`,
   // },
   //
   // ← Add UI snippets for custom component controls, e.g.:
@@ -97,16 +99,17 @@ export const snippets: SnippetDescriptor[] = [
   //   name: "Device Status Card",
   //   description: "Card showing device state with toggle button",
   //   mode: "ui",
-  //   code: `const myDevices = props.devices.filter(d => d.integration === "my-connector");\n// In JSX:\n// {myDevices.map(d => <div key={d.id}>{d.name}</div>)}`,
+  //   code: `const myDevices = aeolus.devices.filter(d => d.integration === "my-connector");\n// In JSX:\n// {myDevices.map(d => <div key={d.id}>{d.name}</div>)}`,
   // },
 ];
 
 /**
  * Custom action handlers contributed by this connector.
  *
- * These are registered with the ActionExecutor when the connector is enabled
- * and unregistered when it is disabled. They become available as action types
- * in form-based and script-based automations.
+ * These are registered with the CommandService when the connector is enabled
+ * and unregistered when it is disabled. This is an advanced extension point for
+ * connector-specific command types. Normal Automation Project Logic should use
+ * devices.action(), which routes ordinary device actions through execute().
  *
  * Each key is the action type string (e.g. "my_connector_special_action").
  * Prefix with your connector name to avoid collisions with other connectors.
@@ -116,15 +119,18 @@ export const snippets: SnippetDescriptor[] = [
  *   - ruleId: the automation rule that triggered this action
  *   - deps: { mqttService, connectorManager, logger }
  */
-export const actionHandlers: Record<string, ActionHandler> = {
+export const actionHandlers: Record<string, ConnectorActionContribution> = {
   // ← Add action handlers for your connector, e.g.:
-  // my_connector_special_action: async (action, ruleId, deps) => {
-  //   deps.logger.info({ ruleId, deviceId: action.target }, "Executing special action");
-  //   await deps.connectorManager.executeAction(action.target, {
-  //     type: "special",
-  //     deviceId: action.target,
-  //     params: action.params,
-  //   });
+  // my_connector_special_action: {
+  //   physical: true, // false for reporting/logging helpers that do not command hardware
+  //   handler: async (action, ruleId, deps) => {
+  //     deps.logger.info({ ruleId, deviceId: action.target }, "Executing special action");
+  //     return deps.connectorManager.executeAction(action.target, {
+  //       type: "special",
+  //       deviceId: action.target,
+  //       params: action.params,
+  //     });
+  //   },
   // },
 };
 
@@ -132,8 +138,8 @@ export const actionHandlers: Record<string, ActionHandler> = {
  * Custom condition factories contributed by this connector.
  *
  * These are registered with the ConditionRegistry when the connector is enabled
- * and unregistered when it is disabled. They become available as condition types
- * in form-based automations.
+ * and unregistered when it is disabled. They exist for retained legacy form-rule
+ * compatibility; new Automation Projects express guards directly in Logic.
  *
  * Each key is the condition type string (e.g. "my_connector_value_check").
  * Prefix with your connector name to avoid collisions.

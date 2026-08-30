@@ -405,9 +405,9 @@ export interface Connector {
    * indicate the device reaches at most the Dispatch confirmation tier.
    *
    * Analogous to {@link getActionCatalog}. When absent (or returning
-   * `undefined`/`{ supported: false }`), the ActionExecutor never advances the
-   * command to `ACKNOWLEDGED` — dispatch is the truthful terminal success
-   * state unless Confirmation_Options are supplied.
+   * `undefined`/`{ supported: false }`), the CommandService never advances the
+   * command to `ACKNOWLEDGED` — dispatch is the truthful completion success
+   * when that is the requested tier; later acknowledgement/observation may still advance lifecycle evidence.
    *
    * Requirements: 9.1
    */
@@ -464,6 +464,13 @@ export interface SnippetDescriptor {
  * ];
  * ```
  */
+/** A connector-contributed command handler with an explicit physical classification. */
+export interface ConnectorActionContribution {
+  handler: ActionHandler;
+  /** True only when the handler dispatches a real device/physical command. */
+  physical: boolean;
+}
+
 export interface ConnectorModule {
   /** Static metadata describing this connector type. */
   metadata: ConnectorMetadata;
@@ -493,16 +500,16 @@ export interface ConnectorModule {
   snippets?: SnippetDescriptor[];
 
   /**
-   * Optional action handlers contributed by this connector.
-   *
-   * When provided, the ConnectorManager registers these handlers with
-   * the ActionExecutor when the connector is enabled, and unregisters
-   * them when the connector is disabled. Keys are action type strings.
+   * Optional advanced CommandService action handlers contributed by this connector.
+   * Normal Automation Project Logic should use `devices.action()` for ordinary
+   * device control. Every contribution declares whether it is a real physical
+   * command so command IDs/history remain truthful.
    */
-  actionHandlers?: Record<string, ActionHandler>;
+  actionHandlers?: Record<string, ConnectorActionContribution>;
 
   /**
-   * Optional condition factories contributed by this connector.
+   * Optional condition factories for retained legacy form-rule compatibility.
+   * New Automation Projects express guards directly in Logic.
    *
    * When provided, the ConnectorManager registers these factories with
    * the ConditionRegistry when the connector is enabled, and unregisters

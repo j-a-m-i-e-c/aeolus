@@ -5,8 +5,9 @@ import type {
   ConnectorConfigSchema,
   Connector,
   SnippetDescriptor,
+  ConnectorActionContribution,
 } from "../connector.interface.js";
-import type { ActionHandler } from "../../automations/command-service.js";
+
 import type { ConditionFactory } from "../../automations/condition-registry.js";
 import { HueConnector } from "./hue-connector.js";
 
@@ -46,58 +47,45 @@ export const snippets: SnippetDescriptor[] = [
     id: "toggle-light",
     name: "Toggle Hue Light",
     description: "Toggle a specific Hue light on or off",
-    code: `function toggleHueLight(context) {
-  devices.action("hue-light-1", "toggle");
-  log.info("Toggled Hue light");
-  state.set("lastToggled", "hue-light-1");
-}`,
+    code: `const result = await devices.action("hue-light-1", "toggle");
+if (!result.success) throw new Error(result.error ?? "Hue command failed");
+state.set("lastToggled", "hue-light-1");`,
   },
   {
     id: "set-brightness",
     name: "Set Brightness",
     description: "Set a Hue light to a specific brightness percentage (0-100)",
-    code: `function setHueBrightness(context) {
-  devices.action("hue-light-1", "brightness", { brightness: 50 });
-  log.info("Set Hue light brightness to 50%");
-  state.set("brightness", 50);
-}`,
+    code: `const result = await devices.action("hue-light-1", "brightness", { brightness: 50 });
+if (!result.success) throw new Error(result.error ?? "Hue command failed");
+state.set("brightness", 50);`,
   },
   {
     id: "dim-all-lights",
     name: "Dim All Hue Lights",
     description: "Set all Hue lights to a low brightness",
-    code: `function dimAllHueLights(context) {
-  const hueLights = devices.filter(d => d.integration === "hue" && d.type === "light");
-  for (const light of hueLights) {
-    devices.action(light.id, "brightness", { brightness: 25 });
-  }
-  log.info(\`Dimmed \${hueLights.length} Hue lights\`);
-  state.set("dimmedCount", hueLights.length);
-}`,
+    code: `const result = await devices.actionAll(
+  (device) => device.integration === "hue" && device.type === "light",
+  "brightness",
+  { brightness: 25 },
+);
+log.info(\`Dimmed \${result.succeeded} Hue lights; \${result.failed} failed\`);`,
   },
   {
     id: "lights-off",
     name: "All Hue Lights Off",
     description: "Turn off every Hue light in the system",
-    code: `function allHueLightsOff(context) {
-  const hueLights = devices.filter(d => d.integration === "hue" && d.type === "light");
-  for (const light of hueLights) {
-    if (light.state.on) {
-      devices.action(light.id, "toggle");
-    }
-  }
-  log.info(\`Turned off \${hueLights.length} Hue lights\`);
-  state.set("allOff", true);
-}`,
+    code: `const result = await devices.actionAll(
+  (device) => device.integration === "hue" && device.type === "light" && device.state.on === true,
+  "toggle",
+);
+log.info(\`Turned off \${result.succeeded} Hue lights; \${result.failed} failed\`);`,
   },
   {
     id: "is-light-on",
     name: "Condition: Hue Light Is On",
     description: "Check if a specific Hue light is currently on",
-    code: `function isHueLightOn(context) {
-  const light = devices.get("hue-light-1");
-  return light !== undefined && light.state.on === true;
-}`,
+    code: `const light = devices.get("hue-light-1");
+if (!light || light.state.on !== true) return;`,
   },
   // ── UI snippets ──
   {
@@ -154,21 +142,17 @@ export const snippets: SnippetDescriptor[] = [
     id: "set-color",
     name: "Set Color",
     description: "Set a Hue light to a specific color (hue 0-65535, saturation 0-254)",
-    code: `function setHueColor(context) {
-  devices.action("hue-light-1", "color", { hue: 21845, saturation: 254 });
-  log.info("Set Hue light to green");
-  state.set("lastColor", "green");
-}`,
+    code: `const result = await devices.action("hue-light-1", "color", { hue: 21845, saturation: 254 });
+if (!result.success) throw new Error(result.error ?? "Hue command failed");
+state.set("lastColor", "green");`,
   },
   {
     id: "set-color-temp",
     name: "Set Color Temperature",
     description: "Set a Hue light to a specific color temperature (mirek value, 153=cool to 500=warm)",
-    code: `function setHueColorTemp(context) {
-  devices.action("hue-light-1", "color-temp", { ct: 300 });
-  log.info("Set Hue light to neutral white (300 mirek)");
-  state.set("colorTemp", 300);
-}`,
+    code: `const result = await devices.action("hue-light-1", "color-temp", { ct: 300 });
+if (!result.success) throw new Error(result.error ?? "Hue command failed");
+state.set("colorTemp", 300);`,
   },
   {
     id: "ui-color-temp-slider",
@@ -196,7 +180,7 @@ export const snippets: SnippetDescriptor[] = [
 
 // ── Contributed action handlers ─────────────────────────────────────────────
 
-export const actionHandlers: Record<string, ActionHandler> = {
+export const actionHandlers: Record<string, ConnectorActionContribution> = {
   /**
    * Activate a Hue scene by name.
    *
@@ -206,7 +190,9 @@ export const actionHandlers: Record<string, ActionHandler> = {
    * this currently resolves to a truthful failure until that support lands
    * (tracked in the backlog).
    */
-  hue_scene: (action, ruleId, deps) => {
+  hue_scene: {
+    physical: true,
+    handler: (action, ruleId, deps) => {
     const sceneName = typeof action.params.sceneName === "string"
       ? action.params.sceneName
       : "unknown";
@@ -219,6 +205,7 @@ export const actionHandlers: Record<string, ActionHandler> = {
       deviceId: action.target,
       params: { sceneName },
     });
+    },
   },
 
   /**
@@ -228,7 +215,9 @@ export const actionHandlers: Record<string, ActionHandler> = {
    * does not yet implement `color_loop`, so this currently resolves to a
    * truthful failure until that support lands (tracked in the backlog).
    */
-  hue_color_loop: (action, ruleId, deps) => {
+  hue_color_loop: {
+    physical: true,
+    handler: (action, ruleId, deps) => {
     const enable = action.params.enable === true;
     const deviceId = action.target;
     deps.logger.info(
@@ -240,6 +229,7 @@ export const actionHandlers: Record<string, ActionHandler> = {
       deviceId,
       params: { enable },
     });
+    },
   },
 };
 
