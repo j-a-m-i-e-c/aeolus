@@ -27,14 +27,20 @@ export async function stopDeterrent() {
     const deterrent = byTopic("switch/wildlife/deterrent/state");
     if (!deterrent)
         return;
-    await devices.action(deterrent.id, "command", { payload: { active: false, target: "none", pulseMs: 0 } }, {
+    const result = await devices.action(deterrent.id, "command", { payload: { active: false, target: "none", pulseMs: 0 } }, {
         tier: "observed",
         deviceId: deterrent.id,
         condition: { field: "active", op: "eq", value: false },
         timeoutMs: 5000,
     });
-    state.set("activeUntil", 0);
-    state.set("lastOutcome", "Deterrent physically stopped");
+    if (result.success) {
+        state.set("activeUntil", 0);
+        state.set("lastOutcome", "Deterrent physically stopped");
+    }
+    else {
+        state.set("lastOutcome", "Deterrent stop not verified");
+        setAction("Deterrent stop not verified: " + String(result.error || result.lifecycleState || "unknown"));
+    }
     publishResponseStatus();
 }
 export async function handlePredatorOperatorEvent(event: string | undefined) {

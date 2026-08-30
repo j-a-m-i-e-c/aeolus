@@ -121,14 +121,16 @@ export async function stopPhysicalEffects() {
     const rack = byTopic("switch/stage/fx/state");
     if (!rack)
         return;
-    await devices.action(rack.id, "command", { payload: { active: false } }, {
+    const result = await devices.action(rack.id, "command", { payload: { active: false } }, {
         tier: "observed",
         deviceId: rack.id,
         condition: { field: "active", op: "eq", value: false },
         timeoutMs: 5000,
     });
     projectStageState();
-    setAction("Physical effects stopped");
+    setAction(result.success
+        ? "Physical effects stopped · observed state verified"
+        : "Physical effects stop not verified: " + String(result.error || result.lifecycleState || "unknown"));
 }
 function parseCue(payload: Record<string, unknown>): CuePayload | null {
     const scene = String(payload.scene || "wash");

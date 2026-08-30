@@ -109,6 +109,14 @@ describe("Agriculture demo UI projection contract", () => {
     expect(waterAutomation.scriptSource).toContain("batch volume reached");
   });
 
+  it("Water Management keeps a transfer active until the observed stop verifies", () => {
+    // stopPump() owns transferActive=false after zero flow is observed. Clearing it
+    // before awaiting stopPump() would suppress retry semantics after a failed stop.
+    expect(waterAutomation.scriptSource).not.toMatch(
+      /state\.set\(\s*["']transferActive["']\s*,\s*false\s*\);[\s\S]{0,180}?await\s+stopPump\(/,
+    );
+  });
+
   it("Trough Watering never auto-refills while the herd is still drinking", () => {
     // The guard may be read off a snapshot object or straight from state, so match
     // the negation of the flag rather than one spelling of the receiver.

@@ -117,7 +117,6 @@ export async function reconcileBatchTransfer(snapshot: WaterSnapshot) {
     const progress = Math.max(0, snapshot.flowTotal - start);
     state.set("transferProgressLitres", progress);
     if (progress >= target - 1 && snapshot.pumpOn && !Boolean(state.get("transferStopping"))) {
-        state.set("transferActive", false);
         setAction("Batch target reached · stopping transfer at " + Math.round(progress) + " L");
         await stopPump("batch volume reached");
         return false;
@@ -163,13 +162,11 @@ export async function reconcileWaterPolicy(snapshot: WaterSnapshot, pumpOn: bool
     }
     const mode = String(state.get("transferMode") || "idle");
     if (mode === "automatic" && !isNaN(headerPct) && headerPct >= 70 && pumpOn && !Boolean(state.get("transferStopping"))) {
-        state.set("transferActive", false);
         setAction("Header recovery target reached · stopping transfer");
         await stopPump("header recovery target reached");
         pumpOn = false;
     }
     else if (!isNaN(headerPct) && headerPct >= 95 && pumpOn && !Boolean(state.get("transferStopping"))) {
-        state.set("transferActive", false);
         setAction("Header high-level safety stop");
         await stopPump("header high-level safety");
         pumpOn = false;
@@ -177,7 +174,6 @@ export async function reconcileWaterPolicy(snapshot: WaterSnapshot, pumpOn: bool
     const battery = byTopic("sensor/farm/energy/battery");
     const energyAllowed = !battery || battery.state.available !== false;
     if (pumpOn && (!energyAllowed || (!isNaN(snapshot.soc) && snapshot.soc < 30)) && !Boolean(state.get("transferStopping"))) {
-        state.set("transferActive", false);
         setAction("Energy reserve low · stopping discretionary pump load");
         await stopPump("energy reserve protection");
     }

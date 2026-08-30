@@ -108,6 +108,12 @@ describe("seeded Automation Projects", () => {
         failures.push(`${projectDir}: showcase UI has no supporting project file`);
       }
 
+      for (const module of source.files.filter((file) => file.path.startsWith("logic/"))) {
+        if (/^\s*await\s+devices\.action\s*\(/m.test(module.content)) {
+          failures.push(`${projectDir}: ${module.path} discards a devices.action() result instead of checking verification`);
+        }
+      }
+
       for (const module of uiModules) {
         if (/\baeolus\.(?:read|fire|save|saveAndFire)\s*\(/.test(module.content)) {
           failures.push(`${projectDir}: ${module.path} bypasses the UI composition entry point`);
