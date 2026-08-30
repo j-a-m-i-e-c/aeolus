@@ -130,24 +130,28 @@ export async function publishDevices(api, devices) {
  * panes can reference automations by their stable module key.
  *
  * Demo automations use the same multi-file Automation Project model as normal
- * Aeolus authoring. Legacy scriptSource/uiSource descriptors are still accepted
- * so older third-party seed modules remain compatible.
+ * Aeolus authoring. Seed descriptors are Project-only so the showcase cannot
+ * silently drift back to the removed single-file authoring contract.
  */
 export async function createAutomations(api, automations) {
   const ids = {};
   for (const a of automations) {
+    if (!a.projectDir) {
+      throw new Error(`Seed automation "${a.name || a.key || "<unnamed>"}" is missing projectDir`);
+    }
     const body = {
       name: a.name,
       ruleType: "script",
-      ...(a.projectDir
-        ? { project: loadProject(a.projectDir) }
-        : { scriptSource: a.scriptSource, uiSource: a.uiSource || undefined }),
+      project: loadProject(a.projectDir),
     };
     if (a.cron) {
       body.triggerType = "cron";
       body.cronExpression = a.cron;
+    } else if (a.triggerTopic) {
+      body.triggerType = "mqtt";
+      body.triggerTopic = a.triggerTopic;
     } else {
-      body.triggerTopic = a.triggerTopic || "none";
+      body.triggerType = "none";
     }
     const created = await api("POST", "/api/automations", body);
     if (created) {

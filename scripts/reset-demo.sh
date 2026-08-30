@@ -33,14 +33,23 @@ log() { printf '[reset-demo] %s\n' "$*"; }
 die() { printf '[reset-demo] ERROR: %s\n' "$*" >&2; exit 1; }
 
 command -v docker >/dev/null 2>&1 || die "docker not found on PATH"
+command -v sha256sum >/dev/null 2>&1 || die "sha256sum not found on PATH"
 [ -f "$GOLDEN_DB" ] || die "golden database not found: $GOLDEN_DB"
-if [ -f "${GOLDEN_DB}.sha256" ]; then
-  log "Verifying golden snapshot checksum…"
-  (cd "$(dirname "$GOLDEN_DB")" && sha256sum -c "$(basename "${GOLDEN_DB}.sha256")") >/dev/null \
-    || die "golden database checksum verification failed"
-fi
+[ -f "${GOLDEN_DB}.sha256" ] || die "golden checksum not found: ${GOLDEN_DB}.sha256"
+log "Verifying golden snapshot checksum…"
+(cd "$(dirname "$GOLDEN_DB")" && sha256sum -c "$(basename "${GOLDEN_DB}.sha256")") >/dev/null \
+  || die "golden database checksum verification failed"
 
 compose() { docker compose -f "$COMPOSE_FILE" "$@"; }
+
+runtime_uid="${AEOLUS_RUNTIME_UID:-1000}"
+runtime_gid="${AEOLUS_RUNTIME_GID:-1000}"
+restore_runtime_ownership() {
+  if [ "$(id -u)" -eq 0 ]; then
+    log "Restoring runtime ownership (${runtime_uid}:${runtime_gid}) on ${DATA_DIR}…"
+    chown -R "${runtime_uid}:${runtime_gid}" "$DATA_DIR"
+  fi
+}
 
 # Once the app services are stopped the demo is down until they come back. A
 # fail-fast abort anywhere in the swap would otherwise leave it down until
@@ -59,6 +68,7 @@ on_exit() {
     printf '[reset-demo] Aborted (exit %s) after stopping backend/simulator.\n' "$exit_code"
     printf '[reset-demo] Restarting them so the demo does not stay down…\n'
   } >&2
+  restore_runtime_ownership >&2 || true
   if compose up -d backend simulator >&2; then
     printf '[reset-demo] Services restarted. The demo may be serving PRE-RESET data — investigate before the next window.\n' >&2
   else
@@ -84,8 +94,11 @@ rm -f "$staged_db"
 cp "$GOLDEN_DB" "$staged_db"
 
 log "Replacing active database (and dropping its WAL/SHM sidecars)…"
-rm -f "$ACTIVE_DB" "${ACTIVE_DB}-wal" "${ACTIVE_DB}-shm"
-mv "$staged_db" "$ACTIVE_DB"
+# Keep the old main database in place until the staged copy is ready to rename.
+# `mv -f` within DATA_DIR atomically replaces the pathname, so a rename failure
+# leaves the previous database intact instead of creating a no-database window.
+rm -f "${ACTIVE_DB}-wal" "${ACTIVE_DB}-shm"
+mv -f "$staged_db" "$ACTIVE_DB"
 
 log "Setting permissions on the active database…"
 chmod 0644 "$ACTIVE_DB"
@@ -103,12 +116,7 @@ chmod 0644 "$ACTIVE_DB"
 #
 # Manual resets run by the deployment user already produce a correctly owned
 # copy, so the chown only applies when running as root.
-runtime_uid="${AEOLUS_RUNTIME_UID:-1000}"
-runtime_gid="${AEOLUS_RUNTIME_GID:-1000}"
-if [ "$(id -u)" -eq 0 ]; then
-  log "Restoring runtime ownership (${runtime_uid}:${runtime_gid}) on ${DATA_DIR}…"
-  chown -R "${runtime_uid}:${runtime_gid}" "$DATA_DIR"
-fi
+restore_runtime_ownership
 
 log "Starting app services…"
 compose up -d backend simulator

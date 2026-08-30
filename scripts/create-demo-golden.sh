@@ -23,9 +23,28 @@ command -v sha256sum >/dev/null 2>&1 || die "sha256sum not found"
 
 mkdir -p "$(dirname "$GOLDEN_DB")"
 
+runtime_uid="${AEOLUS_RUNTIME_UID:-1000}"
+runtime_gid="${AEOLUS_RUNTIME_GID:-1000}"
+restore_runtime_ownership() {
+  if [ "$(id -u)" -eq 0 ]; then
+    log "Restoring runtime ownership (${runtime_uid}:${runtime_gid}) on ${DATA_DIR}…"
+    chown -R "${runtime_uid}:${runtime_gid}" "$DATA_DIR"
+  fi
+}
+
+reset_unit_present=0
+if command -v systemctl >/dev/null 2>&1 && systemctl cat aeolus-demo-reset.timer >/dev/null 2>&1; then
+  reset_unit_present=1
+  # A snapshot operation and the nightly reset must never race. Keep the timer
+  # disabled until the replacement golden and its checksum have been verified.
+  sudo systemctl disable --now aeolus-demo-reset.timer >/dev/null 2>&1 || true
+fi
+
 restart_needed=0
 cleanup() {
   if [ "$restart_needed" = "1" ]; then
+    log "Restoring runtime ownership after interrupted snapshot…"
+    restore_runtime_ownership || true
     log "Restarting backend and simulator after interrupted snapshot…"
     compose up -d backend simulator >/dev/null 2>&1 || true
   fi
@@ -53,21 +72,32 @@ if [ -f "$GOLDEN_DB" ]; then
 fi
 
 tmp="${GOLDEN_DB}.tmp.$$"
-rm -f "$tmp"
+checksum_tmp="${GOLDEN_DB}.sha256.tmp.$$"
+meta_tmp="${GOLDEN_DB}.meta.tmp.$$"
+rm -f "$tmp" "$checksum_tmp" "$meta_tmp"
 cp "$ACTIVE_DB" "$tmp"
 chmod 0444 "$tmp"
 mv -f "$tmp" "$GOLDEN_DB"
-sha256sum "$GOLDEN_DB" > "${GOLDEN_DB}.sha256"
-chmod 0444 "${GOLDEN_DB}.sha256"
 
-meta="${GOLDEN_DB}.meta"
+# Build sidecars through fresh staging files. The previous sidecars are 0444 by
+# design, so truncating them in-place makes a second refresh fail for the normal
+# deployment user even though replacing them atomically is safe.
+sha256sum "$GOLDEN_DB" > "$checksum_tmp"
+chmod 0444 "$checksum_tmp"
+mv -f "$checksum_tmp" "${GOLDEN_DB}.sha256"
+
 {
   printf 'created_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   printf 'app_image=%s\n' "${AEOLUS_APP_IMAGE:-$(docker inspect --format='{{.Config.Image}}' aeolus-demo-backend 2>/dev/null || echo unknown)}"
   printf 'frontend_image=%s\n' "${AEOLUS_FRONTEND_IMAGE:-$(docker inspect --format='{{.Config.Image}}' aeolus-demo-frontend 2>/dev/null || echo unknown)}"
   printf 'sha256=%s\n' "$(sha256sum "$GOLDEN_DB" | awk '{print $1}')"
-} > "$meta"
-chmod 0444 "$meta"
+} > "$meta_tmp"
+chmod 0444 "$meta_tmp"
+mv -f "$meta_tmp" "${GOLDEN_DB}.meta"
+
+log "Verifying replacement golden snapshot…"
+(cd "$(dirname "$GOLDEN_DB")" && sha256sum -c "$(basename "${GOLDEN_DB}.sha256")") >/dev/null \
+  || die "new golden database checksum verification failed"
 
 log "Golden snapshot created: $GOLDEN_DB"
 log "SHA-256: $(awk '{print $1}' "${GOLDEN_DB}.sha256")"
@@ -78,12 +108,7 @@ log "SHA-256: $(awk '{print $1}' "${GOLDEN_DB}.sha256")"
 # create -wal/-shm as whoever ran this script; under sudo that would hand the
 # backend a readable-but-unwritable database (SQLITE_READONLY on first write).
 # The golden snapshot itself lives outside DATA_DIR and stays read-only.
-runtime_uid="${AEOLUS_RUNTIME_UID:-1000}"
-runtime_gid="${AEOLUS_RUNTIME_GID:-1000}"
-if [ "$(id -u)" -eq 0 ]; then
-  log "Restoring runtime ownership (${runtime_uid}:${runtime_gid}) on ${DATA_DIR}…"
-  chown -R "${runtime_uid}:${runtime_gid}" "$DATA_DIR"
-fi
+restore_runtime_ownership
 
 log "Restarting app services…"
 compose up -d backend simulator
@@ -96,7 +121,7 @@ fi
 # The deploy step installs the units but deliberately leaves the Persistent
 # timer disabled until a verified golden exists. Enable it only after the
 # snapshot and restarted application have both passed health checks.
-if systemctl cat aeolus-demo-reset.timer >/dev/null 2>&1; then
+if [ "$reset_unit_present" = "1" ]; then
   log "Enabling nightly reset timer now that the golden snapshot is verified…"
   sudo systemctl enable --now aeolus-demo-reset.timer
 else

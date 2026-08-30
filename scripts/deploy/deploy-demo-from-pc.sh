@@ -235,14 +235,19 @@ fi
 log "Installing/updating nightly reset units…"
 ssh "${ssh_args[@]}" "$remote" "cd '${DEMO_APP_DIR}' && sudo cp scripts/systemd/aeolus-demo-reset.service scripts/systemd/aeolus-demo-reset.timer /etc/systemd/system/ && sudo systemctl daemon-reload"
 
-if ssh "${ssh_args[@]}" "$remote" "test -f '${DEMO_ROOT}/golden/aeolus-demo.db'"; then
-  log "Golden snapshot exists; enabling nightly reset timer…"
-  ssh "${ssh_args[@]}" "$remote" "sudo systemctl enable --now aeolus-demo-reset.timer"
+golden_db="${DEMO_ROOT}/golden/aeolus-demo.db"
+# A file merely existing is not enough to arm an automated destructive reset.
+# Require its checksum sidecar and prove the pair before enabling the timer.
+# Keep the destructive reset timer disarmed until *all* deployment gates have
+# passed. A valid golden is necessary but not sufficient: if the public route
+# later fails, the deployment itself is failed and must leave the timer off.
+ssh "${ssh_args[@]}" "$remote" "sudo systemctl disable --now aeolus-demo-reset.timer >/dev/null 2>&1 || true"
+if ssh "${ssh_args[@]}" "$remote" "test -f '$golden_db' && test -f '$golden_db.sha256' && cd '${DEMO_ROOT}/golden' && sha256sum -c 'aeolus-demo.db.sha256' >/dev/null"; then
+  log "Verified golden snapshot exists; reset timer remains disarmed until the public release gate passes."
   golden_exists=1
 else
-  # First deploy: do not start a Persistent timer before a golden exists, or
-  # systemd may immediately attempt a catch-up reset with nothing to restore.
-  ssh "${ssh_args[@]}" "$remote" "sudo systemctl disable --now aeolus-demo-reset.timer >/dev/null 2>&1 || true"
+  # First deploy or invalid/incomplete golden: fail safe. A Persistent timer must
+  # never catch up by restoring an unverified snapshot.
   golden_exists=0
 fi
 
@@ -275,15 +280,20 @@ if command -v curl >/dev/null 2>&1; then
     fi
   fi
 else
-  log "curl not available locally; skipping public Cloudflare smoke test."
+  die "curl is required for the public Cloudflare release gate"
 fi
-if [ "$golden_exists" = "1" ]; then
-  log "Golden snapshot already exists. Deployment complete."
-else
-  log "No golden snapshot exists yet. Nightly reset remains disabled until the golden is created."
-fi
-# Last word on screen, so a failed public gate cannot scroll past unnoticed
-# behind the golden-snapshot guidance above.
+# A failed public gate is a failed deployment. Leave the reset timer disabled.
 if [ "${public_ok:-1}" != "1" ]; then
-  log "RELEASE GATE NOT MET: public checks failed:${public_failed}. Do not announce this release."
+  die "RELEASE GATE NOT MET: public checks failed:${public_failed}"
+fi
+
+# Arm the reset only after both prerequisites are proven: a verified golden and
+# a healthy externally reachable release. This ordering is intentional so any
+# failure above leaves the timer fail-closed.
+if [ "$golden_exists" = "1" ]; then
+  log "All release gates passed; enabling nightly reset timer…"
+  ssh "${ssh_args[@]}" "$remote" "sudo systemctl enable --now aeolus-demo-reset.timer"
+  log "Golden snapshot verified. Deployment complete."
+else
+  log "No verified golden snapshot exists yet. Nightly reset remains disabled until the golden is created."
 fi
