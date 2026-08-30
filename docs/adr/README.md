@@ -25,6 +25,7 @@ This is especially useful for decisions that are easy to misunderstand from code
 | [0006](0006-truthful-command-lifecycle.md) | One command boundary with evidence-based completion tiers | Accepted |
 | [0007](0007-automation-projects-esbuild.md) | Bounded multi-file Automation Projects bundled in memory with esbuild | Accepted |
 | [0008](0008-modular-monolith-process-boundaries.md) | Modular monolith with a small number of explicit process boundaries | Accepted |
+| [0009](0009-pinned-node-22-runtime.md) | One exact pinned Node 22 runtime across dev, CI and Docker | Accepted |
 
 ## Writing a new ADR
 

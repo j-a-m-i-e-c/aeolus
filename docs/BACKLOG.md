@@ -211,10 +211,12 @@ model, but should remain visible:
   Node's `fetch` may resolve the host again when connecting; close that only if a
   pinned-address transport becomes necessary for the threat model.
 - Dependency posture is deliberate rather than "green at any cost": `ws` is on
-  the safe 8.21.3 line, while `isolated-vm` remains on the Node-22-compatible 5.x
-  line. The 7.x major requires Node 24, so take that upgrade only as part of an
-  explicit Node-runtime migration with native-addon/CI verification rather than
-  merging the Dependabot major solely to clear an alert.
+  the safe 8.21.3 line, while `isolated-vm` remains on the 5.x line that the
+  pinned Node 22 runtime supports. Treat an `isolated-vm` major as a runtime
+  migration, not a Dependabot merge — the 6.x line (6.0.1+) supports both Node 22
+  and newer, so it is the bridge to take first, while 7.x requires Node 24.
+  Rationale and the migration order are recorded in
+  [ADR-0009](adr/0009-pinned-node-22-runtime.md).
 - Internal automation MQTT publish bypasses the REST raw-publish namespace
   policy — acceptable for admin-authored code; scoped (non-admin) automations are
   already denied raw publish by the `AutomationScopeResolver`. A per-automation
