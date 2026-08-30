@@ -12,7 +12,7 @@ Form rules store a trigger, optional condition and action configuration instead 
 
 Script rules contain an Automation Project. `logic/index.ts` is the default backend entrypoint and `ui/index.tsx` is the optional UI entrypoint. Relative imports resolve only within the project (with React provided externally to the UI sandbox). The project is bundled with esbuild in memory when saved, then the compiled Logic is executed in an isolated V8 context when triggered.
 
-The editor presents this progressively: simple automations open as **Logic** with an optional **UI** tab. The complete **Project files** tree stays collapsed until an automation actually needs additional local modules.
+The editor presents one consistent project surface: **Logic**, optional **UI**, and **Files** are primary navigation, with the file tree available when an automation needs additional local modules.
 
 New Logic uses a normal module entrypoint:
 
@@ -22,7 +22,7 @@ export default async function run(context: EventContext) {
 }
 ```
 
-The compiler adds the existing completion wrapper internally. The `automation()` helper remains optional backwards-compatible shorthand for legacy/simple rules rather than the default scaffold.
+The compiler registers the exported function with Aeolus' completion wrapper internally. Existing Project source that explicitly calls `automation({...})` remains accepted for pre-release compatibility, but it is not a second authoring model.
 
 ## Triggers
 
@@ -64,14 +64,21 @@ The exposed API includes:
 - `devices`
 - `mqtt`
 - `state`
-- `db`
+- `db` when Data Store is available
+- `events` when the automation-event service is available
 - `http`
 - `log`
 - `context`
 
+Optional capabilities are omitted when their backing service is unavailable; their absence does not prevent otherwise-valid Logic from starting.
+
 The sandbox returns an explicit result for success, runtime failure, timeout, memory failure or runtime unavailability.
 
-For module-style Automation Projects, the compiler routes the exported Logic function through the same internal completion machinery used by the legacy `automation()` helper. The helper itself awaits each action callback in order. If a device action fails (including TIMED_OUT, STATE_MISMATCH, or FAILED lifecycle states), subsequent actions are not invoked — fail-fast. To override this, pass `continueOnFailure: true` in the automation config. After the script body returns, the sandbox drains every in-flight device-action promise before resolving, bounded by a 30-second completion budget separate from the 5-second CPU timeout. This ensures command results are never lost to a premature resolution.
+Authored `http.get/post` uses the same outbound policy as runtime webhook actions: only public HTTP(S) destinations are allowed; localhost, LAN/private, link-local and reserved addresses are rejected after DNS preflight; redirects are disabled; requests time out after roughly ten seconds; and request/response bodies are bounded. DNS is preflighted before `fetch`, but the transport can resolve again at connection time, leaving a documented DNS preflight-to-connect TOCTOU limitation rather than a claim of perfect DNS pinning.
+
+For module-style Automation Projects, the compiler routes the exported Logic function through the same internal completion machinery used by `automation()`. The host waits for the exported function and drains in-flight device-command promises before resolving, bounded by a 30-second completion budget separate from the 5-second CPU timeout.
+
+Inside a normal `run(context)` function, `devices.action()` returns an `ActionResult`; author code decides whether to throw/return after a failed result before executing later statements. For the compatibility `automation({ actions: [...] })` helper, separate action callbacks are awaited in order and fail-fast after a logical command failure unless `continueOnFailure: true` is set.
 
 ## Logic and UI state
 
@@ -197,15 +204,13 @@ also verified commands. Query it through the command API (see
 [API reference](api.md)). Handler-resolution and authorization refusals happen
 before acceptance and therefore receive no `commandId` and no record.
 
-Completeness is determined by a durable `terminal_at` timestamp, not the state
-name, because `DISPATCHED` is terminal for a dispatch-only command but not for
-an acknowledged/observed one.
+Completion of the configured wait is recorded by the durable `terminal_at` column (a historical schema name), not by treating every success tier as lifecycle-final. `DISPATCHED` can satisfy a dispatch-only request and `ACKNOWLEDGED` can satisfy an acknowledgement request, while later evidence may still advance the lifecycle when that command remains under observation. Only `OBSERVED`, `FAILED`, `TIMED_OUT` and `STATE_MISMATCH` are lifecycle-final states.
 
 ### Restart semantics (no physical replay)
 
 `PendingCommandTracker` is in-memory, so a restart loses live confirmation
-waits. At startup Aeolus reconciles any command record still non-terminal
-(`terminal_at IS NULL`): it becomes a terminal `FAILED` with failure reason
+waits. At startup Aeolus reconciles any command record whose configured completion wait was still unresolved
+(`terminal_at IS NULL`): it becomes lifecycle-final `FAILED` with failure reason
 `interrupted` and a matching transition row. Aeolus never re-dispatches or
 replays a physical command after a restart — reconciliation only corrects the
 audit trail. Reconciliation is idempotent.
@@ -254,7 +259,7 @@ Source: `src/automations/automation-event-service.ts`.
 - duration;
 - success or failure;
 - failure reason;
-- terminal lifecycle state where relevant.
+- command completion/lifecycle state where relevant.
 
 The execution log and the live pending-command registry are process memory. Automation state and durable command history (records and transitions) are persistent.
 
@@ -271,7 +276,7 @@ src/automations/command-lifecycle.ts
 src/automations/pending-command-tracker.ts
 src/automations/automation-project.ts
 frontend/src/components/AutomationProjectEditor.tsx
-frontend/src/components/ScriptEditor.tsx
-frontend/src/components/UiEditor.tsx
+frontend/src/components/AutomationAuthoringFields.tsx
+frontend/src/components/automation-authoring.ts
 frontend/src/sandbox/
 ```

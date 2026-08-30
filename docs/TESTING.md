@@ -27,7 +27,9 @@ src/connectors/connector-manager.test.ts
 
 ### Backend integration tests
 
-`src/__integration__/` runs real Express routes and SQLite-backed services. Current coverage includes API routes, Data Store behaviour, metrics history, the MQTT-to-automation pipeline, and the command acknowledgement flow.
+`src/__integration__/` runs real Express routes and SQLite-backed services. Current coverage includes API routes, Data Store behaviour, metrics history, the MQTT-to-automation pipeline, command acknowledgement, public-demo reset invariants, and a Linux-only real `isolated-vm` execution test. The isolate test proves Node globals are unavailable, optional capabilities do not break bootstrap, async host-mediated device commands cross the boundary, `actionAll()` keeps its predicate inside the isolate, and timeout/runtime errors are classified.
+
+The demo operations regression suite also checks the golden/checksum contract. A non-root functional regression runs the real golden creator twice with prior sidecars made `0444`; structural tests remain active everywhere so checksum-required reset and timer/release-gate safety do not silently regress.
 
 ### Frontend tests
 
@@ -60,19 +62,21 @@ browser; auth cookie rotation needs real HTTP).
 
 | Boundary / concern | Unit | Property | Integration | E2E |
 |---|:---:|:---:|:---:|:---:|
-| Sandbox error classification | ✓ | ✓ | | |
+| Sandbox error classification | ✓ | ✓ | ✓ (real V8 on Linux) | |
 | Command lifecycle transitions | ✓ | ✓ | | |
 | Pending-command tracker (ack/timeout/cancel) | ✓ | ✓ | ✓ | |
 | Completion-tier resolution | ✓ | ✓ | | |
 | Command envelope (MQTT 5 correlation) | | ✓ | | |
 | Fail-fast automation body ordering | ✓ | ✓ | | |
-| Bulk action arithmetic | | ✓ | | |
+| Bulk action arithmetic / isolate boundary | | ✓ | ✓ (real V8 on Linux) | |
 | MQTT topic parsing | ✓ | ✓ | ✓ | |
 | MQTT ack routing (correlationId resolution) | ✓ | | ✓ | |
 | MQTT ingestion → device registry | | | ✓ | |
 | MQTT → automation engine → action dispatch | | | ✓ | |
 | Command → ack → ACKNOWLEDGED / TIMED_OUT | | | ✓ | |
 | HTTP API → auth → Zod → SQLite | | | ✓ | |
+| Demo golden/checksum/reset/deploy invariants | ✓ | | ✓ | |
+| Shared outbound HTTP / SSRF policy | ✓ | | | |
 | Data Store (write/query/retention/KV) | ✓ | | ✓ | |
 | Metrics sampling and aggregation | | | ✓ | |
 | Connector lifecycle (register/restore/discovery) | ✓ | | | ✓ |
@@ -98,7 +102,7 @@ Backend thresholds from `vitest.config.ts`:
 | `src/data-store/` | 80% | global | global |
 | `src/automations/` | 50% | global | global |
 
-The automation line threshold is lower because the native isolate boundary is excluded from direct coverage. The surrounding runtime, lifecycle and integration behaviour is tested separately.
+The automation line threshold is lower because broad coverage instrumentation excludes the native isolate boundary. The surrounding runtime and lifecycle are tested normally, while a focused Linux integration test executes a real `isolated-vm` Sandbox without relying on coverage instrumentation.
 
 Frontend thresholds from `frontend/vite.config.ts` are 90% for lines, statements, functions and branches over the included jsdom-suitable source.
 

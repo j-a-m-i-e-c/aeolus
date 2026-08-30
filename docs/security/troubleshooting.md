@@ -36,7 +36,7 @@ Confirm that the frontend can refresh its access token and reconnect. Check prox
 
 ## MQTT device cannot connect
 
-First confirm whether the deployment uses dashboard provisioning or manual Mosquitto configuration. The default Compose deployment requires the manual path unless provisioning access has been added deliberately.
+First confirm whether the deployment uses dashboard provisioning or operator-managed Mosquitto configuration. The default Compose stack includes the required file mounts and reload sidecar, but dashboard-managed provisioning is disabled unless `MQTT_MANAGED_PROVISIONING_ENABLED=true` is set deliberately.
 
 Then check:
 

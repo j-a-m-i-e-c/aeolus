@@ -29,6 +29,7 @@ Exact request schemas are defined under `src/api/schemas/` and tested with the r
 | `GET` | `/api/devices` | List devices |
 | `GET` | `/api/devices/:id` | Read one device |
 | `GET` | `/api/devices/:id/actions` | Read its action catalog |
+| `GET` | `/api/devices/:id/completion-tiers` | Read the dispatch/acknowledgement/observation tiers this device can prove |
 | `POST` | `/api/devices/:id/action` | Execute a device action |
 | `GET` | `/api/devices/:id/history` | Query state history |
 | `DELETE` | `/api/devices/:id/history` | Clear one device history |
@@ -63,17 +64,19 @@ only read status codes react correctly.
 | Broker or connector unavailable (`transport`) | `503` |
 | Command timed out (`TIMED_OUT`) | `504` |
 
-There is no `202`: the route awaits a terminal state within the REST action
+There is no `202`: the route awaits the configured completion outcome within the REST action
 timeout, so a dispatched-but-unconfirmed command resolves to `DISPATCHED` (200)
 or `TIMED_OUT` (504).
+
+`DISPATCHED` and `ACKNOWLEDGED` are successful completion tiers, not necessarily lifecycle-final states. While a command remains under observation, later evidence can still advance it to `ACKNOWLEDGED` or `OBSERVED`; only `OBSERVED`, `FAILED`, `TIMED_OUT` and `STATE_MISMATCH` are lifecycle-final.
 
 ## Automations
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/api/automations` | List rules |
-| `POST` | `/api/automations` | Create a rule |
-| `PUT` | `/api/automations/:id` | Update a rule |
+| `GET` | `/api/automations` | List rule metadata (`hasUi`, not authored UI source) |
+| `POST` | `/api/automations` | Create a rule; new script rules require an Automation Project |
+| `PUT` | `/api/automations/:id` | Update rule metadata/trigger; script source updates use Project data |
 | `DELETE` | `/api/automations/:id` | Delete a rule |
 | `PATCH` | `/api/automations/:id/toggle` | Enable or disable a rule |
 | `POST` | `/api/automations/:id/fire` | Fire a rule manually |
@@ -82,6 +85,8 @@ or `TIMED_OUT` (504).
 | `GET` | `/api/automations/snippets` | Editor snippets |
 | `GET` | `/api/automations/types` | Logic editor type declarations |
 | `GET` | `/api/automations/ui-types` | Custom UI type declarations |
+| `GET` | `/api/automations/:id/project` | Read the authored Automation Project source tree |
+| `PUT` | `/api/automations/:id/project` | Compile and replace the authored Project atomically |
 | `GET` | `/api/automations/:id/ui-module` | Compiled custom UI module |
 | `GET` | `/api/automations/:id/state` | Read private automation state |
 | `PUT` | `/api/automations/:id/state` | Save a state value |

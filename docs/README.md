@@ -38,6 +38,7 @@ The old single-file comprehensive document has been split into smaller reference
 | [API and WebSocket](reference/api.md) | Current HTTP routes and real-time protocol |
 | [Dashboard](reference/dashboard.md) | Pages, panes, stores and the custom UI host |
 | [Operations](reference/operations.md) | Configuration, Docker, logging, metrics, CI and failure handling |
+| [Architecture decisions](adr/README.md) | Why major technical choices were made, alternatives and trade-offs |
 
 ## Security reference
 

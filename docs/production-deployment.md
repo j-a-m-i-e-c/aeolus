@@ -229,7 +229,7 @@ sudo ufw status verbose
 
 ## 5. Backup & Restore
 
-All persistent state lives in a single SQLite database (`better-sqlite3`, WAL mode) inside a Docker volume.
+Aeolus application state such as configuration, automations, users, history and Data Store content lives in a single SQLite database (`better-sqlite3`, WAL mode) inside a Docker volume. Mosquitto is a separate service and can persist broker/security state (for example credentials) outside that database, so back up any deployment-specific broker files as well when you use them.
 
 > **Data volume ownership.** The backend runs as an unprivileged user and needs to write to the data directory (WAL mode creates `-wal`/`-shm` sidecar files there). The container entrypoint automatically fixes the volume's ownership on boot, so a fresh deployment just works. If you ever see the backend crash-loop with `SQLITE_READONLY_DIRECTORY` or a "Data directory is not writable" error (for example after restoring a backup with `sudo`, which can leave root-owned files), correct the ownership and restart:
 >
@@ -437,8 +437,7 @@ Or restore from a database backup if data was affected (Section 5).
 
 The default deployment removes several high-risk host-control paths, but it should still be treated as an edge service that needs ordinary network and host hardening:
 
-- **No Docker socket mount** — the backend container has no access to `/var/run/docker.sock`, so a compromised container cannot control the host's Docker daemon.
-  This also means the current dashboard MQTT provisioning service cannot reload the Mosquitto container in the default Compose deployment. Configure MQTT manually or provide a narrower external reload mechanism.
+- **No Docker socket mount** — the backend container has no access to `/var/run/docker.sock`, so a compromised container cannot control the host's Docker daemon. Mosquitto reloads do not require that privilege: the default stack uses a narrowly scoped `mosquitto-reloader` sidecar sharing Mosquitto's PID namespace and watching the shared config directory. Dashboard-managed provisioning itself remains opt-in.
 - **Read-only system router** — `/api/system` is GET-only (diagnostics, logs, version check). There are no shutdown, reboot, update, or prune endpoints; host control is done via SSH/Docker, not the web app.
 - **No git or Docker CLI in the production image** — the build commit is baked into `dist/build-info.json` at build time, so no runtime git is needed.
 - **Backend runs as a non-root user** — the container starts as root only long enough for the entrypoint to repair data-volume ownership, then drops to the unprivileged `aeolus` user via `gosu` before running Node. The application process never runs as root.

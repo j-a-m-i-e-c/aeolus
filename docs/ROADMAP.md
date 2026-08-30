@@ -173,7 +173,7 @@ The platform already includes:
 
 - local MQTT ingestion and device discovery;
 - Hue and Kasa connectors;
-- free-form Logic and form rules;
+- Automation Project Logic plus retained form-rule runtime compatibility;
 - paired sandboxed React UI;
 - persistent automation state;
 - Data Store collections and buckets;

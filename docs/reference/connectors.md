@@ -91,11 +91,11 @@ Frontend panes are registered separately in `frontend/src/lib/pane-registry.ts`.
 
 While an instance is enabled, a connector module may add:
 
-- named action handlers to `ActionExecutor`;
-- named condition factories to `ConditionRegistry`;
-- Logic and UI snippets to the editor.
+- Logic and UI snippets to the Automation Project editor;
+- named condition factories to `ConditionRegistry` for retained form rules;
+- advanced connector-specific command handlers to `CommandService`.
 
-The manager removes those contributions when the connector is disabled.
+Normal code automations should use `devices.action()` against connector-owned devices. A contributed command handler is for genuinely connector-specific command types, and every contribution explicitly declares `physical: true|false` so physical-command IDs/history are not created for reporting-only helpers. The manager removes contributions when the connector is disabled.
 
 ## Main source files
 

@@ -279,7 +279,7 @@ The project editor uses Monaco with a real file tree and Aeolus-specific definit
 | `mqtt` | Publish MQTT messages |
 | `state` | Read and write the automation’s private persistent state |
 | `db` | Write/query time series collections and key/value buckets when enabled |
-| `http` | Make bounded HTTP requests to external or local services |
+| `http` | Make bounded HTTP(S) requests to public services; localhost/LAN/private destinations and redirects are blocked |
 | `log` | Emit structured application logs |
 | `automation()` | Optional conditions/actions helper used for flow visualisation |
 
@@ -447,7 +447,7 @@ Aeolus includes dashboard controls and APIs for three broker security modes:
 | **Shared password** | One credential for all external MQTT clients |
 | **Per-device** | Separate credentials for individual devices |
 
-Applying those settings automatically requires a provisioning-enabled deployment with scoped access to the Mosquitto files and reload mechanism. The default Docker Compose setup keeps those privileges out of the backend, so broker security is configured manually there. See [MQTT security](docs/security/mqtt.md).
+Applying those settings automatically requires a provisioning-enabled deployment with scoped access to the Mosquitto files and reload mechanism. The default Docker Compose stack provides that plumbing through the shared `./mosquitto` directory and a dedicated reload sidecar without mounting the Docker socket, but dashboard-managed provisioning remains opt-in behind `MQTT_MANAGED_PROVISIONING_ENABLED=true`. See [MQTT security](docs/security/mqtt.md).
 
 Aeolus should still be deployed on a segmented or otherwise trusted network when it controls meaningful physical equipment.
 

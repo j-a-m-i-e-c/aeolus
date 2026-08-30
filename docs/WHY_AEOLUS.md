@@ -290,7 +290,7 @@ if (context.topic.endsWith("/send-hint")) {
 }
 ```
 
-For a small condition/action rule, the optional `automation()` helper can keep the structure obvious and produce a flow view:
+Inside an Automation Project, a small condition/action rule can optionally use the `automation()` helper to keep the structure obvious and produce a flow view:
 
 ```javascript
 automation({

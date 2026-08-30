@@ -58,7 +58,7 @@ driver error.
 
 ## MQTT provisioning deployment boundary
 
-The provisioning service needs writable access to the Mosquitto configuration and password file, plus a way to reload the broker. The default `docker-compose.yml` intentionally does not grant the backend those host/container privileges. Configure Mosquitto manually in that deployment, or provide a narrowly scoped external provisioning mechanism. See [MQTT security](../security/mqtt.md).
+The provisioning service needs writable access to the Mosquitto configuration and password file, plus a way to reload the broker. The default `docker-compose.yml` provides that plumbing without a Docker socket: `./mosquitto` is shared with the backend and broker, and the `mosquitto-reloader` sidecar watches that directory and sends Mosquitto `SIGHUP` after atomic config changes. Dashboard-managed Shared Password / Per-Device provisioning is still deliberately opt-in behind `MQTT_MANAGED_PROVISIONING_ENABLED=true`; with the default `false` setting, manage broker credentials through the deployment instead. See [MQTT security](../security/mqtt.md).
 
 ## Demo simulator (Phase 2)
 
@@ -155,12 +155,19 @@ After seeding/reviewing the final release, run on the demo host:
 ```
 
 `scripts/create-demo-golden.sh` stops DB writers, checkpoints SQLite WAL, runs an
-integrity check, preserves the prior golden, creates the new read-only snapshot,
-and writes a SHA-256 checksum + release metadata. `scripts/reset-demo.sh` verifies
-that checksum before restoring golden -> active while the backend is stopped.
+integrity check, preserves the prior golden, and creates the new read-only snapshot.
+Checksum and metadata sidecars are built as fresh temporary files and atomically
+renamed into place so a previous `0444` sidecar is never truncated in place. The
+new checksum is verified before the snapshot is accepted. On success, and on
+interrupted/failure recovery, ownership of the active runtime database is restored
+to the configured backend uid/gid before backend/simulator restart.
 
-The systemd timer in `scripts/systemd/` restores the demo around 03:30 Sydney
-each day. `deploy-demo-from-pc.sh` installs/enables the timer. Manual remote reset
+`scripts/reset-demo.sh` requires the golden `.sha256` sidecar and refuses to stop
+services or replace the active database unless verification succeeds. The systemd
+timer in `scripts/systemd/` restores the demo around 03:30 Sydney each day.
+`deploy-demo-from-pc.sh` enables that timer only when the golden DB and checksum
+both exist and verify successfully; failure leaves the timer disabled. The external
+Cloudflare release gate is also fatal rather than advisory. Manual remote reset
 from an operator machine is:
 
 ```bash

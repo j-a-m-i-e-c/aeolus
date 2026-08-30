@@ -72,27 +72,17 @@ This is mostly an operational sign-off, with one code correction first:
   or rename the misleading "revoked credential rejected" assertion. (Not a
   default-path blocker — provisioning stays opt-in.)
 
-### Explicit trusted-proxy design for rate limiting 🟡
-Rate limiting keys on `req.ip`, but Express does not configure a trusted reverse
-proxy. Behind Caddy/nginx/Cloudflare, users can share the proxy address and one
-login/API rate-limit bucket. Do not blindly set `trust proxy = true`; add a
-configurable trusted-proxy topology for the supported deployment path and test
-client-IP behaviour.
+### General trusted-proxy configuration beyond the public demo 🟡
+The public-demo deployment deliberately configures Express to trust exactly one
+proxy hop, matching its Cloudflare Tunnel topology; normal/local installs keep
+Express' default `trust proxy` behaviour. If Aeolus later advertises additional
+reverse-proxy topologies (Caddy/nginx/multiple hops), make that trust model an
+explicit deployment setting and test client-IP/rate-limit behaviour for each
+supported topology rather than enabling `trust proxy = true` globally.
 
 ---
 
 ## Product truthfulness & connector capability
-
-### Generic MQTT devices have no config path to declare acknowledgement 🟠
-The ack parser works, but `CommandService` only attaches `correlationId` /
-`responseTopic` when `ConnectorManager.getAcknowledgementCapability(deviceId)`
-reports support — which comes from connector instances. A plain discovered MQTT
-device has no connector owner and no persisted MQTT command profile, so it
-cannot opt into the documented ack flow. Preferred fix (truthful command
-evidence is a core differentiator): add a persisted per-device MQTT command
-profile (ack supported, response topic, QoS, optional indicator/status values).
-Fallback: clarify docs that correlated acknowledgement currently requires a
-connector/configuration path not exposed for generic discovered devices.
 
 ### Hue `scene` / `color-loop` actions are not implemented in the connector 🟡
 The contributed `hue_scene` / `hue_color_loop` action handlers now correctly
@@ -132,19 +122,18 @@ Scoped (non-admin) automations are currently denied raw MQTT publish by the
 `AutomationScopeResolver` (a deliberate fail-closed default from the
 `scoped-automation-authoring` work). Give them a safe, bounded per-automation
 publish namespace (e.g. `aeolus/automations/{ruleId}/...`) so they can publish
-within their own prefix instead of being denied outright. Companion to the
-outbound-HTTP consolidation below, after which scoped form-rule webhooks can also
-be allowed.
+within their own prefix instead of being denied outright. Authored HTTP/webhook
+egress now has a shared public-destination policy; any future scoped-webhook
+permission should build on that boundary rather than reintroducing ad-hoc egress.
 
 ### Automation deletion is unrecoverable 📋
 Deleting an automation is an immediate hard delete (`DELETE FROM automation_rules`)
-that also wipes its stored state and unregisters it from the engine. There is no
-confirmation, soft-delete, or undo, so a single misclick permanently destroys
-hand-written script and paired UI. Add a safety margin: soft-delete or
-archive-on-delete so a removed automation can be restored; a confirmation before
-destroying authored logic/UI; and retention of the rule's state until deletion is
-finalised. Important for user trust before encouraging people to build valuable
-applications in Aeolus.
+that also wipes its stored state and unregisters it from the engine. The UI now requires explicit confirmation before the DELETE request, and pane
+removal no longer deletes the underlying automation. The remaining gap is
+recoverability: the backend DELETE is still a hard delete with no archive/undo.
+Add soft-delete or archive-on-delete plus retention of the rule's state until
+deletion is finalised. Important for user trust before encouraging people to
+build valuable applications in Aeolus.
 
 > The most dangerous path — the *implicit* delete where removing a dashboard pane
 > hard-deleted the underlying automation — has been decoupled and now removes
@@ -215,14 +204,17 @@ now enforces the limit like explicit `createCollection()`.)
 Not promotion blockers under the documented mostly-trusted single-site threat
 model, but should remain visible:
 
-- Sandbox HTTP SSRF checks block literal private/link-local addresses, but DNS
-  rebinding / hostnames resolving to private ranges and redirects to private
-  targets are not validated at the network layer; response bodies have no
-  explicit size cap.
-- Form-rule webhook actions use host `fetch()` without the sandbox's timeout or
-  SSRF policy — consolidate outbound requests (script `http` + form-rule
-  webhooks) behind one bounded, SSRF-checked host HTTP service, after which
-  scoped webhooks can be allowed.
+- Authored `http.*` and form-rule webhooks now share one bounded public-HTTP(S)
+  policy: literal/private/link-local destinations are rejected, DNS answers are
+  preflighted, redirects are disabled, and request/response sizes and execution
+  time are bounded. A DNS preflight -> connection TOCTOU window remains because
+  Node's `fetch` may resolve the host again when connecting; close that only if a
+  pinned-address transport becomes necessary for the threat model.
+- Dependency posture is deliberate rather than "green at any cost": `ws` is on
+  the safe 8.21.3 line, while `isolated-vm` remains on the Node-22-compatible 5.x
+  line. The 7.x major requires Node 24, so take that upgrade only as part of an
+  explicit Node-runtime migration with native-addon/CI verification rather than
+  merging the Dependabot major solely to clear an alert.
 - Internal automation MQTT publish bypasses the REST raw-publish namespace
   policy — acceptable for admin-authored code; scoped (non-admin) automations are
   already denied raw publish by the `AutomationScopeResolver`. A per-automation
@@ -247,8 +239,9 @@ model, but should remain visible:
 - Single-segment MQTT state topics derive an unexpected command topic: the
   fallback replaces the final segment with `set`, so a topic with no `/` (e.g.
   `pump`) yields `set` rather than `pump/set`. Deterministic and tested, but
-  surprising — the future per-device MQTT command profile makes the fallback less
-  important, or the convention should be documented explicitly.
+  surprising — the current per-device MQTT command profile can avoid relying on
+  this fallback when an explicit command topic is configured, or the fallback
+  convention should be documented more prominently.
 - Optimistic `on`/`off` state is not updated immediately: `ActionRouter`
   special-cases `toggle` but `on`/`off` normally carry empty params, so local
   state is unchanged until the next real device event/poll. Mostly UX (Aeolus

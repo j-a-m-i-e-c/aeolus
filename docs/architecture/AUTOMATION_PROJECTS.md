@@ -1,43 +1,54 @@
 # Automation Projects
 
-Aeolus script automations are authored as bounded multi-file **Automation Projects**. A simple automation can stay in one file; larger automations can split Logic, UI and shared code into local modules without becoming separate services.
+Aeolus code automations are authored as bounded multi-file **Automation Projects**. This is the normal authoring model, not an optional advanced mode: a simple automation can remain one Logic file, while larger automations can add UI and local modules without becoming separate services.
 
 ```text
 Automation Project
 ├── logic/
 │   ├── index.ts       # backend entrypoint
-│   └── helpers.ts     # only when the automation benefits from another module
+│   └── helpers.ts     # optional local module
 ├── ui/
 │   └── index.tsx      # optional React entrypoint
 └── shared/
-    └── constants.ts   # optional shared code
+    └── constants.ts   # optional shared source
           ↓
   in-memory esbuild bundle
           ↓
- existing Logic/UI sandboxes
+ isolated Logic / opaque-origin UI runtimes
 ```
 
-## Logic entrypoint
+## Authoring model
 
-New projects use an ordinary default-exported function:
+The editor has one consistent hierarchy:
+
+1. **Name**
+2. **Trigger** — MQTT, Schedule, or None/manual-only
+3. **Logic | UI | Files** — primary project navigation
+4. **Insert | API | Format** — contextual editor tools
+
+`Logic` opens first. `UI` is optional. `Files` exposes the complete project tree when local modules are useful; it is a first-party part of the same project rather than a second authoring product.
+
+New projects use one canonical scaffold everywhere:
 
 ```ts
 // logic/index.ts
 export default async function run(context: EventContext) {
-  const tank = devices.get("header-tank");
-  if (Number(tank?.state?.level) < 20) {
-    log.warn("Header tank low");
-  }
+  log.info(`Event: ${context.topic}`);
+  state.set("lastEvent", { topic: context.topic, at: Date.now() });
 }
 ```
 
-The project compiler adds Aeolus' existing completion wrapper internally. Authors do not need to write `automation({...})` to receive ordered device-action completion and failure semantics.
+`EventContext` and the other sandbox APIs are supplied by Aeolus' public editor type declarations.
 
-The legacy `automation()` helper remains supported for old automations and deliberately simple condition/action rules. It is a convenience, not the default project scaffold.
+## Logic entrypoint and completion
+
+The preferred entrypoint is a default-exported function. The project compiler registers that function with Aeolus' internal completion wrapper, so host-mediated device commands are tracked before the sandbox execution resolves.
+
+Pre-release projects that already contain an explicit `automation({...})` registration are also accepted. This is compatibility for authored source, not a separate editor or storage model. The helper supports `continueOnFailure` for deliberately non-fail-fast action sequences.
 
 ## Source model
 
-The API accepts a bounded source tree:
+The API accepts a bounded virtual source tree:
 
 ```ts
 interface AutomationProject {
@@ -54,32 +65,26 @@ Project paths are relative. A project is limited to 64 source files, 128 KiB per
 
 ## Import boundary
 
-Logic and UI can import other files in the same project with relative imports. Imports cannot escape the project root. Arbitrary npm packages, Node built-ins, filesystem access and runtime module loading are not introduced by the project model.
+Logic and UI may import files inside the same project using relative imports. Imports cannot escape the project root. Arbitrary npm packages, Node built-ins, filesystem access and runtime module loading are not introduced by Automation Projects.
 
-The UI bundle may import the React modules already supplied by the existing UI sandbox (`react`, `react-dom` and `react/jsx-runtime`). Those remain host-provided externals.
+The UI bundle may import the React modules supplied by the UI sandbox (`react`, `react-dom` and `react/jsx-runtime`). Those remain host-provided externals.
 
-## Compilation and persistence
+## Compilation, persistence and migration
 
-`src/automations/automation-project.ts` validates and bundles the project entirely in memory. The authored file tree is stored in `automation_projects` / `automation_project_files` while `automation_rules.script_source`, `compiled_js`, `ui_source` and `compiled_ui` remain the runtime projection used by the existing engine.
+`src/automations/automation-project.ts` validates and bundles the project entirely in memory. The authored tree is persisted in `automation_projects` / `automation_project_files`.
 
-This keeps multi-file authoring separate from the execution trust boundary: Automation Projects still run through the same isolated backend and opaque-origin UI sandboxes as legacy script automations.
+`automation_rules.script_source`, `compiled_js`, `ui_source` and `compiled_ui` remain a runtime projection used by the execution engine and upgrade compatibility. They are not a second authoring source of truth for new code automations.
 
-## Backwards compatibility
+Migration 016 promotes pre-Project script rows into a project containing `logic/index.ts` and optional `ui/index.tsx`. The read path can also project an unpromoted historical row so an interrupted/partial upgrade does not make old Logic inaccessible. New script create/update flows use Automation Projects.
 
-Existing `script_source` / `ui_source` automations remain valid. `GET /api/automations/:id/project` projects a legacy automation as `logic/index.ts` plus optional `ui/index.tsx`, so it can be inspected through the project API without a destructive migration.
+## Security boundary
 
-Saving a project stores the authored tree and updates the legacy runtime projection. Explicitly saving a legacy single-file automation continues to use the old path.
+Multi-file authoring does not widen runtime privileges. Logic is bundled and executed in a fresh `isolated-vm` context; UI is bundled and loaded into the existing opaque-origin iframe. Relative project imports are resolved at save time and do not become runtime filesystem or package access.
 
 ## Public demo
 
-Seeded showcase automations use the same Automation Project model as normal authoring. Public-demo visitors open the normal **Edit** surface, with shared source read-only. “Try a New Automation” creates a browser-local project draft; dashboard persistence is disabled in public-demo mode, and keeping the draft does not call the shared automation create/update APIs.
-
-## Authoring experience
-
-The project model is intentionally progressive. A one-file automation should feel like a one-file automation: the editor opens on **Logic**, and an optional **UI** can be added without exposing a file tree. The full **Project files** tree is available when an automation genuinely needs local modules. Multi-file capability is an escape hatch for complexity, not a requirement to manufacture boilerplate files.
-
-Aeolus supplies the Logic and UI runtime type declarations to the editor. Demo projects should not copy those declarations into local `types.ts` files unless they are defining types specific to that automation.
+Seeded showcase automations use the same Automation Project model as normal authoring. Shared demo source is read-only. “Try a New Automation” creates a browser-local Project draft; the public demo does not persist arbitrary visitor source into the shared backend.
 
 ## Demo source
 
-The demo manifests under `scripts/seed/tabs/` contain only metadata and project references. Authored demo source lives under `scripts/seed/projects/<project>/`. This prevents the seeder definitions from becoming giant template-string source containers and makes the showcased code representative of the product's real authoring model.
+Demo manifests under `scripts/seed/tabs/` contain metadata and project references. Current authored demo source lives under `scripts/seed/projects/<project>/`. Files under `docs/reference/legacy-demo-tabs/` are historical snapshots only and must not be used as current authoring examples.
