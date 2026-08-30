@@ -81,14 +81,13 @@ demo/
 
 ## Compose naming
 
-There are now only **two normal Aeolus Compose files at the repository root**:
+There is now only **one normal Aeolus Compose file at the repository root**:
 
 | File | Role |
 | --- | --- |
 | `docker-compose.yml` | normal Linux/Pi Aeolus stack |
-| `docker-compose.desktop.yml` | opt-in Docker Desktop networking override |
 
-Showcase-only Compose definitions are grouped under `demo/compose/` and use role-based names instead of three similar `docker-compose.*demo*.yml` names.
+Showcase-only Compose definitions are grouped under `demo/compose/` and use role-based names instead of several similarly named root-level overrides.
 
 `Dockerfile` and `frontend/Dockerfile` are different: they define how the backend/simulator image and frontend image are built. They are not alternate runtime environments and therefore stay with the product code they build.
 
@@ -133,6 +132,6 @@ Keep these elsewhere:
 - `src/simulator/`: generic simulator runtime;
 - `Dockerfile` / `frontend/Dockerfile`: product image builds;
 - `.github/workflows/`: GitHub requires workflows there;
-- root `docker-compose.yml` / `docker-compose.desktop.yml`: normal Aeolus runtime definitions.
+- root `docker-compose.yml`: the normal Aeolus runtime definition.
 
 New showcase-only deployment scripts, seed worlds, golden/reset tooling or infrastructure should normally go under `demo/` rather than reappearing in the repository root or generic `scripts/` directory.

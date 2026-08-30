@@ -49,6 +49,6 @@ ENTRYPOINT ["docker-entrypoint.sh"]
 # --no-node-snapshot is REQUIRED by isolated-vm on Node 20+ (its README marks this
 # as mandatory). Without it the automation sandbox runs an unsupported V8 startup
 # configuration, and the failure mode is silent rather than a crash. No compose
-# file overrides this command, so every deployment — base, demo, desktop and
-# public-demo — inherits the flag from here.
+# file overrides this command, so the base stack, local showcase and hosted
+# public demo all inherit the flag from here.
 CMD ["node", "--no-node-snapshot", "--max-old-space-size=1024", "dist/index.js"]

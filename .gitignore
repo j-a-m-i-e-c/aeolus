@@ -29,7 +29,8 @@ docs/website-assessment.md
 frontend/.env.production.local
 
 # Docker Compose auto-override — never commit a locally-created override that
-# would silently change network mode. Use docker-compose.desktop.yml explicitly.
+# would silently change the canonical Linux runtime. Showcase definitions live
+# under demo/compose/ instead.
 docker-compose.override.yml
 
 # Terraform local state/cache. Public-demo state contains a sensitive Cloudflare

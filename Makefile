@@ -1,4 +1,4 @@
-.PHONY: deploy deploy-demo public-demo-preflight public-demo-build public-demo-up public-demo-seed public-demo-golden public-demo-reset up up-desktop demo-up demo-reset down restart logs logs-backend status clean dev sim seed seed-demo reset test test-integration e2e e2e-fresh lint check verify verify-all help
+.PHONY: deploy deploy-demo public-demo-preflight public-demo-build public-demo-up public-demo-seed public-demo-golden public-demo-reset up demo-up demo-reset down restart logs logs-backend status clean dev sim seed seed-demo reset test test-integration e2e e2e-fresh lint check verify verify-all help
 
 # `USER` is normally set by the shell (your login name), which would leak into
 # the seed command. Ignore the environment value and default to "admin" unless
@@ -66,9 +66,6 @@ clean: ## Remove unused Docker images and build cache (does NOT touch volumes/da
 	docker builder prune -f && docker image prune -a -f
 
 # ─── Development ──────────────────────────────────────────────────────────────
-
-up-desktop: ## Start all services with the opt-in desktop/dev bridge override (Docker Desktop)
-	docker compose -f docker-compose.yml -f docker-compose.desktop.yml up -d --build
 
 demo-up: ## Start the public demo overlay (backend demo mode + Phase 2 simulator)
 	docker compose $(LOCAL_SHOWCASE_COMPOSE) up -d --build

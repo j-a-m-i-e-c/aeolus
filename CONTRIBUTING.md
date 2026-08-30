@@ -20,15 +20,9 @@ Thanks for your interest in contributing to Aeolus! This guide will help you get
    cd frontend && npm ci && cd ..
    ```
 5. Copy the environment file: `cp .env.example .env`
-6. Start with Docker Compose: `docker compose up -d --build`
+6. On Linux, start the full stack with Docker Compose: `docker compose up -d --build`
 
-   On Docker Desktop (Windows/macOS), host networking is not reachable on `localhost`. Opt in to bridge networking by loading the desktop override explicitly:
-
-   ```bash
-   docker compose -f docker-compose.yml -f docker-compose.desktop.yml up -d --build
-   ```
-
-   The override is never auto-loaded, so the default `docker compose up` keeps the deterministic host-networking path used on the Pi/Linux deployment.
+   The normal Compose stack deliberately uses Linux host networking for LAN discovery and direct device access. Docker Desktop is not a supported full-stack deployment path. Source-level frontend/backend development can still use the npm scripts on other operating systems, but LAN discovery behaviour is platform-dependent.
 
 The backend runs on port 3001, the frontend on port 3000, and Mosquitto on port 1883.
 

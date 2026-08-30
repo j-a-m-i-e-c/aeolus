@@ -42,7 +42,7 @@ Aeolus started around real rural infrastructure, but it is not a farm product. T
 - **Full-stack automations:** pair isolated backend logic with sandboxed custom UI.
 - **Built to operate:** inspect devices, messages, state, history, logs, metrics and command results from the dashboard.
 
-Three core services. One local control plane. No required cloud account.
+One local control plane. No required cloud account.
 
 > For a plain-English introduction, read [**What Is Aeolus?**](docs/WHAT_IS_AEOLUS.md). For the deeper technical argument, read [**Why Aeolus?**](docs/WHY_AEOLUS.md).
 
@@ -74,7 +74,7 @@ It is appropriate for development, supervised pilots and non-safety-critical aut
 - Docker Engine with Docker Compose
 - Raspberry Pi 4/5 or another Linux machine
 
-Aeolus uses host networking for LAN discovery and direct communication with devices such as Kasa plugs and Hue bridges. Docker Desktop on Windows and macOS can be used for limited dashboard evaluation, but a Linux host is required for the intended deployment model.
+Aeolus uses Linux host networking for LAN discovery and direct communication with devices such as Kasa plugs and Hue bridges. The full Docker Compose deployment is therefore intentionally Linux-only. Source development uses the Node version pinned in [`.nvmrc`](.nvmrc).
 
 ### Start Aeolus
 
@@ -86,17 +86,7 @@ docker compose up --build
 
 Open **http://localhost:3000** and create the first administrator account.
 
-This default path uses host networking, which is what the Pi/Linux deployment needs for LAN discovery.
-
-### Desktop / dev (Docker Desktop)
-
-On Docker Desktop (Windows/macOS), host networking runs inside a VM, so the containers are not reachable on `localhost`. For local evaluation, opt in to bridge networking by loading the desktop override explicitly:
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.desktop.yml up --build
-```
-
-The override is not loaded automatically, so cloning the repo never silently switches network mode away from the deterministic host-networking default.
+The normal Compose stack uses host networking for the backend, which is what the Pi/Linux deployment needs for LAN discovery and direct access to local integrations.
 
 ### Explore without hardware
 
@@ -147,7 +137,7 @@ The setup script installs Docker, clones the repository, starts the services, en
 | **Dashboard** | Custom tabs, drag-and-drop panes, device controls, automation editors and monitoring tools |
 | **State and data** | Automation-local state, device history, time series collections and shared key/value buckets |
 | **Security** | Local authentication, user groups, dashboard permissions, MQTT credential modes and isolated user-authored code |
-| **Operations** | Structured logs, Prometheus metrics, built-in metric history, health checks and versioned database migrations |
+| **Operations** | Structured logs, Prometheus metrics, optional built-in metric history when the Data Store is enabled, health checks and versioned database migrations |
 | **Deployment** | Docker Compose on Linux, with Raspberry Pi installation and no mandatory hosted service |
 
 ## Dashboard
@@ -357,8 +347,10 @@ interface Connector {
   connect(): Promise<void>;
   disconnect(): Promise<void>;
   discoverDevices(): Promise<Device[]>;
-  execute(action: DeviceAction): Promise<ActionResult>;
-  getHealthStatus(): ConnectorHealth;
+  execute(action: Action): Promise<void>;
+  getHealthStatus(): ConnectorHealthStatus;
+  onConfigUpdate(config: Record<string, unknown>): void;
+  dispose(): Promise<void>;
 }
 ```
 
@@ -407,7 +399,7 @@ db.set("show-config", "defaultFadeMs", 1200);
 const fadeMs = db.get("show-config", "defaultFadeMs");
 ```
 
-The Data Store is disabled by default until storage limits are configured. Safeguards include collection limits, record limits, retention policies and FIFO eviction.
+The Data Store is disabled by default. Enabling it through the Data setup flow applies explicit storage, collection and record limits. Safeguards include a configured estimated-storage limit, per-collection FIFO eviction and optional retention policies.
 
 <!--
 MEDIA TODO: Data explorer screenshot
@@ -461,7 +453,7 @@ Operational visibility is built into the platform rather than requiring a separa
 - device state history and charts
 - automation execution history
 - Prometheus-compatible `/metrics` endpoint
-- built-in short-term and aggregated metric history.
+- built-in short-term and aggregated metric history when the Data Store is enabled.
 
 The Prometheus endpoint can be protected with `METRICS_TOKEN`.
 
@@ -487,11 +479,12 @@ The backend normalises incoming device events, maintains the device registry, ru
 
 For the component-level view and a walkthrough of the internal event flow, sandbox boundaries, connector lifecycle and command path, see the [**detailed architecture**](docs/WHY_AEOLUS.md#detailed-architecture) in **Why Aeolus?**
 
-### Core services
+### Runtime services
 
 | Service | Default port | Responsibility |
 |---|---:|---|
 | `aeolus-mosquitto` | `1883` | Local MQTT broker |
+| `aeolus-mosquitto-reloader` | — | Scoped sidecar that reloads Mosquitto after managed config/password-file changes |
 | `aeolus-backend` | `3001` | API, WebSocket, connectors, registry, automation runtime and storage |
 | `aeolus-frontend` | `3000` | React dashboard served through nginx |
 
@@ -507,7 +500,7 @@ Versioned migrations run at backend startup. Aeolus records applied schema versi
 
 ## Configuration
 
-Defaults work with Docker Compose. Common environment variables include:
+Runtime defaults come from [`src/config.ts`](src/config.ts); `docker-compose.yml` deliberately overrides a few of them for the container deployment. Common environment variables include:
 
 | Variable | Default | Purpose |
 |---|---|---|
@@ -516,10 +509,10 @@ Defaults work with Docker Compose. Common environment variables include:
 | `MQTT_DISCOVERY_IGNORED_TOPIC_SUFFIXES` | `set,command,cmd,heartbeat,availability` | Topic leaf names excluded from automatic device discovery |
 | `MQTT_MANAGED_PROVISIONING_ENABLED` | `false` | Enables experimental dashboard management of Shared / Per-Device broker security |
 | `PORT` / `API_PORT` | `3001` | Backend API port |
-| `DB_PATH` | `./data/aeolus.db` | SQLite path outside Docker |
-| `LOG_LEVEL` | `info` | Application logging level |
-| `NODE_ENV` | `development` | Runtime environment |
-| `JWT_SECRET` | generated if absent | Access-token signing secret |
+| `DB_PATH` | `./data/aeolus.db` (`/app/data/aeolus.db` in Compose) | SQLite database path |
+| `LOG_LEVEL` | `debug` (`info` in Compose) | Application logging level |
+| `NODE_ENV` | `development` (`production` in Compose) | Runtime environment |
+| `JWT_SECRET` | generated and persisted in SQLite if absent | Access-token signing secret |
 | `METRICS_TOKEN` | unset | Optional bearer token for `/metrics` |
 
 See [`.env.example`](.env.example), [`frontend/.env.example`](frontend/.env.example) and [`docker-compose.yml`](docker-compose.yml) for deployment starting points. Runtime defaults live in [`src/config.ts`](src/config.ts).

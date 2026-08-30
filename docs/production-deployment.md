@@ -9,7 +9,7 @@ Aeolus runs as four long-running services defined in `docker-compose.yml`:
 | `aeolus-mosquitto` | bridge | `1883` | Eclipse Mosquitto MQTT broker |
 | `aeolus-mosquitto-reloader` | shares Mosquitto's PID namespace | — | Sidecar that watches the shared Mosquitto config volume and sends `SIGHUP` to the broker when the password file or config changes |
 | `aeolus-backend` | **host** | `3001` | Express API + automation engine + WebSocket |
-| `aeolus-frontend` | bridge | `3000` → `80` | React dashboard (nginx) |
+| `aeolus-frontend` | bridge | `3000` → `8080` | React dashboard (nginx-unprivileged) |
 
 > The backend uses `network_mode: host` so it can do UDP-broadcast discovery (Kasa) and reach LAN devices (Hue bridge) directly. That means the backend binds port `3001` straight onto the host rather than through Docker port mapping.
 

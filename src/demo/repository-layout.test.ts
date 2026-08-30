@@ -6,15 +6,15 @@ const ROOT = path.resolve(import.meta.dirname, "..", "..");
 const at = (...parts: string[]) => path.join(ROOT, ...parts);
 
 describe("demo repository layout", () => {
-  it("keeps normal Compose files at root and showcase-only Compose under demo/compose", () => {
+  it("keeps the normal Compose file at root and showcase-only Compose under demo/compose", () => {
     expect(existsSync(at("docker-compose.yml"))).toBe(true);
-    expect(existsSync(at("docker-compose.desktop.yml"))).toBe(true);
 
     for (const file of ["local-showcase.yml", "hosted-runtime.yml", "hosted-build.yml"]) {
       expect(existsSync(at("demo", "compose", file)), file).toBe(true);
     }
 
     for (const legacy of [
+      "docker-compose.desktop.yml",
       "docker-compose.demo.yml",
       "docker-compose.public-demo.yml",
       "docker-compose.public-demo.build.yml",
