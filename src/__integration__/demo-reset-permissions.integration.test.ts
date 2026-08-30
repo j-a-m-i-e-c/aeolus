@@ -17,7 +17,8 @@
 
 import { describe, it, expect } from "vitest";
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "..", "..");
@@ -47,8 +48,9 @@ describe("demo reset — runtime ownership contract", () => {
   it("corrects ownership after replacing the DB and before starting services", () => {
     // The bug was ordering-sensitive: a chown that runs after `compose up`, or
     // before the copy, still hands the backend a root-owned database.
-    const replaced = lineOf(RESET_SCRIPT, /mv "\$staged_db" "\$ACTIVE_DB"/);
-    const chowned = lineOf(RESET_SCRIPT, /chown -R "\$\{runtime_uid\}:\$\{runtime_gid\}"/);
+    const replaced = lineOf(RESET_SCRIPT, /mv -f "\$staged_db" "\$ACTIVE_DB"/);
+    const chowned = RESET_SCRIPT.split("\n").findIndex((line, index) => index > replaced && /^restore_runtime_ownership$/.test(line));
+    expect(chowned).toBeGreaterThanOrEqual(0);
     // Anchored: the failure trap also restarts the services, and that line must
     // not be mistaken for the normal start.
     const started = lineOf(RESET_SCRIPT, /^compose up -d backend simulator$/);
@@ -71,7 +73,7 @@ describe("demo reset — runtime ownership contract", () => {
     // -wal/-shm are created by the backend at runtime and may also be left over
     // from a previous run, so naming files individually is fragile.
     expect(RESET_SCRIPT).toMatch(/chown -R "\$\{runtime_uid\}:\$\{runtime_gid\}" "\$DATA_DIR"/);
-    expect(RESET_SCRIPT).toMatch(/rm -f "\$ACTIVE_DB" "\$\{ACTIVE_DB\}-wal" "\$\{ACTIVE_DB\}-shm"/);
+    expect(RESET_SCRIPT).toMatch(/rm -f "\$\{ACTIVE_DB\}-wal" "\$\{ACTIVE_DB\}-shm"/);
   });
 
   it("never loosens the golden snapshot", () => {
@@ -87,15 +89,19 @@ describe("demo reset — runtime ownership contract", () => {
   it("holds the same ownership invariant when a golden snapshot is created", () => {
     // create-demo-golden.sh also stops and restarts the backend, and its WAL
     // checkpoint can create sidecars as whoever ran it.
-    const chowned = lineOf(GOLDEN_SCRIPT, /chown -R "\$\{runtime_uid\}:\$\{runtime_gid\}" "\$DATA_DIR"/);
     const restarted = lineOf(GOLDEN_SCRIPT, /^compose up -d backend simulator$/);
+    const chowned = GOLDEN_SCRIPT.split("\n").findIndex((line, index) => index < restarted && /^restore_runtime_ownership$/.test(line));
+    expect(chowned).toBeGreaterThanOrEqual(0);
     expect(chowned).toBeLessThan(restarted);
   });
 
-  it("stages the restore so a failed copy cannot leave the demo with no database", () => {
+  it("stages then atomically replaces the DB so a failed copy cannot leave no database", () => {
     const staged = lineOf(RESET_SCRIPT, /cp "\$GOLDEN_DB" "\$staged_db"/);
-    const removedActive = lineOf(RESET_SCRIPT, /rm -f "\$ACTIVE_DB" "\$\{ACTIVE_DB\}-wal"/);
-    expect(staged).toBeLessThan(removedActive);
+    const sidecarsRemoved = lineOf(RESET_SCRIPT, /rm -f "\$\{ACTIVE_DB\}-wal" "\$\{ACTIVE_DB\}-shm"/);
+    const replaced = lineOf(RESET_SCRIPT, /mv -f "\$staged_db" "\$ACTIVE_DB"/);
+    expect(staged).toBeLessThan(sidecarsRemoved);
+    expect(sidecarsRemoved).toBeLessThan(replaced);
+    expect(RESET_SCRIPT).not.toMatch(/rm -f "\$ACTIVE_DB"/);
   });
 
   it("recovers, loudly, if the reset aborts after stopping the services", () => {
@@ -107,12 +113,42 @@ describe("demo reset — runtime ownership contract", () => {
     const stopped = lineOf(RESET_SCRIPT, /^compose stop backend simulator$/);
     const flagged = lineOf(RESET_SCRIPT, /^services_stopped=1$/);
     expect(flagged).toBeGreaterThan(stopped);
+    const recoveryOwnership = lineOf(RESET_SCRIPT, /^  restore_runtime_ownership >&2 \|\| true$/);
+    const recoveryRestart = lineOf(RESET_SCRIPT, /^  if compose up -d backend simulator >&2; then$/);
+    expect(recoveryOwnership).toBeLessThan(recoveryRestart);
   });
 
   it("reloads systemd when the deploy installs unit files", () => {
     // Without this systemd keeps running the old unit and warns that the unit
     // file changed on disk.
     expect(DEPLOY_SCRIPT).toMatch(/cp scripts\/systemd\/aeolus-demo-reset\.service[^\n]*systemctl daemon-reload/);
+  });
+
+  it("requires and verifies the golden checksum before reset stops services", () => {
+    const checksumRequired = lineOf(RESET_SCRIPT, /golden checksum not found/);
+    const checksumVerified = lineOf(RESET_SCRIPT, /sha256sum -c/);
+    const stopped = lineOf(RESET_SCRIPT, /^compose stop backend simulator$/);
+    expect(checksumRequired).toBeLessThan(stopped);
+    expect(checksumVerified).toBeLessThan(stopped);
+  });
+
+  it("replaces read-only golden sidecars through staged files", () => {
+    expect(GOLDEN_SCRIPT).toMatch(/checksum_tmp="\$\{GOLDEN_DB\}\.sha256\.tmp\.\$\$"/);
+    expect(GOLDEN_SCRIPT).toMatch(/meta_tmp="\$\{GOLDEN_DB\}\.meta\.tmp\.\$\$"/);
+    expect(GOLDEN_SCRIPT).toMatch(/mv -f "\$checksum_tmp" "\$\{GOLDEN_DB\}\.sha256"/);
+    expect(GOLDEN_SCRIPT).toMatch(/mv -f "\$meta_tmp" "\$\{GOLDEN_DB\}\.meta"/);
+    expect(GOLDEN_SCRIPT).not.toMatch(/>\s*"\$\{GOLDEN_DB\}\.sha256"/);
+    expect(GOLDEN_SCRIPT).not.toMatch(/>\s*"\$\{GOLDEN_DB\}\.meta"/);
+  });
+
+  it("only arms the nightly timer after a verified golden and fails closed otherwise", () => {
+    expect(DEPLOY_SCRIPT).toMatch(/test -f '\$golden_db' && test -f '\$golden_db\.sha256'/);
+    expect(DEPLOY_SCRIPT).toMatch(/sha256sum -c 'aeolus-demo\.db\.sha256'/);
+    expect(DEPLOY_SCRIPT).toMatch(/systemctl disable --now aeolus-demo-reset\.timer/);
+  });
+
+  it("treats an external public release-gate failure as a deployment failure", () => {
+    expect(DEPLOY_SCRIPT).toMatch(/if \[ "\$\{public_ok:-1\}" != "1" \]; then[\s\S]*die /);
   });
 });
 
@@ -168,6 +204,7 @@ describeDocker("demo reset — actual resulting ownership (root reset)", () => {
       // A plausible golden file, plus a stale root-owned sidecar and a
       // root-owned active DB — exactly the broken state from production.
       "printf 'golden-db-bytes' > /demo/golden/aeolus-demo.db",
+      "cd /demo/golden && sha256sum aeolus-demo.db > aeolus-demo.db.sha256 && cd /demo/app",
       "printf 'stale' > /demo/data/aeolus.db",
       "printf 'stale-wal' > /demo/data/aeolus.db-wal",
       "chown -R 0:0 /demo/data",
@@ -207,4 +244,54 @@ describeDocker("demo reset — actual resulting ownership (root reset)", () => {
     // No staging leftovers.
     expect(output).not.toMatch(/aeolus\.db\.restoring/);
   });
+
+  it("can create two consecutive goldens when prior sidecars are 0444", () => {
+    const work = mkdtempSync(path.join(tmpdir(), "aeolus-golden-repeat-"));
+    // The container runs as the current non-root uid/gid so 0444 genuinely blocks
+    // in-place truncation; directory ownership still permits atomic replacement.
+    chmodSync(work, 0o777);
+    try {
+      const uid = typeof process.getuid === "function" ? process.getuid() : 1000;
+      const gid = typeof process.getgid === "function" ? process.getgid() : 1000;
+      if (uid === 0) return; // structural assertions above still run in root-only CI.
+
+      const script = String.raw`
+set -eu
+mkdir -p /work/bin /work/data /work/golden /work/app
+printf '#!/bin/sh\nexit 0\n' > /work/bin/docker
+printf '#!/bin/sh\ncase "$*" in *integrity_check*) echo ok;; *) exit 0;; esac\n' > /work/bin/sqlite3
+chmod +x /work/bin/docker /work/bin/sqlite3
+export PATH=/work/bin:$PATH
+printf 'active-v1' > /work/data/aeolus.db
+cp /repo/scripts/create-demo-golden.sh /work/app/create-demo-golden.sh
+chmod +x /work/app/create-demo-golden.sh
+cd /work/app
+AEOLUS_DEMO_GOLDEN_DB=/work/golden/aeolus-demo.db AEOLUS_DEMO_DATA_DIR=/work/data ./create-demo-golden.sh >/tmp/first 2>&1 || { cat /tmp/first; exit 1; }
+test "$(stat -c %a /work/golden/aeolus-demo.db.sha256)" = 444
+test "$(stat -c %a /work/golden/aeolus-demo.db.meta)" = 444
+sleep 1
+printf 'active-v2' > /work/data/aeolus.db
+AEOLUS_DEMO_GOLDEN_DB=/work/golden/aeolus-demo.db AEOLUS_DEMO_DATA_DIR=/work/data ./create-demo-golden.sh >/tmp/second 2>&1 || { cat /tmp/second; exit 1; }
+cd /work/golden && sha256sum -c aeolus-demo.db.sha256
+test "$(cat aeolus-demo.db)" = active-v2
+echo REPEATED_GOLDEN_OK
+`;
+
+      const output = execFileSync(
+        "docker",
+        [
+          "run", "--rm", "--user", `${uid}:${gid}`,
+          "-v", `${REPO_ROOT}:/repo:ro`,
+          "-v", `${work}:/work`,
+          "--entrypoint", "bash",
+          "bash:5", "-c", script,
+        ],
+        { encoding: "utf8", timeout: 180_000 },
+      );
+      expect(output).toContain("REPEATED_GOLDEN_OK");
+    } finally {
+      rmSync(work, { recursive: true, force: true });
+    }
+  });
+
 });

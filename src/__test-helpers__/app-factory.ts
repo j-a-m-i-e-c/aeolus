@@ -106,7 +106,7 @@ export function createTestApp(
     eventBus.emit(COMMAND_LIFECYCLE_TRANSITION, event);
   });
 
-  const actionExecutor = new CommandService({
+  const commandService = new CommandService({
     mqttService: createStubMqttService(),
     // CommandService may hold a ConnectorManager (routes must not). A minimal
     // stub lets device actions resolve so command history is exercised in tests.
@@ -119,12 +119,12 @@ export function createTestApp(
     commandHistoryStore,
     executionContext: { current: () => currentExecutionContext() },
   } as unknown as CommandServiceDeps);
-  actionExecutor.registerHandler("publish", handlePublish);
-  actionExecutor.registerHandler("toggle", handleToggle);
-  actionExecutor.registerHandler("device_action", handleDeviceAction);
-  actionExecutor.registerHandler("log", handleLog);
-  actionExecutor.registerHandler("delay", handleDelay);
-  actionExecutor.registerHandler("webhook", handleWebhook);
+  commandService.registerHandler("publish", handlePublish);
+  commandService.registerHandler("toggle", handleToggle);
+  commandService.registerHandler("device_action", handleDeviceAction);
+  commandService.registerHandler("log", handleLog);
+  commandService.registerHandler("delay", handleDelay);
+  commandService.registerHandler("webhook", handleWebhook);
 
   const conditionRegistry = new ConditionRegistry();
   conditionRegistry.registerCondition("value_above", (v) => (context) => Number((context.state as Record<string, unknown>).value) > Number(v));
@@ -135,7 +135,7 @@ export function createTestApp(
   const stateStore = new AutomationStateStore(db);
   stateStore.loadFromDb();
 
-  const engine = new AutomationEngine(eventBus, { commandService: actionExecutor, scopeResolver: automationScopeResolver, executionLog });
+  const engine = new AutomationEngine(eventBus, { commandService: commandService, scopeResolver: automationScopeResolver, executionLog });
 
   // Stub MQTT service for health route
   const stubMqttService = createStubMqttService();
@@ -176,14 +176,14 @@ export function createTestApp(
   // ─── Routes ──────────────────────────────────────────────────────────────
 
   app.use("/api/auth", createAuthRoutes());
-  app.use("/api/devices", createDeviceRoutes(registry, actionExecutor, () => [], requireDevice, permissionResolver));
+  app.use("/api/devices", createDeviceRoutes(registry, commandService, () => [], requireDevice, permissionResolver));
   app.use("/api/state", createStateRoutes(registry, permissionResolver));
   app.use("/api/health", createHealthRoutes(stubMqttService as never, registry, engine, startTime));
   app.use("/api/automations", createAutomationRoutes(
     engine,
     db,
     registry,
-    actionExecutor,
+    commandService,
     executionLog,
     "", // sandboxTypesPath — not needed for tests
     requireAutomation,
@@ -232,7 +232,7 @@ export function createAuthToken(options?: {
 
 // ─── Internal Stubs ──────────────────────────────────────────────────────────
 
-/** Minimal stub for MqttService used by health routes and action executor */
+/** Minimal stub for MqttService used by health routes and CommandService */
 function createStubMqttService() {
   return {
     isConnected: () => false,

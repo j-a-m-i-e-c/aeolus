@@ -60,6 +60,12 @@ const demoToken = () =>
   createAuthToken({ userId: "u-demo", username: "demo", role: "user", groupId: "g-demo", sessionType: "public-demo" });
 const adminToken = () => createAuthToken({ userId: "u-admin", role: "admin" });
 
+const scriptProject = (body = "export default async function run() {}") => ({
+  logicEntry: "logic/index.ts",
+  uiEntry: null,
+  files: [{ path: "logic/index.ts", content: body }],
+});
+
 describe("Public demo mode (integration)", () => {
   let db: DatabaseType;
   let app: Express;
@@ -77,13 +83,13 @@ describe("Public demo mode (integration)", () => {
     const created = await request(app)
       .post("/api/automations")
       .set("Authorization", `Bearer ${adminToken()}`)
-      .send({ name: "Demo Control", ruleType: "script", scriptSource: "function automation(context) {}" });
+      .send({ name: "Demo Control", ruleType: "script", project: scriptProject() });
     ruleId = created.body.id;
 
     const unexposed = await request(app)
       .post("/api/automations")
       .set("Authorization", `Bearer ${adminToken()}`)
-      .send({ name: "Hidden", ruleType: "script", scriptSource: "function automation(context) {}" });
+      .send({ name: "Hidden", ruleType: "script", project: scriptProject() });
     unexposedRuleId = unexposed.body.id;
 
     // Expose only the first rule to the demo tab.
@@ -222,7 +228,7 @@ describe("Public demo mode (integration)", () => {
   // ── Deny matrix (Req 8, 16.2, 16.3) ──
   describe("a demo session CANNOT", () => {
     const denied403: Array<[string, string, unknown?]> = [
-      ["post", "/api/automations", { name: "x", ruleType: "script", scriptSource: "function automation(){}" }],
+      ["post", "/api/automations", { name: "x", ruleType: "script", project: scriptProject() }],
       ["put", "/api/layout", { tabs: [], panes: [] }],
       ["post", "/api/mqtt/publish", { topic: "x", payload: "{}" }],
       ["post", "/api/data-store/collections", { name: "x" }],
@@ -301,7 +307,7 @@ describe("Public demo mode (integration)", () => {
       const res = await request(app)
         .post("/api/automations")
         .set("Authorization", `Bearer ${adminToken()}`)
-        .send({ name: "Admin Rule", ruleType: "script", scriptSource: "function automation(){}" });
+        .send({ name: "Admin Rule", ruleType: "script", project: scriptProject() });
       expect(res.status).toBe(200);
     });
   });
