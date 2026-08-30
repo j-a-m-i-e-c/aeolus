@@ -1,5 +1,5 @@
 # frontend/ is its own Docker build context: `docker build … "$ROOT/frontend"`
-# (scripts/deploy/deploy-demo-from-pc.sh, docker-compose*.yml). The repo-root
+# (demo/operations/deploy/deploy-from-pc.sh, docker-compose*.yml). The repo-root
 # .dockerignore does NOT apply here, so this file has to stand on its own.
 #
 # The Dockerfile runs `npm ci` and *then* `COPY . .`. Without these exclusions a

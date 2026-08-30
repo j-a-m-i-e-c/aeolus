@@ -1,0 +1,24 @@
+# aeolus-demo-reset.service — one-shot nightly reset of the hosted Aeolus demo.
+#
+# Install on the demo host (as root):
+#   sudo cp demo/operations/systemd/aeolus-demo-reset.{service,timer} /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now aeolus-demo-reset.timer
+#
+# The deployment scripts use /opt/aeolus-demo. If you choose a different
+# DEMO_ROOT, install a matching unit rather than silently relying on these
+# defaults. The reset is presentation hygiene only; the public-demo application
+# remains fail-closed even if this timer never runs.
+
+[Unit]
+Description=Reset the Aeolus hosted demo to its golden snapshot
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/aeolus-demo/app
+Environment=COMPOSE_FILE=/opt/aeolus-demo/app/demo/compose/hosted-runtime.yml
+Environment=AEOLUS_DEMO_GOLDEN_DB=/opt/aeolus-demo/golden/aeolus-demo.db
+Environment=AEOLUS_DEMO_DATA_DIR=/opt/aeolus-demo/data
+ExecStart=/opt/aeolus-demo/app/demo/operations/reset.sh

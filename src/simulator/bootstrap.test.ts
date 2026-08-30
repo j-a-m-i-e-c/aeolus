@@ -1,21 +1,21 @@
 // src/simulator/bootstrap.test.ts
-// Unit tests for the seed/bootstrap helper (scripts/seed/simulator-bootstrap.mjs).
+// Unit tests for the seed/bootstrap helper (demo/seed/simulator-bootstrap.mjs).
 // The bootstrap is admin-privileged seed-time code, exercised here against a
 // fake client so it needs no running backend.
 import { describe, it, expect, vi } from "vitest";
 import {
   profileMatches,
   configureSimulatedCommandProfiles,
-} from "../../scripts/seed/simulator-bootstrap.mjs";
-import { AGRICULTURE_ACTUATOR_SPECS } from "../../scripts/seed/agriculture-simulator-bootstrap.mjs";
-import { RESEARCH_VESSEL_ACTUATOR_SPECS } from "../../scripts/seed/research-vessel-simulator-bootstrap.mjs";
-import { UNDERGROUND_MINING_ACTUATOR_SPECS } from "../../scripts/seed/underground-mining-simulator-bootstrap.mjs";
-import { WILDLIFE_ACTUATOR_SPECS } from "../../scripts/seed/wildlife-simulator-bootstrap.mjs";
-import { STAGE_SHOW_ACTUATOR_SPECS } from "../../scripts/seed/stage-show-simulator-bootstrap.mjs";
-import { ESCAPE_ROOM_ACTUATOR_SPECS } from "../../scripts/seed/escape-room-simulator-bootstrap.mjs";
-import { OFF_GRID_BUNKER_ACTUATOR_SPECS } from "../../scripts/seed/off-grid-bunker-simulator-bootstrap.mjs";
+} from "../../demo/seed/simulator-bootstrap.mjs";
+import { AGRICULTURE_ACTUATOR_SPECS } from "../../demo/seed/agriculture-simulator-bootstrap.mjs";
+import { RESEARCH_VESSEL_ACTUATOR_SPECS } from "../../demo/seed/research-vessel-simulator-bootstrap.mjs";
+import { UNDERGROUND_MINING_ACTUATOR_SPECS } from "../../demo/seed/underground-mining-simulator-bootstrap.mjs";
+import { WILDLIFE_ACTUATOR_SPECS } from "../../demo/seed/wildlife-simulator-bootstrap.mjs";
+import { STAGE_SHOW_ACTUATOR_SPECS } from "../../demo/seed/stage-show-simulator-bootstrap.mjs";
+import { ESCAPE_ROOM_ACTUATOR_SPECS } from "../../demo/seed/escape-room-simulator-bootstrap.mjs";
+import { OFF_GRID_BUNKER_ACTUATOR_SPECS } from "../../demo/seed/off-grid-bunker-simulator-bootstrap.mjs";
 
-/** Every world's specs, in the order scripts/seed-demo.mjs concatenates them. */
+/** Every world's specs, in the order demo/seed/seed.mjs concatenates them. */
 const WORLD_ACTUATOR_SPECS: Array<readonly [string, readonly unknown[]]> = [
   ["agriculture", AGRICULTURE_ACTUATOR_SPECS],
   ["research-vessel", RESEARCH_VESSEL_ACTUATOR_SPECS],
@@ -192,7 +192,7 @@ describe("every demo world's actuator specs are shaped for the bootstrap", () =>
   );
 
   it("is the full set the seed actually passes to the bootstrap", () => {
-    // Keeps this guard honest: if a new world is wired into seed-demo.mjs but not
+    // Keeps this guard honest: if a new world is wired into demo/seed/seed.mjs but not
     // added here, the count drifts and this fails.
     const declared = WORLD_ACTUATOR_SPECS.reduce((n, [, specs]) => n + specs.length, 0);
     expect(declared).toBe(23);

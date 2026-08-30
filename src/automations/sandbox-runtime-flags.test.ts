@@ -63,7 +63,7 @@ describe("isolated-vm launch flags", () => {
     // The simulator and the seed helper are separate entrypoints that do not use
     // isolated-vm. Adding the flag there would imply a dependency they do not
     // have, and hide where the real requirement comes from.
-    for (const file of ["docker-compose.yml", "docker-compose.public-demo.yml"]) {
+    for (const file of ["docker-compose.yml", "demo/compose/hosted-runtime.yml"]) {
       const compose = read(file);
       const simulatorCommands = compose
         .split("\n")

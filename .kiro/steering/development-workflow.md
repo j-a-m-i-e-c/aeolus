@@ -102,6 +102,11 @@ aeolus/
 │   ├── reference/
 │   ├── security/
 │   └── how-to/
+├── demo/                    # showcase-only compose, seed, operations and IaC
+│   ├── compose/             # local-showcase, hosted-runtime, hosted-build
+│   ├── seed/                # showcase seeder, authored projects and tabs
+│   ├── operations/          # golden/reset/health, deploy helpers, systemd
+│   └── infrastructure/      # Lightsail + Cloudflare Terraform
 ├── scripts/
 ├── e2e/
 └── .github/workflows/

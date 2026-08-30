@@ -8,7 +8,7 @@
 // recoverable.
 //
 // Setup uses the API to create the automation and its pane, mirroring exactly
-// what scripts/seed/lib.mjs does, so the browser drives production-shaped data
+// what demo/seed/lib.mjs does, so the browser drives production-shaped data
 // rather than a bespoke fixture. Each test re-seeds a known baseline so they can
 // run in any order and be re-run against a dirty database.
 

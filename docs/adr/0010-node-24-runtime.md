@@ -81,7 +81,7 @@ Node 26 reaches Active LTS in October 2026, or an `isolated-vm` upgrade again fo
 ## Implementation anchors
 
 - `.nvmrc`, `package.json`, `frontend/package.json`
-- `Dockerfile`, `frontend/Dockerfile`, `docker-compose.yml`, `docker-compose.public-demo.yml`
+- `Dockerfile`, `frontend/Dockerfile`, `docker-compose.yml`, `demo/compose/hosted-runtime.yml`
 - `Makefile`
 - `src/automations/sandbox.ts`
 - `docs/adr/0009-pinned-node-22-runtime.md`

@@ -13,12 +13,12 @@ import { loadSimulatorConfig } from "./config.js";
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "..", "..");
 const baseCompose = readFileSync(path.join(REPO_ROOT, "docker-compose.yml"), "utf8");
-const demoCompose = readFileSync(path.join(REPO_ROOT, "docker-compose.demo.yml"), "utf8");
-const publicDemoCompose = readFileSync(path.join(REPO_ROOT, "docker-compose.public-demo.yml"), "utf8");
+const demoCompose = readFileSync(path.join(REPO_ROOT, "demo/compose/local-showcase.yml"), "utf8");
+const publicDemoCompose = readFileSync(path.join(REPO_ROOT, "demo/compose/hosted-runtime.yml"), "utf8");
 const frontendDockerfile = readFileSync(path.join(REPO_ROOT, "frontend", "Dockerfile"), "utf8");
 const frontendNginx = readFileSync(path.join(REPO_ROOT, "frontend", "nginx.conf"), "utf8");
-const demoHealthScript = readFileSync(path.join(REPO_ROOT, "scripts", "demo-health-check.sh"), "utf8");
-const resetTimer = readFileSync(path.join(REPO_ROOT, "scripts", "systemd", "aeolus-demo-reset.timer"), "utf8");
+const demoHealthScript = readFileSync(path.join(REPO_ROOT, "demo", "operations", "health-check.sh"), "utf8");
+const resetTimer = readFileSync(path.join(REPO_ROOT, "demo", "operations", "systemd", "aeolus-demo-reset.timer"), "utf8");
 
 /** Extract the indented block for a named service from a compose file. */
 function serviceBlock(compose: string, service: string): string | undefined {
@@ -59,7 +59,7 @@ describe("simulator deployment guardrails", () => {
   });
 });
 
-describe("hardened public demo stack (docker-compose.public-demo.yml)", () => {
+describe("hardened public demo stack (demo/compose/hosted-runtime.yml)", () => {
   const backend = serviceBlock(publicDemoCompose, "backend") ?? "";
   const mosquitto = serviceBlock(publicDemoCompose, "mosquitto") ?? "";
   const frontend = serviceBlock(publicDemoCompose, "frontend") ?? "";

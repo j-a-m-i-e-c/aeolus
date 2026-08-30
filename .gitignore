@@ -14,7 +14,7 @@ test-results/
 mosquitto/password_file
 
 # Seed dev scratch files (validation harness + extracted legacy seed)
-scripts/seed/_*.mjs
+demo/seed/_*.mjs
 
 # Local working notes — pasted assistant transcripts and scratch patch files.
 # Kept out of the repo so a release tree can be verified clean before deploying
@@ -38,4 +38,4 @@ docker-compose.override.yml
 *.tfstate
 *.tfstate.*
 *.tfplan
-infra/public-demo/terraform.tfvars
+demo/infrastructure/terraform/terraform.tfvars

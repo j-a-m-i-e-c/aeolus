@@ -18,14 +18,14 @@ export default tseslint.config(
       // that are not TS symbols here, and the UI modules take deliberately
       // untyped projection state. It is also outside tsconfig's `include`, so it
       // has never been type-checked or linted — it previously lived inside
-      // template strings in scripts/seed/tabs/*.mjs, and the multi-file project
+      // template strings in demo/seed/tabs/*.mjs, and the multi-file project
       // restructure merely turned it into real files on disk.
       //
       // It is not unverified: src/simulator/deployment.test.ts and the seed path
       // compile every project through the real esbuild-based project compiler
       // (src/automations/automation-project.ts), which is what actually has to
       // accept this source.
-      "scripts/seed/projects/",
+      "demo/seed/projects/",
     ],
   },
   ...tseslint.configs.recommended,

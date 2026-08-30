@@ -11,9 +11,9 @@
 
 import { describe, it, expect } from "vitest";
 import { transformSync } from "esbuild";
-import spaceTab from "../../scripts/seed/tabs/space.mjs";
+import spaceTab from "../../demo/seed/tabs/space.mjs";
 import { attachSeedProjectSource } from "../__test-helpers__/seed-project-source.js";
-// Authored source lives in scripts/seed/projects/space; expose it as
+// Authored source lives in demo/seed/projects/space; expose it as
 // scriptSource/uiSource for the source-level extraction below.
 attachSeedProjectSource(...spaceTab.automations);
 

@@ -92,7 +92,7 @@ async function provisionDemo(request: APIRequestContext): Promise<string> {
   });
   expect(layout.ok(), await layout.text()).toBeTruthy();
 
-  // Demo identity: read-only on the tab, exactly as scripts/seed/lib.mjs does.
+  // Demo identity: read-only on the tab, exactly as demo/seed/lib.mjs does.
   const groups = await (await request.get(`${API_URL}/api/auth/groups`, { headers: auth })).json() as
     Array<{ id: string; name: string }>;
   const tabAssignments = [{ tabId: TAB_ID, permission: "read" as const }];

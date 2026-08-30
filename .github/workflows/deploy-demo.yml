@@ -7,9 +7,9 @@ name: Publish Aeolus Demo Release
 #   DEMO_IMAGE_MODE=registry \
 #   DEMO_APP_IMAGE=ghcr.io/<owner>/aeolus-demo-app:<sha> \
 #   DEMO_FRONTEND_IMAGE=ghcr.io/<owner>/aeolus-demo-frontend:<sha> \
-#   ./scripts/deploy/deploy-demo-from-pc.sh
+#   ./demo/operations/deploy/deploy-from-pc.sh
 #
-# For the first deployment you can skip GHCR entirely; deploy-demo-from-pc.sh
+# For the first deployment you can skip GHCR entirely; demo/operations/deploy/deploy-from-pc.sh
 # defaults to building locally and streaming the images over SSH.
 
 on:
@@ -132,5 +132,5 @@ jobs:
           echo '- `ghcr.io/${{ github.repository_owner }}/aeolus-demo-frontend:${{ needs.verify.outputs.sha }}`' >> "$GITHUB_STEP_SUMMARY"
           cat >> "$GITHUB_STEP_SUMMARY" <<'SUMMARY'
 
-          Deploy from a source-restricted operator PC with `scripts/deploy/deploy-demo-from-pc.sh` in `registry` mode.
+          Deploy from a source-restricted operator PC with `demo/operations/deploy/deploy-from-pc.sh` in `registry` mode.
           SUMMARY

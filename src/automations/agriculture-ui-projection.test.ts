@@ -15,12 +15,12 @@
 // migrations that will follow the same pattern.
 
 import { describe, it, expect } from "vitest";
-import { waterAutomation } from "../../scripts/seed/tabs/agriculture/water.mjs";
-import { livestockAutomation } from "../../scripts/seed/tabs/agriculture/livestock.mjs";
-import { troughAutomation } from "../../scripts/seed/tabs/agriculture/troughs.mjs";
-import { energyAutomation } from "../../scripts/seed/tabs/agriculture/energy.mjs";
+import { waterAutomation } from "../../demo/seed/tabs/agriculture/water.mjs";
+import { livestockAutomation } from "../../demo/seed/tabs/agriculture/livestock.mjs";
+import { troughAutomation } from "../../demo/seed/tabs/agriculture/troughs.mjs";
+import { energyAutomation } from "../../demo/seed/tabs/agriculture/energy.mjs";
 import { attachSeedProjectSource } from "../__test-helpers__/seed-project-source.js";
-// Authored source lives in scripts/seed/projects/<projectDir>; expose it as
+// Authored source lives in demo/seed/projects/<projectDir>; expose it as
 // scriptSource/uiSource for the source-level assertions below.
 attachSeedProjectSource(waterAutomation, livestockAutomation, troughAutomation, energyAutomation);
 

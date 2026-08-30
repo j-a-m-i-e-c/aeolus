@@ -46,4 +46,4 @@ services:
     network_mode: !reset null
     networks:
       - aeolus
-    entrypoint: ["sh", "-c", "node scripts/seed-demo.mjs http://backend:$${API_PORT} \"$$SEED_USER\" \"$$SEED_PASS\""]
+    entrypoint: ["sh", "-c", "node demo/seed/seed.mjs http://backend:$${API_PORT} \"$$SEED_USER\" \"$$SEED_PASS\""]

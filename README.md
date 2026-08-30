@@ -535,7 +535,8 @@ See [`.env.example`](.env.example), [`frontend/.env.example`](frontend/.env.exam
 | [**Security reference**](docs/security/README.md) | Authentication, permissions, tokens and MQTT security |
 | [**Microcontrollers**](docs/MICROCONTROLLERS.md) | ESP32 and Arduino MQTT integration |
 | [**Production deployment**](docs/production-deployment.md) | Operational deployment guidance |
-| [**Public demo hosting**](infra/public-demo/README.md) | Lightsail + Cloudflare Tunnel IaC and demo release runbook |
+| [**Demo subsystem**](demo/README.md) | Showcase boundaries, Compose roles, seeding and operations layout |
+| [**Public demo hosting**](demo/infrastructure/terraform/README.md) | Lightsail + Cloudflare Tunnel IaC and demo release runbook |
 | [**Testing**](docs/TESTING.md) | Test strategy, coverage and CI |
 | [**Connector guide**](src/connectors/README.md) | Building a new integration |
 | [**Roadmap**](docs/ROADMAP.md) | Current priorities and longer-term directions |

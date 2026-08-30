@@ -88,7 +88,7 @@ make sim            # AEOLUS_SIMULATOR_ENABLED=true npm run sim
 | `AEOLUS_SIMULATOR_MAX_COMMAND_QUEUE` | `100` | Per-device command-queue depth before fail-fast |
 | `AEOLUS_SIMULATOR_RANDOM_SEED` | unset | Seed for deterministic telemetry |
 
-Simulated actuators are ordinary generic MQTT devices. Their acknowledgement capability is configured through the normal `PUT /api/devices/:id/mqtt-command-profile` path by a seed-time bootstrap (`scripts/seed/simulator-bootstrap.mjs`), not by the simulator itself.
+Simulated actuators are ordinary generic MQTT devices. Their acknowledgement capability is configured through the normal `PUT /api/devices/:id/mqtt-command-profile` path by a seed-time bootstrap (`demo/seed/simulator-bootstrap.mjs`), not by the simulator itself.
 
 In the public-demo overlay the simulator runs as a `simulator` service (no published ports, internal broker only):
 
@@ -102,31 +102,31 @@ The reference `reference-water` scenario is a conformance fixture, not a public 
 ## Public demo deployment (hardened)
 
 The hosted demo (`demo.aeolus.com.au`) uses the standalone
-`docker-compose.public-demo.yml`. It is intentionally separate from the base
+`demo/compose/hosted-runtime.yml`. It is intentionally separate from the base
 stack because the public demo must never use host networking or LAN discovery.
 
 The deployment is split into two layers:
 
 ```text
-infra/public-demo (Terraform)
+demo/infrastructure/terraform (Terraform)
   -> Lightsail + static IP + SSH firewall + Cloudflare Tunnel/DNS/ingress
 
-scripts/deploy + docker-compose.public-demo.yml
+demo/operations/deploy + demo/compose/hosted-runtime.yml
   -> immutable Aeolus release + active/golden demo lifecycle
 ```
 
-See **`infra/public-demo/README.md`** for the complete first-deployment runbook.
+See **`demo/infrastructure/terraform/README.md`** for the complete first-deployment runbook.
 
 ### Runtime / build separation
 
-The Lightsail host does **not** build Aeolus. `docker-compose.public-demo.yml` is
+The Lightsail host does **not** build Aeolus. `demo/compose/hosted-runtime.yml` is
 runtime-only and consumes `AEOLUS_APP_IMAGE` / `AEOLUS_FRONTEND_IMAGE`. Local or
-CI builds use the explicit `docker-compose.public-demo.build.yml` overlay.
+CI builds use the explicit `demo/compose/hosted-build.yml` overlay.
 
 For a first deployment, the recommended path is operator-PC `transfer` mode:
 
 ```bash
-./scripts/deploy/deploy-demo-from-pc.sh
+./demo/operations/deploy/deploy-from-pc.sh
 ```
 
 It builds images locally, streams them over source-restricted SSH, starts the
@@ -159,10 +159,10 @@ Cloudflare dashboard configuration remains possible by setting
 After seeding/reviewing the final release, run on the demo host:
 
 ```bash
-./scripts/deploy/seed-demo-and-create-golden.sh
+./demo/operations/deploy/seed-and-create-golden.sh
 ```
 
-`scripts/create-demo-golden.sh` stops DB writers, checkpoints SQLite WAL, runs an
+`demo/operations/create-golden.sh` stops DB writers, checkpoints SQLite WAL, runs an
 integrity check, preserves the prior golden, and creates the new read-only snapshot.
 Checksum and metadata sidecars are built as fresh temporary files and atomically
 renamed into place so a previous `0444` sidecar is never truncated in place. The
@@ -170,16 +170,16 @@ new checksum is verified before the snapshot is accepted. On success, and on
 interrupted/failure recovery, ownership of the active runtime database is restored
 to the configured backend uid/gid before backend/simulator restart.
 
-`scripts/reset-demo.sh` requires the golden `.sha256` sidecar and refuses to stop
+`demo/operations/reset.sh` requires the golden `.sha256` sidecar and refuses to stop
 services or replace the active database unless verification succeeds. The systemd
-timer in `scripts/systemd/` restores the demo around 03:30 Sydney each day.
-`deploy-demo-from-pc.sh` enables that timer only when the golden DB and checksum
+timer in `demo/operations/systemd/` restores the demo around 03:30 Sydney each day.
+`demo/operations/deploy/deploy-from-pc.sh` enables that timer only when the golden DB and checksum
 both exist and verify successfully; failure leaves the timer disabled. The external
 Cloudflare release gate is also fatal rather than advisory. Manual remote reset
 from an operator machine is:
 
 ```bash
-./scripts/deploy/reset-demo-remote.sh
+./demo/operations/deploy/reset-remote.sh
 ```
 
 Reset remains a presentation-quality mechanism, not a security boundary.
@@ -194,7 +194,7 @@ images from a source-restricted PC in `registry` mode.
 This keeps the Lightsail SSH firewall independent of GitHub-hosted runner IPs.
 For the first deployment, GHCR is optional; local image transfer is simpler.
 
-Terraform state under `infra/public-demo` contains sensitive Cloudflare tunnel
+Terraform state under `demo/infrastructure/terraform` contains sensitive Cloudflare tunnel
 material and is ignored by Git. Treat it as a secret.
 
 ## Logging

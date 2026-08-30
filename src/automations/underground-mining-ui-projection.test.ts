@@ -1,12 +1,12 @@
 // Regression guard for the public-demo Underground Mining architecture.
 import { describe, expect, it } from "vitest";
-import { mineOverviewAutomation } from "../../scripts/seed/tabs/underground-mining/mine-overview.mjs";
-import { atmosphereAutomation } from "../../scripts/seed/tabs/underground-mining/atmosphere.mjs";
-import { ventilationAutomation } from "../../scripts/seed/tabs/underground-mining/ventilation.mjs";
-import { personnelAutomation } from "../../scripts/seed/tabs/underground-mining/personnel.mjs";
-import { dewateringAutomation } from "../../scripts/seed/tabs/underground-mining/dewatering.mjs";
+import { mineOverviewAutomation } from "../../demo/seed/tabs/underground-mining/mine-overview.mjs";
+import { atmosphereAutomation } from "../../demo/seed/tabs/underground-mining/atmosphere.mjs";
+import { ventilationAutomation } from "../../demo/seed/tabs/underground-mining/ventilation.mjs";
+import { personnelAutomation } from "../../demo/seed/tabs/underground-mining/personnel.mjs";
+import { dewateringAutomation } from "../../demo/seed/tabs/underground-mining/dewatering.mjs";
 import { attachSeedProjectSource } from "../__test-helpers__/seed-project-source.js";
-// Authored source lives in scripts/seed/projects/<projectDir>; expose it as
+// Authored source lives in demo/seed/projects/<projectDir>; expose it as
 // scriptSource/uiSource for the source-level assertions below.
 attachSeedProjectSource(mineOverviewAutomation, atmosphereAutomation, ventilationAutomation, personnelAutomation, dewateringAutomation);
 

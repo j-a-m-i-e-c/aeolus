@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { gameMasterAutomation } from "../../scripts/seed/tabs/escape-room/game-master.mjs";
-import { puzzleProgressAutomation } from "../../scripts/seed/tabs/escape-room/puzzles.mjs";
-import { roomFxAutomation } from "../../scripts/seed/tabs/escape-room/room-fx.mjs";
+import { gameMasterAutomation } from "../../demo/seed/tabs/escape-room/game-master.mjs";
+import { puzzleProgressAutomation } from "../../demo/seed/tabs/escape-room/puzzles.mjs";
+import { roomFxAutomation } from "../../demo/seed/tabs/escape-room/room-fx.mjs";
 import { attachSeedProjectSource } from "../__test-helpers__/seed-project-source.js";
-// Authored source lives in scripts/seed/projects/<projectDir>; expose it as
+// Authored source lives in demo/seed/projects/<projectDir>; expose it as
 // scriptSource/uiSource for the source-level assertions below.
 attachSeedProjectSource(gameMasterAutomation, puzzleProgressAutomation, roomFxAutomation);
 

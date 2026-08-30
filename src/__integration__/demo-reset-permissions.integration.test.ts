@@ -6,7 +6,7 @@
 // it started and then died with SQLITE_READONLY on its first setting write —
 // leaving the tunnel and frontend up and every /api/* request on 502.
 //
-// The functional half actually runs scripts/reset-demo.sh as root inside a
+// The functional half actually runs demo/operations/reset.sh as root inside a
 // container, with `docker compose` stubbed, and inspects the resulting owner of
 // the active database and its directory. It skips when Docker is unavailable,
 // matching the other integration suites here.
@@ -22,9 +22,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "..", "..");
-const RESET_SCRIPT = readFileSync(path.join(REPO_ROOT, "scripts", "reset-demo.sh"), "utf8");
-const GOLDEN_SCRIPT = readFileSync(path.join(REPO_ROOT, "scripts", "create-demo-golden.sh"), "utf8");
-const DEPLOY_SCRIPT = readFileSync(path.join(REPO_ROOT, "scripts", "deploy", "deploy-demo-from-pc.sh"), "utf8");
+const RESET_SCRIPT = readFileSync(path.join(REPO_ROOT, "demo", "operations", "reset.sh"), "utf8");
+const GOLDEN_SCRIPT = readFileSync(path.join(REPO_ROOT, "demo", "operations", "create-golden.sh"), "utf8");
+const DEPLOY_SCRIPT = readFileSync(path.join(REPO_ROOT, "demo", "operations", "deploy", "deploy-from-pc.sh"), "utf8");
 
 function dockerAvailable(): boolean {
   try {
@@ -65,7 +65,7 @@ describe("demo reset — runtime ownership contract", () => {
 
     // Same defaults the hardened stack applies to backend/simulator, so the two
     // cannot drift apart.
-    const compose = readFileSync(path.join(REPO_ROOT, "docker-compose.public-demo.yml"), "utf8");
+    const compose = readFileSync(path.join(REPO_ROOT, "demo/compose/hosted-runtime.yml"), "utf8");
     expect(compose).toContain('user: "${AEOLUS_RUNTIME_UID:-1000}:${AEOLUS_RUNTIME_GID:-1000}"');
   });
 
@@ -87,7 +87,7 @@ describe("demo reset — runtime ownership contract", () => {
   });
 
   it("holds the same ownership invariant when a golden snapshot is created", () => {
-    // create-demo-golden.sh also stops and restarts the backend, and its WAL
+    // create-golden.sh also stops and restarts the backend, and its WAL
     // checkpoint can create sidecars as whoever ran it.
     const restarted = lineOf(GOLDEN_SCRIPT, /^compose up -d backend simulator$/);
     const chowned = GOLDEN_SCRIPT.split("\n").findIndex((line, index) => index < restarted && /^restore_runtime_ownership$/.test(line));
@@ -121,7 +121,7 @@ describe("demo reset — runtime ownership contract", () => {
   it("reloads systemd when the deploy installs unit files", () => {
     // Without this systemd keeps running the old unit and warns that the unit
     // file changed on disk.
-    expect(DEPLOY_SCRIPT).toMatch(/cp scripts\/systemd\/aeolus-demo-reset\.service[^\n]*systemctl daemon-reload/);
+    expect(DEPLOY_SCRIPT).toMatch(/cp demo\/operations\/systemd\/aeolus-demo-reset\.service[^\n]*systemctl daemon-reload/);
   });
 
   it("requires and verifies the golden checksum before reset stops services", () => {
@@ -221,11 +221,10 @@ describeDocker("demo reset — actual resulting ownership (root reset)", () => {
       "printf 'stale' > /demo/data/aeolus.db",
       "printf 'stale-wal' > /demo/data/aeolus.db-wal",
       "chown -R 0:0 /demo/data",
-      "cp /repo/scripts/reset-demo.sh /demo/app/reset-demo.sh",
-      "chmod +x /demo/app/reset-demo.sh",
       "cd /demo/app",
-      // No health-check script beside it, so the gate is skipped.
-      "AEOLUS_DEMO_GOLDEN_DB=/demo/golden/aeolus-demo.db AEOLUS_DEMO_DATA_DIR=/demo/data ./reset-demo.sh > /tmp/out 2>&1 || { echo SCRIPT_FAILED; cat /tmp/out; exit 1; }",
+      // Use the real operation tree so its shared Compose/path helper is exercised.
+      // Stubbed Docker means the health gate sees a successful compose command.
+      "AEOLUS_REPO_ROOT=/repo AEOLUS_DEMO_GOLDEN_DB=/demo/golden/aeolus-demo.db AEOLUS_DEMO_DATA_DIR=/demo/data /repo/demo/operations/reset.sh > /tmp/out 2>&1 || { echo SCRIPT_FAILED; cat /tmp/out; exit 1; }",
       // Report what the backend would actually see.
       "echo RESULT",
       "stat -c '%n %u:%g %a' /demo/data /demo/data/aeolus.db",
@@ -276,15 +275,13 @@ printf '#!/bin/sh\ncase "$*" in *integrity_check*) echo ok;; *) exit 0;; esac\n'
 chmod +x /work/bin/docker /work/bin/sqlite3
 export PATH=/work/bin:$PATH
 printf 'active-v1' > /work/data/aeolus.db
-cp /repo/scripts/create-demo-golden.sh /work/app/create-demo-golden.sh
-chmod +x /work/app/create-demo-golden.sh
 cd /work/app
-AEOLUS_DEMO_GOLDEN_DB=/work/golden/aeolus-demo.db AEOLUS_DEMO_DATA_DIR=/work/data ./create-demo-golden.sh >/tmp/first 2>&1 || { cat /tmp/first; exit 1; }
+AEOLUS_REPO_ROOT=/repo AEOLUS_DEMO_GOLDEN_DB=/work/golden/aeolus-demo.db AEOLUS_DEMO_DATA_DIR=/work/data /repo/demo/operations/create-golden.sh >/tmp/first 2>&1 || { cat /tmp/first; exit 1; }
 test "$(stat -c %a /work/golden/aeolus-demo.db.sha256)" = 444
 test "$(stat -c %a /work/golden/aeolus-demo.db.meta)" = 444
 sleep 1
 printf 'active-v2' > /work/data/aeolus.db
-AEOLUS_DEMO_GOLDEN_DB=/work/golden/aeolus-demo.db AEOLUS_DEMO_DATA_DIR=/work/data ./create-demo-golden.sh >/tmp/second 2>&1 || { cat /tmp/second; exit 1; }
+AEOLUS_REPO_ROOT=/repo AEOLUS_DEMO_GOLDEN_DB=/work/golden/aeolus-demo.db AEOLUS_DEMO_DATA_DIR=/work/data /repo/demo/operations/create-golden.sh >/tmp/second 2>&1 || { cat /tmp/second; exit 1; }
 cd /work/golden && sha256sum -c aeolus-demo.db.sha256
 test "$(cat aeolus-demo.db)" = active-v2
 echo REPEATED_GOLDEN_OK

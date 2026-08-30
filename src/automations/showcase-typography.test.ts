@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { tabModules } from '../../scripts/seed/tabs/index.mjs';
+import { tabModules } from '../../demo/seed/tabs/index.mjs';
 
 describe('showcase custom UI typography', () => {
   it('keeps normal custom UI text readable', () => {

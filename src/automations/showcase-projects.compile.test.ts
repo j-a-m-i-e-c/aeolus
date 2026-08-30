@@ -8,9 +8,9 @@ import { describe, expect, it } from "vitest";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { compileAutomationProject } from "./automation-project.js";
-import { PROJECTS_ROOT, loadProject } from "../../scripts/seed/project-loader.mjs";
+import { PROJECTS_ROOT, loadProject } from "../../demo/seed/project-loader.mjs";
 
-const TABS_ROOT = path.resolve(import.meta.dirname, "..", "..", "scripts", "seed", "tabs");
+const TABS_ROOT = path.resolve(import.meta.dirname, "..", "..", "demo", "seed", "tabs");
 
 function walkFiles(root: string): string[] {
   const files: string[] = [];

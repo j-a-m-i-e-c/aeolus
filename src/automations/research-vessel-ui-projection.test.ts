@@ -2,12 +2,12 @@
 // The hero is read-only; the three science systems own their physical commands.
 
 import { describe, expect, it } from "vitest";
-import { missionOverviewAutomation } from "../../scripts/seed/tabs/research-vessel/mission-overview.mjs";
-import { ctdAutomation } from "../../scripts/seed/tabs/research-vessel/ctd.mjs";
-import { rovAutomation } from "../../scripts/seed/tabs/research-vessel/rov.mjs";
-import { underwayAutomation } from "../../scripts/seed/tabs/research-vessel/underway.mjs";
+import { missionOverviewAutomation } from "../../demo/seed/tabs/research-vessel/mission-overview.mjs";
+import { ctdAutomation } from "../../demo/seed/tabs/research-vessel/ctd.mjs";
+import { rovAutomation } from "../../demo/seed/tabs/research-vessel/rov.mjs";
+import { underwayAutomation } from "../../demo/seed/tabs/research-vessel/underway.mjs";
 import { attachSeedProjectSource } from "../__test-helpers__/seed-project-source.js";
-// Authored source lives in scripts/seed/projects/<projectDir>; expose it as
+// Authored source lives in demo/seed/projects/<projectDir>; expose it as
 // scriptSource/uiSource for the source-level assertions below.
 attachSeedProjectSource(missionOverviewAutomation, ctdAutomation, rovAutomation, underwayAutomation);
 

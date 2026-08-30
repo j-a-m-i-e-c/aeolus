@@ -18,9 +18,9 @@
 
 import { describe, it, expect } from "vitest";
 import { transformSync } from "esbuild";
-import { bunkerPerimeterAutomation } from "../../scripts/seed/tabs/off-grid-bunker/perimeter.mjs";
+import { bunkerPerimeterAutomation } from "../../demo/seed/tabs/off-grid-bunker/perimeter.mjs";
 import { attachSeedProjectSource } from "../__test-helpers__/seed-project-source.js";
-// Authored source lives in scripts/seed/projects/<projectDir>; expose it as
+// Authored source lives in demo/seed/projects/<projectDir>; expose it as
 // scriptSource/uiSource for the source-level assertions below.
 attachSeedProjectSource(bunkerPerimeterAutomation);
 

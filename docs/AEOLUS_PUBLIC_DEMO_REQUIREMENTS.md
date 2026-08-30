@@ -725,13 +725,14 @@ Example host structure:
 
 ```text
 /opt/aeolus-demo/
+├── app/                  # deployed repository/tooling
+│   └── demo/operations/
+│       ├── reset.sh
+│       └── health-check.sh
 ├── golden/
 │   └── aeolus-demo.db
-├── data/
-│   └── aeolus.db
-└── scripts/
-    ├── reset-demo.sh
-    └── demo-health-check.sh
+└── data/
+    └── aeolus.db
 ```
 
 The backend should mount/use only:
@@ -799,7 +800,7 @@ The UI should state:
 Provide:
 
 ```text
-scripts/reset-demo.sh
+demo/operations/reset.sh
 ```
 
 This must allow an operator to immediately reset a damaged or vandalized shared demo.
@@ -819,7 +820,7 @@ This workflow must be admin/developer initiated only.
 Add:
 
 ```text
-docker-compose.demo.yml
+demo/compose/local-showcase.yml
 ```
 
 Suggested services:
@@ -1191,7 +1192,7 @@ Implement in this order:
 9. Add frontend automatic demo session and banner.
 10. Hide administrative/authoring UI.
 11. Add integration/adversarial tests.
-12. Create `docker-compose.demo.yml`.
+12. Create `demo/compose/local-showcase.yml`.
 13. Create immutable golden database.
 14. Implement manual reset script.
 15. Implement nightly reset.

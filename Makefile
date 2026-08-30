@@ -7,13 +7,12 @@ ifeq ($(origin USER),environment)
 USER := admin
 endif
 
-# Local development/demo overlay. This is NOT the hardened internet-facing stack.
-DEMO_COMPOSE := -f docker-compose.yml -f docker-compose.demo.yml
-
-# Hardened internet-facing stack. Production hosts consume pre-built images; the
-# build overlay is opt-in for a developer/CI machine only.
-PUBLIC_DEMO_COMPOSE := -f docker-compose.public-demo.yml
-PUBLIC_DEMO_BUILD_COMPOSE := -f docker-compose.public-demo.yml -f docker-compose.public-demo.build.yml
+# Compose roles are intentionally explicit: root files are normal Aeolus; demo/compose
+# contains showcase-only definitions. The hosted stack sets the repo root as the
+# Compose project directory so .env, bind mounts and build contexts stay stable.
+LOCAL_SHOWCASE_COMPOSE := --project-directory . -f docker-compose.yml -f demo/compose/local-showcase.yml
+HOSTED_DEMO_COMPOSE := --project-directory . -f demo/compose/hosted-runtime.yml
+HOSTED_DEMO_BUILD_COMPOSE := --project-directory . -f demo/compose/hosted-runtime.yml -f demo/compose/hosted-build.yml
 
 # ─── Production / hosted release ─────────────────────────────────────────────
 
@@ -23,27 +22,27 @@ deploy: ## Pull latest, rebuild, and deploy the BASE stack (run on Pi)
 	docker compose down && docker compose up -d --build && docker builder prune -f && docker image prune -f
 
 deploy-demo: ## Deploy hardened public demo FROM THIS PC (no compilation on Lightsail)
-	./scripts/deploy/deploy-demo-from-pc.sh
+	./demo/operations/deploy/deploy-from-pc.sh
 
 public-demo-preflight: ## Check operator-PC prerequisites for Terraform + public demo deployment
-	./scripts/deploy/check-public-demo-prereqs.sh
+	./demo/operations/deploy/preflight.sh
 
 public-demo-build: ## Build hardened public-demo images locally (not on the VM)
 	BUILD_COMMIT=$$(git rev-parse --short HEAD 2>/dev/null || echo local) BUILD_DATE=$$(date -u +%Y-%m-%dT%H:%M:%SZ) \
-	docker compose $(PUBLIC_DEMO_BUILD_COMPOSE) build backend frontend
+	docker compose $(HOSTED_DEMO_BUILD_COMPOSE) build backend frontend
 
 public-demo-up: ## Start hardened public-demo stack using already-built/pulled images
-	docker compose $(PUBLIC_DEMO_COMPOSE) up -d --remove-orphans
+	docker compose $(HOSTED_DEMO_COMPOSE) up -d --remove-orphans
 
 public-demo-seed: ## Seed hardened public demo on this host. Usage: make public-demo-seed PASS=... [USER=admin]
 	@if [ -z "$(PASS)" ]; then echo "Error: PASS is required"; exit 1; fi
-	docker compose $(PUBLIC_DEMO_COMPOSE) --profile seed run --rm -e SEED_USER="$(USER)" -e SEED_PASS="$(PASS)" seed
+	docker compose $(HOSTED_DEMO_COMPOSE) --profile seed run --rm -e SEED_USER="$(USER)" -e SEED_PASS="$(PASS)" seed
 
 public-demo-golden: ## Create verified immutable golden snapshot (run on demo host)
-	./scripts/create-demo-golden.sh
+	./demo/operations/create-golden.sh
 
 public-demo-reset: ## Restore hardened public demo from golden snapshot (run on demo host)
-	./scripts/reset-demo.sh
+	./demo/operations/reset.sh
 
 up: ## Start all services
 	docker compose up -d
@@ -72,13 +71,13 @@ up-desktop: ## Start all services with the opt-in desktop/dev bridge override (D
 	docker compose -f docker-compose.yml -f docker-compose.desktop.yml up -d --build
 
 demo-up: ## Start the public demo overlay (backend demo mode + Phase 2 simulator)
-	docker compose $(DEMO_COMPOSE) up -d --build
+	docker compose $(LOCAL_SHOWCASE_COMPOSE) up -d --build
 
 demo-reset: ## Reset simulated hardware by restarting the simulator (it republishes initial state on reconnect)
-	docker compose $(DEMO_COMPOSE) restart simulator
+	docker compose $(LOCAL_SHOWCASE_COMPOSE) restart simulator
 	@echo "⏳ Waiting for the simulator to reconnect and republish initial state..."
 	@sleep 6
-	docker compose $(DEMO_COMPOSE) logs --tail 20 simulator
+	docker compose $(LOCAL_SHOWCASE_COMPOSE) logs --tail 20 simulator
 	@echo "✅ Simulator reset. If the database was wiped, re-run the seed with the demo overlay to reconfigure command profiles (AEOLUS_SIMULATOR_BOOTSTRAP=true)."
 
 dev: ## Start backend in dev mode (hot reload)
@@ -117,7 +116,7 @@ seed-demo: ## Seed the PUBLIC DEMO (adds demo identity + configures simulator co
 		echo "Error: PASS is required.  Usage: make seed-demo PASS=<admin-password> [USER=admin]"; \
 		exit 1; \
 	fi
-	docker compose $(DEMO_COMPOSE) --profile seed run --rm -e SEED_USER="$(USER)" -e SEED_PASS="$(PASS)" seed
+	docker compose $(LOCAL_SHOWCASE_COMPOSE) --profile seed run --rm -e SEED_USER="$(USER)" -e SEED_PASS="$(PASS)" seed
 
 reset: ## Wipe database and restart fresh (deletes all data!)
 	docker compose down -v

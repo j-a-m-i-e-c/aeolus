@@ -154,7 +154,7 @@ services:
       API_PORT: ${API_PORT:-3001}
       SEED_USER: ${SEED_USER:-admin}
       SEED_PASS: ${SEED_PASS:-}
-    entrypoint: ["sh", "-c", "node scripts/seed-demo.mjs http://localhost:$${API_PORT} \"$$SEED_USER\" \"$$SEED_PASS\""]
+    entrypoint: ["sh", "-c", "node demo/seed/seed.mjs http://localhost:$${API_PORT} \"$$SEED_USER\" \"$$SEED_PASS\""]
     depends_on:
       - backend
 

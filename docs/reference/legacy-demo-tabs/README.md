@@ -5,13 +5,13 @@ The files in this directory are retained for historical/reference context only. 
 Current seeded Automation Project source lives under:
 
 ```text
-scripts/seed/projects/
+demo/seed/projects/
 ```
 
 Current demo metadata/manifests live under:
 
 ```text
-scripts/seed/tabs/
+demo/seed/tabs/
 ```
 
 For the supported authoring model, see `docs/architecture/AUTOMATION_PROJECTS.md` and `docs/reference/automations.md`.

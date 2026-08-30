@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { showSequencerAutomation } from "../../scripts/seed/tabs/stage-show/sequencer.mjs";
+import { showSequencerAutomation } from "../../demo/seed/tabs/stage-show/sequencer.mjs";
 import { attachSeedProjectSource } from "../__test-helpers__/seed-project-source.js";
-// Authored source lives in scripts/seed/projects/<projectDir>; expose it as
+// Authored source lives in demo/seed/projects/<projectDir>; expose it as
 // scriptSource/uiSource for the source-level assertions below.
 attachSeedProjectSource(showSequencerAutomation);
 

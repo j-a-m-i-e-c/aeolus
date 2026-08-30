@@ -87,4 +87,4 @@ Seeded showcase automations use the same Automation Project model as normal auth
 
 ## Demo source
 
-Demo manifests under `scripts/seed/tabs/` contain metadata and project references. Current authored demo source lives under `scripts/seed/projects/<project>/`. Files under `docs/reference/legacy-demo-tabs/` are historical snapshots only and must not be used as current authoring examples.
+Demo manifests under `demo/seed/tabs/` contain metadata and project references. Current authored demo source lives under `demo/seed/projects/<project>/`. Files under `docs/reference/legacy-demo-tabs/` are historical snapshots only and must not be used as current authoring examples.

@@ -1,12 +1,12 @@
 // src/__test-helpers__/seed-project-source.ts — authored source for demo Automation Projects.
 //
-// Demo manifests under scripts/seed/tabs/ are metadata plus a `projectDir`
-// reference; the authored Logic/UI lives under scripts/seed/projects/<dir>/ so
+// Demo manifests under demo/seed/tabs/ are metadata plus a `projectDir`
+// reference; the authored Logic/UI lives under demo/seed/projects/<dir>/ so
 // the seeder definitions do not become giant template-string source containers
 // (see docs/architecture/AUTOMATION_PROJECTS.md).
 //
 // The tree is read with the SAME loader the seeder uses
-// (scripts/seed/project-loader.mjs), so there is one implementation of the
+// (demo/seed/project-loader.mjs), so there is one implementation of the
 // project layout. This module only adds the presentation the showcase
 // architecture tests want: those tests assert on authored source through the
 // `scriptSource` / `uiSource` names they have always used.
@@ -18,7 +18,7 @@
 // lookups such as `startsWith("function subsolar(")` still resolve when a
 // project splits helpers across modules.
 
-import { readProjectFiles } from "../../scripts/seed/project-loader.mjs";
+import { readProjectFiles } from "../../demo/seed/project-loader.mjs";
 
 export interface SeedAutomationManifest {
   projectDir?: string;

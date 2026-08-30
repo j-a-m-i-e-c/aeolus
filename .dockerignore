@@ -8,6 +8,7 @@ data
 .kiro
 e2e
 docs
+demo
 *.md
 !README.md
 frontend/node_modules
