@@ -16,10 +16,16 @@ HOSTED_DEMO_BUILD_COMPOSE := --project-directory . -f demo/compose/hosted-runtim
 
 # ─── Production / hosted release ─────────────────────────────────────────────
 
+# BUILD_COMMIT/BUILD_DATE are build args consumed by the `backend` build in
+# docker-compose.yml, so they must be set on the command that BUILDS (`up --build`),
+# not on `down`. They are also resolved after `git pull`, so the stamp records the
+# commit actually being deployed rather than the one that was checked out before.
 deploy: ## Pull latest, rebuild, and deploy the BASE stack (run on Pi)
 	git pull && \
+	docker compose down && \
 	BUILD_COMMIT=$$(git rev-parse --short HEAD) BUILD_DATE=$$(git log -1 --format=%cI HEAD) \
-	docker compose down && docker compose up -d --build && docker builder prune -f && docker image prune -f
+	docker compose up -d --build && \
+	docker builder prune -f && docker image prune -f
 
 deploy-demo: ## Deploy hardened public demo FROM THIS PC (no compilation on Lightsail)
 	./demo/operations/deploy/deploy-from-pc.sh
