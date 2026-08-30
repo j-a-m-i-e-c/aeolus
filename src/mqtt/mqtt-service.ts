@@ -28,7 +28,7 @@ export function redactBrokerUrl(url: string): string {
  * Sink for correlated command replies and observation state.
  *
  * Implemented by {@link PendingCommandTracker}; injected at composition so
- * MqttService has no hard dependency on the ActionExecutor (mirrors
+ * MqttService has no hard dependency on the CommandService (mirrors
  * ActionRouter.setMqttService()).
  */
 export interface AckRouter {

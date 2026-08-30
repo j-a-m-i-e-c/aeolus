@@ -17,10 +17,10 @@ import logger from "../logger.js";
 /** Origin kind of a Verified Command; mirrors {@link CommandSource} in command-service. */
 export type CommandSourceKind = "automation" | "rest" | "system";
 
-/** Failure classification persisted on a terminal command, including restart interruption. */
+/** Failure classification persisted on a completed command, including restart interruption. */
 export type CommandFailureReason = CommandFailureKind | "interrupted";
 
-/** Durable summary of one Verified Command. `terminal_at` is authoritative for completeness. */
+/** Durable summary of one Verified Command. `terminal_at` is the historical completion marker. */
 export interface CommandRecord {
   commandId: string;
   correlationId?: string;
@@ -38,7 +38,7 @@ export interface CommandRecord {
   failureKind?: CommandFailureReason;
   error?: string;
   requestedAt: number;
-  /** Set iff the command requires no further lifecycle transition (design §1.2). */
+  /** Historical column name: set when the configured command wait is complete. */
   terminalAt?: number;
 }
 
@@ -97,7 +97,7 @@ export interface CommandTransitionInput {
   success?: boolean;
   failureKind?: CommandFailureReason;
   error?: string;
-  /** When true, `terminal_at` is stamped so the command is complete (design §1.2). */
+  /** When true, `terminal_at` is stamped so the configured command wait is complete. */
   terminal: boolean;
   details?: Record<string, unknown>;
 }
@@ -275,7 +275,7 @@ export class CommandHistoryStore {
    *
    * Guarded by the central lifecycle table: a transition from the persisted
    * current state that is not allowed (or a repeat of the current state, or any
-   * transition out of an already-terminal record) is an idempotent no-op — no
+   * transition after the configured command wait has completed) is an idempotent no-op — no
    * duplicate row is written (Req 3.6, 3.7).
    */
   transition(input: CommandTransitionInput): void {
@@ -311,7 +311,7 @@ export class CommandHistoryStore {
 
       const from = current.lifecycle_state as CommandLifecycleState;
 
-      // Already terminal, or a repeat of the current state, or a disallowed
+      // Already completed, or a repeat of the current state, or a disallowed
       // advance → idempotent no-op.
       if (current.terminal_at !== null) return;
       if (from === input.toState) return;

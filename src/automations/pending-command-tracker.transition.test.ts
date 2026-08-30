@@ -39,7 +39,7 @@ describe("PendingCommandTracker onTransition (Req 3.5)", () => {
     expect(events).toHaveLength(1);
   });
 
-  it("does NOT emit an intermediate transition for an ack-tier command (it is terminal)", async () => {
+  it("does NOT emit an intermediate transition for an ack-tier command (the wait completes at ACK)", async () => {
     const onTransition = vi.fn();
     const tracker = new PendingCommandTracker({ onTransition });
 

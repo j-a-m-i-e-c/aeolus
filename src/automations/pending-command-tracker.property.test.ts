@@ -6,10 +6,10 @@ import * as fc from "fast-check";
 import { PendingCommandTracker, type PendingCommand } from "./pending-command-tracker.js";
 import { resolveCorrelationId } from "../mqtt/mqtt-service.js";
 
-// ─── Property 8: Confirmation resolves to the correct terminal state ─────────
+// ─── Property 8: Confirmation resolves to the correct completion state ─────────
 
-// Feature: verified-command-execution, Property 8: Confirmation resolves to the correct terminal state
-describe("Property 8: Confirmation resolves to the correct terminal state", () => {
+// Feature: verified-command-execution, Property 8: Confirmation resolves to the correct completion state
+describe("Property 8: Confirmation resolves to the correct completion state", () => {
   beforeEach(() => { vi.useFakeTimers(); });
   afterEach(() => { vi.useRealTimers(); });
 
@@ -272,7 +272,7 @@ describe("Property 15: Late and duplicate acknowledgements are idempotent", () =
     );
   });
 
-  it("messages after terminal state are ignored (late arrivals)", async () => {
+  it("messages after the configured wait resolves are ignored (late arrivals)", async () => {
     await fc.assert(
       fc.asyncProperty(
         fc.uuid(),

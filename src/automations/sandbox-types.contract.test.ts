@@ -12,4 +12,23 @@ describe("automation sandbox authoring types", () => {
     expect(source).toContain("interface EventContext");
     expect(source).toContain("declare const context: EventContext;");
   });
+
+  it("keeps connector-defined device types open-ended", () => {
+    expect(source).toMatch(/interface Device[\s\S]*?type:\s*string;/);
+  });
+
+  it("exposes declarative command conditions rather than host-crossing predicates", () => {
+    expect(source).toContain("type DeviceCondition =");
+    expect(source).toContain("condition?: DeviceCondition;");
+    expect(source).not.toContain("condition?: (state:");
+  });
+
+  it("exposes bulk actions as a first-class authored API", () => {
+    expect(source).toMatch(/actionAll\([\s\S]*?Promise<BulkActionResult>/);
+    expect(source).toContain("interface BulkActionResult");
+  });
+
+  it("exposes continueOnFailure when the runtime supports it", () => {
+    expect(source).toContain("continueOnFailure?: boolean;");
+  });
 });

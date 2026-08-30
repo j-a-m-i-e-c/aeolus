@@ -224,8 +224,8 @@ async function main(): Promise<void> {
     collectionOwnershipStore,
   );
 
-  // 5. Action Executor, Execution Log, and Sandbox
-  const actionExecutor = new CommandService({
+  // 5. Command Service, Execution Log, and Sandbox
+  const commandService = new CommandService({
     mqttService,
     connectorManager,
     logger,
@@ -241,12 +241,12 @@ async function main(): Promise<void> {
   });
 
   // Register built-in action handlers
-  actionExecutor.registerHandler("publish", handlePublish);
-  actionExecutor.registerHandler("toggle", handleToggle);
-  actionExecutor.registerHandler("device_action", handleDeviceAction);
-  actionExecutor.registerHandler("log", handleLog);
-  actionExecutor.registerHandler("delay", handleDelay);
-  actionExecutor.registerHandler("webhook", handleWebhook);
+  commandService.registerHandler("publish", handlePublish);
+  commandService.registerHandler("toggle", handleToggle);
+  commandService.registerHandler("device_action", handleDeviceAction);
+  commandService.registerHandler("log", handleLog);
+  commandService.registerHandler("delay", handleDelay);
+  commandService.registerHandler("webhook", handleWebhook);
 
   // Condition Registry — register built-in condition factories
   const conditionRegistry = new ConditionRegistry();
@@ -255,7 +255,7 @@ async function main(): Promise<void> {
   conditionRegistry.registerCondition("equals", (v) => (context) => String((context.state as Record<string, unknown>).value) === v);
 
   // Wire registries into ConnectorManager so contributed handlers are registered on restore
-  connectorManager.setRegistries(actionExecutor, conditionRegistry);
+  connectorManager.setRegistries(commandService, conditionRegistry);
   // Wire the live MqttService into ConnectorManager so ActionRouter can publish MQTT
   // device commands. Without this, generic MQTT device dispatch reports "broker not
   // connected" even while mqttService is connected (pre-promotion-release-gates gate 3).
@@ -295,19 +295,19 @@ async function main(): Promise<void> {
   // Verified Command.
   const automationEventService = new AutomationEventService({ mqttService, logger });
 
-  const sandbox = new Sandbox({ actionExecutor, deviceRegistry: registry, stateStore, dataStore, collector, scopeResolver: automationScopeResolver, automationEventService, onStateChange: (ruleId, key, value) => {
+  const sandbox = new Sandbox({ commandService, deviceRegistry: registry, stateStore, dataStore, collector, scopeResolver: automationScopeResolver, automationEventService, onStateChange: (ruleId, key, value) => {
     eventBus.emit(AUTOMATION_STATE_CHANGE, { ruleId, key, value });
   } });
 
   const executionRecorder = new ExecutionRecorder({ eventBus, executionLog, logger });
   const engine = new AutomationEngine(eventBus, {
     sandbox,
-    commandService: actionExecutor,
+    commandService: commandService,
     scopeResolver: automationScopeResolver,
     executionRecorder,
     collector,
   });
-  loadUiRules(engine, db, registry, actionExecutor, conditionRegistry);
+  loadUiRules(engine, db, registry, commandService, conditionRegistry);
 
 
   // 7b. Initialize MetricsService
@@ -419,7 +419,7 @@ async function main(): Promise<void> {
     "/api/devices",
     createDeviceRoutes(
       registry,
-      actionExecutor,
+      commandService,
       (id) => connectorManager.getActionCatalog(id),
       requireDevice,
       permissionResolver,
@@ -443,7 +443,7 @@ async function main(): Promise<void> {
     }),
   );
   const sandboxTypesPath = path.resolve(import.meta.dirname, "automations/sandbox-types.d.ts");
-  app.use("/api/automations", createAutomationRoutes(engine, db, registry, actionExecutor, executionLog, sandboxTypesPath, requireAutomation, permissionResolver, connectorRegistry, stateStore, conditionRegistry));
+  app.use("/api/automations", createAutomationRoutes(engine, db, registry, commandService, executionLog, sandboxTypesPath, requireAutomation, permissionResolver, connectorRegistry, stateStore, conditionRegistry));
   app.use("/api/connectors", createConnectorRoutes(connectorManager, connectorRegistry));
   app.use("/api/metrics", createMetricsSummaryRoute(metricsService));
   app.use("/api/commands", createCommandRoutes(commandHistoryStore));

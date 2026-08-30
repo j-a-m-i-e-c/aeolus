@@ -89,7 +89,7 @@ describe("CommandHistoryStore — create", () => {
 });
 
 describe("CommandHistoryStore — dispatch-only history", () => {
-  it("writes terminal_at when DISPATCHED is the dispatch-only terminal success", () => {
+  it("writes terminal_at when DISPATCHED completes a dispatch-only wait", () => {
     store.create(baseRecord({ commandId: "c1", effectiveTier: "dispatch" }));
     store.transition({
       commandId: "c1",
@@ -203,11 +203,11 @@ describe("CommandHistoryStore — idempotency and guards (Req 3.6, 3.7)", () => 
     expect(got?.transitions).toHaveLength(1);
   });
 
-  it("ignores a late transition after a terminal state", () => {
+  it("ignores a late transition after the configured wait is complete", () => {
     store.create(baseRecord({ commandId: "c1", effectiveTier: "acknowledged" }));
     store.transition({ commandId: "c1", toState: "DISPATCHED", timestamp: nextTs(), terminal: false });
     store.transition({ commandId: "c1", toState: "ACKNOWLEDGED", timestamp: nextTs(), success: true, terminal: true });
-    // A late OBSERVED must not re-open the terminal command.
+    // A late OBSERVED must not re-open a command whose configured wait is complete.
     store.transition({ commandId: "c1", toState: "OBSERVED", timestamp: nextTs(), success: true, terminal: true });
     const got = store.get("c1");
     expect(got?.lifecycleState).toBe("ACKNOWLEDGED");
@@ -303,7 +303,7 @@ describe("CommandHistoryStore — reconcileInterrupted (Req 4)", () => {
     // Interrupted: acknowledged-tier command stuck at DISPATCHED (no terminal_at).
     store.create(baseRecord({ commandId: "stuck", effectiveTier: "acknowledged" }));
     store.transition({ commandId: "stuck", toState: "DISPATCHED", timestamp: nextTs(), terminal: false });
-    // Complete: dispatch-only command already terminal at DISPATCHED.
+    // Complete: dispatch-only command already finished its configured wait at DISPATCHED.
     store.create(baseRecord({ commandId: "done", effectiveTier: "dispatch" }));
     store.transition({ commandId: "done", toState: "DISPATCHED", timestamp: nextTs(), success: true, terminal: true });
 

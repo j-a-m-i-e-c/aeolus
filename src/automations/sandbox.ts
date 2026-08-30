@@ -16,6 +16,7 @@ import type { DeviceRegistry } from "../core/device-registry.js";
 import type { DataStore } from "../data-store/data-store.js";
 import type { Device, ActionResult, BulkActionResult, ConfirmOptions, EventMetadata } from "../core/types.js";
 import logger from "../logger.js";
+import { requestPublicHttp } from "../security/outbound-http.js";
 
 // isolated-vm is a native addon that requires C++ compilation.
 // On Windows dev machines it may not compile — graceful fallback logs a warning.
@@ -255,7 +256,7 @@ export function toPlainJson<T>(value: T): T {
  * with the per-call tier (`undefined` ⇒ highest-available for that device).
  */
 export async function dispatchScriptAction(
-  actionExecutor: Pick<CommandService, "execute">,
+  commandService: Pick<CommandService, "execute">,
   descriptor: ActionDescriptor,
   ruleId: string,
   confirm: ConfirmOptions | undefined,
@@ -265,7 +266,7 @@ export async function dispatchScriptAction(
   if (!tier.ok) {
     return { success: false, error: tier.error, lifecycleState: "FAILED" };
   }
-  return actionExecutor.execute(descriptor, ruleId, confirm, tier.chosen);
+  return commandService.execute(descriptor, ruleId, confirm, tier.chosen);
 }
 
 /** The plan produced by {@link planAutomationBody}: which action indices the
@@ -324,28 +325,9 @@ export function planAutomationBody(
   return { invokedIndices, aggregateSuccess };
 }
 
-/**
- * Private/internal network patterns that sandbox HTTP requests are blocked from
- * reaching. Prevents SSRF against LAN services and cloud metadata endpoints.
- *
- * Blocked ranges: localhost, 127.x, 10.x, 172.16-31.x, 192.168.x, 169.254.x
- * (link-local/cloud metadata), [::1], and any hostname resolving to "localhost".
- *
- * Exported for unit testing.
- */
-export const BLOCKED_HOSTS = /^https?:\/\/(localhost|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|192\.168\.\d+\.\d+|169\.254\.\d+\.\d+|\[::1\]|0\.0\.0\.0)(:\d+)?(\/|$)/i;
-
-/**
- * Returns true if the URL targets a private/internal address that sandbox
- * scripts should not be allowed to reach. Pure helper for SSRF prevention.
- */
-export function isBlockedUrl(url: string): boolean {
-  return BLOCKED_HOSTS.test(url);
-}
-
 /** Dependencies injected into the Sandbox. */
 export interface SandboxDeps {
-  actionExecutor: CommandService;
+  commandService: CommandService;
   deviceRegistry: DeviceRegistry;
   stateStore?: AutomationStateStore;
   dataStore?: DataStore;
@@ -470,7 +452,7 @@ function registerInFlight(inFlight: Set<Promise<unknown>>, promise: Promise<unkn
  * from the raw references and data injected on the global scope.
  *
  * After execution, all `__` prefixed temporaries are deleted — the user
- * script only sees `devices`, `mqtt`, `log`, and `context`.
+ * script sees the documented `devices`, `mqtt`, `log`, `context`, `http`, `state` and optional capability globals.
  */
 const BOOTSTRAP_SCRIPT = `
 (function() {
@@ -489,13 +471,16 @@ const BOOTSTRAP_SCRIPT = `
   var stateSetRef = __stateSetRef;
   var stateGetAllRef = __stateGetAllRef;
   var stateDeleteRef = __stateDeleteRef;
-  var dbWriteRef = __dbWriteRef;
-  var dbQueryRef = __dbQueryRef;
-  var dbGetRef = __dbGetRef;
-  var dbSetRef = __dbSetRef;
-  var dbDeleteRef = __dbDeleteRef;
-  var dbCollectionsRef = __dbCollectionsRef;
-  var eventsEmitRef = __eventsEmitRef;
+  var dbWriteRef = typeof __dbWriteRef !== "undefined" ? __dbWriteRef : undefined;
+  var dbQueryRef = typeof __dbQueryRef !== "undefined" ? __dbQueryRef : undefined;
+  var dbGetRef = typeof __dbGetRef !== "undefined" ? __dbGetRef : undefined;
+  var dbSetRef = typeof __dbSetRef !== "undefined" ? __dbSetRef : undefined;
+  var dbDeleteRef = typeof __dbDeleteRef !== "undefined" ? __dbDeleteRef : undefined;
+  var dbCollectionsRef = typeof __dbCollectionsRef !== "undefined" ? __dbCollectionsRef : undefined;
+  var eventsEmitRef = typeof __eventsEmitRef !== "undefined" ? __eventsEmitRef : undefined;
+  // Closure-local logical command failure state. User-authored code must not be
+  // able to clear it between actions and bypass the automation fail-fast rule.
+  var commandFailed = false;
 
   globalThis.devices = {
     list: function() { return data; },
@@ -521,26 +506,45 @@ const BOOTSTRAP_SCRIPT = `
       // so automation() can fail-fast without depending on the user action
       // callback returning the ActionResult (Req 11.3, 11.4).
       return p.then(function(result) {
-        if (result && result.success === false) { globalThis.__commandFailed = true; }
+        if (result && result.success === false) { commandFailed = true; }
         return result;
       });
     },
     actionAll: function(filter, actionType, params, opts) {
-      var tier = opts ? opts.tier : undefined;
-      var p;
-      if (opts && typeof opts.condition === 'function') {
-        p = actionAllRef.apply(undefined,
-          [filter, actionType, params, opts.condition, opts.deviceId, opts.timeoutMs, tier],
-          { result: { promise: true } });
-      } else {
-        p = actionAllRef.apply(undefined,
-          [filter, actionType, params, undefined, undefined, undefined, tier],
+      // The predicate is deliberately evaluated INSIDE the isolate against the
+      // already-scoped device snapshot. isolated-vm cannot transfer live
+      // functions or object graphs to the host, and the host must not re-read a
+      // broader registry. Only primitive/JSON data crosses this boundary.
+      var matchedIds;
+      var paramsJson;
+      var conditionJson;
+      try {
+        matchedIds = data.filter(filter).map(function(device) { return device.id; });
+        paramsJson = params === undefined ? undefined : JSON.stringify(params);
+        conditionJson = (opts && opts.condition != null) ? JSON.stringify(opts.condition) : undefined;
+      } catch (err) {
+        // Report isolate-side predicate/serialization failures back through the
+        // host callback as a real failed command result. Returning only a bulk
+        // error-only bulk object would make an otherwise-successful execution look
+        // successful to the AutomationEngine because no CommandResult reached
+        // its collector.
+        var preflightError = String(err && err.message ? err.message : err);
+        commandFailed = true;
+        return actionAllRef.apply(undefined,
+          ["[]", actionType, undefined, undefined,
+           opts ? opts.deviceId : undefined, opts ? opts.timeoutMs : undefined,
+           opts ? opts.tier : undefined, preflightError],
           { result: { promise: true } });
       }
-      // A bulk action is a logical failure when any per-device command failed
-      // (Req 11.3, 11.4).
+      var tier = opts ? opts.tier : undefined;
+      var p = actionAllRef.apply(undefined,
+        [JSON.stringify(matchedIds), actionType, paramsJson, conditionJson,
+         opts ? opts.deviceId : undefined, opts ? opts.timeoutMs : undefined, tier, undefined],
+        { result: { promise: true } });
+      // A bulk action is a logical failure when any per-device command failed or
+      // when the whole call failed validation before dispatch.
       return p.then(function(result) {
-        if (result && result.failed > 0) { globalThis.__commandFailed = true; }
+        if (result && (result.failed > 0 || result.error)) { commandFailed = true; }
         return result;
       });
     }
@@ -632,7 +636,7 @@ const BOOTSTRAP_SCRIPT = `
   // The real async automation body — unchanged fail-fast semantics (Req 11.3–11.5).
   var __runAutomation = async function(config) {
     // Reset the per-invocation logical-failure flag (Req 11.3).
-    globalThis.__commandFailed = false;
+    commandFailed = false;
     // Normalize conditions: accept single function, array, or undefined
     var conditions = config.conditions || config.condition;
     if (conditions) {
@@ -652,7 +656,7 @@ const BOOTSTRAP_SCRIPT = `
     // This mirrors the host-side pure helper planAutomationBody/shouldStopAfter.
     for (var j = 0; j < actions.length; j++) {
       await actions[j](globalThis.context);
-      if (!continueOnFailure && globalThis.__commandFailed) {
+      if (!continueOnFailure && commandFailed) {
         break;
       }
     }
@@ -708,12 +712,12 @@ const BOOTSTRAP_SCRIPT = `
  *
  * Each execution creates a fresh isolate with a 32 MB memory limit and
  * 5-second timeout. The sandbox exposes `devices`, `mqtt`, `log`, and
- * `context` as globals — all other Node.js APIs are inaccessible.
+ * `context`, bounded HTTP/state helpers and any configured optional capabilities as globals — Node.js APIs remain inaccessible.
  *
  * Errors are always caught, logged with the rule ID, and never propagated.
  */
 export class Sandbox {
-  private actionExecutor: CommandService;
+  private commandService: CommandService;
   private deviceRegistry: DeviceRegistry;
   private stateStore?: AutomationStateStore;
   private dataStore?: DataStore;
@@ -723,7 +727,7 @@ export class Sandbox {
   private automationEventService?: AutomationEventService;
 
   constructor(deps: SandboxDeps) {
-    this.actionExecutor = deps.actionExecutor;
+    this.commandService = deps.commandService;
     this.deviceRegistry = deps.deviceRegistry;
     this.stateStore = deps.stateStore;
     this.dataStore = deps.dataStore;
@@ -851,8 +855,9 @@ export class Sandbox {
       });
       // The bridged promise may reject if a user action callback throws (rather than
       // returning success:false); swallow it here so execute() preserves its
-      // never-reject contract (Req 11.6) — logical failures are already surfaced via
-      // the __commandFailed flag and each ActionResult pushed into the collector.
+      // never-reject contract (Req 11.6) — logical command failures are already
+      // surfaced by the closure-local fail-fast state and CommandResults pushed
+      // into the collector.
       const automationBodies = (
         awaitAutomationsRef.apply(undefined, [], { result: { promise: true } }) as Promise<unknown>
       ).catch((err: unknown) => {
@@ -933,7 +938,7 @@ export class Sandbox {
 
     // Host-side callback for devices.action() — returns ActionResult
     // Requirements: 1.5, 1.6, 9.1
-    const actionExecutor = this.actionExecutor;
+    const commandService = this.commandService;
     const collector = this.collector;
     await jail.set(
       "__actionRef",
@@ -973,7 +978,7 @@ export class Sandbox {
             // otherwise dispatch with this call's tier (undefined ⇒ the highest
             // tier this device can prove).
             const result = await dispatchScriptAction(
-              actionExecutor,
+              commandService,
               { type: "device_action", target: deviceId, params: { actionType, ...(params ?? {}) } },
               ruleId,
               confirm,
@@ -985,9 +990,16 @@ export class Sandbox {
             // value handed back to the isolate is copied.
             collector?.pushCurrent(result);
             return copyOut(result);
-          } catch {
-            // Should never reach here since execute() never throws, but guard anyway
-            return copyOut({ success: false, error: "Unexpected error in devices.action()" });
+          } catch (err) {
+            // CommandService is specified never to throw, but preserve execution
+            // truth even if an unexpected host error violates that contract.
+            const failure: ActionResult = {
+              success: false,
+              error: `Unexpected error in devices.action(): ${(err as Error).message}`,
+              failureKind: "execution",
+            };
+            collector?.pushCurrent(failure);
+            return copyOut(failure);
           }
         })();
         // Track the promise so Sandbox.execute() can drain it before resolving,
@@ -997,101 +1009,103 @@ export class Sandbox {
       }),
     );
 
-    // Host-side callback for devices.actionAll() — returns BulkActionResult
-    // Requirements: 7.1–7.7, 9.2
-    //
-    // Capture the scoped inventory that setDevicesRefs() already computed rather
-    // than re-reading the full device registry. Without this, a scoped automation's
-    // predicate is evaluated against hidden devices and the BulkActionResult can
-    // leak hidden device ids, counts, and state-side-channels — contradicting the
-    // scoped-device-inventory guarantee (pre-promotion-release-gates gate 2, Req 5.1–5.6).
+    // Host-side callback for devices.actionAll() — returns BulkActionResult.
+    // The isolate evaluates the author predicate over its scope-filtered snapshot
+    // and transfers only matched IDs + JSON data. The host re-validates every ID
+    // against the same scoped inventory before dispatching.
     const scopedInventory: Device[] = allDevices;  // already scope-filtered above
+    const scopedById = new Map(scopedInventory.map((device) => [device.id, device]));
     await jail.set(
       "__actionAllRef",
       new ivm.Reference(function (
-        filter: (device: Device) => boolean,
+        matchedIdsJson: string,
         actionType: string,
-        params?: Record<string, unknown>,
-        condition?: unknown,
+        paramsJson?: string,
+        conditionJson?: string,
         confirmDeviceId?: string,
         confirmTimeoutMs?: number,
         perCallTier?: unknown,
+        preflightError?: string,
       ): Promise<BulkActionResult> {
-        // Every return below must be a TRANSFERABLE copy — see devices.action().
         const copyOut = (bulk: BulkActionResult): BulkActionResult =>
           (ivm
             ? (new ivm.ExternalCopy(toPlainJson(bulk)).copyInto() as unknown as BulkActionResult)
             : bulk);
+        const fail = (
+          error: string,
+          failureKind: ActionResult["failureKind"] = "invalid_params",
+        ): BulkActionResult => {
+          // A whole-call actionAll failure has no per-device result array, but it
+          // is still a genuine command failure for the Automation execution.
+          // Push one synthetic CommandResult so assembleExecutionResult() cannot
+          // accidentally report success merely because dispatch never began.
+          collector?.pushCurrent({ success: false, error, failureKind });
+          return copyOut({ total: 0, succeeded: 0, failed: 0, results: [], error });
+        };
+
         const run = (async (): Promise<BulkActionResult> => {
-          // Completion-tier gate (Req 5.1–5.5): an invalid per-call tier fails
-          // validation for the whole call WITHOUT dispatching to any device. Runs
-          // before the predicate so no command is issued on failure.
+          if (preflightError) return fail(preflightError, "execution");
           const tier = resolveScriptTier(perCallTier);
-          if (!tier.ok) {
-            return copyOut({
-              total: 0,
-              succeeded: 0,
-              failed: 0,
-              results: [{ deviceId: "", success: false, error: tier.error }],
-            });
-          }
+          if (!tier.ok) return fail(tier.error);
 
-          // Catch predicate throws; filter only the scoped inventory (Req 5.1, 5.6)
-          let matched: Device[];
+          let matchedIds: string[];
+          let params: Record<string, unknown> | undefined;
+          let conditionSpec: unknown;
           try {
-            matched = scopedInventory.filter(filter);
+            const parsedIds = JSON.parse(matchedIdsJson);
+            if (!Array.isArray(parsedIds) || !parsedIds.every((id) => typeof id === "string")) {
+              return fail("Invalid devices.actionAll() matched device list");
+            }
+            matchedIds = [...new Set(parsedIds)];
+            params = typeof paramsJson === "string" ? JSON.parse(paramsJson) as Record<string, unknown> : undefined;
+            conditionSpec = typeof conditionJson === "string" ? JSON.parse(conditionJson) : undefined;
           } catch (err) {
-            return copyOut({
-              total: 0,
-              succeeded: 0,
-              failed: 0,
-              results: [{ deviceId: "", success: false, error: (err as Error).message }],
-            });
+            return fail(`Invalid devices.actionAll() arguments: ${(err as Error).message}`);
           }
 
-          if (matched.length === 0) {
-            return copyOut({ total: 0, succeeded: 0, failed: 0, results: [] });
+          const matched: Device[] = [];
+          for (const id of matchedIds) {
+            const device = scopedById.get(id);
+            if (!device) return fail(`Device '${id}' is outside this automation's scope`, "unauthorized");
+            matched.push(device);
           }
+          if (matched.length === 0) return copyOut({ total: 0, succeeded: 0, failed: 0, results: [] });
 
-          // Each matched device gets its own confirmation (and its own correlationId
-          // assigned inside execute()), observing the target device by default. The
-          // resolved completion tier applies to every per-device command (Req 5.1–5.4).
-          const confirm = buildConfirmOptions(condition, confirmDeviceId, confirmTimeoutMs);
-
+          const confirm = buildConfirmOptions(conditionSpec, confirmDeviceId, confirmTimeoutMs);
           const settled = await Promise.allSettled(
             matched.map((device) =>
-              actionExecutor.execute(
+              commandService.execute(
                 { type: "device_action", target: device.id, params: { actionType, ...(params ?? {}) } },
                 ruleId,
                 confirm,
                 tier.chosen,
               ).then((result): { deviceId: string } & ActionResult => {
-                // Push each per-device Command_Result into the collector
-                // (Req 2.4, 4.3, 5.3 — script-path commands aggregated via AsyncLocalStorage)
                 collector?.pushCurrent(result);
                 return { deviceId: device.id, ...result };
-              })
-               .catch((err): { deviceId: string } & ActionResult => ({
-                 deviceId: device.id,
-                 success: false,
-                 error: (err as Error).message,
-               })),
+              }).catch((err): { deviceId: string } & ActionResult => {
+                // CommandService normally resolves failures rather than rejecting,
+                // but an unexpected host rejection must still reach the execution
+                // collector instead of becoming only a bulk-result bookkeeping row.
+                const failure: ActionResult = {
+                  success: false,
+                  error: (err as Error).message,
+                  failureKind: "execution",
+                };
+                collector?.pushCurrent(failure);
+                return { deviceId: device.id, ...failure };
+              }),
             ),
           );
 
-          const results = settled.map((s) =>
-            s.status === "fulfilled"
-              ? s.value
-              : { deviceId: "", success: false as const, error: String(s.reason) },
+          const results = settled.map((entry, index) =>
+            entry.status === "fulfilled"
+              ? entry.value
+              : { deviceId: matched[index]?.id ?? "", success: false as const, error: String(entry.reason) },
           );
-
-          const succeeded = results.filter((r) => r.success).length;
+          const succeeded = results.filter((result) => result.success).length;
           const failed = results.length - succeeded;
-
           return copyOut({ total: results.length, succeeded, failed, results });
         })();
-        // Track the bulk promise so Sandbox.execute() can drain it before
-        // resolving, closing the await gap (Req 11.1, 11.2).
         registerInFlight(inFlight, run);
         return run;
       }),
@@ -1104,12 +1118,12 @@ export class Sandbox {
   private async setMqttRefs(jail: IvmGlobal, ruleId: string): Promise<void> {
     if (!ivm) return;
 
-    const actionExecutor = this.actionExecutor;
+    const commandService = this.commandService;
     await jail.set(
       "__mqttPublishRef",
       new ivm.Reference(function (topic: string, payload: string) {
         // Fire-and-forget — publish is synchronous from the script's perspective
-        void actionExecutor.execute(
+        void commandService.execute(
           { type: "publish", target: topic, params: { payload } },
           ruleId,
         );
@@ -1182,91 +1196,46 @@ export class Sandbox {
     await jail.set("__contextData", new ivm.ExternalCopy(context).copyInto());
   }
 
-  /** HTTP request timeout in milliseconds. */
-  private static readonly HTTP_TIMEOUT_MS = 10_000;
-
   /**
-   * Identifies local addresses where plain HTTP is expected (not blocked — these
-   * are warnings only for external URLs). See {@link BLOCKED_HOSTS} for the SSRF
-   * blocklist.
-   */
-  private static readonly LOCAL_HOSTS = /^https?:\/\/(localhost|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|192\.168\.\d+\.\d+|\[::1\])(:\d+)?(\/|$)/i;
-
-  /**
-   * Log a warning when plain HTTP is used for non-local URLs.
-   * Local/private network addresses (localhost, 10.x, 172.16-31.x, 192.168.x) are fine over HTTP.
-   */
-  private static warnInsecureUrl(ruleId: string, method: string, url: string): void {
-    if (url.startsWith("http://") && !Sandbox.LOCAL_HOSTS.test(url)) {
-      logger.warn({ ruleId, method, url }, "[sandbox] Plain HTTP used for external URL — consider using HTTPS");
-    }
-  }
-
-  /**
-   * Set HTTP references on the jail for the bootstrap script.
-   * Provides `http.get(url, headers)` and `http.post(url, headers, body)` via host-side callbacks.
-   * Requests are made from the host process using `fetch()` with a 10-second timeout.
+   * Set HTTP references on the jail. Both authored HTTP and generic webhook
+   * actions use the shared public-outbound policy in security/outbound-http.ts:
+   * DNS preflight, public HTTP(S) only, no redirects, timeout and body limits.
    */
   private async setHttpRefs(jail: IvmGlobal, ruleId: string): Promise<void> {
-    if (!ivm) return;
+    const runtime = ivm;
+    if (!runtime) return;
 
-    const timeoutMs = Sandbox.HTTP_TIMEOUT_MS;
+    const request = async (
+      method: "GET" | "POST",
+      url: string,
+      headersJson: string,
+      body?: string,
+    ): Promise<unknown> => {
+      try {
+        const headers = JSON.parse(headersJson) as Record<string, string>;
+        const response = await requestPublicHttp(url, {
+          method,
+          headers,
+          body: method === "POST" && body ? body : undefined,
+        });
+        return new runtime.ExternalCopy({ status: response.status, body: response.body }).copyInto();
+      } catch (err) {
+        logger.warn(
+          { ruleId, method, url, error: (err as Error).message },
+          "[sandbox] outbound HTTP request refused or failed",
+        );
+        return new runtime.ExternalCopy({ status: 0, body: (err as Error).message }).copyInto();
+      }
+    };
 
-    // Host-side callback for http.get(url, headersJson)
     await jail.set(
       "__httpGetRef",
-      new ivm.Reference(async function (url: string, headersJson: string) {
-        try {
-          if (isBlockedUrl(url)) {
-            logger.warn({ ruleId, method: "GET", url }, "[sandbox] HTTP request blocked: private/internal network address");
-            return new ivm.ExternalCopy({ status: 0, body: "Request blocked: private/internal network address" }).copyInto();
-          }
-          Sandbox.warnInsecureUrl(ruleId, "GET", url);
-          const headers = JSON.parse(headersJson) as Record<string, string>;
-          const controller = new AbortController();
-          const timer = setTimeout(() => controller.abort(), timeoutMs);
-          const res = await fetch(url, {
-            method: "GET",
-            headers,
-            signal: controller.signal,
-          });
-          clearTimeout(timer);
-          const body = await res.text();
-          return new ivm.ExternalCopy({ status: res.status, body }).copyInto();
-        } catch (err) {
-          logger.error({ ruleId, url, error: (err as Error).message }, "[sandbox] http.get failed");
-          return new ivm.ExternalCopy({ status: 0, body: (err as Error).message }).copyInto();
-        }
-      }),
+      new runtime.Reference((url: string, headersJson: string) => request("GET", url, headersJson)),
     );
-
-    // Host-side callback for http.post(url, headersJson, body)
     await jail.set(
       "__httpPostRef",
-      new ivm.Reference(async function (url: string, headersJson: string, body: string) {
-        try {
-          if (isBlockedUrl(url)) {
-            logger.warn({ ruleId, method: "POST", url }, "[sandbox] HTTP request blocked: private/internal network address");
-            return new ivm.ExternalCopy({ status: 0, body: "Request blocked: private/internal network address" }).copyInto();
-          }
-          Sandbox.warnInsecureUrl(ruleId, "POST", url);
-          const headers = JSON.parse(headersJson) as Record<string, string>;
-          const controller = new AbortController();
-          const timer = setTimeout(() => controller.abort(), timeoutMs);
-          const res = await fetch(url, {
-            method: "POST",
-            headers,
-            body: body || undefined,
-            signal: controller.signal,
-          });
-          clearTimeout(timer);
-          const responseBody = await res.text();
-          return new ivm.ExternalCopy({ status: res.status, body: responseBody }).copyInto();
-        } catch (err) {
-          logger.error({ ruleId, url, error: (err as Error).message }, "[sandbox] http.post failed");
-          return new ivm.ExternalCopy({ status: 0, body: (err as Error).message }).copyInto();
-        }
-      }),
+      new runtime.Reference((url: string, headersJson: string, body: string) =>
+        request("POST", url, headersJson, body)),
     );
   }
   /**

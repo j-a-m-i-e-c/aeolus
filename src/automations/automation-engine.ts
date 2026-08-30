@@ -28,7 +28,7 @@ import logger from "../logger.js";
 /** Optional dependencies for script/form rule execution (unified-command-boundary Req 4–8). */
 export interface AutomationEngineDeps {
   sandbox?: Sandbox;
-  /** The single physical-command boundary (renamed from ActionExecutor, Req 1.6). */
+  /** The single physical-command boundary (Req 1.6). */
   commandService?: CommandService;
   /**
    * Resolves an automation's authoring scope so device-event triggers can be

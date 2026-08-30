@@ -11,8 +11,6 @@ const ALL_STATES: CommandLifecycleState[] = [
   "FAILED", "TIMED_OUT", "STATE_MISMATCH",
 ];
 
-const TERMINAL_SUCCESS_STATES: CommandLifecycleState[] = ["DISPATCHED", "ACKNOWLEDGED", "OBSERVED"];
-const TERMINAL_FAILURE_STATES: CommandLifecycleState[] = ["FAILED", "TIMED_OUT", "STATE_MISMATCH"];
 
 // ─── Property 5: Dispatch outcome maps to DISPATCHED or FAILED ───────────────
 
@@ -35,8 +33,9 @@ describe("Property 5: Dispatch outcome maps to DISPATCHED or FAILED", () => {
     );
   });
 
-  it("DISPATCHED is terminal for success (isTerminal returns true)", () => {
-    expect(isTerminal("DISPATCHED")).toBe(true);
+  it("DISPATCHED can satisfy completion without being lifecycle-final", () => {
+    expect(isSuccessState("DISPATCHED")).toBe(true);
+    expect(isTerminal("DISPATCHED")).toBe(false);
   });
 
   it("FAILED is terminal (isTerminal returns true)", () => {
@@ -46,8 +45,8 @@ describe("Property 5: Dispatch outcome maps to DISPATCHED or FAILED", () => {
 
 // ─── Property 6: ACKNOWLEDGED requires declared capability ───────────────────
 
-// Feature: verified-command-execution, Property 6: ACKNOWLEDGED requires declared capability; dispatch-only terminates truthfully at DISPATCHED
-describe("Property 6: ACKNOWLEDGED requires declared capability; dispatch-only terminates at DISPATCHED", () => {
+// Feature: verified-command-execution, Property 6: ACKNOWLEDGED requires declared capability; dispatch-only completes truthfully at DISPATCHED
+describe("Property 6: ACKNOWLEDGED requires declared capability; dispatch-only completes at DISPATCHED", () => {
   it("selectRequiredTier without capability and without confirm returns dispatch", () => {
     fc.assert(
       fc.property(
@@ -61,7 +60,7 @@ describe("Property 6: ACKNOWLEDGED requires declared capability; dispatch-only t
     );
   });
 
-  it("DISPATCHED is a success state (dispatch-only terminal success)", () => {
+  it("DISPATCHED is a success state (dispatch-tier completion)", () => {
     expect(isSuccessState("DISPATCHED")).toBe(true);
   });
 
@@ -77,20 +76,16 @@ describe("Property 6: ACKNOWLEDGED requires declared capability; dispatch-only t
   });
 });
 
-// ─── Property 7: Every reported outcome carries a terminal lifecycle state ───
+// ─── Property 7: Lifecycle finality is distinct from completion success ─────
 
-// Feature: verified-command-execution, Property 7: Every reported outcome carries a terminal lifecycle state
-describe("Property 7: Every reported outcome carries a terminal lifecycle state", () => {
-  it("all terminal states are recognized as terminal by isTerminal", () => {
-    fc.assert(
-      fc.property(
-        fc.constantFrom(...TERMINAL_SUCCESS_STATES, ...TERMINAL_FAILURE_STATES),
-        (state) => {
-          expect(isTerminal(state)).toBe(true);
-        },
-      ),
-      { numRuns: 200 },
-    );
+// Feature: verified-command-execution, Property 7: lifecycle finality and completion are not conflated
+describe("Property 7: lifecycle finality is distinct from completion", () => {
+  it("DISPATCHED and ACKNOWLEDGED can satisfy completion but still advance", () => {
+    for (const state of ["DISPATCHED", "ACKNOWLEDGED"] as const) {
+      expect(isSuccessState(state)).toBe(true);
+      expect(isTerminal(state)).toBe(false);
+    }
+    expect(isTerminal("OBSERVED")).toBe(true);
   });
 
   it("REQUESTED is never terminal", () => {

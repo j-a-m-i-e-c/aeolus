@@ -8,8 +8,8 @@ import type { CommandLifecycleState } from "../core/types.js";
  * enforces the monotonic-advance property.
  *
  *   REQUESTED    -> DISPATCHED | FAILED
- *   DISPATCHED   -> ACKNOWLEDGED | OBSERVED | TIMED_OUT | STATE_MISMATCH
- *   ACKNOWLEDGED -> OBSERVED | TIMED_OUT | STATE_MISMATCH
+ *   DISPATCHED   -> ACKNOWLEDGED | OBSERVED | FAILED | TIMED_OUT | STATE_MISMATCH
+ *   ACKNOWLEDGED -> OBSERVED | FAILED | TIMED_OUT | STATE_MISMATCH
  *   FAILED, OBSERVED, TIMED_OUT, STATE_MISMATCH are terminal.
  */
 const ALLOWED_TRANSITIONS: Record<CommandLifecycleState, readonly CommandLifecycleState[]> = {
@@ -22,10 +22,8 @@ const ALLOWED_TRANSITIONS: Record<CommandLifecycleState, readonly CommandLifecyc
   STATE_MISMATCH: [],
 };
 
-/** Terminal states — no further transition is possible once reached. */
+/** Lifecycle-final states — no later evidence can advance them. */
 const TERMINAL_STATES: ReadonlySet<CommandLifecycleState> = new Set([
-  "DISPATCHED",
-  "ACKNOWLEDGED",
   "OBSERVED",
   "FAILED",
   "TIMED_OUT",
@@ -33,13 +31,10 @@ const TERMINAL_STATES: ReadonlySet<CommandLifecycleState> = new Set([
 ]);
 
 /**
- * States that represent a successful terminal outcome.
- *
- * `DISPATCHED` is a success only for dispatch-only commands, `ACKNOWLEDGED`
- * only for commands whose required tier is acknowledgement, and `OBSERVED`
- * always. This helper reports whether the state *can* be a success terminal;
- * callers combine it with the command's required tier to decide the final
- * `success` boolean.
+ * States that can satisfy a configured completion tier. `DISPATCHED` and
+ * `ACKNOWLEDGED` are completion states, not lifecycle-final states: later
+ * evidence may still advance the lifecycle when the command is being tracked.
+ * Callers combine this with the command's required tier to decide success.
  */
 const SUCCESS_STATES: ReadonlySet<CommandLifecycleState> = new Set([
   "DISPATCHED",
@@ -62,15 +57,14 @@ export function canTransition(from: CommandLifecycleState, to: CommandLifecycleS
   return ALLOWED_TRANSITIONS[from].includes(to);
 }
 
-/** Return true when `state` is terminal (no further transition possible). */
+/** Return true only when no lifecycle transition can follow `state`. */
 export function isTerminal(state: CommandLifecycleState): boolean {
   return TERMINAL_STATES.has(state);
 }
 
 /**
- * Return true when `state` is one of the states that can represent success
- * (DISPATCHED, ACKNOWLEDGED, OBSERVED). Whether it *is* a success for a given
- * command still depends on that command's required tier.
+ * Return true when `state` can satisfy some success/completion tier
+ * (DISPATCHED, ACKNOWLEDGED, OBSERVED). This does not imply lifecycle finality.
  */
 export function isSuccessState(state: CommandLifecycleState): boolean {
   return SUCCESS_STATES.has(state);

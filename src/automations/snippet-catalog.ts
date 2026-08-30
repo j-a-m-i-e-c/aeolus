@@ -27,19 +27,15 @@ const PLATFORM_SNIPPETS: SnippetGroup[] = [
         id: "mqtt-publish",
         name: "Publish MQTT Message",
         description: "Publish a message to an MQTT topic",
-        code: `function publishMessage(context) {
-  mqtt.publish("home/living-room/command", JSON.stringify({ action: "notify" }));
-  log.info("Published MQTT message");
-}`,
+        code: `mqtt.publish("home/living-room/command", JSON.stringify({ action: "notify" }));
+log.info("Published MQTT message");`,
       },
       {
         id: "mqtt-forward",
         name: "Forward Event to Topic",
         description: "Re-publish the triggering event to another topic",
-        code: `function forwardEvent(context) {
-  mqtt.publish("alerts/" + context.deviceId, JSON.stringify(context.state));
-  log.info(\`Forwarded \${context.topic} to alerts/\${context.deviceId}\`);
-}`,
+        code: `mqtt.publish("alerts/" + context.deviceId, JSON.stringify(context.state));
+log.info(\`Forwarded \${context.topic} to alerts/\${context.deviceId}\`);`,
       },
     ],
   },
@@ -50,58 +46,43 @@ const PLATFORM_SNIPPETS: SnippetGroup[] = [
       {
         id: "http-get",
         name: "HTTP GET Request",
-        description: "Fetch data from an external API",
-        code: `async function fetchData(context) {
-  const res = await http.get("https://api.example.com/data");
-  log.info(\`API responded: \${res.status}\`);
-  state.set("lastApiResponse", res.body.slice(0, 200));
-}`,
+        description: "Fetch data from a public API",
+        code: `const res = await http.get("https://api.example.com/data");
+log.info(\`API responded: \${res.status}\`);
+state.set("lastApiResponse", res.body.slice(0, 200));`,
       },
       {
         id: "http-post-webhook",
         name: "POST Webhook",
-        description: "Send a POST request to a webhook URL",
-        code: `async function postWebhook(context) {
-  const res = await http.post("https://hooks.example.com/webhook", {
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      event: context.topic,
-      device: context.deviceId,
-      state: context.state,
-      timestamp: new Date(context.timestamp).toISOString(),
-    }),
-  });
-  log.info(\`Webhook responded: \${res.status}\`);
-  state.set("lastWebhookStatus", res.status);
-}`,
+        description: "Send a bounded POST request to a public webhook URL",
+        code: `const res = await http.post("https://hooks.example.com/webhook", {
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    event: context.topic,
+    device: context.deviceId,
+    state: context.state,
+    timestamp: new Date(context.timestamp).toISOString(),
+  }),
+});
+log.info(\`Webhook responded: \${res.status}\`);`,
       },
       {
         id: "http-slack-notify",
         name: "Slack Notification",
         description: "Send a notification to a Slack channel via webhook",
-        code: `async function notifySlack(context) {
-  await http.post("https://hooks.slack.com/services/YOUR/WEBHOOK/URL", {
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      text: \`🏠 Aeolus: \${context.deviceId} triggered on \${context.topic}\`,
-    }),
-  });
-  log.info("Sent Slack notification");
-}`,
+        code: `await http.post("https://hooks.slack.com/services/YOUR/WEBHOOK/URL", {
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ text: \`Aeolus: \${context.deviceId} triggered on \${context.topic}\` }),
+});`,
       },
       {
         id: "http-discord-notify",
         name: "Discord Notification",
         description: "Send a notification to a Discord channel via webhook",
-        code: `async function notifyDiscord(context) {
-  await http.post("https://discord.com/api/webhooks/YOUR/WEBHOOK", {
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      content: \`🏠 **Aeolus**: \\\`\${context.deviceId}\\\` triggered on \\\`\${context.topic}\\\`\`,
-    }),
-  });
-  log.info("Sent Discord notification");
-}`,
+        code: `await http.post("https://discord.com/api/webhooks/YOUR/WEBHOOK", {
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ content: \`Aeolus: \${context.deviceId} triggered on \${context.topic}\` }),
+});`,
       },
     ],
   },
@@ -111,38 +92,30 @@ const PLATFORM_SNIPPETS: SnippetGroup[] = [
     snippets: [
       {
         id: "cond-threshold",
-        name: "Value Threshold",
-        description: "Check if a state value exceeds a threshold",
-        code: `function aboveThreshold(context) {
-  const value = context.state.value as number;
-  return typeof value === "number" && value > 25;
-}`,
+        name: "Value Threshold Guard",
+        description: "Return early unless a state value exceeds a threshold",
+        code: `const value = Number(context.state.value);
+if (!Number.isFinite(value) || value <= 25) return;`,
       },
       {
         id: "cond-time-window",
-        name: "Time Window",
-        description: "Only allow execution during specific hours",
-        code: `function isDuringHours(context) {
-  const hour = new Date(context.timestamp).getHours();
-  return hour >= 8 && hour < 22; // 8am to 10pm
-}`,
+        name: "Time Window Guard",
+        description: "Return early outside specific hours",
+        code: `const hour = new Date(context.timestamp).getHours();
+if (hour < 8 || hour >= 22) return; // only continue from 8am to 10pm`,
       },
       {
         id: "cond-device-online",
-        name: "Device Is Online",
-        description: "Check if a specific device is currently online",
-        code: `function isDeviceOnline(context) {
-  const device = devices.get("my-device-id");
-  return device !== undefined && device.state.online === true;
-}`,
+        name: "Device Online Guard",
+        description: "Continue only when a device reports online",
+        code: `const device = devices.get("my-device-id");
+if (!device || device.state.online !== true) return;`,
       },
       {
         id: "cond-state-changed",
-        name: "State Value Changed",
-        description: "Check that the triggering event has a specific state key",
-        code: `function hasStateKey(context) {
-  return context.state.value !== undefined;
-}`,
+        name: "State Key Guard",
+        description: "Continue only when the triggering event has a state key",
+        code: `if (context.state.value === undefined) return;`,
       },
     ],
   },
@@ -153,141 +126,78 @@ const PLATFORM_SNIPPETS: SnippetGroup[] = [
       {
         id: "device-toggle",
         name: "Toggle Device",
-        description: "Toggle any device on or off by ID",
-        code: `function toggleDevice(context) {
-  devices.action("my-device-id", "toggle");
-  log.info("Toggled device");
-  state.set("lastToggled", context.deviceId);
-  state.set("lastToggleTime", Date.now());
-}`,
+        description: "Toggle any device by ID through CommandService",
+        code: `const result = await devices.action("my-device-id", "toggle");
+if (!result.success) throw new Error(result.error ?? "Device command failed");
+state.set("lastToggled", "my-device-id");`,
       },
       {
         id: "device-filter-type",
-        name: "Filter Devices by Type",
-        description: "Get all devices of a specific type",
-        code: `function controlByType(context) {
-  const lights = devices.filter(d => d.type === "light");
-  for (const light of lights) {
-    devices.action(light.id, "toggle");
-  }
-  log.info(\`Toggled \${lights.length} lights\`);
-  state.set("lightsControlled", lights.length);
-}`,
+        name: "Control Devices by Type",
+        description: "Control every matching scoped device",
+        code: `const result = await devices.actionAll(
+  (device) => device.type === "light",
+  "toggle",
+);
+log.info(\`Controlled \${result.total} lights; \${result.failed} failed\`);`,
       },
       {
         id: "device-log-all",
-        name: "Log All Devices",
-        description: "Log the current state of all registered devices",
-        code: `function logAllDevices(context) {
-  const all = devices.list();
-  for (const d of all) {
-    log.info(\`\${d.name} (\${d.id}): \${JSON.stringify(d.state)}\`);
-  }
-  state.set("deviceCount", all.length);
-}`,
+        name: "Log All Scoped Devices",
+        description: "Log the current scoped device snapshots",
+        code: `const all = devices.list();
+for (const device of all) {
+  log.info(\`\${device.name} (\${device.id}): \${JSON.stringify(device.state)}\`);
+}
+state.set("deviceCount", all.length);`,
       },
     ],
   },
   {
-    category: "Services",
+    category: "Triggers",
     icon: "clock",
     snippets: [
       {
-        id: "svc-cron-listener",
-        name: "Cron Schedule Listener",
-        description: "Full automation template listening to a cron schedule",
-        code: `// Trigger topic: service/cron/every-5m
-automation({
-  actions: [
-    function onSchedule(context) {
-      log.info(\`Cron fired: \${context.state.scheduleName} at \${new Date(context.timestamp).toISOString()}\`);
-      state.set("lastRun", Date.now());
-    },
-  ],
-});`,
+        id: "trigger-scheduled-run",
+        name: "Scheduled Run Marker",
+        description: "Record execution time for a Schedule-triggered Automation",
+        code: `log.info(\`Scheduled automation ran at \${new Date(context.timestamp).toISOString()}\`);
+state.set("lastRun", context.timestamp);`,
       },
       {
-        id: "svc-trigger-listener",
-        name: "API Trigger Listener",
-        description: "Full automation template listening to an API trigger",
-        code: `// Trigger topic: service/trigger/my-trigger
-automation({
-  actions: [
-    function onTrigger(context) {
-      const payload = context.state.payload;
-      log.info(\`API trigger fired with payload: \${JSON.stringify(payload)}\`);
-      state.set("lastTriggerPayload", payload);
-      state.set("lastTriggerTime", Date.now());
-    },
-  ],
-});`,
-      },
-      {
-        id: "svc-check-service",
-        name: "Check Service State",
-        description: "Read the current state of a running service",
-        code: `function checkServiceState(context) {
-  const cronState = services.get("cron");
-  if (cronState) {
-    log.info(\`Cron service state: \${JSON.stringify(cronState)}\`);
-  } else {
-    log.warn("Cron service not running");
-  }
-}`,
+        id: "trigger-payload",
+        name: "Trigger Payload",
+        description: "Inspect the current trigger state; configure the trigger above the editor",
+        code: `log.info(\`Trigger payload: \${JSON.stringify(context.state)}\`);
+state.set("lastTrigger", { topic: context.topic, state: context.state, time: context.timestamp });`,
       },
     ],
   },
   {
-    category: "Templates",
+    category: "Patterns",
     icon: "file-code",
     snippets: [
       {
-        id: "tpl-full-automation",
-        name: "Full Automation Template",
-        description: "Complete automation with conditions and actions",
-        code: `automation({
-  conditions: [
-    function checkCondition(context) {
-      return context.state.value !== undefined;
-    },
-  ],
-  actions: [
-    function executeAction(context) {
-      log.info(\`Event on \${context.topic}: \${JSON.stringify(context.state)}\`);
-      state.set("lastEvent", { topic: context.topic, value: context.state.value, time: Date.now() });
-    },
-  ],
-});`,
+        id: "pattern-guard-and-act",
+        name: "Guard Then Act",
+        description: "A compact module-style condition and command pattern",
+        code: `const value = Number(context.state.value);
+if (!Number.isFinite(value) || value <= 30) return;
+
+const result = await devices.action("my-device-id", "off");
+if (!result.success) throw new Error(result.error ?? "Device command failed");
+state.set("lastAction", { value, time: context.timestamp });`,
       },
       {
-        id: "tpl-multi-device",
+        id: "pattern-multi-device",
         name: "Multi-Device Control",
-        description: "Control multiple devices based on a sensor reading",
-        code: `automation({
-  conditions: [
-    function isAboveThreshold(context) {
-      return (context.state.value as number) > 30;
-    },
-  ],
-  actions: [
-    function controlDevices(context) {
-      const plugs = devices.filter(d => d.type === "plug");
-      for (const plug of plugs) {
-        devices.action(plug.id, "off");
-      }
-      log.info(\`Turned off \${plugs.length} plugs — threshold exceeded\`);
-      state.set("lastAction", "plugs_off");
-      state.set("triggerValue", context.state.value);
-    },
-    function notifyMqtt(context) {
-      mqtt.publish("alerts/threshold", JSON.stringify({
-        value: context.state.value,
-        action: "plugs_off",
-        timestamp: new Date(context.timestamp).toISOString(),
-      }));
-    },
-  ],
-});`,
+        description: "Control matching devices and publish a summary",
+        code: `const result = await devices.actionAll((device) => device.type === "plug", "off");
+mqtt.publish("alerts/automation", JSON.stringify({
+  controlled: result.total,
+  failed: result.failed,
+  timestamp: context.timestamp,
+}));`,
       },
     ],
   },

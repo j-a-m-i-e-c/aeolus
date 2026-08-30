@@ -187,7 +187,7 @@ describe("CommandService lifecycle branches", () => {
     });
   });
 
-  describe("logTerminal branches", () => {
+  describe("completion logging branches", () => {
     it("logs warn for TIMED_OUT with observedDeviceId and timeout", async () => {
       vi.useFakeTimers();
       const tracker = new PendingCommandTracker();

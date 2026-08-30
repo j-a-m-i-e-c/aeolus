@@ -63,8 +63,8 @@ describe("construction-enforced command boundary (Req 1.6, 2.8)", () => {
     const index = read("index.ts");
     const args = extractCallArgs(index, "createDeviceRoutes");
 
-    // The CommandService instance (named actionExecutor at composition) is passed in.
-    expect(/\bactionExecutor\b/.test(args)).toBe(true);
+    // The CommandService instance (named commandService at composition) is passed in.
+    expect(/\bcommandService\b/.test(args)).toBe(true);
 
     // No bare `connectorManager` argument is passed — the only permitted mention
     // is the read-only accessor `connectorManager.getActionCatalog(...)`, where

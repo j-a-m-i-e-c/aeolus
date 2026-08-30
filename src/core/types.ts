@@ -169,8 +169,9 @@ export interface ActionRequest {
  *   REQUESTED    -> DISPATCHED | FAILED
  *   DISPATCHED   -> ACKNOWLEDGED | OBSERVED | TIMED_OUT | STATE_MISMATCH
  *   ACKNOWLEDGED -> OBSERVED | TIMED_OUT | STATE_MISMATCH
- * Terminal success: DISPATCHED (dispatch-only), ACKNOWLEDGED (ack-only tier), OBSERVED.
- * Terminal failure: FAILED, TIMED_OUT, STATE_MISMATCH.
+ * Completion success may be satisfied at DISPATCHED, ACKNOWLEDGED, or OBSERVED
+ * depending on the requested tier. Only OBSERVED and failure outcomes are
+ * lifecycle-final; DISPATCHED/ACKNOWLEDGED may advance if later evidence is tracked.
  */
 export type CommandLifecycleState =
   | "REQUESTED"
@@ -184,7 +185,7 @@ export type CommandLifecycleState =
 /**
  * Optional confirmation of a command's physical effect.
  *
- * When supplied on a device action, the ActionExecutor observes a device's
+ * When supplied on a device action, the CommandService observes a device's
  * state (the target device by default, or `deviceId` when given) and only
  * reports success once `condition` evaluates truthy — advancing the command to
  * the OBSERVED state — or fails with TIMED_OUT / STATE_MISMATCH otherwise.
@@ -222,9 +223,10 @@ export interface ActionResult {
   /** Human-readable error message. Present when success is false. */
   error?: string;
   /**
-   * Final Command_Lifecycle state for this command.
-   * Optional for backward compatibility — existing readers of success/data/error
-   * are unaffected. Always populated by the verified-command-execution code path.
+   * Command lifecycle state reached when this completion result was returned.
+   * DISPATCHED/ACKNOWLEDGED may satisfy the selected completion tier without
+   * being lifecycle-final; later evidence can advance a command that remains
+   * under observation. Optional for backward compatibility.
    */
   lifecycleState?: CommandLifecycleState;
   /** Correlation id assigned at dispatch. Present for MQTT commands that correlate. */
@@ -252,6 +254,8 @@ export interface BulkActionResult {
   failed: number;
   /** Per-device results. succeeded + failed === total always holds. */
   results: Array<{ deviceId: string } & ActionResult>;
+  /** Whole-call validation/boundary failure before any device was dispatched. */
+  error?: string;
 }
 
 /** Response shape for GET /api/health */

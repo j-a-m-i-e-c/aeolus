@@ -25,7 +25,8 @@ async function simulateActionAll(
       total: 0,
       succeeded: 0,
       failed: 0,
-      results: [{ deviceId: "", success: false, error: (err as Error).message }],
+      results: [],
+      error: (err as Error).message,
     };
   }
 
@@ -133,9 +134,8 @@ describe("Property 12: BulkActionResult arithmetic invariant", () => {
           expect(result.total).toBe(0);
           expect(result.succeeded).toBe(0);
           expect(result.failed).toBe(0);
-          expect(result.results).toHaveLength(1);
-          expect(result.results[0].success).toBe(false);
-          expect(result.results[0].error).toBe(errorMessage);
+          expect(result.results).toHaveLength(0);
+          expect(result.error).toBe(errorMessage);
         },
       ),
       { numRuns: 100 },

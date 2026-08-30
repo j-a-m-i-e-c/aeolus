@@ -5,6 +5,23 @@
  * No imports needed — just start writing.
  */
 
+type CommandLifecycleState =
+  | "REQUESTED"
+  | "DISPATCHED"
+  | "ACKNOWLEDGED"
+  | "OBSERVED"
+  | "FAILED"
+  | "TIMED_OUT"
+  | "STATE_MISMATCH";
+
+type CommandFailureKind =
+  | "not_found"
+  | "unsupported"
+  | "invalid_params"
+  | "transport"
+  | "execution"
+  | "unauthorized";
+
 /** Result returned by device action calls. */
 interface ActionResult {
   /** Whether the action completed without error. */
@@ -13,8 +30,14 @@ interface ActionResult {
   data?: Record<string, unknown>;
   /** Human-readable error message. Present when success is false. */
   error?: string;
-  /** Final command lifecycle state (e.g. "DISPATCHED", "OBSERVED", "TIMED_OUT"). */
-  lifecycleState?: string;
+  /** Lifecycle state reached when this completion result was returned. */
+  lifecycleState?: CommandLifecycleState;
+  /** Stable Aeolus id for a verified physical command. */
+  commandId?: string;
+  /** Confirmation-exchange id when an MQTT acknowledgement/observation is correlated. */
+  correlationId?: string;
+  /** Coarse failure classification when success is false. */
+  failureKind?: CommandFailureKind;
 }
 
 /** An IoT device in the Aeolus device registry. */
@@ -23,20 +46,59 @@ interface Device {
   id: string;
   /** Human-readable device name. */
   name: string;
-  /** Device category. */
-  type: "light" | "sensor" | "switch" | "climate" | "plug";
+  /** Connector-defined device category. */
+  type: string;
   /** List of device capabilities (e.g. "on/off", "brightness"). */
   capabilities: string[];
   /** Current device state as key-value pairs. */
   state: Record<string, unknown>;
   /** Source integration identifier (e.g. "mqtt", "hue", "kasa"). */
   integration: string;
+  /** Connector instance that owns the device, when connector-backed. */
+  connectorInstanceId?: string;
   /** Unix timestamp of last state update. */
   lastSeen: number;
   /** MQTT state topic, present for MQTT-sourced devices. */
   topic?: string;
   /** MQTT command topic, when explicitly known. */
   commandTopic?: string;
+  /** Generic MQTT command/acknowledgement profile, when configured. */
+  mqttCommandProfile?: {
+    qos?: 0 | 1 | 2;
+    acknowledgement?: {
+      supported: boolean;
+      responseTopic?: string;
+      ackIndicatorField?: string;
+      ackIndicatorValues?: string[];
+    };
+  };
+}
+
+
+/** Plain-data observed-state condition. Functions never cross the V8 boundary. */
+type DeviceCondition =
+  | { field: string; op: "eq" | "ne" | "gt" | "gte" | "lt" | "lte"; value: number | boolean }
+  | { all: DeviceCondition[] }
+  | { any: DeviceCondition[] };
+
+interface DeviceActionOptions {
+  /** Device to observe (defaults to target device). */
+  deviceId?: string;
+  /** Declarative condition evaluated against observed state by the host. */
+  condition?: DeviceCondition;
+  /** Timeout in ms before TIMED_OUT (default 5000). */
+  timeoutMs?: number;
+  /** Per-call completion tier; omit to use the highest tier the device can prove. */
+  tier?: "dispatch" | "acknowledged" | "observed";
+}
+
+interface BulkActionResult {
+  total: number;
+  succeeded: number;
+  failed: number;
+  results: Array<ActionResult & { deviceId: string }>;
+  /** Whole-call validation/boundary failure before meaningful per-device dispatch. */
+  error?: string;
 }
 
 /**
@@ -73,21 +135,24 @@ declare const devices: {
    * @param params - Optional parameters for the action.
    * @param confirm - Optional confirmation options to verify the physical effect.
    */
-  action(deviceId: string, actionType: string, params?: Record<string, unknown>, confirm?: {
-    /** Device to observe (defaults to target device). */
-    deviceId?: string;
-    /** Predicate evaluated against the observed device state. Omit for a tier-only options bag. */
-    condition?: (state: Record<string, unknown>) => boolean;
-    /** Timeout in ms before TIMED_OUT (default 5000). */
-    timeoutMs?: number;
-    /**
-     * Completion tier that counts as success for this call. One of `dispatch`,
-     * `acknowledged`, or `observed`. This is the only place a tier is chosen —
-     * set it per call, since each device proves a different maximum.
-     * Omit to use the highest tier the target device can prove.
-     */
-    tier?: "dispatch" | "acknowledged" | "observed";
-  }): Promise<ActionResult>;
+  action(
+    deviceId: string,
+    actionType: string,
+    params?: Record<string, unknown>,
+    confirm?: DeviceActionOptions,
+  ): Promise<ActionResult>;
+
+  /**
+   * Execute an action against every scoped device matching `predicate`. The
+   * predicate runs inside the isolate; only matched IDs and plain JSON cross
+   * the host boundary.
+   */
+  actionAll(
+    predicate: (device: Device) => boolean,
+    actionType: string,
+    params?: Record<string, unknown>,
+    confirm?: DeviceActionOptions,
+  ): Promise<BulkActionResult>;
 };
 
 /**
@@ -148,6 +213,27 @@ declare const log: {
  * Automation Project entry functions may use this type directly:
  * `export default async function run(context: EventContext) { ... }`.
  */
+type EventSourceKind =
+  | "mqtt-device"
+  | "connector"
+  | "automation"
+  | "ui"
+  | "cron"
+  | "rest"
+  | "system";
+
+interface EventMetadata {
+  eventId: string;
+  timestamp: number;
+  source: { kind: EventSourceKind; id?: string };
+  causationId?: string;
+  correlationId?: string;
+  ruleId?: string;
+  executionId?: string;
+  traceId?: string;
+  depth?: number;
+}
+
 interface EventContext {
   /** The MQTT topic or synthetic connector topic that fired. */
   topic: string;
@@ -157,6 +243,8 @@ interface EventContext {
   state: Record<string, unknown>;
   /** Unix timestamp (ms) when the event occurred. */
   timestamp: number;
+  /** Optional provenance/causation envelope for this event. */
+  meta?: EventMetadata;
 }
 
 /** The event that triggered this automation. */
@@ -177,17 +265,18 @@ declare const context: EventContext;
 declare function automation(config: {
   conditions?: Array<(ctx: typeof context) => boolean> | ((ctx: typeof context) => boolean);
   actions: Array<(ctx: typeof context) => void | Promise<void>> | ((ctx: typeof context) => void | Promise<void>);
-}): void;
+  /** Continue invoking later actions after a logical device-command failure. */
+  continueOnFailure?: boolean;
+}): Promise<void>;
 
 /**
  * Make HTTP requests to external APIs from your automation scripts.
  *
  * Both methods return a promise that resolves to a simplified response object.
- * Requests have a 10-second timeout. Both HTTP and HTTPS URLs are allowed.
- *
- * **Security note:** Use HTTPS for external/internet APIs. Plain HTTP is fine
- * for local LAN services (localhost, 192.168.x, 10.x, etc.) but a warning
- * will be logged if plain HTTP is used for non-local URLs.
+ * Requests are limited to public HTTP/HTTPS destinations, have a 10-second
+ * timeout, do not follow redirects, and have bounded request/response bodies.
+ * Localhost, private/LAN, link-local, metadata and reserved destinations are
+ * rejected by the host policy.
  *
  * @example
  * ```typescript
@@ -201,9 +290,7 @@ declare function automation(config: {
  *   body: JSON.stringify({ text: "Automation fired!" }),
  * });
  * log.info(`Webhook responded: ${result.status}`);
- *
- * // HTTP is fine for local LAN services
- * const local = await http.get("http://192.168.1.50:8080/api/status");
+
  * ```
  */
 declare const http: {

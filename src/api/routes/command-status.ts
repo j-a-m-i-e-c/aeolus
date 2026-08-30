@@ -3,13 +3,13 @@
 // The device action route returns the full Command_Result as the body for every
 // outcome; this pure function chooses a truthful HTTP status so a timeout or
 // rejection is not indistinguishable from success at the transport layer. It
-// reads only the terminal lifecycleState and the coarse failureKind — never the
+// reads only the reported lifecycleState and the coarse failureKind — never the
 // human-readable error string — so the mapping is stable and testable.
 
 import type { ActionResult } from "../../core/types.js";
 
 /**
- * Map a terminal {@link ActionResult} to an expressive HTTP status code.
+ * Map a completed {@link ActionResult} to an expressive HTTP status code.
  *
  * - success (DISPATCHED | ACKNOWLEDGED | OBSERVED) → 200
  * - TIMED_OUT      → 504 (upstream did not confirm within the budget)
@@ -21,7 +21,7 @@ import type { ActionResult } from "../../core/types.js";
  *     unsupported | invalid_params → 422 (request invalid for this device)
  *     (unclassified)               → 422 (safe default for a rejection)
  *
- * 202 is intentionally not produced: the route awaits a terminal state within
+ * 202 is intentionally not produced: the route awaits the configured completion outcome within
  * the REST action timeout, so a dispatched-but-unconfirmed command resolves to
  * DISPATCHED (200) or TIMED_OUT (504) rather than an async-accepted response.
  */

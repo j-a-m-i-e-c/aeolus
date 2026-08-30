@@ -28,7 +28,7 @@ vi.mock("../logger.js", () => ({
 
 const silentLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } as unknown as Logger;
 
-/** A fake CommandService: returns a terminal Command_Result, never emits events. */
+/** A fake CommandService: returns one completion Command_Result, never emits events. */
 function makeFakeCommandService() {
   const emitted: string[] = []; // records any event the service would emit — must stay empty (Req 6.3)
   return {

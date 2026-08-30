@@ -2,7 +2,7 @@
 //
 // Property-based tests for the CommandService physical-command boundary.
 //   - Feature: device-action-system-uplift — Properties 3, 4, 5, 9, 12 (ported
-//     from the pre-rename ActionExecutor suite; unchanged behavior)
+//     preserved across the CommandService boundary; unchanged behavior)
 //   - Feature: unified-command-boundary — Properties 1, 2, 3, 4
 
 import { describe, it, expect, vi } from "vitest";
@@ -30,7 +30,7 @@ function createMockDeps(): CommandServiceDeps {
   };
 }
 
-const TERMINAL_STATES: ReadonlySet<CommandLifecycleState> = new Set([
+const COMPLETION_STATES: ReadonlySet<CommandLifecycleState> = new Set([
   "DISPATCHED",
   "ACKNOWLEDGED",
   "OBSERVED",
@@ -319,9 +319,9 @@ describe("Property 1: Source-independent command processing", () => {
   });
 });
 
-// Feature: unified-command-boundary, Property 2: Every command yields exactly one terminal Command_Result and never rejects
-describe("Property 2: Every command yields exactly one terminal Command_Result and never rejects", () => {
-  it("resolves with a single terminal Command_Result for any handler behavior", async () => {
+// Feature: unified-command-boundary, Property 2: Every command yields exactly one completion Command_Result and never rejects
+describe("Property 2: Every command yields exactly one completion Command_Result and never rejects", () => {
+  it("resolves with a single completion Command_Result for any handler behavior", async () => {
     await fc.assert(
       fc.asyncProperty(
         // scenario: 0 = success, 1 = throw, 2 = explicit success:false, 3 = no handler
@@ -346,11 +346,11 @@ describe("Property 2: Every command yields exactly one terminal Command_Result a
             "rule-1",
           );
 
-          // Exactly one result object carrying a terminal lifecycle state.
+          // Exactly one result object carrying the state that completed this command call.
           expect(result).toBeTypeOf("object");
           expect(typeof result.success).toBe("boolean");
           expect(result.lifecycleState).toBeDefined();
-          expect(TERMINAL_STATES.has(result.lifecycleState as CommandLifecycleState)).toBe(true);
+          expect(COMPLETION_STATES.has(result.lifecycleState as CommandLifecycleState)).toBe(true);
 
           // Success scenarios reach DISPATCHED; failures are FAILED.
           if (scenario === 0) {

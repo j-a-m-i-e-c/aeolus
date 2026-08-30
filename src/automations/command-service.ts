@@ -1,5 +1,5 @@
 // src/automations/command-service.ts — The single physical-command boundary
-// (formerly ActionExecutor). Every Command_Source routes physical device
+// Every Command_Source routes physical device
 // commands through this service so correlation, dispatch, acknowledgement, and
 // observation are applied identically regardless of origin.
 //
@@ -25,6 +25,7 @@ import type {
   CommandRecord,
   CommandFailureReason,
 } from "./command-history-store.js";
+import { requestPublicHttp } from "../security/outbound-http.js";
 
 /**
  * Narrow, read-only view of the active automation execution context
@@ -134,7 +135,7 @@ export type ActionHandler = (
  *
  * Every command flows through the identical dispatch-and-confirmation pipeline;
  * each command is wrapped in try/catch, errors are logged with the rule ID and
- * never thrown, and exactly one terminal {@link ActionResult} is returned.
+ * never thrown, and exactly one completion {@link ActionResult} is returned for the selected tier.
  *
  * This service records nothing about automation executions and does NOT emit
  * AUTOMATION_FIRED — the AutomationEngine is the sole emitter of that started
@@ -190,12 +191,12 @@ export class CommandService {
    * Process exactly one physical device command through the identical
    * dispatch-and-confirmation path regardless of Command_Source (Req 1.2, 2.10).
    *
-   * Never throws; always returns one Command_Result carrying a terminal
-   * {@link CommandLifecycleState} (Req 1.3, 1.7):
+   * Never throws; always returns one Command_Result carrying the lifecycle state
+   * that satisfied (or failed) the selected completion tier (Req 1.3, 1.7):
    *   - dispatch-only commands resolve synchronously (REQUESTED → DISPATCHED | FAILED)
    *   - commands with an acknowledgement capability and/or Confirmation_Options
-   *     register with the {@link PendingCommandTracker} and await the terminal
-   *     resolution (ACKNOWLEDGED / OBSERVED / TIMED_OUT / STATE_MISMATCH / FAILED)
+   *     register with the {@link PendingCommandTracker} and await the configured
+   *     completion resolution (ACKNOWLEDGED / OBSERVED / TIMED_OUT / STATE_MISMATCH / FAILED)
    *
    * @param requiredTier optional explicit tier ceiling requested by the author.
    *   When omitted, the service auto-selects the highest available tier. When
@@ -371,7 +372,7 @@ export class CommandService {
     }
 
     // Dispatch-only path (no tracker involvement) — dispatch, then DISPATCHED
-    // terminal success. This path is unchanged by the register-before-dispatch
+    // completion success. This path is unchanged by the register-before-dispatch
     // reordering (Req 12.6).
     if (tier === "dispatch" || !this.deps.pendingCommandTracker) {
       let dispatchResult: ActionResult | void;
@@ -384,7 +385,7 @@ export class CommandService {
           `Action execution failed for rule ${logId}`,
         );
         recordTransition("FAILED", true, { success: false, failureKind: "execution", error: message });
-        this.logTerminal(logId, action.target, "FAILED", message);
+        this.logCompletion(logId, action.target, "FAILED", message);
         return withId({ success: false, error: message, lifecycleState: "FAILED" });
       }
 
@@ -395,16 +396,17 @@ export class CommandService {
           ...(dispatchResult.failureKind ? { failureKind: dispatchResult.failureKind } : {}),
           ...(dispatchResult.error ? { error: dispatchResult.error } : {}),
         });
-        this.logTerminal(logId, action.target, "FAILED", dispatchResult.error);
+        this.logCompletion(logId, action.target, "FAILED", dispatchResult.error);
         return withId({ ...dispatchResult, lifecycleState: "FAILED" });
       }
 
       const dispatchData = dispatchResult && dispatchResult.success ? dispatchResult.data : undefined;
 
-      // Dispatch-only tier → DISPATCHED is the truthful terminal success and is
-      // therefore terminal: its record carries terminal_at (locked decision 5).
+      // Dispatch-only tier → DISPATCHED is the truthful completion success. The
+      // historical `terminal_at` column marks that this command call is complete;
+      // DISPATCHED itself is not a lifecycle-final state.
       recordTransition("DISPATCHED", true, { success: true });
-      this.logTerminal(logId, action.target, "DISPATCHED");
+      this.logCompletion(logId, action.target, "DISPATCHED");
       return withId({
         success: true,
         ...(dispatchData ? { data: dispatchData } : {}),
@@ -445,7 +447,7 @@ export class CommandService {
         `Action execution failed for rule ${logId}`,
       );
       recordTransition("FAILED", true, { success: false, failureKind: "execution", error: message });
-      this.logTerminal(logId, action.target, "FAILED", message);
+      this.logCompletion(logId, action.target, "FAILED", message);
       return withId({ success: false, error: message, lifecycleState: "FAILED" });
     }
 
@@ -457,7 +459,7 @@ export class CommandService {
         ...(dispatchResult.failureKind ? { failureKind: dispatchResult.failureKind } : {}),
         ...(dispatchResult.error ? { error: dispatchResult.error } : {}),
       });
-      this.logTerminal(logId, action.target, "FAILED", dispatchResult.error);
+      this.logCompletion(logId, action.target, "FAILED", dispatchResult.error);
       return withId({ ...dispatchResult, lifecycleState: "FAILED" });
     }
 
@@ -467,12 +469,12 @@ export class CommandService {
     // `success` is deliberately left UNSET here: the command has not terminated
     // (terminal_at is still null), so recording success=true would let a Phase 4
     // UI read an in-flight command as already succeeded. Success is stamped only
-    // by the terminal transition below. The intermediate ACKNOWLEDGED (when
+    // by the completion transition below. The intermediate ACKNOWLEDGED (when
     // waiting for OBSERVED) is recorded by the tracker's transition hook; store
     // idempotency dedupes overlap.
     recordTransition("DISPATCHED", false);
 
-    // Await the terminal resolution (ack and/or observe). A fast ack may have
+    // Await the configured completion resolution (ack and/or observe). A fast ack may have
     // already resolved this promise during dispatch above.
     const resolution = await resolutionPromise;
 
@@ -481,7 +483,7 @@ export class CommandService {
       ...(resolution.error ? { error: resolution.error } : {}),
     });
 
-    this.logTerminal(
+    this.logCompletion(
       logId,
       action.target,
       resolution.lifecycleState,
@@ -606,10 +608,12 @@ export class CommandService {
   }
 
   /**
-   * Log a command reaching a terminal lifecycle state (Req 8.1), including the
+   * Log the state that completed this command call (Req 8.1), including the
    * observed device and applied timeout for TIMED_OUT / STATE_MISMATCH (Req 8.2).
+   * A successful DISPATCHED/ACKNOWLEDGED completion is not described as
+   * lifecycle-final; it is simply the evidence tier this caller waited for.
    */
-  private logTerminal(
+  private logCompletion(
     ruleId: string,
     target: string,
     lifecycleState: CommandLifecycleState,
@@ -702,14 +706,18 @@ export const handleDelay: ActionHandler = async (action, ruleId, deps) => {
   await new Promise<void>((resolve) => setTimeout(resolve, duration));
 };
 
-/** Send an HTTP webhook request. */
+/**
+ * Send a generic automation webhook through the same public-outbound policy used
+ * by authored `http.*`. Connector networking is intentionally separate because
+ * a configured connector may legitimately talk to a LAN device.
+ */
 export const handleWebhook: ActionHandler = async (action, _ruleId, _deps) => {
-  const method = typeof action.params.method === "string" ? action.params.method : "POST";
+  const method = typeof action.params.method === "string" ? action.params.method.toUpperCase() : "POST";
   const headers = (action.params.headers as Record<string, string>) ?? {};
   const body = action.params.body !== undefined ? String(action.params.body) : undefined;
 
-  const response = await fetch(action.target, { method, headers, body });
-  if (!response.ok) {
-    throw new Error(`Webhook returned ${response.status} ${response.statusText}`);
+  const response = await requestPublicHttp(action.target, { method, headers, body });
+  if (response.status < 200 || response.status >= 300) {
+    throw new Error(`Webhook returned ${response.status} ${response.statusText}`.trim());
   }
 };

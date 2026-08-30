@@ -78,7 +78,7 @@ export interface PendingCommand {
   ackIndicatorValues?: string[];
 }
 
-/** The terminal resolution of a pending command. */
+/** The completion resolution of a pending command at its configured tier. */
 export interface PendingResolution {
   lifecycleState: CommandLifecycleState;
   success: boolean;
@@ -100,13 +100,13 @@ export interface PendingCommandTransition {
   timestamp: number;
 }
 
-/** Optional logging hook for late/duplicate arrivals and terminal transitions. */
+/** Optional logging hook for late/duplicate arrivals and completion transitions. */
 export interface PendingCommandTrackerDeps {
   onResolve?: (correlationId: string, resolution: PendingResolution, targetDeviceId: string) => void;
   onLateMessage?: (correlationId: string) => void;
   /**
    * Reports an intermediate transition (currently ACKNOWLEDGED reached while an
-   * observed-tier command keeps waiting for OBSERVED). Terminal transitions are
+   * observed-tier command keeps waiting for OBSERVED). Completion transitions are
    * recorded by the CommandService from the awaited resolution, so they are not
    * re-emitted here. Never invoked with the database — the recorder is composed.
    */
@@ -124,8 +124,8 @@ interface TrackedEntry {
 /**
  * In-memory registry of outstanding commands, keyed by correlation id.
  *
- * The tracker owns the wiring between MQTT ack ingestion and the ActionExecutor:
- * `register()` is called by the ActionExecutor after dispatch, and `route()` /
+ * The tracker owns the wiring between MQTT acknowledgement ingestion and the CommandService:
+ * `register()` is called by the CommandService after dispatch, and `route()` /
  * `observeState()` are driven by the MQTT ingestion path. All transitions are
  * idempotent (guarded by the central lifecycle transition table), so duplicate
  * or late messages never re-resolve a command.
@@ -146,7 +146,7 @@ export class PendingCommandTracker {
   /**
    * Register a dispatched command awaiting ack/observation.
    *
-   * Returns a promise that resolves exactly once with the terminal resolution
+   * Returns a promise that resolves exactly once with the configured completion resolution
    * and never rejects. Starts the command in the DISPATCHED state and arms the
    * timeout immediately.
    */
@@ -198,14 +198,15 @@ export class PendingCommandTracker {
         entry.state = "ACKNOWLEDGED";
       }
       if (entry.command.requiredTier === "acknowledged") {
-        // ACKNOWLEDGED is terminal for an ack-tier command; the CommandService
-        // records it from the awaited resolution, so no intermediate emission.
+        // ACKNOWLEDGED completes an ack-tier wait; the CommandService records it
+        // from the awaited resolution, so no intermediate emission. It is not a
+        // lifecycle-final state in the shared transition vocabulary.
         this.finalize(entry, "ACKNOWLEDGED", true);
         return;
       }
       // Observed-tier: ACK is an intermediate milestone before observation.
       // Report it (once) so the durable timeline keeps both the ACKNOWLEDGED and
-      // the later terminal transition (Req 3.5).
+      // the later observed/failure completion transition (Req 3.5).
       if (advanced) {
         this.deps.onTransition?.({
           ...(entry.command.commandId ? { commandId: entry.command.commandId } : {}),
@@ -243,7 +244,7 @@ export class PendingCommandTracker {
    * Cancel an outstanding command because its dispatch failed to complete.
    *
    * Clears the timeout timer, removes the entry from the pending map, and
-   * settles the `register()` promise by RESOLVING it with a terminal FAILED
+   * settles the `register()` promise by RESOLVING it with a lifecycle-final FAILED
    * resolution so any awaiter unblocks (Req 12.4, 12.5). This is a dispatch
    * unwind, not a confirmation outcome, so `deps.onResolve` is intentionally
    * NOT invoked — the CommandService owns the returned FAILED result and its
@@ -335,7 +336,7 @@ export class PendingCommandTracker {
     return undefined;
   }
 
-  /** Resolve an entry to a terminal state (guarded by the transition table). */
+  /** Resolve an entry at its configured completion state (guarded by the transition table). */
   private finalize(
     entry: TrackedEntry,
     to: CommandLifecycleState,

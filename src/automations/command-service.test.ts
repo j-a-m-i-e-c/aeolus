@@ -357,6 +357,7 @@ describe("handleDelay", () => {
 describe("handleWebhook", () => {
   let deps: CommandServiceDeps;
   const originalFetch = globalThis.fetch;
+  const publicUrl = "https://93.184.216.34/hook";
 
   beforeEach(() => {
     deps = createMockDeps();
@@ -366,46 +367,61 @@ describe("handleWebhook", () => {
     globalThis.fetch = originalFetch;
   });
 
-  it("sends POST request by default", async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue({ ok: true, status: 200 });
-    const action: ActionDescriptor = { type: "webhook", target: "https://example.com/hook", params: { body: '{"alert":true}' } };
+  it("sends a bounded POST request by default", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response("", { status: 200 }));
+    const action: ActionDescriptor = { type: "webhook", target: publicUrl, params: { body: '{"alert":true}' } };
     await handleWebhook(action, "rule-w1", deps);
-    expect(globalThis.fetch).toHaveBeenCalledWith("https://example.com/hook", {
-      method: "POST",
-      headers: {},
-      body: '{"alert":true}',
-    });
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      new URL(publicUrl),
+      expect.objectContaining({
+        method: "POST",
+        headers: {},
+        body: '{"alert":true}',
+        redirect: "manual",
+        signal: expect.any(AbortSignal),
+      }),
+    );
   });
 
   it("uses specified method and headers", async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response("", { status: 200 }));
     const action: ActionDescriptor = {
       type: "webhook",
-      target: "https://api.example.com",
+      target: publicUrl,
       params: { method: "PUT", headers: { Authorization: "Bearer token" }, body: "data" },
     };
     await handleWebhook(action, "rule-w2", deps);
-    expect(globalThis.fetch).toHaveBeenCalledWith("https://api.example.com", {
-      method: "PUT",
-      headers: { Authorization: "Bearer token" },
-      body: "data",
-    });
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      new URL(publicUrl),
+      expect.objectContaining({
+        method: "PUT",
+        headers: { Authorization: "Bearer token" },
+        body: "data",
+        redirect: "manual",
+      }),
+    );
   });
 
   it("throws when response is not ok", async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue({ ok: false, status: 500, statusText: "Internal Server Error" });
-    const action: ActionDescriptor = { type: "webhook", target: "https://fail.com", params: {} };
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response("", { status: 500, statusText: "Internal Server Error" }));
+    const action: ActionDescriptor = { type: "webhook", target: publicUrl, params: {} };
     await expect(handleWebhook(action, "rule-w3", deps)).rejects.toThrow("Webhook returned 500");
   });
 
   it("sends undefined body when no body param", async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue({ ok: true, status: 200 });
-    const action: ActionDescriptor = { type: "webhook", target: "https://example.com", params: {} };
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response("", { status: 200 }));
+    const action: ActionDescriptor = { type: "webhook", target: publicUrl, params: {} };
     await handleWebhook(action, "rule-w4", deps);
-    expect(globalThis.fetch).toHaveBeenCalledWith("https://example.com", {
-      method: "POST",
-      headers: {},
-      body: undefined,
-    });
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      new URL(publicUrl),
+      expect.objectContaining({ method: "POST", headers: {}, body: undefined }),
+    );
+  });
+
+  it("rejects private destinations before dispatch", async () => {
+    globalThis.fetch = vi.fn();
+    const action: ActionDescriptor = { type: "webhook", target: "http://127.0.0.1/admin", params: {} };
+    await expect(handleWebhook(action, "rule-w5", deps)).rejects.toThrow(/not public|private|loopback/i);
+    expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 });
