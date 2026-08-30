@@ -15,7 +15,7 @@
 // (ownership must be corrected after the golden copy and before services start)
 // and the failure handling, which no filesystem assertion would catch.
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll, vi } from "vitest";
 import { execFileSync } from "node:child_process";
 import { chmodSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -191,6 +191,19 @@ describe("public demo release gate", () => {
 });
 
 describeDocker("demo reset — actual resulting ownership (root reset)", () => {
+  // Each case runs a container and a real shell script, which takes far longer
+  // than the default per-test timeout. The `execFileSync` calls below already cap
+  // themselves at 180s, so keep the vitest budget above that — otherwise vitest
+  // kills the test first and reports a bare timeout instead of the script output.
+  vi.setConfig({ testTimeout: 200_000 });
+
+  beforeAll(() => {
+    // Pull first so a slow image fetch doesn't blow the per-test timeout. Without
+    // this, whichever case runs first pays for the pull and fails intermittently
+    // on a cold Docker cache.
+    execFileSync("docker", ["pull", "bash:5"], { stdio: "pipe", timeout: 180_000 });
+  }, 240_000);
+
   it("leaves the active database and its directory owned by the runtime UID/GID", () => {
     // Run the real script as root with `docker compose` stubbed out, so the only
     // thing under test is the filesystem work: copy, permissions, ownership.
