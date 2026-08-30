@@ -1,6 +1,6 @@
 // frontend/src/components/panes/AutomationPane.tsx — Self-contained automation pane (setup / status / editing)
 
-import { useState, useEffect, useCallback, useRef, lazy, Suspense } from "react";
+import { useState, useEffect, useCallback, lazy, Suspense } from "react";
 import {
   Power,
   PowerOff,
@@ -10,26 +10,21 @@ import {
   Loader2,
   AlertTriangle,
   RotateCcw,
-  Blocks,
-  BookOpen,
 } from "lucide-react";
 import { authFetch } from "../../lib/auth-fetch";
-import type { TranspileError } from "../ScriptEditor";
-const ScriptEditor = lazy(() => import("../ScriptEditor").then(m => ({ default: m.ScriptEditor })));
-const UiEditor = lazy(() => import("../UiEditor").then(m => ({ default: m.UiEditor })));
 const AutomationProjectEditor = lazy(() => import("../AutomationProjectEditor").then(m => ({ default: m.AutomationProjectEditor })));
 import type { AutomationProjectSource } from "../AutomationProjectEditor";
 import { FlowDiagram } from "../FlowDiagram";
 import { ActivityFeed } from "../ActivityFeed";
-import { SnippetPicker } from "../SnippetPicker";
-import { TriggerSelector } from "../TriggerSelector";
+import { AutomationAuthoringFields } from "../AutomationAuthoringFields";
+import { createDefaultAutomationProject, describeAutomationTrigger, triggerIsConfigured, type TranspileError } from "../automation-authoring";
 import { SandboxHost } from "../../sandbox/SandboxHost";
 import type { PropsPayload } from "../../sandbox/rpc-types";
 import type { ExecutionEntry } from "./custom/types";
 import { useDashboardStore } from "../../store/dashboard-store";
 import { useAuthStore } from "../../store/auth-store";
 import { usePermissionsStore } from "../../store/permissions-store";
-import { useDeviceStore } from "../../store/device-store";
+import { useDeviceStore, type Device } from "../../store/device-store";
 import { useAutomationStateStore } from "../../store/automation-state-store";
 import type { PaneConfig } from "../../types/dashboard";
 
@@ -47,11 +42,9 @@ interface AutomationRule {
   topic: string;
   ruleType: string;
   enabled: boolean;
-  scriptSource?: string;
-  uiSource?: string;
+  hasUi?: boolean;
   triggerType?: "mqtt" | "cron" | "none";
   cronExpression?: string | null;
-  projectMode?: "project" | "legacy";
   structured?: {
     trigger: string;
     conditions: string[];
@@ -62,62 +55,6 @@ interface AutomationRule {
 interface Props {
   config: PaneConfig;
   paneId?: string;
-}
-
-const DEFAULT_SCRIPT = `// Legacy single-file automation. New automations use Automation Projects.
-log.info("Event: " + context.topic);
-`;
-
-const DEFAULT_UI_TEMPLATE = `// Custom Automation UI Component
-// ─────────────────────────────────────────────────────
-// This component renders in the automation pane's status mode.
-// It receives live data from the Aeolus runtime.
-// Open the Docs panel to see all available methods.
-
-export default function MyComponent(aeolus: CustomComponentProps) {
-  const value = aeolus.read("myKey");
-
-  return (
-    <div className="p-4 space-y-3">
-      <div className="text-sm font-semibold text-[#E6EDF3]">
-        {aeolus.ruleName}
-      </div>
-      <div className="text-xs text-[#9AA6B2]">
-        {aeolus.enabled ? "✅ Enabled" : "⏸ Disabled"}
-        {aeolus.lastFired && (
-          <span className="ml-2">
-            Last fired: {new Date(aeolus.lastFired).toLocaleTimeString()}
-          </span>
-        )}
-      </div>
-      <p className="text-xs text-[#6B7785]">Value: {String(value)}</p>
-      <button
-        onClick={() => aeolus.fire("clicked", {})}
-        className="px-3 py-1.5 rounded-lg text-xs font-medium bg-primary/20 text-primary border border-primary/30 hover:bg-primary/30 transition-colors"
-      >
-        Click me
-      </button>
-    </div>
-  );
-}
-`;
-
-
-function createDefaultProject(): AutomationProjectSource {
-  return {
-    logicEntry: "logic/index.ts",
-    uiEntry: null,
-    files: [
-      {
-        path: "logic/index.ts",
-        content: `export default async function run(context: EventContext) {
-  log.info(\`Event: \${context.topic}\`);
-  state.set("lastEvent", { topic: context.topic, at: Date.now() });
-}
-`,
-      },
-    ],
-  };
 }
 
 export function AutomationPane({ config, paneId }: Props) {
@@ -150,11 +87,9 @@ export function AutomationPane({ config, paneId }: Props) {
   );
   const [cronExpression, setCronExpression] = useState(() => isDemoDraft ? String(config.draftCronExpression || "") : "");
   const [triggerValid, setTriggerValid] = useState(true);
-  const [scriptSource, setScriptSource] = useState(DEFAULT_SCRIPT);
-  const [uiSource, setUiSource] = useState("");
   const [projectSource, setProjectSource] = useState<AutomationProjectSource>(() => {
     const draft = config.draftProject as AutomationProjectSource | undefined;
-    return isDemoDraft && draft?.files?.length ? draft : createDefaultProject();
+    return isDemoDraft && draft?.files?.length ? draft : createDefaultAutomationProject();
   });
   const [errors, setErrors] = useState<TranspileError[]>([]);
   const [saving, setSaving] = useState(false);
@@ -177,15 +112,6 @@ export function AutomationPane({ config, paneId }: Props) {
       setMode("setup");
     }
   }, [ruleId]);
-
-  // Editing tab state (Logic vs UI)
-  const [editingTab, setEditingTab] = useState<"logic" | "ui">("logic");
-
-  // Snippet panel state
-  const [showSnippets, setShowSnippets] = useState(true);
-  const [showDocs, setShowDocs] = useState(false);
-  const editorApiRef = useRef<{ insertText: (text: string) => void } | null>(null);
-  const uiEditorApiRef = useRef<{ insertText: (text: string) => void } | null>(null);
 
   // Device store for custom component props
   const devices = useDeviceStore((s) => s.devices);
@@ -288,9 +214,9 @@ export function AutomationPane({ config, paneId }: Props) {
     return () => clearInterval(interval);
   }, [mode, ruleId]);
 
-  // ── Save handler (setup mode) — includes uiSource (15.4) ──
+  // ── Save handler (setup mode) ──
   const handleSave = useCallback(async () => {
-    if (!name.trim() || saving) return;
+    if (!name.trim() || saving || !triggerIsConfigured(triggerType, triggerTopic, cronExpression, triggerValid)) return;
     if (isDemoDraft) {
       if (paneId) {
         updatePaneConfig(paneId, {
@@ -314,7 +240,7 @@ export function AutomationPane({ config, paneId }: Props) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: name.trim(),
-          triggerTopic: triggerTopic.trim() || undefined,
+          triggerTopic: triggerType === "mqtt" ? triggerTopic.trim() : undefined,
           triggerType,
           cronExpression: triggerType === "cron" ? cronExpression : undefined,
           ruleType: "script",
@@ -343,11 +269,11 @@ export function AutomationPane({ config, paneId }: Props) {
     } finally {
       setSaving(false);
     }
-  }, [name, triggerTopic, triggerType, cronExpression, projectSource, saving, paneId, config, updatePaneConfig, panes, activeTabId, isAdmin, isDemoDraft]);
+  }, [name, triggerTopic, triggerType, cronExpression, triggerValid, projectSource, saving, paneId, config, updatePaneConfig, panes, activeTabId, isAdmin, isDemoDraft]);
 
-  // ── Update handler (editing mode) — includes uiSource (15.4) ──
+  // ── Update handler (editing mode) ──
   const handleUpdate = useCallback(async () => {
-    if (!name.trim() || saving || !ruleId) return;
+    if (!name.trim() || saving || !ruleId || !triggerIsConfigured(triggerType, triggerTopic, cronExpression, triggerValid)) return;
     if (isPublicVisitor) {
       setErrors([]);
       setMode("status");
@@ -361,12 +287,10 @@ export function AutomationPane({ config, paneId }: Props) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: name.trim(),
-          triggerTopic: triggerTopic.trim() || undefined,
+          triggerTopic: triggerType === "mqtt" ? triggerTopic.trim() : undefined,
           triggerType,
           cronExpression: triggerType === "cron" ? cronExpression : undefined,
-          ...(rule?.projectMode === "project"
-            ? { project: projectSource }
-            : { scriptSource, uiSource: uiSource || undefined }),
+          ...(rule?.ruleType === "script" ? { project: projectSource } : {}),
         }),
       });
       const data = await res.json();
@@ -390,7 +314,7 @@ export function AutomationPane({ config, paneId }: Props) {
     } finally {
       setSaving(false);
     }
-  }, [name, triggerTopic, triggerType, cronExpression, scriptSource, uiSource, projectSource, rule, saving, ruleId, fetchRule, paneId, config, updatePaneConfig, isPublicVisitor]);
+  }, [name, triggerTopic, triggerType, cronExpression, triggerValid, projectSource, rule, saving, ruleId, fetchRule, paneId, config, updatePaneConfig, isPublicVisitor]);
 
   // ── Toggle handler ──
   const handleToggle = useCallback(async () => {
@@ -417,7 +341,7 @@ export function AutomationPane({ config, paneId }: Props) {
   }, [rule, toggling]);
 
 
-  // ── Enter editing mode — populate uiSource from rule (15.4) ──
+  // ── Enter editing mode ──
   const handleEdit = useCallback(async () => {
     if (!rule) return;
     setName(rule.name);
@@ -426,8 +350,11 @@ export function AutomationPane({ config, paneId }: Props) {
     setCronExpression(rule.cronExpression || "");
     setErrors([]);
 
-    if (rule.projectMode === "project") {
+    if (rule.ruleType === "script") {
       try {
+        // The project endpoint projects legacy single-file automations into the
+        // same source-tree shape, so upgraded installations and the demo share
+        // one editor. Saving persists the projected tree as a real project.
         const response = await authFetch(`${API_URL}/api/automations/${rule.id}/project`);
         if (!response.ok) throw new Error("Failed to load Automation Project");
         const project = await response.json() as AutomationProjectSource;
@@ -437,8 +364,9 @@ export function AutomationPane({ config, paneId }: Props) {
         return;
       }
     } else {
-      setScriptSource(rule.scriptSource || DEFAULT_SCRIPT);
-      setUiSource(rule.uiSource || "");
+      // Historical form rules still run, toggle and render, but are no longer a
+      // second authoring product. They can be recreated as an Automation Project.
+      return;
     }
     setMode("editing");
   }, [rule]);
@@ -455,22 +383,14 @@ export function AutomationPane({ config, paneId }: Props) {
     setTriggerType("mqtt");
     setCronExpression("");
     setTriggerValid(true);
-    setScriptSource(DEFAULT_SCRIPT);
-    setUiSource("");
-    setProjectSource(createDefaultProject());
+    setProjectSource(createDefaultAutomationProject());
     setErrors([]);
   }, [paneId, config, updatePaneConfig]);
 
-  const saveDisabled = !name.trim() || saving || !triggerValid;
+  const saveDisabled = !name.trim() || saving || !triggerIsConfigured(triggerType, triggerTopic, cronExpression, triggerValid);
 
-  // Ctrl+S handler for editors
-  const handleEditorSave = useCallback(
-    (_value: string) => {
-      if (mode === "setup") handleSave();
-      else if (mode === "editing" && !isPublicVisitor) handleUpdate();
-    },
-    [mode, handleSave, handleUpdate, isPublicVisitor],
-  );
+  // NOTE: The former Ctrl+S `handleEditorSave` bridge is gone — the Project
+  // editor receives `onSave` (handleSave / handleUpdate) directly below.
 
   // NOTE: The custom-component privileged callbacks (control / publish / read /
   // save / saveAndFire / fire) formerly defined here are now handled by the shared
@@ -530,7 +450,7 @@ export function AutomationPane({ config, paneId }: Props) {
     if (!rule) return null;
 
     // Dynamic component loading — replaces static CUSTOM_COMPONENTS registry
-    const hasUiSource = !!rule.uiSource;
+    const hasUiSource = rule.hasUi === true;
 
     return (
       <div className="h-full flex flex-col p-4 gap-3 overflow-auto">
@@ -538,16 +458,18 @@ export function AutomationPane({ config, paneId }: Props) {
         <div className="flex items-center justify-between">
           <div className="flex-1 min-w-0">
             <div className="inline-block px-2 py-0.5 rounded text-[10px] font-mono text-[#9AA6B2] bg-[#0B0F14] border border-[#2A3441]">
-              {rule.topic}
+              {describeAutomationTrigger(rule)}
             </div>
           </div>
-          <button
-            onClick={handleEdit}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg text-[#9AA6B2] hover:text-[#E6EDF3] hover:bg-elevated/50 border border-[#2A3441] transition-colors shrink-0"
-          >
-            <Pencil size={12} />
-            Edit
-          </button>
+          {rule.ruleType === "script" && (
+            <button
+              onClick={handleEdit}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg text-[#9AA6B2] hover:text-[#E6EDF3] hover:bg-elevated/50 border border-[#2A3441] transition-colors shrink-0"
+            >
+              <Pencil size={12} />
+              Edit
+            </button>
+          )}
         </div>
 
         {/* Runtime status. Deliberate interactions belong in the project UI, not a generic bypass button. */}
@@ -594,9 +516,7 @@ export function AutomationPane({ config, paneId }: Props) {
 
   // ── Setup Mode / Editing Mode ──
   const isEditing = mode === "editing";
-  const usesProjectEditor = mode === "setup" || rule?.projectMode === "project";
-
-  if (usesProjectEditor) {
+  if (mode === "setup" || rule?.ruleType === "script") {
     return (
       <div className="h-full flex flex-col p-3 sm:p-4 gap-3 overflow-hidden">
         {isPublicVisitor && (
@@ -613,38 +533,24 @@ export function AutomationPane({ config, paneId }: Props) {
             <div className="min-w-0">
               <div className="text-sm font-semibold text-[#E6EDF3] truncate">{name}</div>
               <div className="text-[10px] text-[#6B7785] mt-0.5">
-                {triggerType === "cron"
-                  ? `Schedule · ${cronExpression || "custom cron"}`
-                  : triggerType === "none"
-                    ? "No automatic trigger"
-                    : `MQTT · ${triggerTopic || "topic not set"}`}
+                {describeAutomationTrigger({ triggerType, topic: triggerTopic, cronExpression })}
               </div>
             </div>
             <span className="rounded-full border border-[#2A3441] px-2 py-1 text-[9px] uppercase tracking-wider text-[#7E8A98]">Read only</span>
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-[minmax(220px,0.72fr)_minmax(360px,1.28fr)] items-start gap-3 shrink-0">
-            <div className="min-w-0">
-              <label className="text-[10px] text-[#6B7785] uppercase tracking-wider font-medium block mb-2">Name</label>
-              <input
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Automation name"
-                className="w-full h-10 px-3 text-sm rounded-lg bg-[#0B0F14] border border-[#2A3441] text-[#E6EDF3] placeholder-[#6B7785] focus:outline-none focus:border-primary transition-colors"
-              />
-            </div>
-            <div className="min-w-0 self-start">
-              <TriggerSelector
-                triggerType={triggerType}
-                mqttTopic={triggerTopic}
-                cronExpression={cronExpression}
-                onTriggerTypeChange={setTriggerType}
-                onMqttTopicChange={setTriggerTopic}
-                onCronExpressionChange={setCronExpression}
-                onValidityChange={setTriggerValid}
-              />
-            </div>
+          <div className="shrink-0">
+            <AutomationAuthoringFields
+              name={name}
+              triggerType={triggerType}
+              mqttTopic={triggerTopic}
+              cronExpression={cronExpression}
+              onNameChange={setName}
+              onTriggerTypeChange={setTriggerType}
+              onMqttTopicChange={setTriggerTopic}
+              onCronExpressionChange={setCronExpression}
+              onTriggerValidityChange={setTriggerValid}
+            />
           </div>
         )}
 
@@ -692,377 +598,8 @@ export function AutomationPane({ config, paneId }: Props) {
     );
   }
 
-  // Populate default UI template if uiSource is empty (legacy single-file editor)
-  const effectiveUiSource = uiSource || DEFAULT_UI_TEMPLATE;
-
-  return (
-    <div className="h-full flex flex-col p-4 gap-3">
-      {/* Name input */}
-      <input
-        type="text"
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        placeholder="Automation name"
-        className="w-full px-3 py-2 text-sm rounded-lg bg-[#0B0F14] border border-[#2A3441] text-[#E6EDF3] placeholder-[#6B7785] focus:outline-none focus:border-primary transition-colors"
-      />
-
-      {/* Trigger selector */}
-      <TriggerSelector
-        triggerType={triggerType}
-        mqttTopic={triggerTopic}
-        cronExpression={cronExpression}
-        onTriggerTypeChange={setTriggerType}
-        onMqttTopicChange={setTriggerTopic}
-        onCronExpressionChange={setCronExpression}
-        onValidityChange={setTriggerValid}
-      />
-
-      {/* Tab bar — visible in BOTH setup and editing modes (15.1) */}
-      <div className="flex items-center gap-1 bg-[#0B0F14] rounded-lg p-1 border border-[#2A3441]">
-        <button
-          onClick={() => setEditingTab("logic")}
-          className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 text-xs font-semibold rounded-md transition-all duration-200 ${
-            editingTab === "logic"
-              ? "bg-gradient-to-r from-[#3BA4FF]/20 to-[#5CE1E6]/20 text-[#5CE1E6] border border-[#5CE1E6]/30 shadow-[0_0_12px_rgba(92,225,230,0.1)]"
-              : "text-[#6B7785] hover:text-[#9AA6B2] hover:bg-[#1A2330]"
-          }`}
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="16 18 22 12 16 6" /><polyline points="8 6 2 12 8 18" /></svg>
-          Logic
-        </button>
-        <button
-          onClick={() => setEditingTab("ui")}
-          className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 text-xs font-semibold rounded-md transition-all duration-200 ${
-            editingTab === "ui"
-              ? "bg-gradient-to-r from-[#3BA4FF]/20 to-[#5CE1E6]/20 text-[#5CE1E6] border border-[#5CE1E6]/30 shadow-[0_0_12px_rgba(92,225,230,0.1)]"
-              : "text-[#6B7785] hover:text-[#9AA6B2] hover:bg-[#1A2330]"
-          }`}
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M3 9h18" /><path d="M9 21V9" /></svg>
-          UI
-        </button>
-      </div>
-
-      {/* Editor + snippet panel — fills remaining space */}
-      <div className="flex-1 min-h-0 flex gap-2">
-        {/* Editor + state keys bar */}
-        <div className="flex-1 min-w-0 flex flex-col">
-          <div className="flex-1 min-h-0">
-            <Suspense fallback={<div className="flex items-center justify-center h-64 text-neutral-500">Loading editor...</div>}>
-            {editingTab === "logic" ? (
-              <ScriptEditor
-                initialValue={scriptSource}
-                onChange={setScriptSource}
-                onSave={handleEditorSave}
-                errors={errors}
-                onEditorReady={(api) => { editorApiRef.current = api; }}
-              />
-            ) : (
-              <UiEditor
-                initialValue={effectiveUiSource}
-                onChange={(val) => setUiSource(val)}
-                onSave={handleEditorSave}
-                onEditorReady={(api) => { uiEditorApiRef.current = api; }}
-              />
-            )}
-            </Suspense>
-          </div>
-
-          {/* Live state keys — shown in UI tab when there's state data */}
-          {editingTab === "ui" && Object.keys(ruleState).length > 0 && (
-            <div className="shrink-0 mt-1 rounded-lg bg-[#0B0F14] border border-[#2A3441] px-3 py-2 max-h-24 overflow-auto">
-              <div className="text-[10px] text-[#6B7785] uppercase tracking-wider mb-1">
-                aeolus.read <span className="normal-case tracking-normal">— live from logic tab</span>
-              </div>
-              <div className="flex flex-wrap gap-x-4 gap-y-0.5">
-                {Object.entries(ruleState).map(([key, value]) => (
-                  <div key={key} className="text-[11px] font-mono">
-                    <span className="text-[#9AA6B2]">.read(</span>
-                    <span className="text-[#5CE1E6]">"{key}"</span>
-                    <span className="text-[#9AA6B2]">)</span>
-                    <span className="text-[#6B7785] ml-1">→</span>
-                    <span className="text-[#E6EDF3] ml-1">
-                      {typeof value === "string" ? `"${value}"` : JSON.stringify(value)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Snippet panel — collapsible, available in both tabs */}
-        {showSnippets && (
-          <div className="w-56 shrink-0 rounded-xl border border-[#2A3441] bg-[#121821] overflow-hidden">
-            <SnippetPicker
-              mode={editingTab}
-              onClose={() => setShowSnippets(false)}
-              onInsert={(code) => {
-                const ref = editingTab === "logic" ? editorApiRef.current : uiEditorApiRef.current;
-                if (ref) {
-                  ref.insertText(code);
-                }
-              }}
-            />
-          </div>
-        )}
-
-        {/* Docs panel — context-aware: Logic globals vs UI props */}
-        {showDocs && (
-          <div className="w-72 shrink-0 rounded-xl border border-[#2A3441] bg-[#121821] overflow-hidden flex flex-col">
-            {/* Header — matches SnippetPicker style */}
-            <div className="flex items-center gap-2 px-3 py-2 border-b border-[#2A3441]">
-              <BookOpen size={14} className="text-primary shrink-0" />
-              <span className="text-xs font-semibold text-[#E6EDF3] flex-1">
-                {editingTab === "logic" ? "Logic API" : "Component Props"}
-              </span>
-              <button
-                onClick={() => setShowDocs(false)}
-                className="p-0.5 rounded text-[#6B7785] hover:text-[#9AA6B2] hover:bg-[#1A2330] transition-colors"
-                title="Close docs"
-              >
-                <X size={14} />
-              </button>
-            </div>
-
-            {/* Content */}
-            <div className="flex-1 overflow-auto px-3 py-2">
-            {editingTab === "logic" ? (
-              <div className="space-y-3 text-[11px] font-mono">
-                {/* automation() helper */}
-                <div>
-                  <div className="text-[#9AA6B2] font-semibold mb-1">automation() legacy helper</div>
-                  <div className="text-[#9AA6B2] pl-2 space-y-0.5">
-                    <div className="text-[#E6EDF3]">{"automation({ conditions: [...], actions: [...] })"}</div>
-                    <div className="text-[10px] text-[#6B7785] mt-1">Backwards-compatible simple-rule helper; Automation Projects do not require it</div>
-                  </div>
-                </div>
-
-                {/* context */}
-                <div>
-                  <div className="text-primary font-semibold mb-1">context</div>
-                  <div className="text-[#9AA6B2] pl-2 space-y-0.5">
-                    <div><span className="text-[#E6EDF3]">.topic</span> — MQTT topic that triggered</div>
-                    <div><span className="text-[#E6EDF3]">.deviceId</span> — source device ID</div>
-                    <div><span className="text-[#E6EDF3]">.state</span> — parsed message payload</div>
-                    <div><span className="text-[#E6EDF3]">.timestamp</span> — event time (ms)</div>
-                  </div>
-                </div>
-
-                {/* devices */}
-                <div>
-                  <div className="text-primary font-semibold mb-1">devices</div>
-                  <div className="text-[#9AA6B2] pl-2 space-y-0.5">
-                    <div><span className="text-[#E6EDF3]">.get(id)</span> — get device by ID</div>
-                    <div><span className="text-[#E6EDF3]">.list()</span> — all devices</div>
-                    <div><span className="text-[#E6EDF3]">.filter(fn)</span> — filter devices</div>
-                    <div><span className="text-[#E6EDF3]">.action(id, type, params?)</span> — trigger action</div>
-                  </div>
-                </div>
-
-                {/* mqtt */}
-                <div>
-                  <div className="text-primary font-semibold mb-1">mqtt</div>
-                  <div className="text-[#9AA6B2] pl-2 space-y-0.5">
-                    <div><span className="text-[#E6EDF3]">.publish(topic, payload)</span> — send message</div>
-                  </div>
-                </div>
-
-                {/* log */}
-                <div>
-                  <div className="text-primary font-semibold mb-1">log</div>
-                  <div className="text-[#9AA6B2] pl-2 space-y-0.5">
-                    <div><span className="text-[#E6EDF3]">.info(msg)</span> / <span className="text-[#E6EDF3]">.warn(msg)</span> / <span className="text-[#E6EDF3]">.error(msg)</span></div>
-                  </div>
-                </div>
-
-                {/* state */}
-                <div>
-                  <div className="text-primary font-semibold mb-1">state</div>
-                  <div className="text-[#9AA6B2] pl-2 space-y-0.5">
-                    <div><span className="text-[#E6EDF3]">.get(key)</span> — read value</div>
-                    <div><span className="text-[#E6EDF3]">.set(key, value)</span> — write value</div>
-                    <div><span className="text-[#E6EDF3]">.getAll()</span> — all key-value pairs</div>
-                    <div><span className="text-[#E6EDF3]">.delete(key)</span> — remove key</div>
-                  </div>
-                </div>
-
-                {/* services */}
-                <div>
-                  <div className="text-primary font-semibold mb-1">services</div>
-                  <div className="text-[#9AA6B2] pl-2 space-y-0.5">
-                    <div><span className="text-[#E6EDF3]">.get(type)</span> / <span className="text-[#E6EDF3]">.list()</span></div>
-                  </div>
-                </div>
-
-                {/* http */}
-                <div>
-                  <div className="text-primary font-semibold mb-1">http</div>
-                  <div className="text-[#9AA6B2] pl-2 space-y-0.5">
-                    <div><span className="text-[#E6EDF3]">.get(url, opts?)</span> — GET request</div>
-                    <div><span className="text-[#E6EDF3]">.post(url, opts?)</span> — POST request</div>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="space-y-3 text-[11px] font-mono">
-                <div className="text-[10px] text-[#6B7785] mb-2">
-                  Your component receives these as <span className="text-[#E6EDF3]">aeolus</span>
-                </div>
-
-                {/* aeolus.devices */}
-                <div>
-                  <div className="text-primary font-semibold mb-1">aeolus.devices</div>
-                  <div className="text-[#9AA6B2] pl-2">All devices from the registry (live via WebSocket)</div>
-                </div>
-
-                {/* aeolus.ruleId */}
-                <div>
-                  <div className="text-primary font-semibold mb-1">aeolus.ruleId</div>
-                  <div className="text-[#9AA6B2] pl-2">This automation's unique ID</div>
-                </div>
-
-                {/* aeolus.ruleName */}
-                <div>
-                  <div className="text-primary font-semibold mb-1">aeolus.ruleName</div>
-                  <div className="text-[#9AA6B2] pl-2">This automation's display name</div>
-                </div>
-
-                {/* aeolus.enabled */}
-                <div>
-                  <div className="text-primary font-semibold mb-1">aeolus.enabled</div>
-                  <div className="text-[#9AA6B2] pl-2">Whether this automation is enabled</div>
-                </div>
-
-                {/* aeolus.lastFired */}
-                <div>
-                  <div className="text-primary font-semibold mb-1">aeolus.lastFired</div>
-                  <div className="text-[#9AA6B2] pl-2">Unix timestamp of last execution (or null)</div>
-                </div>
-
-                {/* aeolus.read */}
-                <div>
-                  <div className="text-primary font-semibold mb-1">aeolus.read(key)</div>
-                  <div className="text-[#9AA6B2] pl-2">Read a value from the shared state store</div>
-                </div>
-
-                {/* aeolus.save */}
-                <div>
-                  <div className="text-primary font-semibold mb-1">aeolus.save(key, value)</div>
-                  <div className="text-[#9AA6B2] pl-2">Persist value for the Logic tab to read on next trigger</div>
-                </div>
-
-                {/* aeolus.saveAndFire */}
-                <div>
-                  <div className="text-primary font-semibold mb-1">aeolus.saveAndFire(key, value)</div>
-                  <div className="text-[#9AA6B2] pl-2">Persist state + fire the Logic tab</div>
-                </div>
-
-                {/* aeolus.fire */}
-                <div>
-                  <div className="text-primary font-semibold mb-1">aeolus.fire(eventName, payload?)</div>
-                  <div className="text-[#9AA6B2] pl-2">Fire the Logic tab with a UI event</div>
-                </div>
-
-                {/* aeolus.control */}
-                <div>
-                  <div className="text-primary font-semibold mb-1">aeolus.control(id, type, params?)</div>
-                  <div className="text-[#9AA6B2] pl-2">Control a device</div>
-                </div>
-
-                {/* aeolus.publish */}
-                <div>
-                  <div className="text-primary font-semibold mb-1">aeolus.publish(topic, payload)</div>
-                  <div className="text-[#9AA6B2] pl-2">Send an MQTT message</div>
-                </div>
-
-                {/* aeolus.history */}
-                <div>
-                  <div className="text-primary font-semibold mb-1">aeolus.history</div>
-                  <div className="text-[#9AA6B2] pl-2">Last 10 execution log entries</div>
-                </div>
-              </div>
-            )}
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Error summary panel */}
-      {errors.length > 0 && (
-        <div className="rounded-lg bg-[#EF4444]/10 border border-[#EF4444]/30 p-3 max-h-32 overflow-auto">
-          <div className="text-xs font-medium text-[#EF4444] mb-1">
-            Transpilation errors
-          </div>
-          {errors.map((err, i) => (
-            <div key={i} className="text-[10px] text-[#E6EDF3] font-mono">
-              Line {err.line}:{err.column} — {err.message}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Action buttons */}
-      <div className="flex items-center gap-2 shrink-0">
-        <button
-          onClick={isEditing ? handleUpdate : handleSave}
-          disabled={saveDisabled}
-          className="flex items-center gap-1.5 px-4 py-2 text-xs font-medium rounded-lg bg-primary/20 text-primary border border-primary/30 hover:bg-primary/30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          {saving ? (
-            <Loader2 size={12} className="animate-spin" />
-          ) : (
-            <Save size={12} />
-          )}
-          Save
-        </button>
-
-        <button
-          onClick={() => setShowSnippets((v) => !v)}
-          className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-lg border transition-colors ${
-            showSnippets
-              ? "bg-primary/20 text-primary border-primary/30"
-              : "text-[#9AA6B2] hover:text-[#E6EDF3] hover:bg-elevated/50 border-[#2A3441]"
-          }`}
-        >
-          <Blocks size={12} />
-          Snippets
-        </button>
-
-        <button
-          onClick={() => setShowDocs((v) => !v)}
-          className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-lg border transition-colors ${
-            showDocs
-              ? "bg-primary/20 text-primary border-primary/30"
-              : "text-[#9AA6B2] hover:text-[#E6EDF3] hover:bg-elevated/50 border-[#2A3441]"
-          }`}
-        >
-          <BookOpen size={12} />
-          Docs
-        </button>
-
-        {isEditing && (
-          <button
-            onClick={() => {
-              setErrors([]);
-              setMode("status");
-            }}
-            className="flex items-center gap-1.5 px-4 py-2 text-xs font-medium rounded-lg text-[#9AA6B2] hover:text-[#E6EDF3] hover:bg-elevated/50 border border-[#2A3441] transition-colors"
-          >
-            <X size={12} />
-            Cancel
-          </button>
-        )}
-      </div>
-    </div>
-  );
+  return null;
 }
-
-// ── Helper component for custom UI rendering ──
-// Chooses between the sandboxed custom UI (SandboxHost), the structured flow
-// diagram, and the activity feed based on the rule's shape.
-
-import type { Device } from "../../store/device-store";
 
 interface DynamicCustomSectionProps {
   ruleId: string;

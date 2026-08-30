@@ -17,7 +17,7 @@ import { authFetch } from "../lib/auth-fetch";
 import { API_URL } from "../lib/env";
 import { automationProjectModelUri } from "../lib/automation-project-model";
 import "../lib/monaco-setup";
-import type { TranspileError } from "./ScriptEditor";
+import type { TranspileError } from "./automation-authoring";
 import { SnippetPicker } from "./SnippetPicker";
 
 export interface AutomationProjectFile {
@@ -65,14 +65,16 @@ const LOGIC_API = [
   ["context", "Trigger topic, device, state and timestamp"],
   ["devices.get(id)", "Read a device snapshot"],
   ["devices.list()", "List registered devices"],
-  ["devices.action(id, type, params?)", "Control a device"],
+  ["devices.action(id, type, params?)", "Control one device through CommandService"],
+  ["devices.actionAll(filter, type, params?)", "Control matching scoped devices"],
   ["mqtt.publish(topic, payload)", "Publish an MQTT message"],
   ["state.get(key)", "Read automation state"],
   ["state.set(key, value)", "Persist automation state"],
   ["state.getAll()", "Read all automation state"],
-  ["services.get(type)", "Find a registered service"],
-  ["http.get(url, opts?)", "Make an HTTP GET request"],
-  ["http.post(url, opts?)", "Make an HTTP POST request"],
+  ["http.get(url, opts?)", "Call a public HTTP/HTTPS endpoint"],
+  ["http.post(url, opts?)", "POST to a public HTTP/HTTPS endpoint"],
+  ["events.emit(name, payload?)", "Emit a scoped Automation event"],
+  ["db.*", "Optional Data Store API when enabled"],
   ["log.info / warn / error", "Write to the Aeolus event log"],
 ] as const;
 
@@ -373,30 +375,44 @@ export function AutomationProjectEditor({
 
   return (
     <div className="h-full min-h-[300px] flex flex-col overflow-hidden rounded-xl border border-[#2A3441] bg-[#0B0F14] shadow-[0_10px_30px_rgba(0,0,0,0.12)]">
-      {/* Logic + UI are the product. Insert/API/Files progressively reveal power. */}
+      {/* Logic/UI/Files are navigation. Insert/API/Format are contextual tools. */}
       <div className="min-h-12 shrink-0 flex flex-wrap items-stretch border-b border-[#2A3441] bg-[#10161F]">
         <div className="flex items-stretch px-2">
           <button
-            onClick={() => setActivePath(project.logicEntry)}
-            className={`relative min-w-24 px-4 text-xs font-semibold transition-colors ${logicSelected ? "text-[#5CE1E6]" : "text-[#7E8A98] hover:text-[#C3CDD7]"}`}
+            onClick={() => { setActivePath(project.logicEntry); setToolPanel(null); }}
+            className={`relative min-w-24 px-4 text-xs font-semibold transition-colors ${logicSelected && toolPanel !== "files" ? "text-[#5CE1E6]" : "text-[#7E8A98] hover:text-[#C3CDD7]"}`}
           >
             Logic
-            {logicSelected && <span className="absolute inset-x-3 bottom-0 h-0.5 rounded-full bg-[#5CE1E6]" />}
+            {logicSelected && toolPanel !== "files" && <span className="absolute inset-x-3 bottom-0 h-0.5 rounded-full bg-[#5CE1E6]" />}
           </button>
           <button
-            onClick={() => project.uiEntry ? setActivePath(project.uiEntry) : (!readOnly && addUi())}
+            onClick={() => {
+              setToolPanel(null);
+              if (project.uiEntry) setActivePath(project.uiEntry);
+              else if (!readOnly) addUi();
+            }}
             disabled={readOnly && !project.uiEntry}
-            className={`relative min-w-24 px-4 text-xs font-semibold transition-colors ${uiSelected ? "text-[#3BA4FF]" : "text-[#7E8A98] hover:text-[#C3CDD7] disabled:opacity-40 disabled:hover:text-[#7E8A98]"}`}
+            className={`relative min-w-24 px-4 text-xs font-semibold transition-colors ${uiSelected && toolPanel !== "files" ? "text-[#3BA4FF]" : "text-[#7E8A98] hover:text-[#C3CDD7] disabled:opacity-40 disabled:hover:text-[#7E8A98]"}`}
             title={project.uiEntry ? "Edit automation UI" : readOnly ? "This automation has no custom UI" : "Create automation UI"}
           >
             UI
-            {uiSelected && <span className="absolute inset-x-3 bottom-0 h-0.5 rounded-full bg-[#3BA4FF]" />}
+            {uiSelected && toolPanel !== "files" && <span className="absolute inset-x-3 bottom-0 h-0.5 rounded-full bg-[#3BA4FF]" />}
           </button>
+          {canRevealFiles && (
+            <button
+              onClick={() => toggleTool("files")}
+              className={`relative min-w-24 px-4 text-xs font-semibold transition-colors ${toolPanel === "files" || extraFileSelected ? "text-[#C3CDD7]" : "text-[#7E8A98] hover:text-[#C3CDD7]"}`}
+              title="Browse the complete Automation Project"
+            >
+              <span className="inline-flex items-center gap-1.5"><FolderTree size={12} /> Files</span>
+              {(toolPanel === "files" || extraFileSelected) && <span className="absolute inset-x-3 bottom-0 h-0.5 rounded-full bg-[#9AA6B2]" />}
+            </button>
+          )}
         </div>
 
         <div className="flex-1" />
 
-        <div className="flex items-center gap-1 px-2 py-1.5">
+        <div className="flex items-center gap-1 px-2 py-1.5 before:content-[''] before:h-5 before:w-px before:bg-[#2A3441] before:mr-1">
           {!readOnly && (
             <button
               onClick={() => toggleTool("insert")}
@@ -413,15 +429,6 @@ export function AutomationProjectEditor({
           >
             <BookOpen size={12} /> API
           </button>
-          {canRevealFiles && (
-            <button
-              onClick={() => toggleTool("files")}
-              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[10px] font-medium transition-colors ${toolPanel === "files" ? "bg-[#1A2330] text-[#E6EDF3]" : "text-[#7E8A98] hover:text-[#C3CDD7] hover:bg-[#171E28]"}`}
-              title="Show the complete Automation Project"
-            >
-              <FolderTree size={12} /> Project files
-            </button>
-          )}
           {!readOnly && (
             <button
               onClick={() => editorRef.current?.getAction("editor.action.formatDocument")?.run()}

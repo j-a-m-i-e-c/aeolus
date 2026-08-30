@@ -12,18 +12,8 @@ const { mockAuthFetch } = vi.hoisted(() => ({ mockAuthFetch: vi.fn() }));
 vi.mock("../lib/auth-fetch", () => ({ authFetch: mockAuthFetch }));
 vi.mock("../lib/env", () => ({ API_URL: "http://test.local:3001" }));
 
-// Monaco editor stub — exposes onSave via a button so the save path is reachable.
-vi.mock("./ScriptEditor", () => ({
-  ScriptEditor: ({ onSave }: { onSave: (s: string) => void }) => (
-    <div data-testid="script-editor">
-      <button onClick={() => onSave("when(x) => log('hi')")}>editor-save</button>
-    </div>
-  ),
-}));
-
-// New automations (and existing project automations) author through the
-// multi-file project editor. Stub it for the same reason as ScriptEditor: it
-// wraps Monaco, which does not run in jsdom.
+// New and existing script automations author through the multi-file Project editor.
+// Stub it so this test focuses on page behaviour rather than Monaco.
 vi.mock("./AutomationProjectEditor", () => ({
   AutomationProjectEditor: ({ onSave }: { onSave: () => void }) => (
     <div data-testid="project-editor">
@@ -67,7 +57,7 @@ import { useDashboardStore } from "../store/dashboard-store";
 const RULES = [
   // Legacy form rule with a non-device action: no acknowledgement level applies.
   { id: "r1", name: "Form Rule", topic: "a/b", hasCondition: false, source: "ui", ruleType: "form", enabled: true, actionType: "log" },
-  { id: "r2", name: "Script Rule", topic: "c/d", hasCondition: true, source: "ui", ruleType: "script", enabled: false, scriptSource: "when(x)" },
+  { id: "r2", name: "Script Rule", topic: "c/d", hasCondition: true, source: "ui", ruleType: "script", enabled: false },
   // Legacy device-directed form rule: runtime-only, no authoring surface any more.
   { id: "r3", name: "Toggle Rule", topic: "e/f", hasCondition: false, source: "ui", ruleType: "form", enabled: false, actionType: "toggle", actionTarget: "light/x" },
 ];
@@ -91,7 +81,18 @@ async function openPanel() {
 describe("AutomationsPage", () => {
   beforeEach(() => {
     mockAuthFetch.mockReset();
-    mockAuthFetch.mockResolvedValue(jsonResponse(RULES));
+    mockAuthFetch.mockImplementation((url: string) => {
+      if (url.endsWith("/api/automations/r2/project")) {
+        return Promise.resolve(jsonResponse({
+          automationId: "r2",
+          files: [{ path: "logic/index.ts", content: "when(x)" }],
+          logicEntry: "logic/index.ts",
+          uiEntry: null,
+          legacyProjection: true,
+        }));
+      }
+      return Promise.resolve(jsonResponse(RULES));
+    });
     // Author as an admin by default so authoring controls are available (admins
     // create unrestricted automations and need no owning-tab selection). Scoped
     // non-admin authoring is covered by its own test below.
@@ -122,9 +123,8 @@ describe("AutomationsPage", () => {
     await openPanel();
 
     // Lazy-loaded behind Suspense, so this resolves rather than being immediate.
-    // A new automation is authored as an Automation Project, so the project
-    // editor is the panel here; the single-file editor is only for existing
-    // legacy automations.
+    // All script automations use the Automation Project editor. Existing
+    // single-file rows are transparently projected into this same surface.
     expect(await screen.findByTestId("project-editor")).toBeInTheDocument();
     // The retired form-based "Quick Rule" mode must not come back.
     expect(screen.queryByRole("button", { name: /Quick Rule/ })).not.toBeInTheDocument();
@@ -152,6 +152,10 @@ describe("AutomationsPage", () => {
       name: "My Automation",
       triggerTopic: "sensor/temp",
       ruleType: "script",
+      project: {
+        logicEntry: "logic/index.ts",
+        uiEntry: null,
+      },
     });
   });
 
@@ -184,6 +188,22 @@ describe("AutomationsPage", () => {
 
     await waitFor(() => expect(lastCallWithMethod("PUT")).toBeTruthy());
     expect(lastCallWithMethod("PUT")![0]).toBe("http://test.local:3001/api/automations/r2");
+  });
+
+  it("does not open editing with stale source when the Project read fails", async () => {
+    mockAuthFetch.mockImplementation((url: string) => {
+      if (url.endsWith("/api/automations/r2/project")) {
+        return Promise.resolve(jsonResponse({ error: "unavailable" }, 503));
+      }
+      return Promise.resolve(jsonResponse(RULES));
+    });
+
+    render(<AutomationsPage />);
+    await screen.findByText("Script Rule");
+    fireEvent.click(screen.getByText("Script Rule"));
+
+    expect(await screen.findByText("Failed to load Automation Project source")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Edit Automation" })).not.toBeInTheDocument();
   });
 
   it("does not offer an editor for a legacy form rule", async () => {

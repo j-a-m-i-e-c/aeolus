@@ -24,10 +24,16 @@ import {
   FormInput,
   Pencil,
 } from "lucide-react";
-import type { TranspileError } from "./ScriptEditor";
-const ScriptEditor = lazy(() => import("./ScriptEditor").then(m => ({ default: m.ScriptEditor })));
 const AutomationProjectEditor = lazy(() => import("./AutomationProjectEditor").then(m => ({ default: m.AutomationProjectEditor })));
 import type { AutomationProjectSource } from "./AutomationProjectEditor";
+import { AutomationAuthoringFields } from "./AutomationAuthoringFields";
+import {
+  createDefaultAutomationProject,
+  describeAutomationTrigger,
+  triggerIsConfigured,
+  type AutomationTriggerType,
+  type TranspileError,
+} from "./automation-authoring";
 import { authFetch } from "../lib/auth-fetch";
 import { useAuthStore } from "../store/auth-store";
 import { usePermissionsStore } from "../store/permissions-store";
@@ -48,21 +54,10 @@ interface AutomationRule {
   actionParams?: Record<string, unknown>;
   conditionType?: string | null;
   conditionValue?: string | null;
-  scriptSource?: string;
   ownerTabId?: string | null;
   authoredUnrestricted?: boolean;
-  projectMode?: "project" | "legacy";
-}
-
-function createDefaultProject(): AutomationProjectSource {
-  return {
-    logicEntry: "logic/index.ts",
-    uiEntry: null,
-    files: [{ path: "logic/index.ts", content: `export default async function run(context: EventContext) {
-  log.info(\`Event: \${context.topic}\`);
-}
-` }],
-  };
+  triggerType?: AutomationTriggerType;
+  cronExpression?: string | null;
 }
 
 export function AutomationsPage() {
@@ -91,10 +86,15 @@ export function AutomationsPage() {
   // Authoring state
   const [scriptName, setScriptName] = useState("");
   const [scriptTriggerTopic, setScriptTriggerTopic] = useState("");
-  const [scriptSource, setScriptSource] = useState("");
-  const [projectSource, setProjectSource] = useState<AutomationProjectSource>(() => createDefaultProject());
+  const [triggerType, setTriggerType] = useState<AutomationTriggerType>("mqtt");
+  const [cronExpression, setCronExpression] = useState("");
+  const [triggerValid, setTriggerValid] = useState(true);
+  const [projectSource, setProjectSource] = useState<AutomationProjectSource>(() => createDefaultAutomationProject());
   const [newProjectSession, setNewProjectSession] = useState(0);
   const [transpileErrors, setTranspileErrors] = useState<TranspileError[]>([]);
+  // Surfaced outside the authoring panel: a failed project read deliberately
+  // leaves the panel closed, so an in-panel error would never be seen.
+  const [projectLoadError, setProjectLoadError] = useState<string | null>(null);
 
   // Editing state
   const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
@@ -113,15 +113,18 @@ export function AutomationsPage() {
   const resetAuthoring = () => {
     setScriptName("");
     setScriptTriggerTopic("");
-    setScriptSource("");
-    setProjectSource(createDefaultProject());
+    setTriggerType("mqtt");
+    setCronExpression("");
+    setTriggerValid(true);
+    setProjectSource(createDefaultAutomationProject());
     setNewProjectSession((session) => session + 1);
     setTranspileErrors([]);
+    setProjectLoadError(null);
     setEditingRuleId(null);
   };
 
-  const saveScript = async (source: string) => {
-    if (!scriptName || !scriptTriggerTopic) return;
+  const saveScript = async () => {
+    if (!scriptName.trim() || !triggerIsConfigured(triggerType, scriptTriggerTopic, cronExpression, triggerValid)) return;
     setTranspileErrors([]);
 
     const isEditing = !!editingRuleId;
@@ -135,12 +138,12 @@ export function AutomationsPage() {
         method,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name: scriptName,
-          triggerTopic: scriptTriggerTopic,
+          name: scriptName.trim(),
+          triggerTopic: triggerType === "mqtt" ? scriptTriggerTopic.trim() : undefined,
+          triggerType,
+          cronExpression: triggerType === "cron" ? cronExpression : undefined,
           ruleType: "script",
-          ...((editingRuleId && rules.find((rule) => rule.id === editingRuleId)?.projectMode !== "project")
-            ? { scriptSource: source }
-            : { project: projectSource }),
+          project: projectSource,
           // Owning tab only matters on create; a non-admin binds scope to a tab
           // they can write. On edit (PUT) the server ignores scope fields.
           ...(isEditing || isAdmin ? {} : { tabId: ownerTabId }),
@@ -182,15 +185,26 @@ export function AutomationsPage() {
 
   const openForEditing = async (rule: AutomationRule) => {
     setScriptName(rule.name);
-    setScriptTriggerTopic(rule.topic);
+    setScriptTriggerTopic(rule.topic || "");
+    setTriggerType(rule.triggerType || "mqtt");
+    setCronExpression(rule.cronExpression || "");
+    setTriggerValid(true);
     setTranspileErrors([]);
-    if (rule.projectMode === "project") {
-      try {
-        const response = await authFetch(`${API_URL}/api/automations/${rule.id}/project`);
-        if (response.ok) setProjectSource(await response.json() as AutomationProjectSource);
-      } catch {}
-    } else {
-      setScriptSource(rule.scriptSource || "");
+    setProjectLoadError(null);
+    try {
+      // The project endpoint transparently projects pre-Project automations too.
+      // Existing installations therefore use the same authoring surface as new
+      // automations and the public demo. Saving promotes the projection into a
+      // persisted Automation Project.
+      const response = await authFetch(`${API_URL}/api/automations/${rule.id}/project`);
+      if (!response.ok) throw new Error("Failed to load Automation Project");
+      setProjectSource(await response.json() as AutomationProjectSource);
+    } catch {
+      // Fail closed rather than opening the editor with a stale/default Project:
+      // saving that state could overwrite valid authored source after a transient
+      // project-read failure. The panel stays closed, so report it at page level.
+      setProjectLoadError("Failed to load Automation Project source");
+      return;
     }
     setEditingRuleId(rule.id);
     setShowForm(true);
@@ -224,6 +238,17 @@ export function AutomationsPage() {
           )}
         </div>
       </div>
+
+      {/* Project read failed, so the authoring panel stayed closed on purpose.
+          Report it here rather than inside the panel nobody can see. */}
+      {projectLoadError && (
+        <div
+          role="alert"
+          className="bg-[#EF4444]/10 border border-[#EF4444]/30 rounded-lg p-3 text-xs text-[#EF4444]"
+        >
+          {projectLoadError}
+        </div>
+      )}
 
       {/* Authoring panel — create and edit share one surface, so a setting is
           defined in exactly one place for both. */}
@@ -262,65 +287,31 @@ export function AutomationsPage() {
             </h2>
 
             <div className="space-y-4">
-              {/* Trigger setup */}
-              <div className="rounded-lg border border-[#2A3441] bg-background p-3 space-y-3">
-                <p className="text-[10px] text-[#6B7785] uppercase tracking-wider">Trigger</p>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label
-                      htmlFor="automation-name"
-                      className="text-[10px] text-[#6B7785] uppercase tracking-wider block mb-1"
-                    >
-                      Name
-                    </label>
-                    <input
-                      id="automation-name"
-                      type="text"
-                      placeholder="e.g. Smart heating logic"
-                      value={scriptName}
-                      onChange={(e) => setScriptName(e.target.value)}
-                      className="w-full text-xs bg-surface border border-[#2A3441] rounded px-2 py-1.5 text-[#E6EDF3] placeholder-[#6B7785] focus:outline-none focus:border-primary"
-                    />
-                  </div>
-                  <div>
-                    <label
-                      htmlFor="automation-trigger-topic"
-                      className="text-[10px] text-[#6B7785] uppercase tracking-wider block mb-1"
-                    >
-                      Trigger Topic
-                    </label>
-                    <input
-                      id="automation-trigger-topic"
-                      type="text"
-                      placeholder="e.g. sensor/+/temperature"
-                      value={scriptTriggerTopic}
-                      onChange={(e) => setScriptTriggerTopic(e.target.value)}
-                      className="w-full text-xs bg-surface border border-[#2A3441] rounded px-2 py-1.5 text-[#E6EDF3] placeholder-[#6B7785] font-mono focus:outline-none focus:border-primary"
-                    />
-                  </div>
-                </div>
-
+              <div className="rounded-lg border border-[#2A3441] bg-background p-3">
+                <AutomationAuthoringFields
+                  name={scriptName}
+                  triggerType={triggerType}
+                  mqttTopic={scriptTriggerTopic}
+                  cronExpression={cronExpression}
+                  onNameChange={setScriptName}
+                  onTriggerTypeChange={setTriggerType}
+                  onMqttTopicChange={setScriptTriggerTopic}
+                  onCronExpressionChange={setCronExpression}
+                  onTriggerValidityChange={setTriggerValid}
+                  namePlaceholder="e.g. Smart heating logic"
+                />
               </div>
 
               <Suspense fallback={<div className="flex items-center justify-center h-64 text-neutral-500">Loading editor...</div>}>
-              {(!editingRuleId || rules.find((rule) => rule.id === editingRuleId)?.projectMode === "project") ? (
                 <div className="h-[420px]">
                   <AutomationProjectEditor
                     project={projectSource}
                     projectKey={editingRuleId || `new-automation-${newProjectSession}`}
                     onChange={setProjectSource}
-                    onSave={() => saveScript(projectSource.files.find((file) => file.path === projectSource.logicEntry)?.content || "")}
+                    onSave={saveScript}
                     errors={transpileErrors}
                   />
                 </div>
-              ) : (
-                <ScriptEditor
-                  initialValue={scriptSource || undefined}
-                  onChange={(val) => setScriptSource(val)}
-                  onSave={saveScript}
-                  errors={transpileErrors}
-                />
-              )}
               </Suspense>
 
               {transpileErrors.length > 0 && (
@@ -344,8 +335,8 @@ export function AutomationsPage() {
                   Cancel
                 </button>
                 <button
-                  onClick={() => saveScript((!editingRuleId || rules.find((rule) => rule.id === editingRuleId)?.projectMode === "project") ? (projectSource.files.find((file) => file.path === projectSource.logicEntry)?.content || "") : scriptSource)}
-                  disabled={!scriptName || !scriptTriggerTopic}
+                  onClick={saveScript}
+                  disabled={!scriptName.trim() || !triggerIsConfigured(triggerType, scriptTriggerTopic, cronExpression, triggerValid)}
                   className="flex-1 py-2 text-xs font-medium rounded-lg bg-primary/20 text-primary border border-primary/30 hover:bg-primary/30 transition-colors disabled:opacity-40"
                 >
                   {editingRuleId ? "Update Automation" : "Create Automation"}
@@ -390,10 +381,10 @@ export function AutomationsPage() {
                     {rule.name}
                   </div>
                   <div className="text-[10px] text-[#6B7785] font-mono">
-                    when({rule.topic})
+                    {describeAutomationTrigger(rule)}
                     {rule.hasCondition && " → if(...)"}
                     {rule.actionType && ` → ${rule.actionType}`}
-                    {rule.ruleType === "script" && " → script"}
+                    {rule.ruleType === "script" && " → Logic"}
                   </div>
                 </div>
               </div>

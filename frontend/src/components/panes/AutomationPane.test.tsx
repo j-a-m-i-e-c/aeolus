@@ -23,14 +23,6 @@ vi.mock("../AutomationProjectEditor", () => ({
     </div>
   ),
 }));
-vi.mock("../ScriptEditor", () => ({
-  ScriptEditor: ({ onSave }: { onSave: (s: string) => void }) => (
-    <div data-testid="script-editor">
-      <button onClick={() => onSave("src")}>logic-save</button>
-    </div>
-  ),
-}));
-vi.mock("../UiEditor", () => ({ UiEditor: () => <div data-testid="ui-editor" /> }));
 vi.mock("../FlowDiagram", () => ({ FlowDiagram: () => <div data-testid="flow-diagram" /> }));
 vi.mock("../ActivityFeed", () => ({ ActivityFeed: () => <div data-testid="activity-feed" /> }));
 vi.mock("../SnippetPicker", () => ({
@@ -99,6 +91,13 @@ function routeStatus(rule: Record<string, unknown> = RULE) {
   mockAuthFetch.mockImplementation((url: string, init?: RequestInit) => {
     if (init?.method) return Promise.resolve(jsonResponse({ id: "r1" }));
     if (url.endsWith("/api/automations")) return Promise.resolve(jsonResponse([rule]));
+    if (url.endsWith("/api/automations/r1/project")) return Promise.resolve(jsonResponse({
+      automationId: "r1",
+      files: [{ path: "logic/index.ts", content: `automation({ actions: [] });` }],
+      logicEntry: "logic/index.ts",
+      uiEntry: null,
+      legacyProjection: true,
+    }));
     if (url.includes("/history")) return Promise.resolve(jsonResponse([{ timestamp: 1000 }]));
     if (url.includes("/state")) return Promise.resolve(jsonResponse({}));
     return Promise.resolve(jsonResponse({}));
@@ -123,6 +122,8 @@ describe("AutomationPane — setup mode", () => {
     render(<AutomationPane config={{} as PaneConfig} paneId="p1" />);
 
     fireEvent.change(screen.getByPlaceholderText("Automation name"), { target: { value: "Heat logic" } });
+    // Saving is gated on a configured trigger, so the MQTT topic must be set too.
+    fireEvent.change(screen.getByTestId("trigger-selector"), { target: { value: "a/b" } });
     fireEvent.click(screen.getByRole("button", { name: "Save Automation" }));
 
     await waitFor(() => expect(lastCallWithMethod("POST")).toBeTruthy());
@@ -130,6 +131,8 @@ describe("AutomationPane — setup mode", () => {
     expect(url).toBe("http://test.local:3001/api/automations");
     expect(JSON.parse(init!.body as string)).toMatchObject({
       name: "Heat logic",
+      triggerTopic: "a/b",
+      triggerType: "mqtt",
       ruleType: "script",
       project: { logicEntry: "logic/index.ts", uiEntry: null },
     });
@@ -142,6 +145,7 @@ describe("AutomationPane — setup mode", () => {
     mockAuthFetch.mockResolvedValue(jsonResponse({ details: [{ path: "logic/index.ts", line: 2, column: 4, message: "boom" }] }, 400));
     render(<AutomationPane config={{} as PaneConfig} paneId="p1" />);
     fireEvent.change(screen.getByPlaceholderText("Automation name"), { target: { value: "X" } });
+    fireEvent.change(screen.getByTestId("trigger-selector"), { target: { value: "a/b" } });
     fireEvent.click(screen.getByRole("button", { name: "Save Automation" }));
     expect(await screen.findByText("boom")).toBeInTheDocument();
     expect(screen.getByTestId("project-editor")).toBeInTheDocument();
@@ -154,10 +158,11 @@ describe("AutomationPane — status mode", () => {
     updatePaneConfig.mockClear();
   });
 
-  it("loads the rule and shows its topic + activity feed (no ui/structured)", async () => {
+  it("loads the rule and shows its trigger + activity feed (no ui/structured)", async () => {
     routeStatus();
     render(<AutomationPane config={{ ruleId: "r1" } as unknown as PaneConfig} paneId="p1" />);
-    expect(await screen.findByText("a/b")).toBeInTheDocument();
+    // Status mode summarises the trigger rather than printing the bare topic.
+    expect(await screen.findByText("MQTT · a/b")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Edit" })).toBeInTheDocument();
     expect(screen.getByTestId("activity-feed")).toBeInTheDocument();
   });
@@ -165,7 +170,7 @@ describe("AutomationPane — status mode", () => {
   it("toggles the rule via PATCH", async () => {
     routeStatus();
     render(<AutomationPane config={{ ruleId: "r1" } as unknown as PaneConfig} />);
-    await screen.findByText("a/b");
+    await screen.findByText("MQTT · a/b");
     fireEvent.click(screen.getByRole("button", { name: "Enabled" }));
     await waitFor(() => expect(lastCallWithMethod("PATCH")).toBeTruthy());
     expect(lastCallWithMethod("PATCH")![0]).toBe("http://test.local:3001/api/automations/r1/toggle");
@@ -174,21 +179,24 @@ describe("AutomationPane — status mode", () => {
   it("does not expose a generic Fire Now bypass", async () => {
     routeStatus();
     render(<AutomationPane config={{ ruleId: "r1" } as unknown as PaneConfig} />);
-    await screen.findByText("a/b");
+    await screen.findByText("MQTT · a/b");
     expect(screen.queryByRole("button", { name: "Fire Now" })).not.toBeInTheDocument();
   });
 
   it("enters editing mode and updates via PUT", async () => {
     routeStatus();
     render(<AutomationPane config={{ ruleId: "r1" } as unknown as PaneConfig} paneId="p1" />);
-    await screen.findByText("a/b");
+    await screen.findByText("MQTT · a/b");
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
 
-    // Editing mode: name is populated and a Cancel button appears.
-    expect(screen.getByDisplayValue("My Rule")).toBeInTheDocument();
+    // Existing single-file automations now enter the same Project editor used
+    // by new automations and the public demo. Entering it awaits the project
+    // fetch, and the editor itself is lazy-loaded behind Suspense.
+    expect(await screen.findByDisplayValue("My Rule")).toBeInTheDocument();
+    expect(await screen.findByTestId("project-editor")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save Automation" }));
     await waitFor(() => expect(lastCallWithMethod("PUT")).toBeTruthy());
     expect(lastCallWithMethod("PUT")![0]).toBe("http://test.local:3001/api/automations/r1");
   });
@@ -199,8 +207,8 @@ describe("AutomationPane — status mode", () => {
     expect(await screen.findByTestId("flow-diagram")).toBeInTheDocument();
   });
 
-  it("renders SandboxHost with entityType=automation and the rule id when uiSource present", async () => {
-    routeStatus({ ...RULE, uiSource: "export default () => null" });
+  it("renders SandboxHost with entityType=automation and the rule id when hasUi is true", async () => {
+    routeStatus({ ...RULE, hasUi: true });
     render(<AutomationPane config={{ ruleId: "r1" } as unknown as PaneConfig} />);
     const host = await screen.findByTestId("sandbox-host");
     expect(host).toBeInTheDocument();

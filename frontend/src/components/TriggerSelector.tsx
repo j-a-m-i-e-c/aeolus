@@ -1,6 +1,6 @@
 // frontend/src/components/TriggerSelector.tsx — Inline trigger type selector
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useId } from "react";
 import { CRON_PRESETS, CUSTOM_PICKER_OPTION, CUSTOM_CRON_OPTION, isValidCron, describeCron } from "../lib/cron-utils";
 
 type TriggerType = "mqtt" | "cron" | "none";
@@ -243,6 +243,8 @@ export function TriggerSelector({
   onCronExpressionChange,
   onValidityChange,
 }: TriggerSelectorProps) {
+  const triggerGroupLabelId = useId();
+
   // Track which preset is selected (or custom picker / custom cron)
   const [selectedPreset, setSelectedPreset] = useState<string>(() => {
     const match = CRON_PRESETS.find((p) => p.expression === cronExpression);
@@ -285,11 +287,13 @@ export function TriggerSelector({
 
   return (
     <div className="space-y-2">
-      {/* Trigger type label + segmented control */}
-      <label className="text-[10px] text-[#6B7785] uppercase tracking-wider font-medium block">
+      {/* Trigger type label + segmented control. The label names the button
+          group rather than a single control, so it is a group label, not a
+          <label> (which would have no form control to point at). */}
+      <div id={triggerGroupLabelId} className="text-[10px] text-[#6B7785] uppercase tracking-wider font-medium block">
         Trigger
-      </label>
-      <div className="flex items-center gap-1 p-1 rounded-lg bg-[#0B0F14] border border-[#2A3441]">
+      </div>
+      <div role="group" aria-labelledby={triggerGroupLabelId} className="flex items-center gap-1 p-1 rounded-lg bg-[#0B0F14] border border-[#2A3441]">
         {TRIGGER_OPTIONS.map((opt) => (
           <button
             key={opt.value}
@@ -310,6 +314,7 @@ export function TriggerSelector({
       {triggerType === "mqtt" && (
         <input
           type="text"
+          aria-label="Trigger Topic"
           value={mqttTopic}
           onChange={(e) => onMqttTopicChange(e.target.value)}
           placeholder="e.g. sensor/+/temperature"
