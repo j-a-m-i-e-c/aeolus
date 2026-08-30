@@ -1,6 +1,6 @@
 # Aeolus roadmap
 
-The roadmap is organised by horizon rather than by every idea that has ever come up. Completed design notes remain in Git history and `.kiro/specs/`; this file is for work that may still shape the product.
+The roadmap is organised by horizon rather than by every idea that has ever come up. This file is for work that may still shape the product, not a record of everything already delivered.
 
 ## Now
 
@@ -27,9 +27,8 @@ A follow-up review then found the remaining pre-promotion risk had moved into th
 bundled Hue and Kasa connectors, which had drifted from the newer, stricter
 Action Catalog and multi-instance contracts (advertised controls that were
 rejected or executed incorrectly, a Kasa discovery listener leak, and non-unique
-device IDs). That connector-correctness work is now complete — see the
-`connector-correctness-release-gates` spec (`.kiro/specs/`) and `git log`. The
-remaining convergence work here builds on those fixed connectors.
+device IDs). That connector-correctness work is now complete. The remaining
+convergence work here builds on those fixed connectors.
 
 ### Prove Aeolus on real equipment
 

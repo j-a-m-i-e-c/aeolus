@@ -97,7 +97,7 @@ make demo-up        # backend demo mode + simulator
 make demo-reset     # restart the simulator; it republishes initial state on reconnect
 ```
 
-The reference `reference-water` scenario is a conformance fixture, not a public tab. See `.kiro/specs/phase-2-mqtt-simulator/` for the design and the Phase 3 migration handoff.
+The reference `reference-water` scenario is a conformance fixture, not a public tab. Its device models live in `src/simulator/`.
 
 ## Public demo deployment (hardened)
 

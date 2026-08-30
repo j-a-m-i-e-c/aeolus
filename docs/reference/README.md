@@ -31,4 +31,4 @@ src/websocket/
 frontend/src/
 ```
 
-Historical design work under `.kiro/specs/` records how features were planned and built. It should not be treated as the current platform reference when it conflicts with these documents or the code.
+These documents and the code are the current platform reference. Where older design notes survive elsewhere, they describe how a feature was planned rather than how it behaves today.

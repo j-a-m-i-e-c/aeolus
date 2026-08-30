@@ -22,7 +22,6 @@ This directory is organised by audience and task. Start with the short documents
 | [Testing](TESTING.md) | Test layers, coverage and CI |
 | [Contributing](../CONTRIBUTING.md) | Development workflow and pull requests |
 | [Branding](BRANDING.md) | Visual design system |
-| [Media capture plan](MEDIA_CAPTURE_PLAN.md) | Screenshots and GIFs needed for the public docs |
 
 ## Technical reference
 

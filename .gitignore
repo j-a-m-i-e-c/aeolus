@@ -16,6 +16,10 @@ mosquitto/password_file
 # Seed dev scratch files (validation harness + extracted legacy seed)
 demo/seed/_*.mjs
 
+# Kiro IDE workspace configuration (steering + specs). Kept local only: it is
+# authoring context for this machine, not part of the shipped project.
+.kiro/
+
 # Local working notes — pasted assistant transcripts and scratch patch files.
 # Kept out of the repo so a release tree can be verified clean before deploying
 # (the deploy tags images from HEAD, so an uncommitted tree makes release
