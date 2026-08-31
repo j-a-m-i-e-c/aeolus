@@ -28,6 +28,8 @@ export interface SimulatorConfig {
   maxPendingTimers: number;
   /** Maximum queued commands per device before fail-fast drop. */
   maxCommandQueueDepth: number;
+  /** Optional interval for re-publishing coherent current state (0 disables). */
+  stateRefreshMs: number;
   /** Base reconnect backoff delay (ms). */
   baseRetryDelayMs: number;
   /** Maximum reconnect backoff delay (ms). */
@@ -48,6 +50,8 @@ export const DEFAULT_MAX_PENDING_TIMERS = 200;
 export const DEFAULT_MAX_COMMAND_QUEUE_DEPTH = 100;
 /** Default MQTT client id for the simulator process. */
 export const DEFAULT_CLIENT_ID = "aeolus-simulator";
+/** Periodic state refresh is opt-in; hosted demo enables it explicitly. */
+export const DEFAULT_STATE_REFRESH_MS = 0;
 
 function parseIntEnv(value: string | undefined, fallback: number, min: number): number {
   const parsed = value !== undefined ? Number.parseInt(value, 10) : Number.NaN;
@@ -85,6 +89,7 @@ export function loadSimulatorConfig(env: NodeJS.ProcessEnv): SimulatorConfig {
     maxDelayMs: parseIntEnv(env.AEOLUS_SIMULATOR_MAX_DELAY_MS, DEFAULT_MAX_DELAY_MS, 0),
     maxPendingTimers: parseIntEnv(env.AEOLUS_SIMULATOR_MAX_PENDING_TIMERS, DEFAULT_MAX_PENDING_TIMERS, 1),
     maxCommandQueueDepth: parseIntEnv(env.AEOLUS_SIMULATOR_MAX_COMMAND_QUEUE, DEFAULT_MAX_COMMAND_QUEUE_DEPTH, 1),
+    stateRefreshMs: parseIntEnv(env.AEOLUS_SIMULATOR_STATE_REFRESH_MS, DEFAULT_STATE_REFRESH_MS, 0),
     baseRetryDelayMs: parseIntEnv(env.AEOLUS_SIMULATOR_BASE_RETRY_DELAY_MS, DEFAULT_BASE_RETRY_DELAY_MS, 1),
     maxBackoffMs: parseIntEnv(env.AEOLUS_SIMULATOR_MAX_BACKOFF_MS, DEFAULT_MAX_BACKOFF_MS, 1),
     logLevel: env.AEOLUS_SIMULATOR_LOG_LEVEL?.trim() || env.LOG_LEVEL?.trim() || "info",
@@ -124,6 +129,7 @@ export function describeSimulatorConfig(config: SimulatorConfig): Record<string,
     maxDelayMs: config.maxDelayMs,
     maxPendingTimers: config.maxPendingTimers,
     maxCommandQueueDepth: config.maxCommandQueueDepth,
+    stateRefreshMs: config.stateRefreshMs,
     baseRetryDelayMs: config.baseRetryDelayMs,
     maxBackoffMs: config.maxBackoffMs,
     logLevel: config.logLevel,

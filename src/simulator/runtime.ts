@@ -29,6 +29,7 @@ export class SimulatorRuntime {
   private readonly scenarioManager: ScenarioManager;
   private readonly faults: FaultController;
   private readonly timerBudget: TimerBudget;
+  private stateRefreshTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(config: SimulatorConfig, logger: Logger) {
     this.config = config;
@@ -132,6 +133,12 @@ export class SimulatorRuntime {
     }
 
     await this.client.connect();
+    if (this.config.stateRefreshMs > 0) {
+      this.stateRefreshTimer = setInterval(() => {
+        this.registry.publishAll(true);
+      }, this.config.stateRefreshMs);
+      this.stateRefreshTimer.unref?.();
+    }
     this.logger.info(
       { scenarios: this.config.scenarios, devices: this.registry.list().length },
       "Simulator runtime started",
@@ -140,6 +147,10 @@ export class SimulatorRuntime {
 
   /** Stop the runtime: dispose models/routers, release timers and disconnect. */
   async stop(): Promise<void> {
+    if (this.stateRefreshTimer) {
+      clearInterval(this.stateRefreshTimer);
+      this.stateRefreshTimer = null;
+    }
     this.commandRouter.dispose();
     await this.scenarioManager.dispose();
     await this.registry.dispose();

@@ -9,6 +9,7 @@ import {
   DEFAULT_MAX_DELAY_MS,
   DEFAULT_MAX_PENDING_TIMERS,
   DEFAULT_MAX_COMMAND_QUEUE_DEPTH,
+  DEFAULT_STATE_REFRESH_MS,
   DEFAULT_CLIENT_ID,
 } from "./config.js";
 
@@ -25,6 +26,7 @@ describe("loadSimulatorConfig", () => {
     expect(config.maxDelayMs).toBe(DEFAULT_MAX_DELAY_MS);
     expect(config.maxPendingTimers).toBe(DEFAULT_MAX_PENDING_TIMERS);
     expect(config.maxCommandQueueDepth).toBe(DEFAULT_MAX_COMMAND_QUEUE_DEPTH);
+    expect(config.stateRefreshMs).toBe(DEFAULT_STATE_REFRESH_MS);
     expect(config.baseRetryDelayMs).toBe(DEFAULT_BASE_RETRY_DELAY_MS);
     expect(config.maxBackoffMs).toBe(DEFAULT_MAX_BACKOFF_MS);
     expect(config.logLevel).toBe("info");
@@ -60,6 +62,11 @@ describe("loadSimulatorConfig", () => {
     expect(config.maxPendingTimers).toBe(1);
     expect(config.maxDelayMs).toBe(0);
     expect(config.baseRetryDelayMs).toBe(DEFAULT_BASE_RETRY_DELAY_MS);
+  });
+
+  it("parses the optional coherent state refresh interval", () => {
+    expect(loadSimulatorConfig({ AEOLUS_SIMULATOR_STATE_REFRESH_MS: "300000" }).stateRefreshMs).toBe(300000);
+    expect(loadSimulatorConfig({ AEOLUS_SIMULATOR_STATE_REFRESH_MS: "-1" }).stateRefreshMs).toBe(0);
   });
 
   it("prefers the simulator log level over the shared LOG_LEVEL", () => {
@@ -103,5 +110,6 @@ describe("describeSimulatorConfig", () => {
     const described = describeSimulatorConfig(loadSimulatorConfig({}));
     expect(described.hasCredentials).toBe(false);
     expect(described.hasRandomSeed).toBe(false);
+    expect(described.stateRefreshMs).toBe(DEFAULT_STATE_REFRESH_MS);
   });
 });

@@ -151,6 +151,10 @@ services:
       AEOLUS_SIMULATOR_SCENARIOS: ${AEOLUS_SIMULATOR_SCENARIOS:-agriculture,research-vessel,underground-mining,wildlife,stage-show,escape-room,off-grid-bunker}
       MQTT_BROKER_URL: mqtt://mosquitto:1883
       AEOLUS_SIMULATOR_LOG_LEVEL: ${AEOLUS_SIMULATOR_LOG_LEVEL:-info}
+      # Keep the public showcase visibly alive without high-volume synthetic chatter.
+      # Current state is reasserted every five minutes; selected automations sample
+      # that telemetry into the bounded Data Store at the same cadence.
+      AEOLUS_SIMULATOR_STATE_REFRESH_MS: ${AEOLUS_SIMULATOR_STATE_REFRESH_MS:-300000}
     command: ["node", "dist/simulator/index.js"]
     depends_on:
       - mosquitto
