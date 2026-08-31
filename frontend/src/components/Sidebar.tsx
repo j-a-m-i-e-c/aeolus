@@ -1,6 +1,7 @@
 // frontend/src/components/Sidebar.tsx — Left sidebar navigation with dynamic tabs
 
 import { AeolusLogo } from "./AeolusLogo";
+import { AeolusWordmark } from "./AeolusWordmark";
 import { useDeviceStore } from "../store/device-store";
 import { useDashboardStore, tabNameToSlug } from "../store/dashboard-store";
 import { useDataStoreStore } from "../store/data-store-store";
@@ -300,7 +301,12 @@ export function Sidebar({ mobileOpen = false, onClose }: SidebarProps) {
             onClick={(e) => e.stopPropagation()}
           />
         ) : (
-          <span className="flex-1 truncate">{tab.name}</span>
+          <>
+            <span className="flex-1 truncate">{tab.name}</span>
+            {tab.id === "tab-space" && (
+              <span className="text-[8px] font-semibold uppercase tracking-wide rounded-full border border-[#4A7A66] bg-[#153328] px-1.5 py-0.5 text-[#88D9AD]">real data</span>
+            )}
+          </>
         )}
 
         {/* Delete button for custom tabs — admin only */}
@@ -321,11 +327,11 @@ export function Sidebar({ mobileOpen = false, onClose }: SidebarProps) {
   };
 
   return (
-    <aside className={`${mobileOpen ? "flex" : "hidden"} md:flex w-[min(86vw,20rem)] md:w-64 h-dvh md:h-screen bg-surface border-r border-[#2A3441] flex-col p-4 gap-6 fixed md:sticky inset-y-0 left-0 z-50 md:z-auto top-0 overflow-hidden shadow-2xl md:shadow-none`} aria-label="Aeolus navigation">
+    <aside className={`${mobileOpen ? "flex" : "hidden"} md:flex w-[min(86vw,20rem)] md:w-64 h-dvh md:h-full bg-surface border-r border-[#2A3441] flex-col p-4 gap-6 fixed md:sticky inset-y-0 left-0 z-50 md:z-auto top-0 overflow-hidden shadow-2xl md:shadow-none`} aria-label="Aeolus navigation">
       {/* Logo */}
       <div className="flex items-center gap-3 px-2 shrink-0">
         <AeolusLogo size={40} />
-        <span className="text-xl font-semibold text-primary flex-1">Aeolus</span>
+        <AeolusWordmark className="flex-1" />
         <button type="button" onClick={onClose} className="md:hidden w-9 h-9 inline-flex items-center justify-center rounded-lg text-[#6B7785] hover:text-[#E6EDF3] hover:bg-elevated/60" aria-label="Close navigation"><X size={18} /></button>
       </div>
 

@@ -5,19 +5,20 @@ import { Menu } from "lucide-react";
 import { Sidebar } from "./Sidebar";
 import { DemoBanner } from "./DemoBanner";
 import { AeolusLogo } from "./AeolusLogo";
+import { AeolusWordmark } from "./AeolusWordmark";
 
 export function Layout({ children }: { children: React.ReactNode }) {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   return (
-    <div className="flex flex-col min-h-screen bg-background">
-      <DemoBanner />
-      <div className="md:hidden sticky top-0 z-40 h-14 px-3 flex items-center gap-3 border-b border-[#2A3441] bg-surface/95 backdrop-blur">
+    <div className="flex h-dvh flex-col overflow-hidden bg-background">
+      <div className="shrink-0"><DemoBanner /></div>
+      <div className="md:hidden shrink-0 z-40 h-14 px-3 flex items-center gap-3 border-b border-[#2A3441] bg-surface/95 backdrop-blur">
         <button type="button" onClick={() => setMobileNavOpen(true)} className="w-10 h-10 inline-flex items-center justify-center rounded-lg border border-[#2A3441] text-[#9AA6B2] hover:text-[#E6EDF3] hover:bg-elevated/60 transition-colors" aria-label="Open navigation" aria-expanded={mobileNavOpen}>
           <Menu size={19} />
         </button>
         <AeolusLogo size={30} />
-        <span className="font-semibold text-primary">Aeolus</span>
+        <AeolusWordmark compact />
       </div>
 
       <div className="flex flex-1 min-h-0">
