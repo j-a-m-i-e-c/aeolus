@@ -146,6 +146,16 @@ describe("dashboard-store", () => {
       expect(pane2.config).toEqual({ title: "Sensors" });
     });
 
+    it("places a new automation first and shifts existing panes on that tab", () => {
+      d().addPane("tab-1", "device-grid");
+      const existingId = d().panes[0].id;
+      const existingY = d().panes[0].y;
+      d().addPane("tab-1", "automation", { ruleId: "rule-new" } as Pane["config"]);
+
+      expect(d().panes[0].paneType).toBe("automation");
+      expect(d().panes.find((pane) => pane.id === existingId)?.y).toBeGreaterThan(existingY);
+    });
+
     it("removePane drops the pane without deleting the linked automation", () => {
       d().addPane("tab-1", "automation", { ruleId: "rule-42" } as Pane["config"]);
       const id = d().panes[0].id;

@@ -185,7 +185,17 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
       h: defaultSize.h,
       createdAt: Date.now(),
     };
-    set((state) => ({ panes: [...state.panes, newPane] }));
+    set((state) => {
+      if (paneType !== "automation") return { panes: [...state.panes, newPane] };
+
+      // New automations are the primary creative act on a custom tab. Put the
+      // fresh editor first instead of letting grid collision resolution bury it
+      // under the first seeded pane.
+      const shifted = state.panes.map((pane) =>
+        pane.tabId === tabId ? { ...pane, y: pane.y + defaultSize.h } : pane,
+      );
+      return { panes: [newPane, ...shifted] };
+    });
     debouncedPersist(get);
   },
 
