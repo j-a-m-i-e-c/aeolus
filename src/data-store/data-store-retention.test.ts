@@ -158,7 +158,7 @@ describe("DataStore — retention enforcement", () => {
   });
 
   describe("storage limit", () => {
-    it("throws when storage limit is exceeded", () => {
+    it("rejects writes when the configured budget cannot hold even one record", () => {
       // Create a store with very low storage limit
       const tinyDb = new Database(":memory:");
       const tinyStore = new DataStore(tinyDb, eventBus, {
@@ -171,6 +171,30 @@ describe("DataStore — retention enforcement", () => {
       // With maxStorageMb = 0, estimated storage (0 records * 200 bytes = 0 MB) >= 0 MB
       // So the very first write should fail
       expect(() => tinyStore.write("test", { value: 1 })).toThrow("storage limit exceeded");
+
+      tinyStore.dispose();
+      tinyDb.close();
+    });
+
+
+    it("evicts the oldest records globally when the storage budget fills", () => {
+      const tinyDb = new Database(":memory:");
+      const tinyStore = new DataStore(tinyDb, eventBus, {
+        enabled: true,
+        // ~2 records at the Data Store's 200-byte estimation heuristic.
+        maxStorageMb: 0.0004,
+        maxRecordsPerCollection: 100000,
+        maxCollections: 50,
+      });
+
+      tinyStore.write("a", { value: 1 }, { timestamp: 1000 });
+      tinyStore.write("b", { value: 2 }, { timestamp: 2000 });
+      tinyStore.write("b", { value: 3 }, { timestamp: 3000 });
+
+      expect((tinyStore.query("a") as { total: number }).total).toBe(0);
+      const remaining = tinyStore.query("b") as { records: Array<{ payload: { value: number } }>; total: number };
+      expect(remaining.total).toBe(2);
+      expect(remaining.records.map((record) => record.payload.value).sort()).toEqual([2, 3]);
 
       tinyStore.dispose();
       tinyDb.close();

@@ -232,17 +232,26 @@ export class DataStore {
       );
     }
 
-    // Check storage limit before write (rough heuristic: ~200 bytes per record)
+    // Global storage budget (rough heuristic: ~200 bytes per record). When the
+    // bounded store is full, evict the oldest time-series records globally to
+    // make room rather than turning a long-running edge deployment into a
+    // permanent write failure. A zero/too-small budget still fails closed.
     const countRow = this.db.prepare("SELECT COUNT(*) as cnt FROM ds_records").get() as { cnt: number };
     const totalRecords = countRow.cnt;
-    const estimatedStorageMb = (totalRecords * 200) / (1024 * 1024);
-    if (estimatedStorageMb >= this.config.maxStorageMb) {
-      logger.warn(
-        { estimatedStorageMb, maxStorageMb: this.config.maxStorageMb },
-        "Data Store storage limit exceeded — rejecting write",
-      );
-      throw new Error(
-        `Data Store storage limit exceeded: estimated ${estimatedStorageMb.toFixed(1)} MB >= ${this.config.maxStorageMb} MB limit`,
+    const maxRecordsByStorage = Math.floor((this.config.maxStorageMb * 1024 * 1024) / 200);
+    if (maxRecordsByStorage < 1) {
+      throw new Error(`Data Store storage limit exceeded: ${this.config.maxStorageMb} MB budget cannot hold a record`);
+    }
+    if (totalRecords >= maxRecordsByStorage) {
+      const evictCount = totalRecords - maxRecordsByStorage + 1;
+      this.db.prepare(
+        `DELETE FROM ds_records WHERE id IN (
+          SELECT id FROM ds_records ORDER BY timestamp ASC, id ASC LIMIT ?
+        )`,
+      ).run(evictCount);
+      logger.info(
+        { evicted: evictCount, maxStorageMb: this.config.maxStorageMb },
+        "Global FIFO eviction: deleted oldest records to remain inside Data Store storage budget",
       );
     }
 
