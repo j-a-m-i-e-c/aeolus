@@ -11,6 +11,7 @@ function makeJwt(claims: Record<string, unknown>): string {
 }
 
 const adminToken = makeJwt({ userId: "u1", username: "admin", role: "admin", groupId: null });
+const demoToken = makeJwt({ userId: "demo-1", username: "demo", role: "user", groupId: "demo-group" });
 
 function okJson(body: unknown) {
   return new Response(JSON.stringify(body), { status: 200 });
@@ -94,6 +95,34 @@ describe("auth-store", () => {
       vi.mocked(fetch).mockRejectedValue(new Error("offline"));
 
       expect(await s().refresh()).toBe(false);
+      expect(s().isAuthenticated).toBe(false);
+    });
+  });
+
+  describe("demo session renewal", () => {
+    it("keeps an existing demo session when a renewal attempt transiently fails", async () => {
+      useAuthStore.setState({
+        accessToken: demoToken,
+        user: { id: "demo-1", username: "demo", role: "user", groupId: "demo-group" },
+        isAuthenticated: true,
+        loading: false,
+      });
+      vi.mocked(fetch).mockResolvedValue(new Response("", { status: 503 }));
+
+      const result = await s().initDemoSession();
+
+      expect(result).toBe(true);
+      expect(s().isAuthenticated).toBe(true);
+      expect(s().accessToken).toBe(demoToken);
+      expect(s().user?.username).toBe("demo");
+    });
+
+    it("still fails closed when the first demo session cannot be created", async () => {
+      vi.mocked(fetch).mockResolvedValue(new Response("", { status: 503 }));
+
+      const result = await s().initDemoSession();
+
+      expect(result).toBe(false);
       expect(s().isAuthenticated).toBe(false);
     });
   });

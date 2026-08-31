@@ -190,14 +190,19 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   initDemoSession: async () => {
+    // A renewal failure must not eject somebody who already has a still-valid
+    // two-hour demo token. Keep the current session and let the 13-minute timer
+    // try again; fail closed only when the initial anonymous session cannot be
+    // established at all.
+    const renewingExistingSession = get().isAuthenticated && get().user?.username === "demo";
     try {
       const res = await fetch(`${API_URL}/api/auth/demo-session`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
       });
       if (!res.ok) {
-        set({ isAuthenticated: false, loading: false });
-        return false;
+        if (!renewingExistingSession) set({ isAuthenticated: false, loading: false });
+        return renewingExistingSession;
       }
       const data = await res.json();
       const user = decodeTokenPayload(data.accessToken);
@@ -213,8 +218,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       startRefreshTimer(get().initDemoSession);
       return true;
     } catch {
-      set({ isAuthenticated: false, loading: false });
-      return false;
+      if (!renewingExistingSession) set({ isAuthenticated: false, loading: false });
+      return renewingExistingSession;
     }
   },
 
