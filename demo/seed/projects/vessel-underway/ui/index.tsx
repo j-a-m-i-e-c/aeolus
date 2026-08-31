@@ -1,7 +1,9 @@
 // Underway Science — UI composition entry point.
-// State selection and operator intent stay visible; rendering detail lives in Files.
+// At a glance: continuous seawater telemetry exposes fronts and controls the sampling pump.
 
 import UnderwayScienceDashboard from "./UnderwayScienceDashboard";
+
+import { createDemoActions } from "./demo-actions";
 
 export default function UnderwayScience(aeolus: CustomComponentProps) {
   const model = {
@@ -20,8 +22,7 @@ export default function UnderwayScience(aeolus: CustomComponentProps) {
   const actions = {
     samplingStart: () => aeolus.fire("sampling-start"),
     samplingStop: () => aeolus.fire("sampling-stop"),
-    simulateFront: () => aeolus.fire("simulate-front"),
-    resetUnderway: () => aeolus.fire("reset-underway"),
+    ...createDemoActions(aeolus),
   };
 
   return <UnderwayScienceDashboard model={model} actions={actions} />;

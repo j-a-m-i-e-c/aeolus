@@ -1,5 +1,5 @@
 // Game Master — UI composition entry point.
-// State selection and operator intent stay visible; rendering detail lives in Files.
+// At a glance: the operator runs time, hints, room looks and intercom while puzzle/room state flows in live.
 
 import GameMasterConsole from "./GameMasterConsole";
 

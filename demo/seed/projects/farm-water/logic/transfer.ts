@@ -86,7 +86,7 @@ export async function startTransfer(requestedLitres: number, source: string) {
     state.set("transferTargetLitres", litres);
     state.set("transferStartTotalLitres", startTotal);
     state.set("transferProgressLitres", 0);
-    setAction((source === "automatic-header-recovery" ? "Automatic recovery" : "Operator batch") + " · requesting " + litres + " L from lower dam");
+    setAction((source === "automatic-header-recovery" ? "Automatic recovery" : "Operator batch") + " · requesting " + litres + " L from shed catchment");
     const result = await devices.action(pump.id, "command", { payload: { on: true, litres } }, {
         tier: "observed",
         deviceId: flow.id,

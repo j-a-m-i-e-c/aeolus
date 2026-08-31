@@ -1,7 +1,9 @@
 // Wildlife Detection — UI composition entry point.
-// State selection and operator intent stay visible; rendering detail lives in Files.
+// At a glance: trail-camera telemetry becomes classified native/predator detections and shared domain events.
 
 import WildlifeDetectionDashboard from "./WildlifeDetectionDashboard";
+
+import { createDemoActions } from "./demo-actions";
 
 export default function WildlifeDetection(aeolus: CustomComponentProps) {
   const model = {
@@ -26,10 +28,7 @@ export default function WildlifeDetection(aeolus: CustomComponentProps) {
   };
 
   const actions = {
-    simulateNative: () => aeolus.fire("simulate-native"),
-    simulateFox: () => aeolus.fire("simulate-fox"),
-    simulateCat: () => aeolus.fire("simulate-cat"),
-    resetWildlife: () => aeolus.fire("reset-wildlife"),
+    ...createDemoActions(aeolus),
   };
 
   return <WildlifeDetectionDashboard model={model} actions={actions} />;

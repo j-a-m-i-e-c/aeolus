@@ -1,7 +1,9 @@
 // Puzzle Progress — UI composition entry point.
-// State selection and operator intent stay visible; rendering detail lives in Files.
+// At a glance: four physical puzzle sensors become progress, attempts and completion timing.
 
 import PuzzleProgressPanel from "./PuzzleProgressPanel";
+
+import { createDemoActions } from "./demo-actions";
 
 export default function PuzzleProgress(aeolus: CustomComponentProps) {
   const model = {
@@ -17,8 +19,7 @@ export default function PuzzleProgress(aeolus: CustomComponentProps) {
   };
 
   const actions = {
-    simulateSolve: () => aeolus.fire("simulate-solve"),
-    resetPuzzles: () => aeolus.fire("reset-puzzles"),
+    ...createDemoActions(aeolus),
   };
 
   return <PuzzleProgressPanel model={model} actions={actions} />;

@@ -1,7 +1,9 @@
 // Atmospheric Safety — UI composition entry point.
-// State selection and operator intent stay visible; rendering detail lives in Files.
+// At a glance: multi-gas telemetry becomes a safety band, alarm state and ventilation demand.
 
 import AtmosphericSafetyPanel from "./AtmosphericSafetyPanel";
+
+import { createDemoActions } from "./demo-actions";
 
 export default function AtmosphericSafety(aeolus: CustomComponentProps) {
   const model = {
@@ -19,8 +21,7 @@ export default function AtmosphericSafety(aeolus: CustomComponentProps) {
 
   const actions = {
     acknowledgeAlarm: () => aeolus.fire("acknowledge-alarm"),
-    simulateGasRise: () => aeolus.fire("simulate-gas-rise"),
-    resetAtmosphere: () => aeolus.fire("reset-atmosphere"),
+    ...createDemoActions(aeolus),
   };
 
   return <AtmosphericSafetyPanel model={model} actions={actions} />;

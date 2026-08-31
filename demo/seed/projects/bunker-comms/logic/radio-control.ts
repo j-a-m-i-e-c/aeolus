@@ -25,9 +25,10 @@ export async function transmitCheckIn() {
         setAction("Radio transmission not verified");
     }
 }
-export function simulateRadioContact() {
+export function handleCommsDemoEvent(event: string | undefined) {
+    if (event !== "simulate-contact") return;
     events.emit("bunker/sim/radio-contact", {});
-    setAction("Injecting a weak external VHF transmission");
+    setAction("DEMO · injecting a weak external VHF transmission");
 }
 export function projectRadioState() {
     const radio = byTopic("sensor/bunker/radio/rx");

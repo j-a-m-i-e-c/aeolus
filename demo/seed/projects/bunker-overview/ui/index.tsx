@@ -1,5 +1,5 @@
 // Continuity Overview — UI composition entry point.
-// State selection and operator intent stay visible; rendering detail lives in Files.
+// At a glance: one continuity summary across perimeter, air, energy, radio, water, food and filtration.
 
 import ContinuityOverviewDashboard from "./ContinuityOverview";
 

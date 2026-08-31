@@ -104,7 +104,7 @@ export default function TroughWateringDashboard({ model, actions }: {
         </div>
       </div>
 
-      <div style={{ marginTop: 7, padding: 8, border: "1px dashed #5D5331", borderRadius: 9, background: "#17150D" }}>
+      <div style={{ marginTop: 16, padding: 8, border: "1px dashed #5D5331", borderRadius: 9, background: "#17150D" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
           <div><div style={{ color: "#C8AE66", fontSize: 11, fontWeight: 850, letterSpacing: 1 }}>DEMO SCENARIO</div><div style={{ color: "#766E55", fontSize: 11, marginTop: 2 }}>Injects a herd visit into the simulated physical world.</div></div>
           {scenarioBusy && <div style={{ color: "#D8BC72", fontSize: 11 }}>HERD VISIT {Math.round(drinkingProgress)}%</div>}

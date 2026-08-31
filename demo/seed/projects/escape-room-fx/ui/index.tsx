@@ -1,5 +1,5 @@
 // Room Systems — UI composition entry point.
-// State selection and operator intent stay visible; rendering detail lives in Files.
+// At a glance: room scene state and physical FX controls are projected into one operator surface.
 
 import RoomSystemsPanel from "./RoomSystemsPanel";
 

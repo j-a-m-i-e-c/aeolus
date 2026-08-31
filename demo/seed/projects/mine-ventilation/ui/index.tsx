@@ -1,5 +1,5 @@
 // Ventilation Control — UI composition entry point.
-// State selection and operator intent stay visible; rendering detail lives in Files.
+// At a glance: mine airflow demand and fan state expose automatic ventilation plus a bounded operator boost.
 
 import VentilationControlPanel from "./VentilationControlPanel";
 

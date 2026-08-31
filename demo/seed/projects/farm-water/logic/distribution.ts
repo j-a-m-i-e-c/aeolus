@@ -9,7 +9,7 @@ async function refillZone(zone: "house" | "shed", tankTopic: string, valveTopic:
         return true;
     const key = zone === "house" ? "houseRefillActive" : "shedRefillActive";
     state.set(key, true);
-    setAction((zone === "house" ? "House" : "Shed") + " tank low · opening header feed");
+    setAction((zone === "house" ? "House" : "Office") + " tank low · opening header feed");
     const result = await devices.action(valve.id, "command", { payload: { on: true, targetPct } }, {
         tier: "observed",
         deviceId: tank.id,
@@ -18,11 +18,11 @@ async function refillZone(zone: "house" | "shed", tankTopic: string, valveTopic:
     });
     state.set(key, false);
     if (result.success) {
-        setAction((zone === "house" ? "House" : "Shed") + " tank recovered from header storage");
+        setAction((zone === "house" ? "House" : "Office") + " tank recovered from header storage");
         events.emit("farm/water/downstream-refill-verified", { zone, targetPct, lifecycleState: result.lifecycleState });
         return true;
     }
-    setAction((zone === "house" ? "House" : "Shed") + " refill not verified: " + String(result.error || result.lifecycleState || "unknown"));
+    setAction((zone === "house" ? "House" : "Office") + " refill not verified: " + String(result.error || result.lifecycleState || "unknown"));
     events.emit("farm/water/downstream-refill-failed", { zone, lifecycleState: result.lifecycleState });
     return false;
 }

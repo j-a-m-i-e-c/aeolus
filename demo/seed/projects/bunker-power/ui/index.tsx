@@ -1,7 +1,9 @@
 // Power & Supplies — UI composition entry point.
-// State selection and operator intent stay visible; rendering detail lives in Files.
+// At a glance: solar + battery reserves, continuity supplies and verified backup-generator control.
 
 import PowerSuppliesPanel from "./PowerSuppliesPanel";
+
+import { createDemoActions } from "./demo-actions";
 
 export default function PowerSupplies(aeolus: CustomComponentProps) {
   const model = {
@@ -21,8 +23,7 @@ export default function PowerSupplies(aeolus: CustomComponentProps) {
   const actions = {
     generatorOn: () => aeolus.fire("generator-on"),
     generatorOff: () => aeolus.fire("generator-off"),
-    simulateLowPower: () => aeolus.fire("simulate-low-power"),
-    resetPower: () => aeolus.fire("reset-power"),
+    ...createDemoActions(aeolus),
   };
 
   return <PowerSuppliesPanel model={model} actions={actions} />;

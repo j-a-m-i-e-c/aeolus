@@ -100,7 +100,7 @@ export default function LivestockDashboard({ model, actions }: {
         </div>
       </div>
 
-      <div style={{ marginTop: 7, padding: 8, border: "1px dashed #5A5132", borderRadius: 9, background: "#17150D" }}>
+      <div style={{ marginTop: 16, padding: 8, border: "1px dashed #5A5132", borderRadius: 9, background: "#17150D" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}><div><div style={{ color: "#C5AA67", fontSize: 11, fontWeight: 850, letterSpacing: 1 }}>DEMO SCENARIO</div><div style={{ color: "#746D57", fontSize: 11, marginTop: 2 }}>Injects livestock movement and fence conditions into the simulated property.</div></div>{demoScenarioPending && <div style={{ color: "#D4B770", fontSize: 11 }}>INJECTING…</div>}</div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4,minmax(0,1fr))", gap: 6 }}>
           <button onClick={() => actions.simulateStrays()} disabled={!!demoScenarioPending || recallInProgress || alert} style={{ borderRadius: 8, padding: "8px 5px", border: "1px solid #5F4930", background: "#21190F", color: demoScenarioPending || alert ? "#756A55" : "#D8B978", fontSize: 11, cursor: demoScenarioPending || alert ? "not-allowed" : "pointer" }}>Boundary breach</button>

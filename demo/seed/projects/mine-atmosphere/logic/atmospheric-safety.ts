@@ -59,6 +59,12 @@ export function projectAtmosphere(publishDemand: boolean) {
             events.emit("mine/atmosphere/vent-demand", { demand, severity, ch4: d7Ch4 });
         }
     }
+    const now = Date.now();
+    const lastSample = Number(state.get("lastDataSampleAt") || 0);
+    if (now - lastSample >= 5 * 60_000) {
+        db.write("gas-readings", { location: "Drift 7", ch4: d7Ch4, co, o2, no2 });
+        state.set("lastDataSampleAt", now);
+    }
     events.emit("mine/summary/atmosphere", {
         l3Ch4,
         d7Ch4,

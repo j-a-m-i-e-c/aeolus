@@ -123,7 +123,7 @@ export default function SiteEnergyDashboard({ model, actions }: {
         </div>
       </div>
 
-      <div style={{ marginTop: 7, padding: 8, border: "1px dashed #615034", borderRadius: 9, background: "#19140D" }}>
+      <div style={{ marginTop: 16, padding: 8, border: "1px dashed #615034", borderRadius: 9, background: "#19140D" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
           <div><div style={{ color: "#C99F64", fontSize: 11, fontWeight: 850, letterSpacing: 1 }}>DEMO SCENARIO</div><div style={{ color: "#776752", fontSize: 11, marginTop: 2 }}>Injects weather/reserve conditions into the simulated site.</div></div>
           {demoScenarioPending && <div style={{ color: "#D7A66B", fontSize: 11 }}>INJECTING…</div>}

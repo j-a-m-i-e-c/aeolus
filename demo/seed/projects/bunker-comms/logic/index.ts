@@ -1,6 +1,6 @@
 // Communications — orchestration entry point.
 
-import { projectRadioState, simulateRadioContact, transmitCheckIn } from "./radio-control";
+import { handleCommsDemoEvent, projectRadioState, transmitCheckIn } from "./radio-control";
 
 export default async function run(context: EventContext) {
   const topic = String(context.topic || "");
@@ -8,7 +8,7 @@ export default async function run(context: EventContext) {
 
   if (topic.startsWith("ui/")) {
     if (event === "transmit-checkin") await transmitCheckIn();
-    if (event === "simulate-contact") simulateRadioContact();
+    else handleCommsDemoEvent(event);
     return;
   }
 

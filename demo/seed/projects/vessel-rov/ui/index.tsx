@@ -1,7 +1,9 @@
 // ROV Operations — UI composition entry point.
-// State selection and operator intent stay visible; rendering detail lives in Files.
+// At a glance: depth, tether and vehicle state drive verified dive/survey/hold/recover commands.
 
 import RovOperationsDashboard from "./RovOperationsDashboard";
+
+import { createDemoActions } from "./demo-actions";
 
 export default function RovOperations(aeolus: CustomComponentProps) {
   const model = {
@@ -24,8 +26,7 @@ export default function RovOperations(aeolus: CustomComponentProps) {
     rovSurvey: () => aeolus.fire("rov-survey"),
     rovHold: () => aeolus.fire("rov-hold"),
     rovRecover: () => aeolus.fire("rov-recover"),
-    simulateRovCurrent: () => aeolus.fire("simulate-rov-current"),
-    resetRov: () => aeolus.fire("reset-rov"),
+    ...createDemoActions(aeolus),
   };
 
   return <RovOperationsDashboard model={model} actions={actions} />;

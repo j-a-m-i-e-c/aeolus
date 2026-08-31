@@ -1,13 +1,15 @@
-// Water Management — UI composition entry point.
-// State selection and operator intent stay visible; rendering detail lives in Files.
+// Water Management — UI entry point.
+// At a glance: shed catchment -> transfer pump -> header tank -> house + office.
+// The operator requests verified water transfers; the separate demo helper only injects outside conditions.
 
 import WaterManagementDashboard from "./WaterManagementDashboard";
+import { createWaterDemoActions } from "./demo-actions";
 
 export default function WaterManagement(aeolus: CustomComponentProps) {
-  const model = {
-    damPct: aeolus.read("damPct"),
+  const water = {
+    sourcePct: aeolus.read("damPct"),
     headerPct: aeolus.read("headerPct"),
-    shedPct: aeolus.read("shedPct"),
+    officePct: aeolus.read("shedPct"),
     housePct: aeolus.read("housePct"),
     pumpOn: aeolus.read("pumpOn"),
     flowLpm: aeolus.read("flowLpm"),
@@ -27,14 +29,16 @@ export default function WaterManagement(aeolus: CustomComponentProps) {
     lastAction: aeolus.read("lastAction"),
   };
 
-  const actions = {
+  const operatorActions = {
     transfer500: () => aeolus.fire("transfer-500"),
     transfer1000: () => aeolus.fire("transfer-1000"),
     pumpStop: () => aeolus.fire("pump-stop"),
-    simulateHeaderLow: () => aeolus.fire("simulate-header-low"),
-    simulatePropertyDemand: () => aeolus.fire("simulate-property-demand"),
-    resetWater: () => aeolus.fire("reset-water"),
   };
 
-  return <WaterManagementDashboard model={model} actions={actions} />;
+  return (
+    <WaterManagementDashboard
+      model={water}
+      actions={{ ...operatorActions, ...createWaterDemoActions(aeolus) }}
+    />
+  );
 }

@@ -1,4 +1,5 @@
-// Live Space — orchestration entry point.
+// Space — orchestration entry point.
+// Fixed public data sources refresh the shared real-world dashboard on a bounded schedule.
 // One automation composes several fixed public data sources at sensible cadences.
 
 import {

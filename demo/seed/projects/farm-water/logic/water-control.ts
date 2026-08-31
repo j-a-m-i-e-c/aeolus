@@ -35,7 +35,7 @@ export async function handleWaterOperatorEvent(event: string | undefined) {
             return;
         state.set("demoScenarioPending", "morning-demand");
         events.emit("farm/sim/property-water-demand", {});
-        setAction("DEMO · injecting morning house + shed demand");
+        setAction("DEMO · injecting morning house + office demand");
     }
     else if (event === "reset-water") {
         events.emit("farm/sim/water-reset", {});
@@ -108,6 +108,23 @@ export function projectWaterTelemetry(topic: string): WaterSnapshot {
     }
     return snapshot;
 }
+
+export function sampleWaterHistory(snapshot: WaterSnapshot) {
+    const now = Date.now();
+    const last = Number(state.get("lastDataSampleAt") || 0);
+    if (now - last < 5 * 60_000)
+        return;
+    if ([snapshot.damPct, snapshot.headerPct, snapshot.shedPct, snapshot.housePct].some((value) => isNaN(value)))
+        return;
+    db.write("tank-levels", {
+        shedCatchment: snapshot.damPct,
+        header: snapshot.headerPct,
+        office: snapshot.shedPct,
+        house: snapshot.housePct,
+    });
+    state.set("lastDataSampleAt", now);
+}
+
 export async function reconcileBatchTransfer(snapshot: WaterSnapshot) {
     const transferActive = Boolean(state.get("transferActive"));
     const target = Math.max(0, Number(state.get("transferTargetLitres")) || 0);

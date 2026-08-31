@@ -1,7 +1,9 @@
 // Site Energy — UI composition entry point.
-// State selection and operator intent stay visible; rendering detail lives in Files.
+// At a glance: solar margin and battery reserve decide whether discretionary loads may run.
 
 import SiteEnergyDashboard from "./SiteEnergyDashboard";
+
+import { createDemoActions } from "./demo-actions";
 
 export default function SiteEnergy(aeolus: CustomComponentProps) {
   const model = {
@@ -25,9 +27,7 @@ export default function SiteEnergy(aeolus: CustomComponentProps) {
 
   const actions = {
     toggleOpportunity: () => aeolus.fire("toggle-opportunity"),
-    simulateLowBattery: () => aeolus.fire("simulate-low-battery"),
-    restoreBattery: () => aeolus.fire("restore-battery"),
-    resetEnergy: () => aeolus.fire("reset-energy"),
+    ...createDemoActions(aeolus),
   };
 
   return <SiteEnergyDashboard model={model} actions={actions} />;

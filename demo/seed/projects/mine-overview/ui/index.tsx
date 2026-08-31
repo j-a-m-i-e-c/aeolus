@@ -1,5 +1,5 @@
 // Mine Operations Overview — UI composition entry point.
-// State selection and operator intent stay visible; rendering detail lives in Files.
+// At a glance: mine ventilation, atmosphere, personnel and dewatering are composed into one operations view.
 
 import MineOperationsDashboard from "./MineOperationsOverview";
 

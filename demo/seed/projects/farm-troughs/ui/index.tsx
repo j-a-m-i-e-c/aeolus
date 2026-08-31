@@ -1,7 +1,9 @@
 // Trough Watering — UI composition entry point.
-// State selection and operator intent stay visible; rendering detail lives in Files.
+// At a glance: trough levels and herd demand drive automatic or operator-requested verified refills.
 
 import TroughWateringDashboard from "./TroughWateringDashboard";
+
+import { createDemoActions } from "./demo-actions";
 
 export default function TroughWatering(aeolus: CustomComponentProps) {
   const model = {
@@ -27,8 +29,7 @@ export default function TroughWatering(aeolus: CustomComponentProps) {
   const actions = {
     refillTroughs: () => aeolus.fire("refill-troughs"),
     toggleAuto: () => aeolus.fire("toggle-auto"),
-    simulateDrinking: () => aeolus.fire("simulate-drinking"),
-    resetTroughs: () => aeolus.fire("reset-troughs"),
+    ...createDemoActions(aeolus),
   };
 
   return <TroughWateringDashboard model={model} actions={actions} />;

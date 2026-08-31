@@ -1,7 +1,9 @@
 // CTD Operations — UI composition entry point.
-// State selection and operator intent stay visible; rendering detail lives in Files.
+// At a glance: CTD depth/chemistry and cable tension surround verified deploy, hold and recover commands.
 
 import CtdOperationsDashboard from "./CtdOperationsDashboard";
+
+import { createDemoActions } from "./demo-actions";
 
 export default function CtdOperations(aeolus: CustomComponentProps) {
   const model = {
@@ -21,8 +23,7 @@ export default function CtdOperations(aeolus: CustomComponentProps) {
     deploy420: () => aeolus.fire("deploy-420"),
     holdCtd: () => aeolus.fire("hold-ctd"),
     recoverCtd: () => aeolus.fire("recover-ctd"),
-    simulateSnag: () => aeolus.fire("simulate-snag"),
-    resetCtd: () => aeolus.fire("reset-ctd"),
+    ...createDemoActions(aeolus),
   };
 
   return <CtdOperationsDashboard model={model} actions={actions} />;

@@ -1,5 +1,5 @@
 // Air & Filtration — UI composition entry point.
-// State selection and operator intent stay visible; rendering detail lives in Files.
+// At a glance: bunker sealing, overpressure and filter life; operator controls the physical air boundary.
 
 import AirFiltrationPanel from "./AirFiltrationPanel";
 

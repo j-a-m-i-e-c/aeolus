@@ -1,7 +1,9 @@
 // Communications — UI composition entry point.
-// State selection and operator intent stay visible; rendering detail lives in Files.
+// At a glance: VHF listening/transmit state and contact activity; demo stimuli imitate transmissions arriving from outside.
 
 import CommunicationsPanel from "./CommunicationsPanel";
+
+import { createDemoActions } from "./demo-actions";
 
 export default function Communications(aeolus: CustomComponentProps) {
   const model = {
@@ -16,7 +18,7 @@ export default function Communications(aeolus: CustomComponentProps) {
 
   const actions = {
     transmitCheckin: () => aeolus.fire("transmit-checkin"),
-    simulateContact: () => aeolus.fire("simulate-contact"),
+    ...createDemoActions(aeolus),
   };
 
   return <CommunicationsPanel model={model} actions={actions} />;

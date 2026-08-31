@@ -1,15 +1,15 @@
-// demo/seed/tabs/space.mjs — Live Space demo manifest.
+// demo/seed/tabs/space.mjs — Space demo manifest.
 // Authored Logic/UI lives in demo/seed/projects/space/.
 
 const tab = {
   "id": "tab-space",
-  "name": "Live Space",
+  "name": "Space",
   "icon": "rocket"
 };
 const devices = [];
 const automations = [{
   "key": "space",
-  "name": "Live Space",
+  "name": "Space",
   "cron": "* * * * *",
   "demoAccess": {
     "fireEvents": [

@@ -1,7 +1,9 @@
 // Show Control — UI composition entry point.
-// State selection and operator intent stay visible; rendering detail lives in Files.
+// At a glance: cue sequencing controls lighting/FX only while physical safety permissives remain authoritative.
 
 import ShowControlDashboard from "./ShowControlDashboard";
+
+import { createDemoActions } from "./demo-actions";
 
 export default function ShowControl(aeolus: CustomComponentProps) {
   const model = {
@@ -27,8 +29,7 @@ export default function ShowControl(aeolus: CustomComponentProps) {
     runCue: (payload: unknown) => aeolus.fire("run-cue", payload),
     stopFx: () => aeolus.fire("stop-fx"),
     fireEffect: (payload: unknown) => aeolus.fire("fire-effect", payload),
-    simulateTrip: () => aeolus.fire("simulate-trip"),
-    resetSafety: () => aeolus.fire("reset-safety"),
+    ...createDemoActions(aeolus),
   };
 
   return <ShowControlDashboard model={model} actions={actions} />;

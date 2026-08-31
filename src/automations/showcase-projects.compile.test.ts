@@ -93,6 +93,12 @@ describe("seeded Automation Projects", () => {
         if (!ui.content.includes("aeolus.read(")) {
           failures.push(`${projectDir}: UI entry does not expose its state selection`);
         }
+        if (!ui.content.includes("At a glance:")) {
+          failures.push(`${projectDir}: UI entry does not explain its composition at a glance`);
+        }
+        if (/aeolus\.fire\(\s*["']simulate-/.test(ui.content)) {
+          failures.push(`${projectDir}: UI entry contains demo-only stimulus wiring; move it behind ui/demo-actions.ts`);
+        }
       }
 
       const logicModules = source.files.filter(
@@ -115,7 +121,15 @@ describe("seeded Automation Projects", () => {
       }
 
       for (const module of uiModules) {
-        if (/\baeolus\.(?:read|fire|save|saveAndFire)\s*\(/.test(module.content)) {
+        // ui/demo-actions.ts is the sanctioned home for public-showcase-only
+        // stimulus: the rule above requires the entry to delegate `simulate-*`
+        // events here, so firing them from this module is the intended shape. It
+        // still must not read or persist shared state, because state selection has
+        // to stay visible at the composition entry point.
+        const forbidden = module.path === "ui/demo-actions.ts"
+          ? /\baeolus\.(?:read|save|saveAndFire)\s*\(/
+          : /\baeolus\.(?:read|fire|save|saveAndFire)\s*\(/;
+        if (forbidden.test(module.content)) {
           failures.push(`${projectDir}: ${module.path} bypasses the UI composition entry point`);
         }
       }

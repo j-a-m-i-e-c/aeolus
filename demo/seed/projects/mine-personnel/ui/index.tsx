@@ -1,7 +1,9 @@
 // Personnel & Muster — UI composition entry point.
-// State selection and operator intent stay visible; rendering detail lives in Files.
+// At a glance: underground tag telemetry becomes accountable-personnel state and an operator muster workflow.
 
 import PersonnelMusterPanel from "./PersonnelMusterPanel";
+
+import { createDemoActions } from "./demo-actions";
 
 export default function PersonnelMuster(aeolus: CustomComponentProps) {
   const model = {
@@ -20,8 +22,7 @@ export default function PersonnelMuster(aeolus: CustomComponentProps) {
   const actions = {
     initiateMuster: () => aeolus.fire("initiate-muster"),
     clearMuster: () => aeolus.fire("clear-muster"),
-    simulateTagDropout: () => aeolus.fire("simulate-tag-dropout"),
-    resetPersonnel: () => aeolus.fire("reset-personnel"),
+    ...createDemoActions(aeolus),
   };
 
   return <PersonnelMusterPanel model={model} actions={actions} />;

@@ -6,13 +6,13 @@ export default function WaterManagementDashboard({ model, actions }: {
     model: Record<string, any>;
     actions: Record<string, (...args: any[]) => void>;
 }) {
-    const damTarget = clamp(Number(model.damPct ?? 82), 0, 100);
+    const sourceTarget = clamp(Number(model.sourcePct ?? 82), 0, 100);
     const headerTarget = clamp(Number(model.headerPct ?? 65), 0, 100);
-    const shedTarget = clamp(Number(model.shedPct ?? 72), 0, 100);
+    const officeTarget = clamp(Number(model.officePct ?? 72), 0, 100);
     const houseTarget = clamp(Number(model.housePct ?? 64), 0, 100);
-    const dam = useSmooth(damTarget);
+    const source = useSmooth(sourceTarget);
     const header = useSmooth(headerTarget);
-    const shed = useSmooth(shedTarget);
+    const office = useSmooth(officeTarget);
     const house = useSmooth(houseTarget);
     const pumpOn = Boolean(model.pumpOn);
     const flow = Math.max(0, Number(model.flowLpm ?? 0));
@@ -44,7 +44,7 @@ export default function WaterManagementDashboard({ model, actions }: {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, marginBottom: 8 }}>
         <div>
           <div style={{ fontSize: 13, fontWeight: 850 }}>WATER MANAGEMENT</div>
-          <div style={{ color: "#657A7F", fontSize: 11, marginTop: 2 }}>Dam transfer · header reserve · house & shed distribution</div>
+          <div style={{ color: "#789095", fontSize: 11, marginTop: 2 }}>Shed rainwater catchment · pumped header reserve · gravity-fed house + office</div>
         </div>
         <div style={{ textAlign: "right" }}>
           <div style={{ color: moving ? "#78E6FF" : pumpOn ? "#F1C06B" : "#7C8F91", fontSize: 11, fontWeight: 800 }}>{transferStopping ? "STOPPING" : moving ? (transferMode === "automatic" ? "AUTO RECOVERY" : "BATCH TRANSFER") : pumpOn ? "PUMP ON · WAITING FLOW" : distributionActive ? "DISTRIBUTING" : "SYSTEM BALANCED"}</div>
@@ -52,7 +52,7 @@ export default function WaterManagementDashboard({ model, actions }: {
         </div>
       </div>
 
-      <WaterSchematic dam={dam} header={header} shed={shed} house={house} moving={moving} pumpOn={pumpOn} shedRefill={shedRefill} houseRefill={houseRefill} phase={phase}/>
+      <WaterSchematic source={source} header={header} office={office} house={house} moving={moving} pumpOn={pumpOn} officeRefill={shedRefill} houseRefill={houseRefill} phase={phase}/>
 
       {transferTarget > 0 && <div style={{ marginTop: 8, padding: "7px 9px", border: "1px solid #234651", borderRadius: 8, background: "#09191E" }}>
         <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#718B91", marginBottom: 5 }}>
@@ -62,7 +62,7 @@ export default function WaterManagementDashboard({ model, actions }: {
         <div style={{ height: 5, borderRadius: 5, background: "#173038", overflow: "hidden" }}><div style={{ width: batchPct + "%", height: "100%", background: "#55D6F3" }}/></div>
       </div>}
 
-      <div style={{ marginTop: 8, padding: 8, border: "1px solid #244650", borderRadius: 9, background: "#0A171B" }}>
+      <div style={{ marginTop: 11, padding: 9, border: "1px solid #2B515C", borderRadius: 10, background: "#0A171B" }}>
         <div style={{ color: "#6E858B", fontSize: 11, fontWeight: 800, letterSpacing: 1, marginBottom: 6 }}>OPERATOR CONTROLS</div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 5 }}>
           <button onClick={() => actions.transfer500()} disabled={operatorBusy || !energyAllowed} style={{ borderRadius: 7, padding: "7px 4px", border: "1px solid " + (!operatorBusy && energyAllowed ? "#27586A" : "#2C393D"), background: !operatorBusy && energyAllowed ? "#0C2630" : "#12191B", color: !operatorBusy && energyAllowed ? "#79DDF5" : "#5B686C", fontSize: 11, fontWeight: 750, cursor: !operatorBusy && energyAllowed ? "pointer" : "not-allowed" }}>Transfer 500 L</button>
@@ -71,9 +71,9 @@ export default function WaterManagementDashboard({ model, actions }: {
         </div>
       </div>
 
-      <div style={{ marginTop: 7, padding: 8, border: "1px dashed #5B4E2F", borderRadius: 9, background: "#17150D" }}>
+      <div style={{ marginTop: 18, padding: 10, border: "1px dashed #6A5935", borderRadius: 10, background: "#17150D" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-          <div><div style={{ color: "#C8AA62", fontSize: 11, fontWeight: 850, letterSpacing: 1 }}>DEMO SCENARIO</div><div style={{ color: "#766D54", fontSize: 11, marginTop: 2 }}>Injects external physical conditions. These are not normal operator controls.</div></div>
+          <div><div style={{ color: "#C8AA62", fontSize: 11, fontWeight: 850, letterSpacing: 1 }}>DEMO SCENARIO</div><div style={{ color: "#766D54", fontSize: 11, marginTop: 2 }}>Inject outside conditions into the simulated property. These controls belong to the demo, not the real operator UI.</div></div>
           {demoScenarioPending && <div style={{ color: "#D7B968", fontSize: 11 }}>INJECTING…</div>}
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr .7fr", gap: 5 }}>

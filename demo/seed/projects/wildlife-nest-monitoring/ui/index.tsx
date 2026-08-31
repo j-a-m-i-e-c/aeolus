@@ -1,7 +1,9 @@
 // Sugar Glider Den — UI composition entry point.
-// State selection and operator intent stay visible; rendering detail lives in Files.
+// At a glance: den temperature and occupancy become a quiet monitoring/thermal-alert workflow.
 
 import SugarGliderDenPanel from "./SugarGliderDenPanel";
+
+import { createDemoActions } from "./demo-actions";
 
 export default function SugarGliderDen(aeolus: CustomComponentProps) {
   const model = {
@@ -18,9 +20,7 @@ export default function SugarGliderDen(aeolus: CustomComponentProps) {
 
   const actions = {
     acknowledgeAlert: () => aeolus.fire("acknowledge-alert"),
-    simulateVisit: () => aeolus.fire("simulate-visit"),
-    simulateHeat: () => aeolus.fire("simulate-heat"),
-    resetNest: () => aeolus.fire("reset-nest"),
+    ...createDemoActions(aeolus),
   };
 
   return <SugarGliderDenPanel model={model} actions={actions} />;

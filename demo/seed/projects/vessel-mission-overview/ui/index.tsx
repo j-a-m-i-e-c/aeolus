@@ -1,5 +1,5 @@
 // Mission Overview — UI composition entry point.
-// State selection and operator intent stay visible; rendering detail lives in Files.
+// At a glance: CTD, ROV and underway-science summaries compose the vessel mission picture.
 
 import MissionOverviewDashboard from "./MissionOverviewDashboard";
 

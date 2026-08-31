@@ -22,6 +22,16 @@ export function projectDewateringState() {
     state.set("sumpStatus", String(sumpState.status || "normal"));
     state.set("pumpOn", pumpOn);
     state.set("pumpFlowLps", Number(pumpState.flowLps || 0));
+    const now = Date.now();
+    const lastSample = Number(state.get("lastDataSampleAt") || 0);
+    if (now - lastSample >= 5 * 60_000) {
+        db.write("mine-water", {
+            levelM,
+            inflowLps: Number(sumpState.inflowLps || 0),
+            pumpDutyPct: pumpOn ? 100 : 0,
+        });
+        state.set("lastDataSampleAt", now);
+    }
     events.emit("mine/summary/dewatering", {
         levelM,
         inflowLps: Number(sumpState.inflowLps || 0),

@@ -1,7 +1,9 @@
 // Dewatering — UI composition entry point.
-// State selection and operator intent stay visible; rendering detail lives in Files.
+// At a glance: sump level drives an obvious AUTO start/stop policy around a verified physical pump.
 
 import DewateringPanel from "./DewateringPanel";
+
+import { createDemoActions } from "./demo-actions";
 
 export default function Dewatering(aeolus: CustomComponentProps) {
   const model = {
@@ -19,8 +21,7 @@ export default function Dewatering(aeolus: CustomComponentProps) {
     toggleAuto: () => aeolus.fire("toggle-auto"),
     pumpOn: () => aeolus.fire("pump-on"),
     pumpOff: () => aeolus.fire("pump-off"),
-    simulateHeavyInflow: () => aeolus.fire("simulate-heavy-inflow"),
-    resetSump: () => aeolus.fire("reset-sump"),
+    ...createDemoActions(aeolus),
   };
 
   return <DewateringPanel model={model} actions={actions} />;

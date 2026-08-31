@@ -1,7 +1,9 @@
 // Livestock & Virtual Fence — UI composition entry point.
-// State selection and operator intent stay visible; rendering detail lives in Files.
+// At a glance: herd location, virtual-fence state and collar health feed recall and movement decisions.
 
 import LivestockDashboard from "./LivestockDashboard";
+
+import { createDemoActions } from "./demo-actions";
 
 export default function Livestock(aeolus: CustomComponentProps) {
   const model = {
@@ -22,11 +24,7 @@ export default function Livestock(aeolus: CustomComponentProps) {
 
   const actions = {
     recallStrays: () => aeolus.fire("recall-strays"),
-    simulateStrays: () => aeolus.fire("simulate-strays"),
-    moveHerd: () => aeolus.fire("move-herd"),
-    resetLivestock: () => aeolus.fire("reset-livestock"),
-    toggleFenceFault: (faulted: boolean) =>
-      aeolus.fire(faulted ? "restore-fence" : "simulate-fence-fault"),
+    ...createDemoActions(aeolus),
   };
 
   return <LivestockDashboard model={model} actions={actions} />;

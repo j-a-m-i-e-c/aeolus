@@ -1,9 +1,10 @@
-// Live Space — UI composition entry point.
+// Space — UI entry point.
+// At a glance: live ISS position, orbit geometry, NOAA space weather, Moon and launch schedules.
 // State selection and operator intent stay visible; rendering detail lives in Files.
 
 import LiveSpaceDashboard from "./LiveSpaceDashboard";
 
-export default function LiveSpace(aeolus: CustomComponentProps) {
+export default function Space(aeolus: CustomComponentProps) {
   const model = {
     iss: aeolus.read("iss"),
     issAscending: aeolus.read("issAscending"),

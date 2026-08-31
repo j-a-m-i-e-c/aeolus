@@ -1,5 +1,5 @@
 // Predator Response — UI composition entry point.
-// State selection and operator intent stay visible; rendering detail lives in Files.
+// At a glance: classified predator events drive a humane deterrent with verified physical stop semantics.
 
 import PredatorResponsePanel from "./PredatorResponsePanel";
 

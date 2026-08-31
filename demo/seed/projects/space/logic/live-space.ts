@@ -1,4 +1,4 @@
-// Live Space data-source implementation. logic/index.ts shows the refresh schedule.
+// Space real-data source implementation. logic/index.ts shows the refresh schedule.
 function round(value: unknown, precision = 0) {
     const number = Number(value);
     if (!isFinite(number))
