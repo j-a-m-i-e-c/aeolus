@@ -60,7 +60,11 @@ vi.mock("../../store/dashboard-store", () => ({
   ) => sel({ updatePaneConfig, panes: [], activeTabId: null }),
 }));
 vi.mock("../../store/device-store", () => ({
-  useDeviceStore: (sel: (s: { devices: Record<string, unknown> }) => unknown) => sel({ devices: {} }),
+  // `automationEvents` is always an array on the real store; the pane reads it to
+  // surface the latest fire time, so the mock has to provide it.
+  useDeviceStore: (
+    sel: (s: { devices: Record<string, unknown>; automationEvents: unknown[] }) => unknown,
+  ) => sel({ devices: {}, automationEvents: [] }),
 }));
 vi.mock("../../store/automation-state-store", () => {
   const store = (sel: (s: { stateByRule: Record<string, unknown> }) => unknown) => sel({ stateByRule: {} });

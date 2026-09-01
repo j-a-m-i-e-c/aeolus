@@ -37,11 +37,12 @@ export default function SecurityPage() {
   }
 
   return (
-    <div className="max-w-5xl mx-auto py-6 px-4 space-y-6">
+    <div className="space-y-6">
       {/* Page header */}
       <div>
         <h1 className="text-2xl font-bold text-[#E6EDF3] mb-1">Security</h1>
-        <p className="text-sm text-[#6B7785]">Manage MQTT authentication and user access</p>
+        <p className="text-sm text-[#6B7785]">Manage dashboard access and MQTT broker authentication.</p>
+        {PUBLIC_DEMO && !isAdmin && <p className="mt-1 text-xs text-[#72B7E6]">Public demo: open the editors and change fields freely. Account, group and broker changes cannot be saved.</p>}
       </div>
 
       {/* Section tabs */}

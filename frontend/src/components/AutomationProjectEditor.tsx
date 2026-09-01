@@ -313,12 +313,12 @@ export function AutomationProjectEditor({
 
   const insertText = useCallback((text: string) => {
     const ed = editorRef.current;
-    if (!ed || readOnly) return;
+    if (!ed) return;
     const selection = ed.getSelection();
     if (!selection) return;
     ed.executeEdits("aeolus-insert", [{ range: selection, text, forceMoveMarkers: true }]);
     ed.focus();
-  }, [readOnly]);
+  }, []);
 
   const handleMount: OnMount = useCallback((ed, monaco) => {
     editorRef.current = ed;
@@ -375,7 +375,7 @@ export function AutomationProjectEditor({
 
   return (
     <div className="h-full min-h-[300px] flex flex-col overflow-hidden rounded-xl border border-[#2A3441] bg-[#0B0F14] shadow-[0_10px_30px_rgba(0,0,0,0.12)]">
-      {/* Logic/UI/Files are navigation. Insert/API/Format are contextual tools. */}
+      {/* Logic and UI are the primary entry points. Files opens the complete project; the remaining buttons are contextual tools. */}
       <div className="min-h-12 shrink-0 flex flex-wrap items-stretch border-b border-[#2A3441] bg-[#10161F]">
         <div className="flex items-stretch px-2">
           <button
@@ -398,30 +398,34 @@ export function AutomationProjectEditor({
             UI
             {uiSelected && toolPanel !== "files" && <span className="absolute inset-x-3 bottom-0 h-0.5 rounded-full bg-[#3BA4FF]" />}
           </button>
-          {canRevealFiles && (
-            <button
-              onClick={() => toggleTool("files")}
-              className={`relative min-w-24 px-4 text-xs font-semibold transition-colors ${toolPanel === "files" || extraFileSelected ? "text-[#C3CDD7]" : "text-[#7E8A98] hover:text-[#C3CDD7]"}`}
-              title="Browse the complete Automation Project"
-            >
-              <span className="inline-flex items-center gap-1.5"><FolderTree size={12} /> Files</span>
-              {(toolPanel === "files" || extraFileSelected) && <span className="absolute inset-x-3 bottom-0 h-0.5 rounded-full bg-[#9AA6B2]" />}
-            </button>
-          )}
         </div>
 
         <div className="flex-1" />
 
         <div className="flex items-center gap-1 px-2 py-1.5 before:content-[''] before:h-5 before:w-px before:bg-[#2A3441] before:mr-1">
-          {!readOnly && (
-            <button
+          {canRevealFiles && (
+            <>
+              <button
+                onClick={() => toggleTool("files")}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md border text-[10px] font-semibold transition-colors ${
+                  toolPanel === "files" || extraFileSelected
+                    ? "bg-[#5CE1E6]/10 text-[#DDFBFF] border-[#5CE1E6]/35"
+                    : "bg-[#5CE1E6]/5 text-[#9AD9E5] border-[#5CE1E6]/20 hover:bg-[#5CE1E6]/10 hover:text-[#DDFBFF]"
+                }`}
+                title="Browse the complete Automation Project"
+              >
+                <FolderTree size={12} /> Files
+              </button>
+              <span className="h-5 w-px bg-[#2A3441] mx-1" aria-hidden="true" />
+            </>
+          )}
+          <button
               onClick={() => toggleTool("insert")}
               className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[10px] font-medium transition-colors ${toolPanel === "insert" ? "bg-[#1A2330] text-[#E6EDF3]" : "text-[#7E8A98] hover:text-[#C3CDD7] hover:bg-[#171E28]"}`}
               title="Insert an Aeolus pattern at the cursor"
             >
               <Blocks size={12} /> Insert
             </button>
-          )}
           <button
             onClick={() => toggleTool("api")}
             className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[10px] font-medium transition-colors ${toolPanel === "api" ? "bg-[#1A2330] text-[#E6EDF3]" : "text-[#7E8A98] hover:text-[#C3CDD7] hover:bg-[#171E28]"}`}
@@ -429,15 +433,13 @@ export function AutomationProjectEditor({
           >
             <BookOpen size={12} /> API
           </button>
-          {!readOnly && (
-            <button
+          <button
               onClick={() => editorRef.current?.getAction("editor.action.formatDocument")?.run()}
               className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[10px] font-medium text-[#7E8A98] hover:text-[#C3CDD7] hover:bg-[#171E28] transition-colors"
               title="Format current file"
             >
               <WandSparkles size={12} /> Format
             </button>
-          )}
         </div>
       </div>
 
@@ -465,10 +467,10 @@ export function AutomationProjectEditor({
               defaultValue={activeFile.content}
               theme="aeolus-project-dark"
               onMount={handleMount}
-              onChange={readOnly ? undefined : (value) => updateFile(activeFile.path, value ?? "")}
+              onChange={(value) => updateFile(activeFile.path, value ?? "")}
               keepCurrentModel
               options={{
-                readOnly,
+                readOnly: false,
                 fontFamily: "'JetBrains Mono', monospace",
                 fontSize: 13,
                 lineHeight: 21,
@@ -477,7 +479,7 @@ export function AutomationProjectEditor({
                 scrollBeyondLastLine: false,
                 padding: { top: 18, bottom: 18 },
                 tabSize: 2,
-                wordWrap: readOnly ? "on" : "off",
+                wordWrap: "off",
                 bracketPairColorization: { enabled: true },
                 renderLineHighlight: "line",
                 smoothScrolling: true,

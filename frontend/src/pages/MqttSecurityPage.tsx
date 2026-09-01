@@ -38,8 +38,9 @@ export default function MqttSecurityPage() {
 
       {!managedProvisioningEnabled && (
         <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-200">
-          Shared Password and Per-Device broker management are under development. Open mode remains available;
-          configure authenticated Mosquitto deployments through the host for now.
+          Managed Mosquitto provisioning is experimental and disabled in this deployment. The authentication
+          modes themselves are standard broker configurations; configure Shared Password or Per-Device access on
+          the host unless managed provisioning has been explicitly enabled and verified for your deployment.
         </div>
       )}
 

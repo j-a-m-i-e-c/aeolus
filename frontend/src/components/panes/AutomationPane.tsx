@@ -115,7 +115,14 @@ export function AutomationPane({ config, paneId }: Props) {
 
   // Device store for custom component props
   const devices = useDeviceStore((s) => s.devices);
+  const automationEvents = useDeviceStore((s) => s.automationEvents);
   const ruleState = useAutomationStateStore((s) => s.stateByRule[ruleId]) ?? EMPTY_STATE;
+
+  useEffect(() => {
+    if (!ruleId) return;
+    const latest = automationEvents.find((event) => event.ruleId === ruleId);
+    if (latest) setLastFired(latest.timestamp);
+  }, [automationEvents, ruleId]);
 
   // ── Fetch rule data for status mode ──
   const fetchRule = useCallback(async () => {
@@ -524,7 +531,7 @@ export function AutomationPane({ config, paneId }: Props) {
             <span className="font-semibold text-[#5CE1E6]">{isDemoDraft ? "Demo draft" : "Shared demo"}</span>
             {isDemoDraft
               ? " · This automation exists only in your browser and never changes the shared demo."
-              : " · You are viewing the real automation. Shared demo source is read-only."}
+              : " · This is the real seeded project. You can experiment locally; shared source is never saved."}
             {draftSavedAt && isDemoDraft && <span className="ml-2 text-[#73D99A]">Draft kept locally.</span>}
           </div>
         )}
@@ -536,7 +543,7 @@ export function AutomationPane({ config, paneId }: Props) {
                 {describeAutomationTrigger({ triggerType, topic: triggerTopic, cronExpression })}
               </div>
             </div>
-            <span className="rounded-full border border-[#2A3441] px-2 py-1 text-[9px] uppercase tracking-wider text-[#7E8A98]">Read only</span>
+            <span className="rounded-full border border-[#2A3441] px-2 py-1 text-[9px] uppercase tracking-wider text-[#7E8A98]">Local edits only</span>
           </div>
         ) : (
           <div className="shrink-0">

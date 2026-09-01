@@ -17,12 +17,14 @@ const h = vi.hoisted(() => {
     managedProvisioningEnabled: true,
     setLevel,
   };
-  return { state, setLevel };
+  const demoState = { readOnly: false };
+  return { state, setLevel, demoState };
 });
 
 vi.mock("../../store/mqtt-provisioning-store", () => ({
   useMqttProvisioningStore: () => h.state,
 }));
+vi.mock("../../hooks/useReadOnlyDemo", () => ({ useReadOnlyDemo: () => h.demoState.readOnly }));
 
 import SecurityLevelSelector from "./SecurityLevelSelector";
 
@@ -32,6 +34,7 @@ describe("SecurityLevelSelector", () => {
     h.state.level = "open";
     h.state.loading = false;
     h.state.managedProvisioningEnabled = true;
+    h.demoState.readOnly = false;
     vi.spyOn(window, "confirm").mockReturnValue(true);
   });
 
@@ -90,15 +93,24 @@ describe("SecurityLevelSelector", () => {
     expect(h.setLevel).not.toHaveBeenCalled();
   });
 
-  it("marks managed security options as under development when disabled", () => {
+  it("marks managed security options as unavailable when managed provisioning is disabled", () => {
     h.state.managedProvisioningEnabled = false;
     render(<SecurityLevelSelector />);
 
-    expect(screen.getAllByText("Under development")).toHaveLength(2);
+    expect(screen.getAllByText("Managed setup disabled")).toHaveLength(2);
     const sharedPassword = screen.getByRole("button", { name: /shared password/i });
     expect(sharedPassword).toBeDisabled();
     fireEvent.click(sharedPassword);
     expect(h.setLevel).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: /^open/i })).not.toBeDisabled();
+  });
+
+  it("lets the public demo preview broker modes without applying them", () => {
+    h.demoState.readOnly = true;
+    h.state.managedProvisioningEnabled = false;
+    render(<SecurityLevelSelector />);
+    fireEvent.click(screen.getByText("Shared Password"));
+    expect(screen.getByText(/Demo preview · not applied/i)).toBeInTheDocument();
+    expect(h.setLevel).not.toHaveBeenCalled();
   });
 });

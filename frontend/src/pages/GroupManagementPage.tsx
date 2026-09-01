@@ -367,15 +367,13 @@ export function GroupManagementPage({ onGroupsChanged }: { onGroupsChanged?: () 
           <FolderKey size={16} className="text-primary" />
           <h2 className="text-sm font-semibold text-[#9AA6B2] uppercase tracking-wider">Groups</h2>
         </div>
-        {!readOnly && (
-          <button
+        <button
             onClick={() => setShowCreateForm(!showCreateForm)}
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-primary/20 text-primary border border-primary/30 hover:bg-primary/30 transition-colors"
           >
             <Plus size={12} />
             Add Group
           </button>
-        )}
       </div>
 
       {/* Create group form */}
@@ -406,11 +404,11 @@ export function GroupManagementPage({ onGroupsChanged }: { onGroupsChanged?: () 
           <div className="flex gap-2">
             <button
               onClick={handleCreate}
-              disabled={creating}
+              disabled={creating || readOnly}
               className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-primary/20 text-primary hover:bg-primary/30 transition-colors disabled:opacity-50"
             >
               {creating && <Loader2 size={12} className="animate-spin" />}
-              Create
+              {readOnly ? "Demo preview · not saved" : "Create"}
             </button>
             <button
               onClick={() => {
@@ -452,15 +450,15 @@ export function GroupManagementPage({ onGroupsChanged }: { onGroupsChanged?: () 
                       </span>
                     )}
                   </div>
-                  {!readOnly && (
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={() => openEditModal(group)}
-                        className="p-1.5 rounded-lg text-[#6B7785] hover:text-primary hover:bg-primary/10 transition-colors"
-                        title="Edit group"
-                      >
-                        <Pencil size={14} />
-                      </button>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => openEditModal(group)}
+                      className="p-1.5 rounded-lg text-[#6B7785] hover:text-primary hover:bg-primary/10 transition-colors"
+                      title="Edit group"
+                    >
+                      <Pencil size={14} />
+                    </button>
+                    {!readOnly && (
                       <button
                         onClick={() => setDeleteGroup(group)}
                         className="p-1.5 rounded-lg text-[#6B7785] hover:text-[#EF4444] hover:bg-[#EF4444]/10 transition-colors"
@@ -468,8 +466,8 @@ export function GroupManagementPage({ onGroupsChanged }: { onGroupsChanged?: () 
                       >
                         <Trash2 size={14} />
                       </button>
-                    </div>
-                  )}
+                    )}
+                  </div>
                 </div>
 
                 {/* Tab assignments visual indicator */}
@@ -548,11 +546,11 @@ export function GroupManagementPage({ onGroupsChanged }: { onGroupsChanged?: () 
               </button>
               <button
                 onClick={handleEdit}
-                disabled={saving}
+                disabled={saving || readOnly}
                 className="flex items-center gap-1.5 px-4 py-2 text-xs font-medium rounded-lg bg-primary/20 text-primary hover:bg-primary/30 transition-colors disabled:opacity-50"
               >
                 {saving && <Loader2 size={12} className="animate-spin" />}
-                Save Changes
+                {readOnly ? "Demo preview · not saved" : "Save Changes"}
               </button>
             </div>
           </div>

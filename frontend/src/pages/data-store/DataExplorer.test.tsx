@@ -52,8 +52,8 @@ describe("DataExplorer", () => {
     demoState.readOnly = true;
     render(<DataExplorer />);
     expect(screen.getByText(/Public demo · read only/i)).toBeInTheDocument();
-    expect(screen.getByText(/seeded time-series history and key\/value buckets/i)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Settings/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/time-series measurements and shared key\/value state/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Configuration/i })).toBeInTheDocument();
   });
 
   it("fetches stats, collections, and buckets on mount", () => {
@@ -100,7 +100,7 @@ describe("DataExplorer", () => {
 
   it("switches to Settings tab", () => {
     render(<DataExplorer />);
-    fireEvent.click(screen.getByRole("button", { name: /Settings/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Configuration/i }));
     expect(screen.getByTestId("settings-panel")).toBeInTheDocument();
   });
 

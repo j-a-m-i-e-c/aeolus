@@ -266,15 +266,13 @@ export function UserManagementPage() {
           <Users size={16} className="text-primary" />
           <h2 className="text-sm font-semibold text-[#9AA6B2] uppercase tracking-wider">Users</h2>
         </div>
-        {!readOnly && (
-          <button
-            onClick={() => { fetchGroups(); setShowCreateForm(!showCreateForm); }}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-primary/20 text-primary border border-primary/30 hover:bg-primary/30 transition-colors"
-          >
-            <Plus size={12} />
-            Add User
-          </button>
-        )}
+        <button
+          onClick={() => { fetchGroups(); setShowCreateForm(!showCreateForm); }}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-primary/20 text-primary border border-primary/30 hover:bg-primary/30 transition-colors"
+        >
+          <Plus size={12} />
+          Add User
+        </button>
       </div>
 
       {/* Create user form */}
@@ -343,11 +341,11 @@ export function UserManagementPage() {
           <div className="flex gap-2">
             <button
               onClick={handleCreate}
-              disabled={creating}
+              disabled={creating || readOnly}
               className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-primary/20 text-primary hover:bg-primary/30 transition-colors disabled:opacity-50"
             >
               {creating && <Loader2 size={12} className="animate-spin" />}
-              Create
+              {readOnly ? "Demo preview · not saved" : "Create"}
             </button>
             <button
               onClick={() => {
@@ -377,7 +375,7 @@ export function UserManagementPage() {
                 <th className="text-left px-4 py-3 text-[10px] text-[#6B7785] uppercase font-semibold tracking-wider">Role</th>
                 <th className="text-left px-4 py-3 text-[10px] text-[#6B7785] uppercase font-semibold tracking-wider">Group</th>
                 <th className="text-left px-4 py-3 text-[10px] text-[#6B7785] uppercase font-semibold tracking-wider">Created</th>
-                {!readOnly && <th className="text-right px-4 py-3 text-[10px] text-[#6B7785] uppercase font-semibold tracking-wider">Actions</th>}
+                <th className="text-right px-4 py-3 text-[10px] text-[#6B7785] uppercase font-semibold tracking-wider">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[#2A3441]/50">
@@ -410,16 +408,16 @@ export function UserManagementPage() {
                     )}
                   </td>
                   <td className="px-4 py-3 text-[#6B7785]">{formatDate(u.createdAt)}</td>
-                  {!readOnly && (
-                    <td className="px-4 py-3">
-                      <div className="flex items-center justify-end gap-1">
-                        <button
-                          onClick={() => openEditModal(u)}
-                          className="p-1.5 rounded-lg text-[#6B7785] hover:text-primary hover:bg-primary/10 transition-colors"
-                          title="Edit user"
-                        >
-                          <Pencil size={14} />
-                        </button>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center justify-end gap-1">
+                      <button
+                        onClick={() => openEditModal(u)}
+                        className="p-1.5 rounded-lg text-[#6B7785] hover:text-primary hover:bg-primary/10 transition-colors"
+                        title="Edit user"
+                      >
+                        <Pencil size={14} />
+                      </button>
+                      {!readOnly && (
                         <button
                           onClick={() => setDeleteUser(u)}
                           className="p-1.5 rounded-lg text-[#6B7785] hover:text-[#EF4444] hover:bg-[#EF4444]/10 transition-colors"
@@ -427,9 +425,9 @@ export function UserManagementPage() {
                         >
                           <Trash2 size={14} />
                         </button>
-                      </div>
-                    </td>
-                  )}
+                      )}
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -510,11 +508,11 @@ export function UserManagementPage() {
               </button>
               <button
                 onClick={handleEdit}
-                disabled={saving}
+                disabled={saving || readOnly}
                 className="flex items-center gap-1.5 px-4 py-2 text-xs font-medium rounded-lg bg-primary/20 text-primary hover:bg-primary/30 transition-colors disabled:opacity-50"
               >
                 {saving && <Loader2 size={12} className="animate-spin" />}
-                Save Changes
+                {readOnly ? "Demo preview · not saved" : "Save Changes"}
               </button>
             </div>
           </div>

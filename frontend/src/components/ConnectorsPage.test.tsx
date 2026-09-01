@@ -103,7 +103,29 @@ describe("ConnectorsPage — main", () => {
     render(<ConnectorsPage />);
     await screen.findByText("Connectors");
     expect(screen.getByText(/Public demo · read only/i)).toBeInTheDocument();
-    expect(screen.getByText(/real hardware, networks or credentials/i)).toBeInTheDocument();
+    expect(screen.getByText(/never saves credentials or changes connector state/i)).toBeInTheDocument();
+  });
+
+  it("lets demo visitors explore connector config without calling the mutation API", async () => {
+    demoState.readOnly = true;
+    render(<ConnectorsPage />);
+    await screen.findByText("Connectors");
+
+    fireEvent.click(screen.getByRole("button", { name: "Explore config" }));
+    expect(screen.getByPlaceholderText("1.2.3.4")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Demo preview · not saved/i })).toBeDisabled();
+    expect(api.enableConnector).not.toHaveBeenCalled();
+  });
+
+  it("lets demo visitors mimic a physical setup step without creating a connector", async () => {
+    demoState.readOnly = true;
+    render(<ConnectorsPage />);
+    await screen.findByText("Connectors");
+
+    fireEvent.click(screen.getByRole("button", { name: "Explore setup" }));
+    fireEvent.click(screen.getByRole("button", { name: /Simulate physical bridge button/i }));
+    expect(screen.getByText(/Bridge authorised/i)).toBeInTheDocument();
+    expect(api.enableConnector).not.toHaveBeenCalled();
   });
 
   it("refreshes on demand", async () => {

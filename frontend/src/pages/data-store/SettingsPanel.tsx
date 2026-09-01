@@ -4,12 +4,14 @@ import { useEffect, useState } from "react";
 import { Settings, AlertTriangle, Check } from "lucide-react";
 import { useDataStoreStore } from "../../store/data-store-store";
 import { authFetch } from "../../lib/auth-fetch";
+import { useReadOnlyDemo } from "../../hooks/useReadOnlyDemo";
 
 const API_URL =
   import.meta.env.VITE_API_URL ||
   `http://${window.location.hostname}:3001`;
 
 export function SettingsPanel() {
+  const readOnly = useReadOnlyDemo();
   const config = useDataStoreStore((s) => s.config);
   const fetchConfig = useDataStoreStore((s) => s.fetchConfig);
 
@@ -38,6 +40,7 @@ export function SettingsPanel() {
       maxCollections !== config.maxCollections);
 
   const handleSave = () => {
+    if (readOnly) return;
     setShowConfirm(true);
     setError(null);
     setSuccess(false);
@@ -73,9 +76,15 @@ export function SettingsPanel() {
 
   return (
     <div className="space-y-4 max-w-xl">
-      <p className="text-sm text-[#6B7785]">
-        Manage Data Store limits and configuration.
-      </p>
+      <div className="space-y-1">
+        <p className="text-sm text-[#9AA6B2]">
+          Storage is disabled on a fresh install until these safeguards are chosen.
+        </p>
+        <p className="text-xs text-[#6B7785]">
+          Set an overall disk budget, a per-collection record ceiling and a collection count. FIFO eviction removes the oldest time-series records as either limit fills.
+        </p>
+        {readOnly && <p className="text-xs text-[#72B7E6]">Public demo: change the fields to explore the configuration. Nothing here can be saved.</p>}
+      </div>
 
       {/* Configuration form */}
       <div className="bg-[#161B22] border border-[#30363D] rounded-xl p-5 space-y-4">
@@ -101,8 +110,8 @@ export function SettingsPanel() {
               className="w-full text-sm bg-[#0D1117] border border-[#30363D] rounded-lg px-3 py-2 text-[#E6EDF3] font-mono focus:outline-none focus:border-primary transition-colors"
             />
             <p className="text-[10px] text-[#6B7785]">
-              Total disk space the Data Store can use. Writes are rejected when
-              this limit is reached.
+              Approximate disk budget for time-series history. The oldest records are
+              evicted globally as this budget fills.
             </p>
           </div>
 
@@ -149,11 +158,11 @@ export function SettingsPanel() {
         <div className="flex items-center gap-3">
           <button
             onClick={handleSave}
-            disabled={!hasChanges}
+            disabled={!hasChanges || readOnly}
             className="flex items-center gap-1.5 bg-primary hover:bg-primary/90 text-white rounded-lg px-4 py-2 text-xs font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Check size={14} />
-            Save Changes
+            {readOnly ? "Demo preview · not saved" : "Save Changes"}
           </button>
           {success && (
             <span className="text-xs text-[#22C55E]">

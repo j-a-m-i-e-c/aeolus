@@ -26,9 +26,11 @@ const h = vi.hoisted(() => ({
     { id: "t1", name: "Overview", pinned: false },
     { id: "t2", name: "Devices", pinned: true },
   ],
+  demoState: { readOnly: false },
 }));
 
 vi.mock("../lib/auth-fetch", () => ({ authFetch: h.authFetch }));
+vi.mock("../hooks/useReadOnlyDemo", () => ({ useReadOnlyDemo: () => h.demoState.readOnly }));
 
 vi.mock("../store/dashboard-store", () => ({
   useDashboardStore: (selector: (s: { tabs: typeof h.tabs }) => unknown) =>
@@ -55,6 +57,7 @@ describe("GroupManagementPage", () => {
     h.groups = [];
     h.users = [];
     h.groupsOk = true;
+    h.demoState.readOnly = false;
     h.authFetch.mockReset();
     h.authFetch.mockImplementation(async (url: string, opts?: RequestInit) => {
       const method = opts?.method ?? "GET";
@@ -78,6 +81,23 @@ describe("GroupManagementPage", () => {
     expect(screen.getByText(/Members: alice/)).toBeInTheDocument();
     // Assigned tab name resolved from the dashboard store.
     expect(screen.getByText("Overview")).toBeInTheDocument();
+  });
+
+  it("lets demo visitors inspect group creation and editing without writes", async () => {
+    h.demoState.readOnly = true;
+    h.groups = sampleGroups;
+    render(<GroupManagementPage />);
+    await screen.findByText("Family");
+
+    fireEvent.click(screen.getByRole("button", { name: /Add Group/ }));
+    fireEvent.change(screen.getByPlaceholderText("e.g. Family, Guests"), { target: { value: "Visitors" } });
+    expect(screen.getAllByRole("button", { name: /Demo preview · not saved/i })[0]).toBeDisabled();
+
+    fireEvent.click(screen.getByTitle("Edit group"));
+    expect(screen.getByText("Edit Group: Family")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /Demo preview · not saved/i }).at(-1)).toBeDisabled();
+    expect(screen.queryByTitle("Delete group")).not.toBeInTheDocument();
+    expect(h.authFetch.mock.calls.some((c) => ["POST", "PUT", "DELETE"].includes(c[1]?.method))).toBe(false);
   });
 
   it("shows an error banner when the groups request fails", async () => {

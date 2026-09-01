@@ -474,6 +474,7 @@ export function ConnectorsPage() {
   // Config form state for enabling a connector
   const [configuringType, setConfiguringType] = useState<string | null>(null);
   const [configValues, setConfigValues] = useState<Record<string, unknown>>({});
+  const [demoPairedType, setDemoPairedType] = useState<string | null>(null);
 
   // Setup wizard state
   const [setupConnectorId, setSetupConnectorId] = useState<string | null>(null);
@@ -500,18 +501,28 @@ export function ConnectorsPage() {
 
   // ---- Enable flow ----
   const handleEnableClick = (connType: ConnectorType) => {
-    // For connectors that require setup, skip the config form and enable immediately
-    // The setup wizard will collect the necessary configuration
+    const defaults: Record<string, unknown> = {};
+    for (const field of connType.configSchema) {
+      if (field.default !== undefined) defaults[field.id] = field.default;
+    }
+
+    // Public-demo visitors should see the real setup/configuration experience,
+    // but never cross the backend mutation boundary. Keep this preview entirely
+    // local to the browser.
+    if (readOnly) {
+      setConfiguringType(connType.metadata.id);
+      setConfigValues(defaults);
+      setDemoPairedType(null);
+      return;
+    }
+
+    // For connectors that require setup, normal installs enable the connector
+    // first and then enter its real setup wizard.
     if (connType.metadata.requiresSetup) {
       handleEnableWithSetup(connType.metadata.id);
       return;
     }
     setConfiguringType(connType.metadata.id);
-    // Pre-fill defaults
-    const defaults: Record<string, unknown> = {};
-    for (const field of connType.configSchema) {
-      if (field.default !== undefined) defaults[field.id] = field.default;
-    }
     setConfigValues(defaults);
   };
 
@@ -602,9 +613,9 @@ export function ConnectorsPage() {
               Public demo · read only
             </div>
             <p className="mt-1 text-xs leading-relaxed text-[#8B9AAA]">
-              This page shows the connector types and health surfaces Aeolus supports. Connector setup,
-              configuration, enable/disable and retry actions are disabled in the hosted demo because they
-              would require access to real hardware, networks or credentials.
+              Connectors teach Aeolus how to talk to commercial hardware and local ecosystems. Open any
+              connector below to explore its real configuration or setup flow. You can interact with the
+              controls here, but the public demo never saves credentials or changes connector state.
             </p>
           </div>
         </div>
@@ -771,9 +782,13 @@ export function ConnectorsPage() {
                   </div>
                   <div className="shrink-0">
                   {readOnly ? (
-                    isEnabled && !isIncompleteSetup && (
-                      <span className="text-[10px] px-2 py-0.5 rounded bg-[#22C55E]/20 text-[#22C55E]">Active</span>
-                    )
+                    <button
+                      onClick={() => isConfiguring ? setConfiguringType(null) : handleEnableClick(connType)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-primary/10 text-primary border border-primary/25 hover:bg-primary/20 transition-colors"
+                    >
+                      <ChevronRight size={12} />
+                      {isConfiguring ? "Close" : connType.metadata.requiresSetup ? "Explore setup" : "Explore config"}
+                    </button>
                   ) : isIncompleteSetup ? (
                     <button
                       onClick={handleResumeSetup}
@@ -814,13 +829,42 @@ export function ConnectorsPage() {
                       {connType.configSchema.length > 0 && (
                         <ConfigForm schema={connType.configSchema} values={configValues} onChange={setConfigValues} />
                       )}
+
+                      {readOnly && connType.metadata.requiresSetup && (
+                        <div className="rounded-lg border border-[#31506A] bg-[#0D1822] p-3 space-y-3">
+                          <div className="space-y-1">
+                            <div className="text-[10px] font-semibold uppercase tracking-wider text-[#8CC9F0]">Setup preview</div>
+                            <p className="text-xs leading-relaxed text-[#8B9AAA]">
+                              Aeolus discovers the bridge on the local network, waits for its physical link button,
+                              stores the resulting local API credential, then discovers devices. The demo can mimic
+                              that physical button press without creating a connector.
+                            </p>
+                          </div>
+                          {demoPairedType === connType.metadata.id ? (
+                            <div className="rounded-lg border border-[#22C55E]/25 bg-[#22C55E]/8 px-3 py-2 text-xs text-[#8ED9A5]">
+                              Bridge authorised · next Aeolus would discover its devices. Nothing was saved.
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setDemoPairedType(connType.metadata.id)}
+                              className="w-full py-2 text-xs font-medium rounded-lg bg-[#F59E0B]/15 text-[#E7BB70] border border-[#F59E0B]/25 hover:bg-[#F59E0B]/20 transition-colors"
+                            >
+                              Simulate physical bridge button
+                            </button>
+                          )}
+                        </div>
+                      )}
+
                       <button
-                        onClick={handleEnableSubmit}
-                        disabled={actionLoading === connType.metadata.id}
-                        className="w-full py-2 text-xs font-medium rounded-lg bg-primary/20 text-primary border border-primary/30 hover:bg-primary/30 transition-colors disabled:opacity-50"
+                        onClick={readOnly ? undefined : handleEnableSubmit}
+                        disabled={readOnly || actionLoading === connType.metadata.id}
+                        className="w-full py-2 text-xs font-medium rounded-lg bg-primary/20 text-primary border border-primary/30 hover:bg-primary/30 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                       >
                         {actionLoading === connType.metadata.id ? (
                           <Loader2 size={14} className="animate-spin mx-auto" />
+                        ) : readOnly ? (
+                          "Demo preview · not saved"
                         ) : (
                           "Enable Connector"
                         )}
@@ -831,6 +875,29 @@ export function ConnectorsPage() {
               </div>
             );
           })}
+
+          <div className="bg-surface border border-dashed border-primary/30 rounded-xl p-5 space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="p-2.5 rounded-lg bg-primary/10 shrink-0">
+                <icons.Code2 size={20} className="text-primary" />
+              </div>
+              <div className="space-y-1">
+                <div className="text-sm font-semibold text-[#E6EDF3]">Your hardware here</div>
+                <p className="text-xs text-[#6B7785] leading-relaxed">
+                  Aeolus is open source. If the bridge, protocol or weird bit of kit you use is missing,
+                  connectors are designed to be extended without changing the automation model.
+                </p>
+              </div>
+            </div>
+            <a
+              href="https://github.com/j-a-m-i-e-c/aeolus/blob/main/src/connectors/README.md"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:text-[#7FD9F2] transition-colors"
+            >
+              Write a connector <ChevronRight size={12} />
+            </a>
+          </div>
         </div>
 
         {available.length === 0 && (

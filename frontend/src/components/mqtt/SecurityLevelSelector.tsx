@@ -1,12 +1,13 @@
 // frontend/src/components/mqtt/SecurityLevelSelector.tsx — Radio-card UI for MQTT security level selection
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Key, Shield, Unlock } from "lucide-react";
 import { motion } from "framer-motion";
 import {
   useMqttProvisioningStore,
   type SecurityLevel,
 } from "../../store/mqtt-provisioning-store";
+import { useReadOnlyDemo } from "../../hooks/useReadOnlyDemo";
 
 interface LevelOption {
   level: SecurityLevel;
@@ -20,7 +21,7 @@ const LEVEL_OPTIONS: LevelOption[] = [
     level: "open",
     icon: Unlock,
     title: "Open",
-    description: "No authentication — anyone can connect",
+    description: "No broker login. Appropriate on a trusted/private LAN; never expose the broker port to an untrusted network.",
   },
   {
     level: "shared_password",
@@ -53,20 +54,26 @@ function getConfirmationMessage(currentLevel: SecurityLevel): string {
 }
 
 export default function SecurityLevelSelector() {
+  const readOnly = useReadOnlyDemo();
   const { level, setLevel, loading, managedProvisioningEnabled } = useMqttProvisioningStore();
   const [pending, setPending] = useState(false);
+  const [previewLevel, setPreviewLevel] = useState<SecurityLevel>(level);
+
+  useEffect(() => setPreviewLevel(level), [level]);
+  const displayedLevel = readOnly ? previewLevel : level;
 
   const handleSelect = async (newLevel: SecurityLevel) => {
-    if (
-      newLevel === level
-      || loading
-      || pending
-      || (!managedProvisioningEnabled && newLevel !== "open")
-    ) return;
+    if (newLevel === displayedLevel || loading || pending) return;
+
+    if (readOnly) {
+      setPreviewLevel(newLevel);
+      return;
+    }
+    if (!managedProvisioningEnabled && newLevel !== "open") return;
 
     // Show confirmation when switching away from modes with active credentials
-    if (MODES_WITH_CREDENTIALS.includes(level)) {
-      const message = getConfirmationMessage(level);
+    if (MODES_WITH_CREDENTIALS.includes(displayedLevel)) {
+      const message = getConfirmationMessage(displayedLevel);
       if (!window.confirm(message)) return;
     }
 
@@ -81,9 +88,9 @@ export default function SecurityLevelSelector() {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
       {LEVEL_OPTIONS.map(({ level: optionLevel, icon: Icon, title, description }) => {
-        const isActive = optionLevel === level;
-        const isUnderDevelopment = !managedProvisioningEnabled && optionLevel !== "open";
-        const isDisabled = loading || pending || isUnderDevelopment;
+        const isActive = optionLevel === displayedLevel;
+        const needsManagedProvisioning = !managedProvisioningEnabled && optionLevel !== "open";
+        const isDisabled = loading || pending || (needsManagedProvisioning && !readOnly);
 
         return (
           <motion.button
@@ -113,8 +120,11 @@ export default function SecurityLevelSelector() {
                 {title}
               </span>
               <span className="text-xs text-secondary">{description}</span>
-              {isUnderDevelopment && (
-                <span className="text-xs font-medium text-amber-400">Under development</span>
+              {needsManagedProvisioning && !readOnly && (
+                <span className="text-xs font-medium text-amber-400">Managed setup disabled</span>
+              )}
+              {readOnly && optionLevel !== level && isActive && (
+                <span className="text-xs font-medium text-[#72B7E6]">Demo preview · not applied</span>
               )}
             </div>
 

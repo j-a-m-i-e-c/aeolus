@@ -28,11 +28,10 @@ export function TabLayout({ tabId }: TabLayoutProps) {
   // Permission-based controls
   const { canInteract, canWrite: _canWrite, isAdmin } = useTabPermission(tabId);
 
-  // Structural editing (add/remove/configure panes) remains admin-only. In the
-  // hosted public demo, however, visitors may drag/resize the existing panes as
-  // a local workspace experiment. dashboard-store deliberately never persists
-  // those public-demo mutations, so another visitor can never inherit them.
-  const canEditLayout = isAdmin;
+  // Public-demo layout edits are deliberately browser-local: dashboard-store
+  // suppresses persistence, so visitors can experience the real composition UI
+  // without changing the shared showcase for anybody else.
+  const canEditLayout = isAdmin || PUBLIC_DEMO;
 
   // PanePicker visibility
   const [showPicker, setShowPicker] = useState(false);
@@ -111,40 +110,38 @@ export function TabLayout({ tabId }: TabLayoutProps) {
 
   return (
     <div ref={containerRef} className="w-full">
-      {/* Header area: admins get structural tools; public-demo visitors only get
-          the compact reset action. Drag/resize is intentionally discoverable from
-          the pane chrome itself rather than repeated explanatory copy on every tab. */}
-      {(canEditLayout || (PUBLIC_DEMO && !isAdmin)) && (
+      {/* The demo intentionally exposes the same composition tools as the real app.
+          Its layout mutations stay local to the browser and Reset restores the seed. */}
+      {canEditLayout && (
       <div className="flex items-center justify-between gap-2 px-4 py-2">
-        <div />
+        <div className="text-[10px] text-[#6B7785]">
+          {PUBLIC_DEMO && !isAdmin ? "Layout changes stay in this browser only." : ""}
+        </div>
         <div className="flex items-center gap-2">
-        {canEditLayout && (<>
-        <motion.button
-          whileHover={{ scale: 1.02 }}
-          whileTap={{ scale: 0.97 }}
-          onClick={() => addPane(tabId, "automation")}
-          className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold text-white border border-primary/40 transition-colors"
-          style={{
-            background: "linear-gradient(135deg, #3BA4FF, #5CE1E6)",
-          }}
-        >
-          <Zap size={13} />
-          New Automation Pane
-        </motion.button>
-        <button
-          onClick={() => setShowPicker(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-[#9AA6B2] hover:text-[#E6EDF3] hover:bg-elevated/50 border border-[#2A3441] transition-colors"
-        >
-          <Plus size={14} />
-          Browse Panes
-        </button>
-        </>)}
-        {PUBLIC_DEMO && !isAdmin && (<>
-          <button onClick={() => addPane(tabId, "automation", { demoDraft: true, ruleName: "Demo Draft" })} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-[#5CE1E6] bg-[#3BA4FF]/10 hover:bg-[#3BA4FF]/20 border border-[#3BA4FF]/30 transition-colors">
-            <Zap size={13} /> Try a New Automation
+          <motion.button
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.97 }}
+            onClick={() => PUBLIC_DEMO && !isAdmin
+              ? addPane(tabId, "automation", { demoDraft: true, ruleName: "New Automation" })
+              : addPane(tabId, "automation")}
+            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold text-white border border-primary/40 transition-colors"
+            style={{ background: "linear-gradient(135deg, #3BA4FF, #5CE1E6)" }}
+          >
+            <Zap size={13} />
+            New Automation
+          </motion.button>
+          <button
+            onClick={() => setShowPicker(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-[#9AA6B2] hover:text-[#E6EDF3] hover:bg-elevated/50 border border-[#2A3441] transition-colors"
+          >
+            <Plus size={14} />
+            Browse Panes
           </button>
-          <button onClick={() => void resetLayout()} className="px-3 py-1.5 rounded-lg text-xs font-medium text-[#9AA6B2] hover:text-[#E6EDF3] hover:bg-elevated/50 border border-[#2A3441] transition-colors">Reset layout</button>
-        </>)}
+          {PUBLIC_DEMO && !isAdmin && (
+            <button onClick={() => void resetLayout()} className="px-3 py-1.5 rounded-lg text-xs font-medium text-[#9AA6B2] hover:text-[#E6EDF3] hover:bg-elevated/50 border border-[#2A3441] transition-colors">
+              Reset layout
+            </button>
+          )}
         </div>
       </div>
       )}
@@ -179,9 +176,9 @@ export function TabLayout({ tabId }: TabLayoutProps) {
                 <span className="text-xs font-medium text-[#9AA6B2] truncate select-none">
                   {(pane.config.ruleName as string) || entry?.displayName || pane.paneType}
                 </span>
-                {(canEditLayout || (PUBLIC_DEMO && pane.config.demoDraft === true)) && (
+                {canEditLayout && (
                 <div className="flex items-center gap-1 shrink-0">
-                  {canEditLayout && <button className="p-1 rounded text-[#6B7785] hover:text-[#9AA6B2] hover:bg-elevated transition-colors" title="Pane settings" onMouseDown={(e) => e.stopPropagation()} onClick={() => setConfigPaneId(pane.id)}><Settings size={13} /></button>}
+                  <button className="p-1 rounded text-[#6B7785] hover:text-[#9AA6B2] hover:bg-elevated transition-colors" title="Pane settings" onMouseDown={(e) => e.stopPropagation()} onClick={() => setConfigPaneId(pane.id)}><Settings size={13} /></button>
                   <button className="p-1 rounded text-[#6B7785] hover:text-[#EF4444] hover:bg-elevated transition-colors" title={PUBLIC_DEMO && pane.config.demoDraft === true ? "Discard local draft" : "Remove pane"} onMouseDown={(e) => e.stopPropagation()} onClick={() => handleRemovePane(pane.id)}><X size={13} /></button>
                 </div>
                 )}

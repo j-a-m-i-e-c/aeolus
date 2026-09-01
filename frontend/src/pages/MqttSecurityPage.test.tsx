@@ -79,11 +79,11 @@ describe("MqttSecurityPage", () => {
     expect(screen.queryByTestId("device-credential-list")).not.toBeInTheDocument();
   });
 
-  it("explains that managed modes are under development when disabled", async () => {
+  it("explains that managed provisioning is disabled while standard broker modes remain available", async () => {
     mockLoading = false;
     mockManagedProvisioningEnabled = false;
     render(<MqttSecurityPage />);
 
-    expect(await screen.findByText(/under development/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Managed Mosquitto provisioning is experimental and disabled/i)).toBeInTheDocument();
   });
 });

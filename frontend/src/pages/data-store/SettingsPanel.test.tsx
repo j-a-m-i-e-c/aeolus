@@ -3,9 +3,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 
-const { mockState, mockAuthFetch } = vi.hoisted(() => ({
+const { mockState, mockAuthFetch, demoState } = vi.hoisted(() => ({
   mockState: {} as any,
   mockAuthFetch: vi.fn(),
+  demoState: { readOnly: false },
 }));
 
 vi.mock("../../store/data-store-store", () => ({
@@ -14,6 +15,10 @@ vi.mock("../../store/data-store-store", () => ({
 
 vi.mock("../../lib/auth-fetch", () => ({
   authFetch: mockAuthFetch,
+}));
+
+vi.mock("../../hooks/useReadOnlyDemo", () => ({
+  useReadOnlyDemo: () => demoState.readOnly,
 }));
 
 import { SettingsPanel } from "./SettingsPanel";
@@ -33,6 +38,7 @@ function resetState() {
 describe("SettingsPanel", () => {
   beforeEach(() => {
     resetState();
+    demoState.readOnly = false;
     mockAuthFetch.mockReset();
   });
 
@@ -49,6 +55,16 @@ describe("SettingsPanel", () => {
     expect(save).toBeDisabled();
     fireEvent.change(screen.getByDisplayValue("500"), { target: { value: "800" } });
     expect(save).not.toBeDisabled();
+  });
+
+  it("keeps configuration fields explorable but unsaveable in the public demo", () => {
+    demoState.readOnly = true;
+    render(<SettingsPanel />);
+    const input = screen.getByDisplayValue("500");
+    fireEvent.change(input, { target: { value: "800" } });
+    expect(screen.getByDisplayValue("800")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Demo preview · not saved/i })).toBeDisabled();
+    expect(mockAuthFetch).not.toHaveBeenCalled();
   });
 
   it("shows the confirmation dialog with a before/after diff", () => {

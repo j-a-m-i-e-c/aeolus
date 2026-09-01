@@ -16,9 +16,11 @@ const h = vi.hoisted(() => ({
   users: [] as UserRecord[],
   groups: [] as { id: string; name: string }[],
   usersOk: true,
+  demoState: { readOnly: false },
 }));
 
 vi.mock("../lib/auth-fetch", () => ({ authFetch: h.authFetch }));
+vi.mock("../hooks/useReadOnlyDemo", () => ({ useReadOnlyDemo: () => h.demoState.readOnly }));
 
 import { UserManagementPage } from "./UserManagementPage";
 
@@ -36,6 +38,7 @@ describe("UserManagementPage", () => {
     h.users = [];
     h.groups = [];
     h.usersOk = true;
+    h.demoState.readOnly = false;
     h.authFetch.mockReset();
     h.authFetch.mockImplementation(async (url: string, opts?: RequestInit) => {
       const method = opts?.method ?? "GET";
@@ -61,6 +64,23 @@ describe("UserManagementPage", () => {
     // Every row (admin and user) now exposes a delete action; the last-admin
     // safeguard is enforced server-side (409), not by hiding the control.
     expect(screen.getAllByTitle("Delete user")).toHaveLength(2);
+  });
+
+  it("lets demo visitors inspect user creation and editing without writes", async () => {
+    h.demoState.readOnly = true;
+    h.users = sampleUsers;
+    render(<UserManagementPage />);
+    await screen.findByText("alice");
+
+    fireEvent.click(screen.getByRole("button", { name: /Add User/ }));
+    fireEvent.change(screen.getByPlaceholderText("username"), { target: { value: "visitor" } });
+    expect(screen.getAllByRole("button", { name: /Demo preview · not saved/i })[0]).toBeDisabled();
+
+    fireEvent.click(screen.getAllByTitle("Edit user")[1]);
+    expect(screen.getByText("Edit User: alice")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /Demo preview · not saved/i }).at(-1)).toBeDisabled();
+    expect(screen.queryByTitle("Delete user")).not.toBeInTheDocument();
+    expect(h.authFetch.mock.calls.some((c) => ["POST", "PUT", "DELETE"].includes(c[1]?.method))).toBe(false);
   });
 
   it("shows an error banner when the users request fails", async () => {

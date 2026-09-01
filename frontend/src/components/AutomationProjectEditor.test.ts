@@ -47,8 +47,8 @@ describe("AutomationProjectEditor Monaco model identity", () => {
   });
 });
 
-describe("AutomationProjectEditor read-only model switching", () => {
-  it("does not subscribe Monaco changes while shared source is read-only", () => {
+describe("AutomationProjectEditor local editing model switching", () => {
+  it("keeps Monaco changes wired while shared source persistence is read-only", () => {
     const onChange = vi.fn();
     render(
       createElement(AutomationProjectEditor, {
@@ -59,18 +59,19 @@ describe("AutomationProjectEditor read-only model switching", () => {
       }),
     );
 
-    expect(editorHarness.props?.onChange).toBeUndefined();
+    expect(editorHarness.props?.onChange).toEqual(expect.any(Function));
     expect(editorHarness.props?.value).toBeUndefined();
+    expect((editorHarness.props?.options as { readOnly?: boolean })?.readOnly).toBe(false);
     expect(screen.getByTestId("monaco-editor")).toHaveTextContent("logic/index.ts");
     expect(screen.getByTestId("monaco-editor")).toHaveTextContent("return 'logic'");
 
     fireEvent.click(screen.getByRole("button", { name: "UI" }));
-    expect(editorHarness.props?.onChange).toBeUndefined();
+    expect(editorHarness.props?.onChange).toEqual(expect.any(Function));
     expect(screen.getByTestId("monaco-editor")).toHaveTextContent("ui/index.tsx");
     expect(screen.getByTestId("monaco-editor")).toHaveTextContent("<div>ui</div>");
 
     fireEvent.click(screen.getByRole("button", { name: "Logic" }));
-    expect(editorHarness.props?.onChange).toBeUndefined();
+    expect(editorHarness.props?.onChange).toEqual(expect.any(Function));
     expect(editorHarness.props?.value).toBeUndefined();
     expect(screen.getByTestId("monaco-editor")).toHaveTextContent("logic/index.ts");
     expect(screen.getByTestId("monaco-editor")).toHaveTextContent("return 'logic'");

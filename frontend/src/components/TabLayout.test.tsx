@@ -94,7 +94,7 @@ describe("TabLayout", () => {
 
   it("renders the write controls and pane content for a writable tab", () => {
     render(<TabLayout tabId="tab1" />);
-    expect(screen.getByText("New Automation Pane")).toBeInTheDocument();
+    expect(screen.getByText("New Automation")).toBeInTheDocument();
     expect(screen.getByText("Browse Panes")).toBeInTheDocument();
     expect(screen.getByText("Sensor Panel")).toBeInTheDocument();
     expect(screen.getByTestId("pane-body")).toBeInTheDocument();
@@ -104,7 +104,7 @@ describe("TabLayout", () => {
     permState.isAdmin = false;
     permState.canWrite = false;
     render(<TabLayout tabId="tab1" />);
-    expect(screen.queryByText("New Automation Pane")).not.toBeInTheDocument();
+    expect(screen.queryByText("New Automation")).not.toBeInTheDocument();
     expect(screen.queryByText("Browse Panes")).not.toBeInTheDocument();
     // Content is still rendered
     expect(screen.getByTestId("pane-body")).toBeInTheDocument();
@@ -119,7 +119,7 @@ describe("TabLayout", () => {
 
   it("adds an automation pane when the new-automation button is clicked", () => {
     render(<TabLayout tabId="tab1" />);
-    fireEvent.click(screen.getByText("New Automation Pane"));
+    fireEvent.click(screen.getByText("New Automation"));
     expect(mockDashState.addPane).toHaveBeenCalledWith("tab1", "automation");
   });
 

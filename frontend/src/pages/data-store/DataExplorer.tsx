@@ -53,9 +53,7 @@ export function DataExplorer() {
   const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
     { id: "collections", label: "Collections", icon: <Layers size={14} /> },
     { id: "buckets", label: "Buckets", icon: <Archive size={14} /> },
-    // The Settings tab is the Data Store config-mutation surface — hidden in the
-    // read-only public demo.
-    ...(readOnly ? [] : [{ id: "settings" as Tab, label: "Settings", icon: <Settings size={14} /> }]),
+    { id: "settings", label: "Configuration", icon: <Settings size={14} /> },
   ];
 
   return (
@@ -73,9 +71,9 @@ export function DataExplorer() {
               Public demo · read only
             </div>
             <p className="mt-1 text-xs leading-relaxed text-[#8B9AAA]">
-              Explore seeded time-series history and key/value buckets from across the showcase. Some demo
-              automations append live records while you interact with them. The demo seed clears and rebuilds
-              this store, so old showcase data does not accumulate between deployments.
+              Aeolus keeps time-series measurements and shared key/value state locally on the edge device.
+              Browse the showcase data, then open Configuration to see the storage limits that prevent a small
+              device from silently filling its disk. This public demo lets you inspect the real controls without saving changes.
             </p>
           </div>
         </div>
