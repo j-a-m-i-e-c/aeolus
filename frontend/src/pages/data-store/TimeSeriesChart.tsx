@@ -40,6 +40,7 @@ function detectNumericFields(records: DataRecord[]): string[] {
   const fieldSet = new Set<string>();
   for (const record of records) {
     for (const [key, value] of Object.entries(record.payload)) {
+      if (key.toLowerCase() === "timestamp") continue;
       if (typeof value === "number" && isFinite(value)) {
         fieldSet.add(key);
       }

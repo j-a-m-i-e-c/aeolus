@@ -1,8 +1,14 @@
 // frontend/src/pages/data-store/BucketList.tsx — Expandable list of buckets with key-value pairs
 
 import { useEffect, useState } from "react";
-import { Archive, ChevronDown, ChevronRight, Key } from "lucide-react";
+import { Archive, ChevronDown, ChevronRight, Key, Clock3 } from "lucide-react";
 import { useDataStoreStore } from "../../store/data-store-store";
+
+const DEMO_BUCKET_NOTES: Record<string, string> = {
+  "demo-runtime": "Small values describing this showcase runtime. Useful as an example of durable application metadata.",
+  "policy-snapshots": "Current control thresholds shared by automations, such as water, mine atmosphere and wildlife response policies.",
+  "latest-checkpoints": "The latest useful outcome from longer-running workflows, without treating it like a time-series log.",
+};
 
 export function BucketList() {
   const buckets = useDataStoreStore((s) => s.buckets);
@@ -55,9 +61,16 @@ export function BucketList() {
 
   return (
     <div className="space-y-2">
-      <p className="text-sm text-[#6B7785]">
-        Key-value buckets store persistent named values that can be read and written from any automation. Use them for cross-rule shared state, computed results, or configuration that needs to survive restarts.
-      </p>
+      <div className="grid gap-3 md:grid-cols-2">
+        <div className="rounded-xl border border-[#30363D] bg-[#161B22] p-4">
+          <div className="mb-1 flex items-center gap-2 text-xs font-semibold text-[#E6EDF3]"><Clock3 size={13} className="text-[#5CE1E6]" /> Collections</div>
+          <p className="text-xs leading-relaxed text-[#6B7785]">History: many timestamped measurements or events that you query over a time window and chart.</p>
+        </div>
+        <div className="rounded-xl border border-[#30363D] bg-[#161B22] p-4">
+          <div className="mb-1 flex items-center gap-2 text-xs font-semibold text-[#E6EDF3]"><Key size={13} className="text-[#3BA4FF]" /> Buckets</div>
+          <p className="text-xs leading-relaxed text-[#6B7785]">Current shared values: named configuration, checkpoints or computed state that should survive restarts.</p>
+        </div>
+      </div>
 
       {buckets.map((bucket) => {
         const isExpanded = expandedBucket === bucket.bucket;
@@ -79,9 +92,10 @@ export function BucketList() {
                   <ChevronRight size={14} className="text-[#6B7785]" />
                 )}
                 <Archive size={14} className="text-primary" />
-                <span className="text-sm font-medium text-[#E6EDF3]">
-                  {bucket.bucket}
-                </span>
+                <div className="text-left">
+                  <span className="text-sm font-medium text-[#E6EDF3]">{bucket.bucket}</span>
+                  {DEMO_BUCKET_NOTES[bucket.bucket] && <p className="mt-0.5 max-w-2xl text-[10px] leading-relaxed text-[#6B7785]">{DEMO_BUCKET_NOTES[bucket.bucket]}</p>}
+                </div>
               </div>
               <span className="text-xs text-[#6B7785]">
                 {bucket.keyCount} {bucket.keyCount === 1 ? "key" : "keys"}

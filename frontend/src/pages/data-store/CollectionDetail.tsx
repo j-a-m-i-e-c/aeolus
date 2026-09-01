@@ -127,7 +127,7 @@ export function CollectionDetail() {
           eye lands before the collection name. */}
       <button
         onClick={handleBack}
-        className="flex items-center gap-1.5 text-[#9AA6B2] hover:text-[#E6EDF3] hover:bg-[#0D1117] border border-[#30363D] rounded-lg pl-2 pr-3 py-1.5 text-xs font-medium transition-colors"
+        className="inline-flex items-center gap-2 text-[#BFE8FF] hover:text-white bg-[#3BA4FF]/10 hover:bg-[#3BA4FF]/20 border border-[#3BA4FF]/35 rounded-lg px-3.5 py-2 text-xs font-semibold transition-colors shadow-sm"
       >
         <ArrowLeft size={14} />
         All collections
