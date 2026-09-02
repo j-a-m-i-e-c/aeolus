@@ -3,8 +3,13 @@
 // The Farm is one operator tab containing four first-class Aeolus automations.
 // Each domain owns its own Logic and UI. There is deliberately no hidden
 // coordinator automation and no shared in-process state between domains.
+//
+// A fifth automation records tank history on a schedule. It is headless, because
+// recording history is not an operator task — which also shows that an Aeolus
+// automation does not have to own a dashboard pane to be useful.
 
 import { waterAutomation } from "./water.mjs";
+import { waterHistoryAutomation } from "./water-history.mjs";
 import { livestockAutomation } from "./livestock.mjs";
 import { troughAutomation } from "./troughs.mjs";
 import { energyAutomation } from "./energy.mjs";
@@ -18,6 +23,7 @@ const devices = [];
 
 const automations = [
   waterAutomation,
+  waterHistoryAutomation,
   livestockAutomation,
   troughAutomation,
   energyAutomation,

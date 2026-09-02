@@ -109,21 +109,10 @@ export function projectWaterTelemetry(topic: string): WaterSnapshot {
     return snapshot;
 }
 
-export function sampleWaterHistory(snapshot: WaterSnapshot) {
-    const now = Date.now();
-    const last = Number(state.get("lastDataSampleAt") || 0);
-    if (now - last < 5 * 60_000)
-        return;
-    if ([snapshot.damPct, snapshot.headerPct, snapshot.shedPct, snapshot.housePct].some((value) => isNaN(value)))
-        return;
-    db.write("tank-levels", {
-        shedCatchment: snapshot.damPct,
-        header: snapshot.headerPct,
-        office: snapshot.shedPct,
-        house: snapshot.housePct,
-    });
-    state.set("lastDataSampleAt", now);
-}
+// Tank history is recorded by the separate scheduled Water History automation.
+// Sampling opportunistically from telemetry made history density a function of
+// how often the tanks published, and tied the sampling interval to the publish
+// interval; both are retention decisions that do not belong in this control loop.
 
 export async function reconcileBatchTransfer(snapshot: WaterSnapshot) {
     const transferActive = Boolean(state.get("transferActive"));

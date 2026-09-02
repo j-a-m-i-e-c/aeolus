@@ -7,7 +7,6 @@ import {
   isWaterTelemetry,
   projectWaterTelemetry,
   publishSourceReserve,
-  sampleWaterHistory,
   reconcileBatchTransfer,
   reconcileWaterPolicy,
 } from "./water-control";
@@ -28,7 +27,6 @@ export default async function run(context: EventContext) {
   const water = projectWaterTelemetry(topic);
   const pumpOn = await reconcileBatchTransfer(water);
 
-  sampleWaterHistory(water);
   publishSourceReserve(water);
   await reconcileWaterPolicy(water, pumpOn);
 }
