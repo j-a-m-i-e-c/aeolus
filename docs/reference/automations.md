@@ -146,6 +146,35 @@ The host exposes a bounded SDK for:
 - MQTT publishing;
 - selected history and platform data.
 
+### Styling a custom UI
+
+Tailwind classes are not available inside the sandbox: the host stylesheet is
+compiled from `frontend/src` only, so a class authored in a project is purged and
+renders as nothing. A custom UI styles itself with inline style objects.
+
+`@aeolus/ui` is the second module a custom UI may import, alongside React. It
+supplies the theme tokens, operator-control presentation and number formatting:
+
+```tsx
+import { control, percent, tokens } from "@aeolus/ui";
+
+<button {...control({ disabled: pumpOn })} onClick={start}>Start pump</button>
+<span style={{ color: tokens.color.textSecondary }}>{percent(level)}</span>
+```
+
+`control()` resolves a control to one of `available`, `current`, `disabled`,
+`pending` or `danger` and returns the matching style plus the `disabled` and ARIA
+attributes, so an action that is inappropriate for the current state looks
+unavailable rather than only carrying the HTML attribute. `toggleProps()` covers a
+mode switch, which stays pressable while on. The formatters accept the `unknown`
+that `read()` returns and render a placeholder rather than a raw float or
+`undefined` for a reading that has not arrived.
+
+The module is pure functions, constants and style objects. It performs no I/O and
+holds no reference to the SDK or the host page, so it widens what a custom UI can
+express without widening what it can do. Any other bare import is still refused at
+compile time.
+
 ## Actions
 
 Built-in action handlers include:

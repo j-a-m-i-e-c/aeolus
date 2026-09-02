@@ -15,6 +15,11 @@ Aeolus should feel calm, capable and technical. It deals with real devices and o
 
 The current tokens are defined in `frontend/tailwind.config.js`.
 
+A sandboxed custom automation UI cannot use these as Tailwind classes, because the
+stylesheet is compiled from `frontend/src` only. It imports the same values from
+`@aeolus/ui` instead; see the custom UI styling notes in
+`docs/reference/automations.md`.
+
 ### Core palette
 
 | Role | Token | Value |

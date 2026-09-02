@@ -24,11 +24,41 @@ export const SANDBOX_EXTERNALS_GLOBAL = "__SANDBOX_EXTERNALS__";
 /**
  * Supported external specifiers that are rewritten to reference the frame-local
  * `__SANDBOX_EXTERNALS__` object instead of ES module imports.
+ *
+ * Must stay in step with `UI_EXTERNALS` in src/automations/automation-project.ts
+ * (which decides what compiles) and the externals map in `entry.ts` (which
+ * supplies the instances). A specifier the compiler marks external but this set
+ * omits survives into the blob as a bare import and fails to resolve in the frame.
  */
-const EXTERNAL_SPECIFIERS = new Set(["react", "react-dom", "react/jsx-runtime"]);
+export const EXTERNAL_SPECIFIERS: readonly string[] = [
+  "react",
+  "react-dom",
+  "react/jsx-runtime",
+  "@aeolus/ui",
+];
+
+const EXTERNAL_SPECIFIER_SET = new Set(EXTERNAL_SPECIFIERS);
+
+/** Escape a specifier for literal use inside a regular expression. */
+function escapeForRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+}
 
 /**
- * Rewrite ES module import statements for React externals into destructuring
+ * Build the import matcher from {@link EXTERNAL_SPECIFIERS} rather than hardcoding
+ * the pattern, so adding an external cannot silently leave the regex behind.
+ * Longest specifier first, so `react/jsx-runtime` is preferred over `react`.
+ */
+function buildImportPattern(): RegExp {
+  const alternation = [...EXTERNAL_SPECIFIERS]
+    .sort((a, b) => b.length - a.length)
+    .map(escapeForRegExp)
+    .join("|");
+  return new RegExp(`import\\s+([\\s\\S]*?)\\s+from\\s+["'](${alternation})["']\\s*;`, "g");
+}
+
+/**
+ * Rewrite ES module import statements for sandbox externals into destructuring
  * assignments from the frame-local `globalThis.__SANDBOX_EXTERNALS__`.
  *
  * Handles patterns like:
@@ -37,18 +67,16 @@ const EXTERNAL_SPECIFIERS = new Set(["react", "react-dom", "react/jsx-runtime"])
  *   import React from "react";
  *   import * as React from "react";
  *   import React, { useState } from "react";
+ *   import { tokens, controlProps } from "@aeolus/ui";
  *
  * Exported separately for testability.
  */
 export function rewriteImports(source: string): string {
   const global = `globalThis.${SANDBOX_EXTERNALS_GLOBAL}`;
-
-  // Match: import <clause> from "<specifier>";
-  const importRe =
-    /import\s+([\s\S]*?)\s+from\s+["'](react(?:\/jsx-runtime|-dom)?)["']\s*;/g;
+  const importRe = buildImportPattern();
 
   return source.replace(importRe, (match, clause: string, specifier: string) => {
-    if (!EXTERNAL_SPECIFIERS.has(specifier)) {
+    if (!EXTERNAL_SPECIFIER_SET.has(specifier)) {
       // Not one of our externals — leave it alone
       return match;
     }

@@ -26,6 +26,7 @@ import * as jsxRuntime from "react/jsx-runtime";
 // a transparent background so this stylesheet's `body` background does not paint an
 // opaque rectangle over the host pane.
 import "../../index.css";
+import * as aeolusUi from "../ui-kit";
 import { SANDBOX_EXTERNALS_GLOBAL, loadModule } from "./module-loader";
 import { createSdkClient } from "./sdk-client";
 import { ShimHost } from "./shim";
@@ -43,10 +44,16 @@ declare global {
   var __SANDBOX_EXTERNALS__: Record<string, unknown> | undefined;
 }
 
+// `@aeolus/ui` is the platform design-token and formatting module. Unlike React it
+// is Aeolus' own code, and it is deliberately inert: pure functions, constants and
+// style objects with no I/O and no reference to the SDK or the host page. Exposing
+// it here gives authored UIs the theme they cannot otherwise reach (Tailwind classes
+// authored outside frontend/src are purged) without granting any new capability.
 (globalThis as Record<string, unknown>)[SANDBOX_EXTERNALS_GLOBAL] = {
   "react": React,
   "react-dom": ReactDOM,
   "react/jsx-runtime": jsxRuntime,
+  "@aeolus/ui": aeolusUi,
 };
 
 // ─── Fatal error reporting (frame → host via window.parent) ─────────────────

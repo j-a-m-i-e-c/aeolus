@@ -106,6 +106,113 @@ interface CustomComponentProps {
   history: ExecutionEntry[];
 }
 
+/**
+ * Aeolus design tokens, control styling and number formatting.
+ *
+ * Provided by the UI sandbox, so it is the one module besides React a custom UI
+ * may import. Tailwind classes are not available to custom UIs, so use these
+ * tokens and style objects instead of literal colours.
+ *
+ * ```tsx
+ * import { tokens, control, percent } from "@aeolus/ui";
+ *
+ * <button {...control({ disabled: pumpOn })} onClick={start}>Start pump</button>
+ * <span style={{ color: tokens.color.textSecondary }}>{percent(level)}</span>
+ * ```
+ *
+ * Mirrors frontend/src/sandbox/ui-kit/index.ts, which is the implementation.
+ */
+declare module "@aeolus/ui" {
+  /** Aeolus theme colours and font stacks. */
+  export const tokens: {
+    color: {
+      background: string;
+      surface: string;
+      elevated: string;
+      primary: string;
+      accent: string;
+      success: string;
+      warning: string;
+      error: string;
+      border: string;
+      text: string;
+      textSecondary: string;
+      textMuted: string;
+    };
+    font: { sans: string; mono: string };
+  };
+
+  /** Rendered in place of a measurement that has not arrived or is not a number. */
+  export const NO_VALUE: string;
+
+  /**
+   * How an operator control should present itself.
+   *
+   * - `available` — a real action the operator may take now.
+   * - `current`   — the operating state the system is already in, not an action.
+   * - `disabled`  — inappropriate for the current state, and visibly so.
+   * - `pending`   — requested and awaiting a physical outcome.
+   * - `danger`    — available, but consequential.
+   */
+  export type ControlState = "available" | "current" | "disabled" | "pending" | "danger";
+
+  /** Props to spread onto a `<button>`; carries styling and the matching semantics. */
+  export interface ControlVisual {
+    style: Record<string, string | number>;
+    disabled: boolean;
+    "aria-pressed"?: boolean;
+    "aria-busy"?: boolean;
+  }
+
+  /** Conditions a call site knows about, resolved into a single ControlState. */
+  export interface ControlConditions {
+    pending?: boolean;
+    disabled?: boolean;
+    current?: boolean;
+    danger?: boolean;
+  }
+
+  /** Resolve the presentation for one operator control. */
+  export function controlProps(state: ControlState): ControlVisual;
+  /** Derive a control's state from conditions. Precedence: pending, disabled, current, danger. */
+  export function controlState(conditions?: ControlConditions): ControlState;
+  /** Shorthand for `controlProps(controlState(conditions))`. */
+  export function control(conditions?: ControlConditions): ControlVisual;
+  /**
+   * Presentation for a control that switches a mode on and off. Stays pressable
+   * when on (unlike `current`) and reports the mode with `aria-pressed`.
+   */
+  export function toggleProps(
+    on: boolean,
+    conditions?: { pending?: boolean; disabled?: boolean },
+  ): ControlVisual;
+
+  /** Fixed-precision number. Returns NO_VALUE for anything non-numeric. */
+  export function formatNumber(value: unknown, decimals?: number): string;
+  /** Whole number with thousands separators. */
+  export function integer(value: unknown): string;
+  /** Fixed decimal places, one by default. */
+  export function decimal(value: unknown, decimals?: number): string;
+  /** Percentage, whole by default (`"73%"`). */
+  export function percent(value: unknown, decimals?: number): string;
+  /** Degrees Celsius, one decimal (`"12.4 °C"`). */
+  export function temperature(value: unknown, decimals?: number): string;
+  /** Rotational speed, always whole (`"2378 rpm"`). */
+  export function rpm(value: unknown): string;
+  /** Depth or altitude in metres, whole by default (`"420 m"`). */
+  export function metres(value: unknown, decimals?: number): string;
+  /** Volumetric flow (`"72.0 L/min"`). */
+  export function flow(value: unknown, decimals?: number): string;
+  /** Volume in litres, whole (`"1,000 L"`). */
+  export function litres(value: unknown): string;
+  /** Practical salinity, two decimals (`"35.12 PSU"`). */
+  export function salinity(value: unknown, decimals?: number): string;
+  /** Power in watts, whole (`"42 W"`). */
+  export function watts(value: unknown): string;
+  /** Power in kilowatts, two decimals (`"2.10 kW"`). */
+  export function kilowatts(value: unknown, decimals?: number): string;
+}
+
 // ── Minimal React type declarations for IntelliSense ──
 
 declare namespace React {

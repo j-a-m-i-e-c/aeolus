@@ -1,5 +1,6 @@
 // farm-troughs — visual implementation behind ui/index.tsx
 import { useEffect, useMemo, useState } from "react";
+import { control, toggleProps } from "@aeolus/ui";
 export default function TroughWateringDashboard({ model, actions }: {
     model: Record<string, any>;
     actions: Record<string, (...args: any[]) => void>;
@@ -35,6 +36,17 @@ export default function TroughWateringDashboard({ model, actions }: {
     const status = scenarioBusy ? "HERD WATERING " + Math.round(drinkingProgress) + "%" : refilling > 0 || refillCommandActive ? "REFILLING " + Math.max(refilling, refillTargets.length) : low > 0 ? low + " LOW" : "NETWORK HEALTHY";
     const statusColor = scenarioBusy ? "#E9C66D" : refilling > 0 || refillCommandActive ? "#76DDF4" : low > 0 ? "#F4A45A" : "#74DDA0";
     const actionLabel = lastAction?.label ? String(lastAction.label) : "Distributed trough telemetry online";
+    // The refill control states its own reason: a manifold command already in
+    // flight, cattle still at the troughs, or nothing below the threshold.
+    const refillVisual = control({ pending: refillCommandActive, disabled: drinkingActive || low === 0 });
+    const refillLabel = refillCommandActive
+        ? "Refilling…"
+        : drinkingActive
+            ? "Waiting for herd to clear"
+            : low === 0
+                ? "No troughs below threshold"
+                : "Refill " + low + " low trough" + (low === 1 ? "" : "s");
+    const autoVisual = toggleProps(auto, { pending: refillCommandActive });
     function Trough(props: {
         index: number;
         x: number;
@@ -99,8 +111,8 @@ export default function TroughWateringDashboard({ model, actions }: {
           <div style={{ color: auto ? "#83DFA0" : "#8A9291", fontSize: 11, fontWeight: 800 }}>AUTO REFILL {auto ? "ON" : "OFF"}</div>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-          <button onClick={() => actions.refillTroughs()} disabled={low === 0 || refillCommandActive || drinkingActive} style={{ borderRadius: 8, padding: "8px 5px", border: "1px solid " + (low > 0 && !drinkingActive ? "#2A6170" : "#303B40"), background: low > 0 && !drinkingActive ? "#102830" : "#151A1D", color: low > 0 && !drinkingActive ? "#7ADCF4" : "#69777C", fontSize: 11, cursor: low > 0 && !drinkingActive ? "pointer" : "not-allowed" }}>{refillCommandActive ? "Refilling…" : "Refill low troughs"}</button>
-          <button onClick={() => actions.toggleAuto()} disabled={refillCommandActive} style={{ borderRadius: 8, padding: "8px 5px", border: "1px solid " + (auto ? "#315B45" : "#303B40"), background: auto ? "#10251A" : "#151A1D", color: auto ? "#82E3A0" : "#87949A", fontSize: 11, cursor: refillCommandActive ? "wait" : "pointer" }}>Automatic refill {auto ? "ON" : "OFF"}</button>
+          <button {...refillVisual} style={{ ...refillVisual.style, padding: "8px 5px" }} onClick={() => actions.refillTroughs()}>{refillLabel}</button>
+          <button {...autoVisual} style={{ ...autoVisual.style, padding: "8px 5px" }} onClick={() => actions.toggleAuto()}>Automatic refill {auto ? "ON" : "OFF"}</button>
         </div>
       </div>
 

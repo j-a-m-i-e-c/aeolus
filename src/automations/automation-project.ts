@@ -11,7 +11,20 @@ export const MAX_PROJECT_BYTES = 512 * 1024;
 export const MAX_PROJECT_FILE_BYTES = 128 * 1024;
 
 const ALLOWED_SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx", ".json"]);
-const UI_EXTERNALS = new Set(["react", "react-dom", "react/jsx-runtime"]);
+
+/**
+ * Bare specifiers a project's UI may import. Everything else is rejected, so a
+ * custom UI can never pull in an arbitrary package or reach outside its own tree.
+ *
+ * `@aeolus/ui` is the platform's design-token and formatting module, provided by
+ * the sandbox runtime alongside React. It is pure functions and constants with no
+ * I/O and no privileged access, so allowing it widens what a custom UI can
+ * express without widening what it can do. Keep this set in step with
+ * `EXTERNAL_SPECIFIERS` in frontend/src/sandbox/runtime/module-loader.ts and the
+ * externals map in frontend/src/sandbox/runtime/entry.ts — a specifier marked
+ * external here but absent there compiles and then fails to load in the frame.
+ */
+const UI_EXTERNALS = new Set(["react", "react-dom", "react/jsx-runtime", "@aeolus/ui"]);
 
 export interface AutomationProjectFile {
   path: string;
@@ -140,7 +153,7 @@ function virtualProjectPlugin(files: Map<string, string>, mode: "logic" | "ui", 
         const spec = args.path;
         if (mode === "ui" && UI_EXTERNALS.has(spec)) return { path: spec, external: true };
         if (!spec.startsWith(".")) {
-          return { errors: [{ text: `Only relative project imports are allowed${mode === "ui" ? " (React is provided by the UI sandbox)" : ""}: ${spec}` }] };
+          return { errors: [{ text: `Only relative project imports are allowed${mode === "ui" ? ' (the UI sandbox provides "react" and "@aeolus/ui")' : ""}: ${spec}` }] };
         }
 
         const base = args.importer === "__aeolus_entry__" ? "" : path.posix.dirname(args.importer);

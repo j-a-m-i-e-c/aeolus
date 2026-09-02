@@ -1,5 +1,6 @@
 // farm-water — visual implementation behind ui/index.tsx
 import { useEffect, useState } from "react";
+import { control } from "@aeolus/ui";
 import { clamp, useSmooth } from "./hooks";
 import { WaterSchematic } from "./WaterSchematic";
 export default function WaterManagementDashboard({ model, actions }: {
@@ -40,6 +41,10 @@ export default function WaterManagementDashboard({ model, actions }: {
     const operatorBusy = pumpOn || transferActive || transferStopping;
     const demoBusy = operatorBusy || distributionActive || houseRefill || shedRefill || demoScenarioPending.length > 0;
     const actionLabel = lastAction?.label ? String(lastAction.label) : "Water system online";
+    // A batch cannot start while the pump is already committed or while the site
+    // battery is holding energy, and the stop only exists while it is running.
+    const batchVisual = control({ disabled: operatorBusy || !energyAllowed });
+    const stopVisual = control({ pending: transferStopping, disabled: !pumpOn });
     return (<div style={{ padding: 12, minHeight: "100%", color: "#E8EEF2", background: "linear-gradient(180deg,#081315,#071012 58%,#070C0D)" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, marginBottom: 8 }}>
         <div>
@@ -65,9 +70,9 @@ export default function WaterManagementDashboard({ model, actions }: {
       <div style={{ marginTop: 11, padding: 9, border: "1px solid #2B515C", borderRadius: 10, background: "#0A171B" }}>
         <div style={{ color: "#6E858B", fontSize: 11, fontWeight: 800, letterSpacing: 1, marginBottom: 6 }}>OPERATOR CONTROLS</div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 5 }}>
-          <button onClick={() => actions.transfer500()} disabled={operatorBusy || !energyAllowed} style={{ borderRadius: 7, padding: "7px 4px", border: "1px solid " + (!operatorBusy && energyAllowed ? "#27586A" : "#2C393D"), background: !operatorBusy && energyAllowed ? "#0C2630" : "#12191B", color: !operatorBusy && energyAllowed ? "#79DDF5" : "#5B686C", fontSize: 11, fontWeight: 750, cursor: !operatorBusy && energyAllowed ? "pointer" : "not-allowed" }}>Transfer 500 L</button>
-          <button onClick={() => actions.transfer1000()} disabled={operatorBusy || !energyAllowed} style={{ borderRadius: 7, padding: "7px 4px", border: "1px solid " + (!operatorBusy && energyAllowed ? "#27586A" : "#2C393D"), background: !operatorBusy && energyAllowed ? "#0C2630" : "#12191B", color: !operatorBusy && energyAllowed ? "#79DDF5" : "#5B686C", fontSize: 11, fontWeight: 750, cursor: !operatorBusy && energyAllowed ? "pointer" : "not-allowed" }}>Transfer 1000 L</button>
-          <button onClick={() => actions.pumpStop()} disabled={!pumpOn || transferStopping} style={{ borderRadius: 7, padding: "7px 4px", border: "1px solid " + (pumpOn ? "#6A3B34" : "#2C3638"), background: pumpOn ? "#281713" : "#111718", color: pumpOn ? "#F39B8C" : "#566366", fontSize: 11, cursor: pumpOn && !transferStopping ? "pointer" : "not-allowed" }}>{transferStopping ? "Stopping…" : "Stop transfer"}</button>
+          <button {...batchVisual} style={{ ...batchVisual.style, padding: "7px 4px" }} onClick={() => actions.transfer500()}>Transfer 500 L</button>
+          <button {...batchVisual} style={{ ...batchVisual.style, padding: "7px 4px" }} onClick={() => actions.transfer1000()}>Transfer 1000 L</button>
+          <button {...stopVisual} style={{ ...stopVisual.style, padding: "7px 4px" }} onClick={() => actions.pumpStop()}>{transferStopping ? "Stopping…" : "Stop transfer"}</button>
         </div>
       </div>
 

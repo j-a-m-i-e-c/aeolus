@@ -1,5 +1,6 @@
 // vessel-mission-overview — visual implementation behind ui/index.tsx
 import { useEffect, useState } from "react";
+import { percent } from "@aeolus/ui";
 export default function MissionOverviewDashboard({ model }: {
     model: Record<string, any>;
 }) {
@@ -66,7 +67,7 @@ export default function MissionOverviewDashboard({ model }: {
 
         <path d={"M365 71 C382 135 399 190 414 " + rovY} fill="none" stroke="#647982" strokeDasharray="4 3"/>
         <g transform={"translate(416 " + rovY + ")"}><rect x="-17" y="-8" width="34" height="16" rx="4" fill="#102C3A" stroke="#54D4F0"/><circle cx="-9" cy="0" r="3" fill="#8BEBFF"/><path d="M17 -3 L26 -8 M17 3 L26 8" stroke="#54D4F0"/></g>
-        <text x="416" y={rovY + 23} textAnchor="middle" fill="#78D7E9" fontSize="10">ROV {Math.round(rovDepth)}m · {rovBattery}%</text>
+        <text x="416" y={rovY + 23} textAnchor="middle" fill="#78D7E9" fontSize="10">ROV {Math.round(rovDepth)}m · {percent(rovBattery)}</text>
 
         <g transform="translate(540 94)">
           <rect width="190" height="158" rx="10" fill="#06131C" stroke="#1B3A4A"/>

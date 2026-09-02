@@ -1,5 +1,6 @@
 // farm-energy — visual implementation behind ui/index.tsx
 import { useEffect, useState } from "react";
+import { toggleProps } from "@aeolus/ui";
 export default function SiteEnergyDashboard({ model, actions }: {
     model: Record<string, any>;
     actions: Record<string, (...args: any[]) => void>;
@@ -29,6 +30,7 @@ export default function SiteEnergyDashboard({ model, actions }: {
     const status = mode === "reserve-protection" ? "RESERVE PROTECTION" : mode === "water-priority" ? "WATER PRIORITY" : mode === "opportunity-charging" ? "OPPORTUNITY CHARGING" : mode === "solar-surplus" ? "SOLAR SURPLUS" : mode === "battery-support" ? "BATTERY SUPPORT" : "BALANCED";
     const statusColor = mode === "reserve-protection" ? "#F09B61" : mode === "water-priority" ? "#73DDF1" : mode === "opportunity-charging" ? "#8DE59A" : mode === "solar-surplus" ? "#B6DE78" : mode === "battery-support" ? "#E6C26B" : "#8AB7A0";
     const actionLabel = lastAction?.label ? String(lastAction.label) : "Energy telemetry online";
+    const opportunityVisual = toggleProps(autoOpportunity, { pending: chargerPending });
     function FlowDots(props: {
         x1: number;
         x2: number;
@@ -114,7 +116,7 @@ export default function SiteEnergyDashboard({ model, actions }: {
             <div style={{ color: "#87937B", fontSize: 11, fontWeight: 850, letterSpacing: 1 }}>OPERATOR CONTROL</div>
             <div style={{ color: "#656F60", fontSize: 11, marginTop: 2 }}>Shed charging is lowest priority. Auto mode uses spare solar and yields to water transfer.</div>
           </div>
-          <button onClick={() => actions.toggleOpportunity()} disabled={chargerPending} style={{ minWidth: 135, borderRadius: 8, padding: "8px", border: "1px solid " + (autoOpportunity ? "#3C5E3F" : "#353A32"), background: autoOpportunity ? "#132218" : "#161A15", color: autoOpportunity ? "#8DD49A" : "#879083", fontSize: 11, cursor: chargerPending ? "wait" : "pointer" }}>Opportunity charging {autoOpportunity ? "AUTO" : "OFF"}</button>
+          <button {...opportunityVisual} style={{ ...opportunityVisual.style, minWidth: 135, padding: "8px" }} onClick={() => actions.toggleOpportunity()}>{chargerPending ? "Switching charging…" : "Opportunity charging " + (autoOpportunity ? "AUTO" : "OFF")}</button>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 5, marginTop: 7, fontSize: 11 }}>
           <div style={{ padding: "5px 6px", borderRadius: 6, background: "#171B13", color: "#9BA594" }}><b>1</b> Essential farm load</div>

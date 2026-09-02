@@ -63,6 +63,30 @@ describe("Automation Projects", () => {
     ] })).rejects.toBeInstanceOf(AutomationProjectCompileError);
   });
 
+  it("leaves @aeolus/ui external in a UI bundle so the sandbox runtime supplies it", async () => {
+    // Custom UIs cannot use Tailwind classes, so the platform provides its theme
+    // and formatting as an importable module rather than leaving every author to
+    // hand-roll hex. It must survive bundling as an import, not be inlined.
+    const compiled = await compileAutomationProject({
+      files: [
+        { path: "logic/index.ts", content: `export default async function run() {}` },
+        {
+          path: "ui/index.tsx",
+          content: `import { tokens, percent } from "@aeolus/ui";
+export default function View() { return <div style={{ color: tokens.color.text }}>{percent(42)}</div>; }`,
+        },
+      ],
+    });
+
+    expect(compiled.compiledUi).toContain('from "@aeolus/ui"');
+  });
+
+  it("still refuses @aeolus/ui from project Logic, which has no UI sandbox", async () => {
+    await expect(compileAutomationProject({ files: [
+      { path: "logic/index.ts", content: `import { percent } from "@aeolus/ui"; export default async function run() { log.info(percent(1)); }` },
+    ] })).rejects.toBeInstanceOf(AutomationProjectCompileError);
+  });
+
   it("rejects a declared UI entry that does not exist", async () => {
     await expect(compileAutomationProject({
       uiEntry: "ui/missing.tsx",

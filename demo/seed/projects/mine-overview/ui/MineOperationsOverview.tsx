@@ -1,5 +1,6 @@
 // mine-overview — visual implementation behind ui/index.tsx
 import { useEffect, useMemo, useState } from "react";
+import { formatNumber } from "@aeolus/ui";
 import { AIRFLOW_ARROWS, airflowParticle } from "./airflow";
 function clamp(v: number, a: number, b: number) { return Math.min(b, Math.max(a, v)); }
 export default function MineOperationsOverview({ model }: {
@@ -18,7 +19,7 @@ export default function MineOperationsOverview({ model }: {
     <path d="M92 45 V248 H641 V45" fill="none" stroke={fan} strokeWidth="1.2" strokeOpacity=".2" strokeDasharray="5 8"/>
     {AIRFLOW_ARROWS.map((a: any, i) => <path key={"air-arrow-" + i} d={"M" + a[0] + " " + a[1] + " L" + a[2] + " " + a[3]} stroke={fan} strokeOpacity=".42" strokeWidth="1.6" markerEnd="url(#airArrow)"/>)}
     {Array.from({ length: 18 }).map((_, i) => { const t = ((phase * (vent === "boost" ? .011 : .006) + i / 18) % 1); const { x, y } = airflowParticle(t); return <circle key={i} cx={x} cy={y} r={i % 4 === 0 ? 2.1 : 1.4} fill={fan} opacity=".68"/>; })}
-    <circle cx="641" cy="40" r="22" fill="#111517" stroke={fan}/><g style={{ transform: "rotate(" + (phase * (vent === "boost" ? 15 : 8)) + "deg)", transformOrigin: "641px 40px" }}>{[0, 90, 180, 270].map(a => <path key={a} d="M641 40 C650 31 657 33 659 37 C653 43 648 46 641 40 Z" fill={fan} transform={"rotate(" + a + " 641 40)"}/>)}</g><text x="641" y="73" textAnchor="middle" fill="#7A858A" fontSize="10">{vent.toUpperCase()} · {airflow} m³/s</text>
+    <circle cx="641" cy="40" r="22" fill="#111517" stroke={fan}/><g style={{ transform: "rotate(" + (phase * (vent === "boost" ? 15 : 8)) + "deg)", transformOrigin: "641px 40px" }}>{[0, 90, 180, 270].map(a => <path key={a} d="M641 40 C650 31 657 33 659 37 C653 43 648 46 641 40 Z" fill={fan} transform={"rotate(" + a + " 641 40)"}/>)}</g><text x="641" y="73" textAnchor="middle" fill="#7A858A" fontSize="10">{vent.toUpperCase()} · {formatNumber(airflow, 0)} m³/s</text>
     {workers.map((p, i) => { const inRef = i < refuge; const x = inRef ? 539 + (i % 5) * 12 : p.x, y = inRef ? 298 + Math.floor(i / 5) * 7 : p.y; return <g key={i} opacity={unaccounted > 0 && i === 13 ? .3 : 1}><circle cx={x} cy={y - 3} r="2.4" fill={unaccounted > 0 && i === 13 ? "#F07765" : muster !== "normal" ? "#EFC05E" : "#D3DBDE"}/><line x1={x} y1={y - 1} x2={x} y2={y + 5} stroke="#AAB2B5" strokeWidth="1.2"/></g>; })}
     <g transform="translate(45 275)"><rect width="118" height="43" rx="7" fill="#0D1215" stroke="#30414A"/><text x="9" y="14" fill="#6F8189" fontSize="10">DEEP SUMP</text><text x="9" y="31" fill={sump >= 3.5 ? "#EF8968" : pump ? "#62CDE5" : "#B9C7CC"} fontSize="13" fontFamily="monospace" fontWeight="800">{sump.toFixed(1)} m</text><text x="108" y="29" textAnchor="end" fill="#74838A" fontSize="10">{pump ? "PUMP ON" : "AUTO"}</text></g>
     </svg></div>

@@ -1,4 +1,5 @@
 // mine-atmosphere — visual implementation behind ui/index.tsx
+import { control } from "@aeolus/ui";
 function clamp(v: number, a: number, b: number) { return Math.min(b, Math.max(a, v)); }
 export default function AtmosphericSafetyPanel({ model, actions }: {
     model: Record<string, any>;
@@ -10,6 +11,9 @@ export default function AtmosphericSafetyPanel({ model, actions }: {
     const color = severity === "alarm" ? "#FF7868" : severity === "warning" ? "#F2B65B" : "#75D99A";
     const action = last?.label ? String(last.label) : "Multi-gas network online";
     const gasWidth = (v: number) => clamp(v / 1.5 * 100, 0, 100);
+    // An acknowledgement already given is the current state; with no alarm there
+    // is nothing to acknowledge.
+    const ackVisual = control({ current: alarm && ack, disabled: !alarm });
     return <div style={{ padding: 11, minHeight: "100%", background: "linear-gradient(180deg,#0B0D0F,#080A0C)", color: "#EDF1F4" }}>
     <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}><div><div style={{ fontSize: 12, fontWeight: 900 }}>ATMOSPHERIC SAFETY</div><div style={{ fontSize: 11, color: "#747D84", marginTop: 2 }}>Distributed multi-gas telemetry · threshold policy · ventilation demand</div></div><div style={{ textAlign: "right" }}><div style={{ color, fontSize: 11, fontWeight: 850 }}>{severity.toUpperCase()}</div><div style={{ fontSize: 11, color: "#6E767C" }}>vent demand {Math.round(demand)}%</div></div></div>
     <div style={{ display: "grid", gridTemplateColumns: "1.15fr .85fr", gap: 7 }}>
@@ -22,7 +26,7 @@ export default function AtmosphericSafetyPanel({ model, actions }: {
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 5, marginTop: 9 }}>{[["CO", Math.round(co) + " ppm"], ["O₂", o2.toFixed(1) + "%"], ["NO₂", no2.toFixed(1) + " ppm"], ["DEMAND", Math.round(demand) + "%"]].map((x: any) => <div key={x[0]} style={{ padding: 5, border: "1px solid #282D30", borderRadius: 6 }}><div style={{ fontSize: 11, color: "#686F73" }}>{x[0]}</div><div style={{ fontSize: 11, color: "#BEC7CB", fontFamily: "monospace", marginTop: 1 }}>{x[1]}</div></div>)}</div>
       </div>
     </div>
-    <div style={{ marginTop: 7, border: "1px solid #343A3D", borderRadius: 9, padding: 8, background: "#0D1012" }}><div style={{ fontSize: 11, color: "#8B9499", letterSpacing: ".12em", marginBottom: 6 }}>OPERATOR CONTROLS</div><button disabled={!alarm || ack} onClick={() => actions.acknowledgeAlarm()} style={{ width: "100%", padding: "7px", borderRadius: 6, border: "1px solid " + (alarm && !ack ? "#70463B" : "#34393C"), background: alarm && !ack ? "#241410" : "#131618", color: alarm && !ack ? "#F2977E" : "#687176", fontSize: 11, cursor: "pointer" }}>{alarm ? (ack ? "Alarm acknowledged" : "Acknowledge atmospheric alarm") : "No active alarm"}</button></div>
+    <div style={{ marginTop: 7, border: "1px solid #343A3D", borderRadius: 9, padding: 8, background: "#0D1012" }}><div style={{ fontSize: 11, color: "#8B9499", letterSpacing: ".12em", marginBottom: 6 }}>OPERATOR CONTROLS</div><button {...ackVisual} style={{ ...ackVisual.style, width: "100%" }} onClick={() => actions.acknowledgeAlarm()}>{alarm ? (ack ? "Alarm acknowledged" : "Acknowledge atmospheric alarm") : "No active alarm"}</button></div>
     <div style={{ marginTop: 16, border: "1px dashed #6D5232", borderRadius: 9, padding: 8, background: "#171209" }}><div style={{ fontSize: 11, color: "#D5B26B", letterSpacing: ".12em" }}>DEMO SCENARIO</div><div style={{ fontSize: 11, color: "#857153", margin: "3px 0 6px" }}>Inject a transient methane pocket into Drift 7. Aeolus should demand ventilation without the demo button commanding a fan.</div><div style={{ display: "flex", gap: 5 }}><button disabled={alarm} onClick={() => actions.simulateGasRise()} style={{ flex: 1, padding: "6px", borderRadius: 6, border: "1px solid #6A4A2D", background: "#24170B", color: "#E7B668", fontSize: 11, cursor: "pointer" }}>Inject methane pocket</button><button onClick={() => actions.resetAtmosphere()} style={{ padding: "6px 9px", borderRadius: 6, border: "1px solid #454038", background: "#171713", color: "#919087", fontSize: 11, cursor: "pointer" }}>Reset</button></div></div>
     <div style={{ fontSize: 11, color: "#60686D", marginTop: 6, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{action}</div>
   </div>;

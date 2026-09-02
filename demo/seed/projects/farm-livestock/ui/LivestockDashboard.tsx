@@ -1,5 +1,6 @@
 // farm-livestock — visual implementation behind ui/index.tsx
 import { useEffect, useMemo, useState } from "react";
+import { control } from "@aeolus/ui";
 export default function LivestockDashboard({ model, actions }: {
     model: Record<string, any>;
     actions: Record<string, (...args: any[]) => void>;
@@ -31,6 +32,9 @@ export default function LivestockDashboard({ model, actions }: {
     const activeA = paddock === "A";
     const actionLabel = lastAction?.label ? String(lastAction.label) : "Collar network online";
     const mainStatus = recallInProgress ? "RECALL IN PROGRESS" : alert ? strays + " OUTSIDE" : "HERD CONTAINED";
+    // Recall is an observed-tier command, so the wait is the interesting part:
+    // the control stays pending until collar telemetry confirms containment.
+    const recallVisual = control({ pending: recallInProgress, disabled: !alert });
     function Cow(props: {
         x: number;
         y: number;
@@ -96,7 +100,7 @@ export default function LivestockDashboard({ model, actions }: {
       <div style={{ marginTop: 8, padding: 8, border: "1px solid #2D4836", borderRadius: 9, background: "#0C1710" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
           <div><div style={{ color: "#74877A", fontSize: 11, fontWeight: 850, letterSpacing: 1 }}>OPERATOR CONTROL</div><div style={{ color: "#5C6E62", fontSize: 11, marginTop: 2 }}>Recall is a real verified command to the virtual-fence/collar system.</div></div>
-          <button onClick={() => actions.recallStrays()} disabled={!alert || recallInProgress} style={{ minWidth: 135, borderRadius: 8, padding: "8px 6px", border: "1px solid " + (alert ? "#743B34" : "#304138"), background: alert ? "#2A1714" : "#121A15", color: alert ? "#FF9A8D" : "#68766D", fontSize: 11, fontWeight: 750, cursor: alert && !recallInProgress ? "pointer" : "not-allowed" }}>{recallInProgress ? "Recalling…" : alert ? "Recall herd" : "No recall required"}</button>
+          <button {...recallVisual} style={{ ...recallVisual.style, minWidth: 135, padding: "8px 6px" }} onClick={() => actions.recallStrays()}>{recallInProgress ? "Waiting for collars to confirm…" : alert ? "Recall herd" : "No recall required"}</button>
         </div>
       </div>
 
