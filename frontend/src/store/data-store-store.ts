@@ -61,6 +61,22 @@ export interface QueryOptions {
   field?: string;
 }
 
+// ---- Query bounds ----
+
+/** Rows per page in the observations table. */
+export const RECORDS_PAGE_SIZE = 50;
+
+/**
+ * Upper bound on observations fetched for the chart.
+ *
+ * The chart visualises a time range, not a table page, so it needs its own
+ * bounded query: a 30-day range holds far more than one page. This ceiling keeps
+ * a large collection from being pulled into the browser wholesale — the server
+ * reports the matching `total` alongside, so the chart can say how much of the
+ * range it is actually drawing.
+ */
+export const CHART_MAX_POINTS = 1000;
+
 // ---- API helpers ----
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -76,6 +92,26 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return res.json();
 }
 
+/** Run one bounded record query. Shared by the table and chart fetches. */
+async function queryRecords(
+  collection: string,
+  options?: QueryOptions,
+): Promise<{ records: DataRecord[]; total: number }> {
+  const params = new URLSearchParams();
+  if (options?.from != null) params.set("from", String(options.from));
+  if (options?.to != null) params.set("to", String(options.to));
+  if (options?.limit != null) params.set("limit", String(options.limit));
+  if (options?.offset != null) params.set("offset", String(options.offset));
+  if (options?.tags) params.set("tags", JSON.stringify(options.tags));
+  if (options?.aggregate) params.set("aggregate", options.aggregate);
+  if (options?.field) params.set("field", options.field);
+
+  const query = params.toString() ? `?${params.toString()}` : "";
+  return request<{ records: DataRecord[]; total: number }>(
+    `/api/data-store/collections/${encodeURIComponent(collection)}/records${query}`,
+  );
+}
+
 // ---- State interface ----
 
 interface DataStoreState {
@@ -88,10 +124,19 @@ interface DataStoreState {
   collections: CollectionMetadata[];
   selectedCollection: string | null;
 
-  // Records for selected collection
+  // Observations table for the selected collection — one page of raw records.
   records: DataRecord[];
   recordsTotal: number;
   recordsLoading: boolean;
+  /** Zero-based page of the observations table. Reset whenever the query changes. */
+  recordsPage: number;
+
+  // Chart series for the selected collection — a bounded window over the whole
+  // selected time range, deliberately independent of the table's pagination so
+  // paging the table never changes what the chart visualises.
+  chartRecords: DataRecord[];
+  chartTotal: number;
+  chartLoading: boolean;
 
   // Latest realtime record per collection, so independent panes (each showing a
   // different collection) can receive live updates without sharing the single
@@ -111,12 +156,14 @@ interface DataStoreState {
   fetchConfig: () => Promise<void>;
   fetchCollections: () => Promise<void>;
   fetchRecords: (collection: string, options?: QueryOptions) => Promise<void>;
+  fetchChartRecords: (collection: string, options?: QueryOptions) => Promise<void>;
   fetchBuckets: () => Promise<void>;
   fetchBucketEntries: (bucket: string) => Promise<void>;
   fetchStats: () => Promise<void>;
   selectCollection: (name: string | null) => void;
   selectBucket: (name: string | null) => void;
   setTimeRange: (range: string) => void;
+  setRecordsPage: (page: number) => void;
   addRealtimeRecord: (collection: string, record: DataRecord) => void;
   removeCollection: (name: string) => void;
 }
@@ -133,6 +180,10 @@ export const useDataStoreStore = create<DataStoreState>((set, get) => ({
   records: [],
   recordsTotal: 0,
   recordsLoading: false,
+  recordsPage: 0,
+  chartRecords: [],
+  chartTotal: 0,
+  chartLoading: false,
   latestRecordByCollection: {},
   buckets: [],
   selectedBucket: null,
@@ -163,23 +214,30 @@ export const useDataStoreStore = create<DataStoreState>((set, get) => ({
   fetchRecords: async (collection, options) => {
     set({ recordsLoading: true });
     try {
-      const params = new URLSearchParams();
-      if (options?.from != null) params.set("from", String(options.from));
-      if (options?.to != null) params.set("to", String(options.to));
-      if (options?.limit != null) params.set("limit", String(options.limit));
-      if (options?.offset != null) params.set("offset", String(options.offset));
-      if (options?.tags) params.set("tags", JSON.stringify(options.tags));
-      if (options?.aggregate) params.set("aggregate", options.aggregate);
-      if (options?.field) params.set("field", options.field);
-
-      const query = params.toString() ? `?${params.toString()}` : "";
-      const result = await request<{ records: DataRecord[]; total: number }>(
-        `/api/data-store/collections/${encodeURIComponent(collection)}/records${query}`,
-      );
+      const result = await queryRecords(collection, options);
       set({ records: result.records, recordsTotal: result.total, recordsLoading: false });
     } catch (err) {
       console.warn("[data-store-store] Failed to fetch records:", err);
       set({ records: [], recordsTotal: 0, recordsLoading: false });
+    }
+  },
+
+  /**
+   * Fetch the chart's series window. Issued separately from `fetchRecords` so
+   * the chart's dataset is driven only by the selected time range and the table's
+   * dataset only by its page — changing one must never move the other.
+   */
+  fetchChartRecords: async (collection, options) => {
+    set({ chartLoading: true });
+    try {
+      const result = await queryRecords(collection, {
+        limit: CHART_MAX_POINTS,
+        ...options,
+      });
+      set({ chartRecords: result.records, chartTotal: result.total, chartLoading: false });
+    } catch (err) {
+      console.warn("[data-store-store] Failed to fetch chart records:", err);
+      set({ chartRecords: [], chartTotal: 0, chartLoading: false });
     }
   },
 
@@ -214,23 +272,50 @@ export const useDataStoreStore = create<DataStoreState>((set, get) => ({
   },
 
   selectCollection: (name) => {
-    set({ selectedCollection: name, records: [], recordsTotal: 0 });
+    set({
+      selectedCollection: name,
+      records: [],
+      recordsTotal: 0,
+      recordsPage: 0,
+      chartRecords: [],
+      chartTotal: 0,
+    });
   },
 
   selectBucket: (name) => {
     set({ selectedBucket: name, bucketEntries: [] });
   },
 
+  /**
+   * Change the visualised time range. The table returns to its first page: an
+   * offset that was valid for the previous range is meaningless in the new one,
+   * and silently keeping it strands the table on a page the range may not have.
+   */
   setTimeRange: (range) => {
-    set({ timeRange: range });
+    set({ timeRange: range, recordsPage: 0 });
+  },
+
+  setRecordsPage: (page) => {
+    set({ recordsPage: Math.max(0, page) });
   },
 
   addRealtimeRecord: (collection, record) => {
     const state = get();
     if (state.selectedCollection === collection) {
+      // The table shows one page of a newest-first query, so a live record only
+      // belongs on page 0; prepending it while the user reads an older page would
+      // both misplace it and push that page past its size. The total still moves
+      // so the pagination footer stays honest.
+      const onFirstPage = state.recordsPage === 0;
       set({
-        records: [record, ...state.records],
+        records: onFirstPage
+          ? [record, ...state.records].slice(0, RECORDS_PAGE_SIZE)
+          : state.records,
         recordsTotal: state.recordsTotal + 1,
+        // The chart tracks the live edge of the range regardless of table paging,
+        // staying within its own bound by dropping the oldest point it holds.
+        chartRecords: [record, ...state.chartRecords].slice(0, CHART_MAX_POINTS),
+        chartTotal: state.chartTotal + 1,
       });
     }
     // Publish the latest record for this collection so any data-collection pane
@@ -258,6 +343,9 @@ export const useDataStoreStore = create<DataStoreState>((set, get) => ({
         updates.selectedCollection = null;
         updates.records = [];
         updates.recordsTotal = 0;
+        updates.recordsPage = 0;
+        updates.chartRecords = [];
+        updates.chartTotal = 0;
       }
       return updates;
     });

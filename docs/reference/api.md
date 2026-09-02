@@ -138,6 +138,15 @@ clamped to a maximum of 200.
 | `POST` | `/api/data-store/enable` | Enable and configure the store |
 | `POST` | `/api/data-store/disable` | Disable the store |
 
+A record query accepts `from` (duration string such as `24h`, or epoch ms), `to`,
+`limit`, `offset`, `tags`, and `aggregate` with `field`.
+
+Record queries are always bounded. `limit` defaults to 100 and is clamped to a
+maximum of 5000; a `limit` below 1 or a negative `offset` is rejected. The
+response `total` still reports how many records matched the range, so a caller
+can tell it received a bounded window. The export route is the deliberate
+exception and returns the whole collection.
+
 ## Platform and layout
 
 | Method | Path | Purpose |

@@ -9,7 +9,11 @@ import {
   X,
   Check,
 } from "lucide-react";
-import { useDataStoreStore } from "../../store/data-store-store";
+import {
+  useDataStoreStore,
+  CHART_MAX_POINTS,
+  RECORDS_PAGE_SIZE,
+} from "../../store/data-store-store";
 import { TimeSeriesChart } from "./TimeSeriesChart";
 import { RecordTable } from "./RecordTable";
 import { authFetch } from "../../lib/auth-fetch";
@@ -26,9 +30,15 @@ export function CollectionDetail() {
   const selectCollection = useDataStoreStore((s) => s.selectCollection);
   const fetchCollections = useDataStoreStore((s) => s.fetchCollections);
   const fetchRecords = useDataStoreStore((s) => s.fetchRecords);
+  const fetchChartRecords = useDataStoreStore((s) => s.fetchChartRecords);
   const records = useDataStoreStore((s) => s.records);
   const recordsTotal = useDataStoreStore((s) => s.recordsTotal);
   const recordsLoading = useDataStoreStore((s) => s.recordsLoading);
+  const page = useDataStoreStore((s) => s.recordsPage);
+  const setPage = useDataStoreStore((s) => s.setRecordsPage);
+  const chartRecords = useDataStoreStore((s) => s.chartRecords);
+  const chartTotal = useDataStoreStore((s) => s.chartTotal);
+  const chartLoading = useDataStoreStore((s) => s.chartLoading);
   const timeRange = useDataStoreStore((s) => s.timeRange);
 
   const [showEdit, setShowEdit] = useState(false);
@@ -38,13 +48,11 @@ export function CollectionDetail() {
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
-  // Pagination
-  const [page, setPage] = useState(0);
-  const pageSize = 50;
+  const pageSize = RECORDS_PAGE_SIZE;
 
   const collection = collections.find((c) => c.name === selectedCollection);
 
-  // Fetch records when collection or time range changes
+  // The observations table browses raw records one page at a time.
   useEffect(() => {
     if (selectedCollection) {
       fetchRecords(selectedCollection, {
@@ -53,7 +61,18 @@ export function CollectionDetail() {
         offset: page * pageSize,
       });
     }
-  }, [selectedCollection, timeRange, page, fetchRecords]);
+  }, [selectedCollection, timeRange, page, pageSize, fetchRecords]);
+
+  // The chart visualises the whole selected range. It deliberately does not
+  // depend on `page`: the graph's dataset is the time range, not a table page.
+  useEffect(() => {
+    if (selectedCollection) {
+      fetchChartRecords(selectedCollection, {
+        from: timeRange,
+        limit: CHART_MAX_POINTS,
+      });
+    }
+  }, [selectedCollection, timeRange, fetchChartRecords]);
 
   // Initialize edit form
   useEffect(() => {
@@ -257,8 +276,12 @@ export function CollectionDetail() {
         </div>
       )}
 
-      {/* Time-series chart */}
-      <TimeSeriesChart records={records} />
+      {/* Time-series chart — its own range-scoped dataset, not the table page */}
+      <TimeSeriesChart
+        records={chartRecords}
+        total={chartTotal}
+        loading={chartLoading}
+      />
 
       {/* Record table */}
       <RecordTable

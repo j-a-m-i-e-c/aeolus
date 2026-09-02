@@ -21,7 +21,8 @@ describe("data-store-store — uncovered functions", () => {
     useDataStoreStore.setState({
       config: null, enabled: false, stats: null,
       collections: [], selectedCollection: null,
-      records: [], recordsTotal: 0, recordsLoading: false,
+      records: [], recordsTotal: 0, recordsLoading: false, recordsPage: 0,
+      chartRecords: [], chartTotal: 0, chartLoading: false,
       buckets: [], selectedBucket: null, bucketEntries: [],
       timeRange: "24h", queryTags: {},
     });

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useDataStoreStore, type DataRecord } from "../../store/data-store-store";
+import { detectNumericFields } from "../../lib/series";
 
 // ── Palette ──
 const SERIES_COLORS = ["#3BA4FF", "#5CE1E6", "#22C55E", "#F59E0B", "#A855F7", "#EF4444"];
@@ -17,15 +18,19 @@ const CHART_HEIGHT = 260;
 
 // ── Time range presets ──
 const TIME_RANGES = [
-  { label: "1h", value: "1h" },
-  { label: "6h", value: "6h" },
-  { label: "24h", value: "24h" },
-  { label: "7d", value: "7d" },
-  { label: "30d", value: "30d" },
+  { label: "1h", value: "1h", description: "1 hour" },
+  { label: "6h", value: "6h", description: "6 hours" },
+  { label: "24h", value: "24h", description: "24 hours" },
+  { label: "7d", value: "7d", description: "7 days" },
+  { label: "30d", value: "30d", description: "30 days" },
 ];
 
 interface TimeSeriesChartProps {
+  /** Observations to draw. A window over the selected range, not a table page. */
   records: DataRecord[];
+  /** Observations matching the selected range, when known. May exceed `records`. */
+  total?: number;
+  loading?: boolean;
 }
 
 interface TooltipData {
@@ -35,19 +40,17 @@ interface TooltipData {
   timestamp: number;
 }
 
-/** Auto-detect numeric fields from record payloads */
-function detectNumericFields(records: DataRecord[]): string[] {
-  const fieldSet = new Set<string>();
-  for (const record of records) {
-    for (const [key, value] of Object.entries(record.payload)) {
-      if (key.toLowerCase() === "timestamp") continue;
-      if (typeof value === "number" && isFinite(value)) {
-        fieldSet.add(key);
-      }
-    }
-    if (fieldSet.size > 0) break;
+/**
+ * Describe what the chart is actually drawing, so a visible window over a large
+ * range is never mistaken for the whole range.
+ */
+function describeCoverage(shown: number, total: number | undefined, range: string): string {
+  const rangeLabel = TIME_RANGES.find((tr) => tr.value === range)?.description ?? range;
+  const noun = shown === 1 ? "observation" : "observations";
+  if (total !== undefined && total > shown) {
+    return `Showing ${shown.toLocaleString()} of ${total.toLocaleString()} observations over ${rangeLabel}`;
   }
-  return Array.from(fieldSet).slice(0, SERIES_COLORS.length);
+  return `Showing ${shown.toLocaleString()} ${noun} over ${rangeLabel}`;
 }
 
 /** Compute nice round tick values */
@@ -123,7 +126,7 @@ function smoothPath(points: { x: number; y: number }[], tension: number = 0.3): 
   return d;
 }
 
-export function TimeSeriesChart({ records }: TimeSeriesChartProps) {
+export function TimeSeriesChart({ records, total, loading }: TimeSeriesChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(600);
   const [tooltip, setTooltip] = useState<TooltipData | null>(null);
@@ -152,7 +155,19 @@ export function TimeSeriesChart({ records }: TimeSeriesChartProps) {
   );
 
   // Detect numeric fields
-  const allFields = useMemo(() => detectNumericFields(sorted), [sorted]);
+  const allFields = useMemo(
+    () =>
+      detectNumericFields(
+        sorted.map((record) => record.payload),
+        { maxFields: SERIES_COLORS.length },
+      ),
+    [sorted],
+  );
+
+  const coverage = useMemo(
+    () => describeCoverage(records.length, total, timeRange),
+    [records.length, total, timeRange],
+  );
 
   // Visible fields (excluding hidden)
   const visibleFields = useMemo(
@@ -288,20 +303,25 @@ export function TimeSeriesChart({ records }: TimeSeriesChartProps) {
     return (
       <div className="bg-[#161B22] border border-[#30363D] rounded-xl p-5 space-y-3">
         {/* Time range picker */}
-        <div className="flex items-center gap-1">
-          {TIME_RANGES.map((tr) => (
-            <button
-              key={tr.value}
-              onClick={() => setTimeRange(tr.value)}
-              className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
-                timeRange === tr.value
-                  ? "bg-primary text-white"
-                  : "text-[#9AA6B2] hover:text-[#E6EDF3] hover:bg-[#0D1117]"
-              }`}
-            >
-              {tr.label}
-            </button>
-          ))}
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-1">
+            {TIME_RANGES.map((tr) => (
+              <button
+                key={tr.value}
+                onClick={() => setTimeRange(tr.value)}
+                className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
+                  timeRange === tr.value
+                    ? "bg-primary text-white"
+                    : "text-[#9AA6B2] hover:text-[#E6EDF3] hover:bg-[#0D1117]"
+                }`}
+              >
+                {tr.label}
+              </button>
+            ))}
+          </div>
+          <p className="text-[10px] text-[#6B7785]">
+            {loading ? "Loading observations…" : coverage}
+          </p>
         </div>
         <div
           className="flex items-center justify-center rounded-xl"
@@ -318,21 +338,28 @@ export function TimeSeriesChart({ records }: TimeSeriesChartProps) {
   return (
     <div className="bg-[#161B22] border border-[#30363D] rounded-xl p-5 space-y-3">
       {/* Time range picker + Legend */}
-      <div className="flex items-center justify-between flex-wrap gap-2">
-        <div className="flex items-center gap-1">
-          {TIME_RANGES.map((tr) => (
-            <button
-              key={tr.value}
-              onClick={() => setTimeRange(tr.value)}
-              className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
-                timeRange === tr.value
-                  ? "bg-primary text-white"
-                  : "text-[#9AA6B2] hover:text-[#E6EDF3] hover:bg-[#0D1117]"
-              }`}
-            >
-              {tr.label}
-            </button>
-          ))}
+      <div className="flex items-start justify-between flex-wrap gap-2">
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-1">
+            {TIME_RANGES.map((tr) => (
+              <button
+                key={tr.value}
+                onClick={() => setTimeRange(tr.value)}
+                className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
+                  timeRange === tr.value
+                    ? "bg-primary text-white"
+                    : "text-[#9AA6B2] hover:text-[#E6EDF3] hover:bg-[#0D1117]"
+                }`}
+              >
+                {tr.label}
+              </button>
+            ))}
+          </div>
+          {/* What the chart is drawing, so a bounded window over a long range is
+              never mistaken for the full range. */}
+          <p className="text-[10px] text-[#6B7785]">
+            {loading ? "Loading observations…" : coverage}
+          </p>
         </div>
 
         {/* Legend */}

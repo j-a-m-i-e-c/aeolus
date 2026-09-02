@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { HistoryEntry } from "../lib/api-client";
+import { detectNumericFields } from "../lib/series";
 
 // ── Aeolus palette ──
 const SERIES_COLORS = ["#3BA4FF", "#5CE1E6", "#22C55E", "#F59E0B"];
@@ -26,20 +27,6 @@ interface TooltipData {
   y: number;
   values: { field: string; value: number; color: string }[];
   timestamp: number;
-}
-
-/** Extract numeric fields from the first entry that has data */
-function detectNumericFields(data: HistoryEntry[]): string[] {
-  const fieldSet = new Set<string>();
-  for (const entry of data) {
-    for (const [key, value] of Object.entries(entry.state)) {
-      if (typeof value === "number" && isFinite(value)) {
-        fieldSet.add(key);
-      }
-    }
-    if (fieldSet.size > 0) break;
-  }
-  return Array.from(fieldSet).slice(0, SERIES_COLORS.length);
 }
 
 /** Compute nice round tick values for a given data range */
@@ -162,7 +149,12 @@ export function StateHistoryChart({ data, fields, height = 280 }: StateHistoryCh
 
   // ── Resolve fields ──
   const resolvedFields = useMemo(
-    () => fields ?? detectNumericFields(data),
+    () =>
+      fields ??
+      detectNumericFields(
+        data.map((entry) => entry.state),
+        { maxFields: SERIES_COLORS.length },
+      ),
     [data, fields],
   );
 

@@ -35,6 +35,26 @@ function escapeCsvValue(value: unknown): string {
 }
 
 /**
+ * Records returned when a record query omits `limit`.
+ *
+ * The record route must never answer with an unbounded collection scan: an
+ * omitted limit previously meant "every matching row", so a 30-day range on a
+ * dense collection could serialise the whole collection to JSON for any session
+ * allowed to read it (including the hosted public demo). Callers that genuinely
+ * want the full collection use the CSV export route, which is deliberately
+ * unbounded and goes through `DataStore.query` directly.
+ */
+export const DEFAULT_RECORD_QUERY_LIMIT = 100;
+
+/**
+ * Hard ceiling on records returned by one record query. An over-request is
+ * clamped rather than refused so an honest large chart query still succeeds;
+ * the response `total` still reports how many records matched the range, so a
+ * caller can tell it received a bounded window.
+ */
+export const MAX_RECORD_QUERY_LIMIT = 5000;
+
+/**
  * Parse and validate the query string for GET /collections/:name/records.
  * Throws BadRequestError on malformed params. Kept in one place rather than
  * inline so the handler stays small.
@@ -59,18 +79,29 @@ function parseRecordQueryOptions(query: Request["query"]): QueryOptions {
     options.to = toNum;
   }
 
-  if (limit !== undefined) {
+  // A record query is always bounded. An omitted limit takes the default rather
+  // than meaning "no limit", and a non-positive limit is refused instead of
+  // reaching SQLite as `LIMIT -1`, which means unbounded.
+  if (limit === undefined) {
+    options.limit = DEFAULT_RECORD_QUERY_LIMIT;
+  } else {
     const limitNum = parseInt(limit as string, 10);
     if (isNaN(limitNum)) {
       throw new BadRequestError(`Invalid 'limit' parameter: must be a number, got "${limit}"`);
     }
-    options.limit = limitNum;
+    if (limitNum < 1) {
+      throw new BadRequestError(`Invalid 'limit' parameter: must be at least 1, got "${limit}"`);
+    }
+    options.limit = Math.min(limitNum, MAX_RECORD_QUERY_LIMIT);
   }
 
   if (offset !== undefined) {
     const offsetNum = parseInt(offset as string, 10);
     if (isNaN(offsetNum)) {
       throw new BadRequestError(`Invalid 'offset' parameter: must be a number, got "${offset}"`);
+    }
+    if (offsetNum < 0) {
+      throw new BadRequestError(`Invalid 'offset' parameter: must not be negative, got "${offset}"`);
     }
     options.offset = offsetNum;
   }

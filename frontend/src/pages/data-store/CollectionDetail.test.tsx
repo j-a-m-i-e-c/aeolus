@@ -8,15 +8,25 @@ const { mockState, mockAuthFetch } = vi.hoisted(() => ({
   mockAuthFetch: vi.fn(),
 }));
 
-vi.mock("../../store/data-store-store", () => ({
-  useDataStoreStore: (selector: (s: any) => unknown) => selector(mockState),
-}));
+// The real module is kept for its query-bound constants; only the hook is faked,
+// so the test asserts against the same bounds the component uses.
+vi.mock("../../store/data-store-store", async () => {
+  const actual =
+    await vi.importActual<typeof import("../../store/data-store-store")>(
+      "../../store/data-store-store",
+    );
+  return {
+    ...actual,
+    useDataStoreStore: (selector: (s: any) => unknown) => selector(mockState),
+  };
+});
 
 vi.mock("../../lib/auth-fetch", () => ({
   authFetch: mockAuthFetch,
 }));
 
 import { CollectionDetail } from "./CollectionDetail";
+import { CHART_MAX_POINTS } from "../../store/data-store-store";
 
 // jsdom lacks ResizeObserver, which TimeSeriesChart relies on.
 class ResizeObserverStub {
@@ -39,6 +49,10 @@ function makeCollection(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function record(id: number, payload: Record<string, unknown>, timestamp = id) {
+  return { id, collection: "energy-daily", payload, tags: {}, timestamp };
+}
+
 function resetState() {
   Object.assign(mockState, {
     selectedCollection: "energy-daily",
@@ -46,9 +60,15 @@ function resetState() {
     selectCollection: vi.fn(),
     fetchCollections: vi.fn().mockResolvedValue(undefined),
     fetchRecords: vi.fn().mockResolvedValue(undefined),
+    fetchChartRecords: vi.fn().mockResolvedValue(undefined),
     records: [],
     recordsTotal: 0,
     recordsLoading: false,
+    recordsPage: 0,
+    setRecordsPage: vi.fn(),
+    chartRecords: [],
+    chartTotal: 0,
+    chartLoading: false,
     timeRange: "24h",
     setTimeRange: vi.fn(),
   });
@@ -80,6 +100,74 @@ describe("CollectionDetail", () => {
       limit: 50,
       offset: 0,
     });
+  });
+
+  it("queries the chart over the whole range, not the table's page", () => {
+    render(<CollectionDetail />);
+    expect(mockState.fetchChartRecords).toHaveBeenCalledWith("energy-daily", {
+      from: "24h",
+      limit: CHART_MAX_POINTS,
+    });
+    // An offset would tie the graph to a table page — the bug this separation fixes.
+    expect(mockState.fetchChartRecords.mock.calls[0][1]).not.toHaveProperty("offset");
+  });
+
+  it("does not re-query the chart when the table changes page", () => {
+    const { rerender } = render(<CollectionDetail />);
+    expect(mockState.fetchChartRecords).toHaveBeenCalledTimes(1);
+    expect(mockState.fetchRecords).toHaveBeenCalledTimes(1);
+
+    mockState.recordsPage = 2;
+    rerender(<CollectionDetail />);
+
+    // The table advances to the next window; the graph's dataset is untouched.
+    expect(mockState.fetchRecords).toHaveBeenCalledTimes(2);
+    expect(mockState.fetchRecords).toHaveBeenLastCalledWith("energy-daily", {
+      from: "24h",
+      limit: 50,
+      offset: 100,
+    });
+    expect(mockState.fetchChartRecords).toHaveBeenCalledTimes(1);
+  });
+
+  it("re-queries both datasets when the time range changes", () => {
+    const { rerender } = render(<CollectionDetail />);
+    mockState.timeRange = "30d";
+    rerender(<CollectionDetail />);
+
+    expect(mockState.fetchChartRecords).toHaveBeenLastCalledWith("energy-daily", {
+      from: "30d",
+      limit: CHART_MAX_POINTS,
+    });
+    expect(mockState.fetchRecords).toHaveBeenLastCalledWith("energy-daily", {
+      from: "30d",
+      limit: 50,
+      offset: 0,
+    });
+  });
+
+  it("charts the chart dataset rather than the table page", () => {
+    // Distinct datasets: only the chart's records may reach the graph.
+    mockState.records = [record(1, { fromTable: 5 })];
+    mockState.chartRecords = [
+      record(2, { fromChart: 10 }),
+      record(3, { fromChart: 12 }),
+    ];
+    mockState.chartTotal = 8421;
+
+    render(<CollectionDetail />);
+
+    expect(screen.getByRole("button", { name: /fromChart/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /fromTable/i })).not.toBeInTheDocument();
+  });
+
+  it("states how much of the range the chart is drawing", () => {
+    mockState.chartRecords = [record(2, { header: 10 }), record(3, { header: 12 })];
+    mockState.chartTotal = 8421;
+    render(<CollectionDetail />);
+    expect(
+      screen.getByText("Showing 2 of 8,421 observations over 24 hours"),
+    ).toBeInTheDocument();
   });
 
   it("navigates back via a labelled control that clears the selected collection", () => {

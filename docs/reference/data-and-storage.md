@@ -94,6 +94,12 @@ Time-series records with:
 
 Collections support time-range queries, filtering and CSV or JSON export.
 
+A record query is always bounded, so reading a collection cannot become an
+unbounded scan. Time filtering is independent of pagination: visualising a range
+and browsing raw records are separate queries, and the Data Explorer issues one
+of each rather than charting the table's current page. Export is the deliberate
+exception and reads the whole collection.
+
 ### Buckets
 
 Persistent key-value storage for application data that is not naturally a time series.

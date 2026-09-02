@@ -2,7 +2,11 @@
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import express from "express";
-import { createDataStoreRoutes } from "./data-store.routes.js";
+import {
+  createDataStoreRoutes,
+  DEFAULT_RECORD_QUERY_LIMIT,
+  MAX_RECORD_QUERY_LIMIT,
+} from "./data-store.routes.js";
 import { errorHandler } from "../middleware/error-handler.js";
 import type { DataStore } from "../../data-store/data-store.js";
 import type { PermissionResolver } from "../../auth/permission-resolver.js";
@@ -330,6 +334,41 @@ describe("data-store.routes", () => {
 
     it("should return 400 for invalid offset parameter", async () => {
       const res = await request(app, "GET", "/api/data-store/collections/sensors/records?offset=xyz");
+      expect(res.status).toBe(400);
+    });
+
+    // A record query must always be bounded. An unbounded scan is reachable by
+    // any session allowed to read the collection, including the hosted public
+    // demo, so these bounds are enforced at the route rather than assumed of
+    // callers. The CSV export route remains deliberately unbounded.
+    it("applies a default limit when the query omits one", async () => {
+      await request(app, "GET", "/api/data-store/collections/sensors/records");
+      expect(mockDataStore.query).toHaveBeenCalledWith("sensors", expect.objectContaining({
+        limit: DEFAULT_RECORD_QUERY_LIMIT,
+      }));
+    });
+
+    it("clamps an over-large limit to the maximum", async () => {
+      await request(
+        app,
+        "GET",
+        `/api/data-store/collections/sensors/records?limit=${MAX_RECORD_QUERY_LIMIT * 10}`,
+      );
+      expect(mockDataStore.query).toHaveBeenCalledWith("sensors", expect.objectContaining({
+        limit: MAX_RECORD_QUERY_LIMIT,
+      }));
+    });
+
+    it("should return 400 for a non-positive limit rather than reaching SQLite as unbounded", async () => {
+      const zero = await request(app, "GET", "/api/data-store/collections/sensors/records?limit=0");
+      expect(zero.status).toBe(400);
+      const negative = await request(app, "GET", "/api/data-store/collections/sensors/records?limit=-5");
+      expect(negative.status).toBe(400);
+      expect(mockDataStore.query).not.toHaveBeenCalled();
+    });
+
+    it("should return 400 for a negative offset", async () => {
+      const res = await request(app, "GET", "/api/data-store/collections/sensors/records?offset=-10");
       expect(res.status).toBe(400);
     });
 
