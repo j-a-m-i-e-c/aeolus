@@ -6,6 +6,8 @@ type TroughSnapshot = {
     refilling: number;
     lowIds: unknown[];
     drinkingActive: boolean;
+    /** True from cattle walking in until the last one has moved off. */
+    herdPresent: boolean;
 };
 export function initialiseTroughState() {
     if (state.get("autoRefill") === undefined)
@@ -18,6 +20,10 @@ export function initialiseTroughState() {
         state.set("drinkingActive", false);
     if (state.get("drinkingProgress") === undefined)
         state.set("drinkingProgress", 0);
+    if (state.get("herdPresent") === undefined)
+        state.set("herdPresent", false);
+    if (state.get("troughPhase") === undefined)
+        state.set("troughPhase", "idle");
 }
 export async function handleTroughOperatorEvent(event: string | undefined) {
     if (event === "refill-troughs") {
@@ -25,7 +31,7 @@ export async function handleTroughOperatorEvent(event: string | undefined) {
     }
     else if (event === "simulate-drinking") {
         if (Boolean(state.get("drinkScenarioRequested"))
-            || Boolean(state.get("drinkingActive"))
+            || Boolean(state.get("herdPresent"))
             || Boolean(state.get("refillCommandActive")))
             return;
         state.set("drinkScenarioRequested", true);
@@ -39,7 +45,7 @@ export async function handleTroughOperatorEvent(event: string | undefined) {
         setAction(next
             ? "Automatic refill enabled · acts after cattle leave"
             : "Automatic refill disabled · low troughs require operator action");
-        if (next && !Boolean(state.get("drinkingActive")))
+        if (next && !Boolean(state.get("herdPresent")))
             await refill("automatic");
     }
     else if (event === "reset-troughs") {
@@ -48,6 +54,8 @@ export async function handleTroughOperatorEvent(event: string | undefined) {
         state.set("refillCommandActive", false);
         state.set("drinkScenarioRequested", false);
         state.set("drinkingActive", false);
+        state.set("herdPresent", false);
+        state.set("troughPhase", "idle");
         state.set("drinkingProgress", 0);
         state.set("autoRefill", true);
         setAction("DEMO · trough network reset to nominal");
@@ -64,7 +72,12 @@ export function projectTroughTelemetry(context: EventContext): TroughSnapshot {
     const drinkingIds = Array.isArray(source.drinkingIds) ? source.drinkingIds : [];
     const drinkingHead = Math.max(0, Number(source.drinkingHead) || 0);
     const drinkingActive = Boolean(source.drinkingActive);
+    const herdPresent = Boolean(source.herdPresent);
+    const phase = String(source.phase || "idle");
     const drinkingProgress = Math.max(0, Math.min(100, Number(source.drinkingProgress) || 0));
+    state.set("herdPresent", herdPresent);
+    state.set("troughPhase", phase);
+    state.set("visitPaddock", String(source.visitPaddock || "A"));
     state.set("troughAverage", average);
     state.set("troughLow", low);
     state.set("troughRefilling", refilling);
@@ -78,9 +91,11 @@ export function projectTroughTelemetry(context: EventContext): TroughSnapshot {
     state.set("consumptionTodayLitres", Math.max(0, Number(source.consumptionTodayLitres) || 0));
     state.set("lastDrinkLitres", Math.max(0, Number(source.lastDrinkLitres) || 0));
     state.set("refillFlowLpm", Math.max(0, Number(source.refillFlowLpm) || 0));
-    if (drinkingActive)
+    // The request is satisfied as soon as the herd is physically on its way in, not
+    // only once they are drinking.
+    if (herdPresent)
         state.set("drinkScenarioRequested", false);
-    return { average, low, refilling, lowIds, drinkingActive };
+    return { average, low, refilling, lowIds, drinkingActive, herdPresent };
 }
 export function publishTroughThresholdTransitions(snapshot: TroughSnapshot) {
     const lowActive = Boolean(state.get("lowActive"));
@@ -96,9 +111,11 @@ export function publishTroughThresholdTransitions(snapshot: TroughSnapshot) {
     }
 }
 export async function reconcileAutomaticRefill(snapshot: TroughSnapshot) {
+    // Automatic refill waits for the herd to clear entirely, so the manifold never
+    // opens while cattle are still walking in or moving off.
     if (snapshot.low > 0
         && Boolean(state.get("autoRefill"))
-        && !snapshot.drinkingActive
+        && !snapshot.herdPresent
         && snapshot.refilling === 0
         && !Boolean(state.get("refillCommandActive"))) {
         await refill("automatic");

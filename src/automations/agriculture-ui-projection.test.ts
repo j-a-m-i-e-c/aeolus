@@ -117,10 +117,13 @@ describe("Agriculture demo UI projection contract", () => {
     );
   });
 
-  it("Trough Watering never auto-refills while the herd is still drinking", () => {
+  it("Trough Watering never auto-refills while the herd is at the troughs", () => {
+    // Guards on `herdPresent`, not `drinkingActive`. That is deliberately stronger:
+    // cattle walking in or still moving off are physically at the water even though
+    // they are not drinking, and the manifold must not open around them.
     // The guard may be read off a snapshot object or straight from state, so match
     // the negation of the flag rather than one spelling of the receiver.
-    expect(troughAutomation.scriptSource).toMatch(/!\s*(?:\w+\.)*drinkingActive/);
+    expect(troughAutomation.scriptSource).toMatch(/!\s*(?:\w+\.)*herdPresent/);
     expect(troughAutomation.scriptSource).toContain('Automatic refill enabled · acts after cattle leave');
   });
 

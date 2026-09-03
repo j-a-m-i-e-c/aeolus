@@ -32,16 +32,27 @@ export default function TroughWateringDashboard({ model, actions }: {
         x: 82 + (i % 5) * 88,
         y: 52 + Math.floor(i / 5) * 47,
     })), []);
-    const scenarioBusy = drinkingActive || drinkScenarioRequested;
-    const status = scenarioBusy ? "HERD WATERING " + Math.round(drinkingProgress) + "%" : refilling > 0 || refillCommandActive ? "REFILLING " + Math.max(refilling, refillTargets.length) : low > 0 ? low + " LOW" : "NETWORK HEALTHY";
+    const herdPresent = Boolean(model.herdPresent);
+    // `phase` is already the animation clock in this file, so the visit stage keeps
+    // its own name.
+    const visitPhase = String(model.troughPhase ?? "idle");
+    const visitPaddock = String(model.visitPaddock ?? "A");
+    const scenarioBusy = herdPresent || drinkScenarioRequested;
+    // Name the stage rather than only showing a percentage, so it is obvious why an
+    // automatic refill is holding off.
+    const status = visitPhase === "approaching" ? "HERD APPROACHING PADDOCK " + visitPaddock
+        : visitPhase === "drinking" ? "HERD DRINKING " + Math.round(drinkingProgress) + "%"
+        : visitPhase === "clearing" ? "HERD CLEARING"
+        : refilling > 0 || refillCommandActive ? "REFILLING " + Math.max(refilling, refillTargets.length)
+        : low > 0 ? low + " LOW" : "NETWORK HEALTHY";
     const statusColor = scenarioBusy ? "#E9C66D" : refilling > 0 || refillCommandActive ? "#76DDF4" : low > 0 ? "#F4A45A" : "#74DDA0";
     const actionLabel = lastAction?.label ? String(lastAction.label) : "Distributed trough telemetry online";
     // The refill control states its own reason: a manifold command already in
     // flight, cattle still at the troughs, or nothing below the threshold.
-    const refillVisual = control({ pending: refillCommandActive, disabled: drinkingActive || low === 0 });
+    const refillVisual = control({ pending: refillCommandActive, disabled: herdPresent || low === 0 });
     const refillLabel = refillCommandActive
         ? "Refilling…"
-        : drinkingActive
+        : herdPresent
             ? "Waiting for herd to clear"
             : low === 0
                 ? "No troughs below threshold"
@@ -101,7 +112,7 @@ export default function TroughWateringDashboard({ model, actions }: {
             <text x="9" y="24" fill="#86E3F7" fontSize="10" fontFamily="monospace" fontWeight="700">{Math.round(consumptionToday).toLocaleString()} L</text>
             {lastDrink > 0 && <text x="82" y="24" fill="#A79062" fontSize="10">last drink {Math.round(lastDrink)} L</text>}
           </g>
-          {drinkingHead > 0 && <text x="34" y="231" fill="#BDA66C" fontSize="10">{drinkingHead} head currently drinking · {Math.round(drinkingProgress)}% through simulated visit</text>}
+          {drinkingHead > 0 && <text x="34" y="231" fill="#BDA66C" fontSize="10">{drinkingHead} head at the Paddock {visitPaddock} troughs · {visitPhase}</text>}
         </svg>
       </div>
 

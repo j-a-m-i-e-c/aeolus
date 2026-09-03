@@ -5,7 +5,10 @@ function byTopic(wanted: string) {
     return devices.list().find((device) => device.topic === wanted);
 }
 export async function refill(source: string) {
-    if (Boolean(state.get("refillCommandActive")) || Boolean(state.get("drinkingActive")))
+    // Wait for the herd to clear, not merely to stop drinking: cattle walking in or
+    // still moving off are physically at the troughs, and the manifold must not
+    // open around them.
+    if (Boolean(state.get("refillCommandActive")) || Boolean(state.get("herdPresent")))
         return;
     const troughs = byTopic("sensor/farm/troughs");
     const actuator = byTopic("switch/farm/trough-refill/state");

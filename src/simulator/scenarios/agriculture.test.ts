@@ -224,17 +224,30 @@ describe("agriculture simulator scenario", () => {
   it("models one guarded herd-drinking sequence and a targeted refill", async () => {
     const { registry, command, fire, last } = setup();
     await fire(AGRICULTURE_STIMULUS.troughsDrink);
-    expect(last(AGRICULTURE_STATE_TOPICS.troughs)).toMatchObject({ drinkingActive: true, drinkingHead: 18, drinkingProgress: 0 });
+    // Cattle walk in before they drink, so the visit opens on `approaching` with the
+    // herd present but not yet at the water.
+    expect(last(AGRICULTURE_STATE_TOPICS.troughs)).toMatchObject({
+      phase: "approaching",
+      herdPresent: true,
+      drinkingActive: false,
+      drinkingHead: 18,
+      drinkingProgress: 0,
+    });
 
     // A second click while the herd visit is active is ignored instead of
     // stacking another delayed drinking sequence on top of the first.
     await fire(AGRICULTURE_STIMULUS.troughsDrink);
-    await vi.advanceTimersByTimeAsync(3000);
+    await vi.advanceTimersByTimeAsync(9000);
     const afterDrink = last(AGRICULTURE_STATE_TOPICS.troughs)!;
+    expect(afterDrink.phase).toBe("idle");
+    expect(afterDrink.herdPresent).toBe(false);
     expect(afterDrink.drinkingActive).toBe(false);
     expect(afterDrink.low).toBeGreaterThan(0);
     expect(afterDrink.lastDrinkLitres).toBeGreaterThan(0);
-    expect(afterDrink.lowIds).toEqual(expect.arrayContaining(["T4", "T5"]));
+    // The herd is in Paddock A, so it drank from Paddock A's cluster (T1–T5).
+    for (const id of afterDrink.lowIds as string[]) {
+      expect(["T1", "T2", "T3", "T4", "T5"]).toContain(id);
+    }
 
     const refill = registry.get(AGRICULTURE_DEVICE_KEYS.troughRefill)!;
     await refill.model.onCommand!(command(AGRICULTURE_COMMAND_TOPICS.troughRefill, {
@@ -286,5 +299,116 @@ describe("agriculture simulator scenario", () => {
     expect(last(AGRICULTURE_STATE_TOPICS.troughs)).toMatchObject({ low: 0, average: 84 });
     expect(last(AGRICULTURE_STATE_TOPICS.battery)).toMatchObject({ soc: 78, available: true, pumpKw: 0, chargerKw: 0 });
     expect(last(AGRICULTURE_STATE_TOPICS.pump)).toEqual({ on: false, running: false });
+  });
+});
+
+describe("agriculture trough visits", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  });
+
+  /** Run one complete herd visit and report which troughs it emptied. */
+  async function visit(helpers: ReturnType<typeof setup>): Promise<string[]> {
+    await helpers.fire(AGRICULTURE_STIMULUS.troughsDrink);
+    await vi.advanceTimersByTimeAsync(9000);
+    return (helpers.last(AGRICULTURE_STATE_TOPICS.troughs)!.lowIds as string[]).slice().sort();
+  }
+
+  it("does not drain the same troughs on every visit", async () => {
+    // The old scenario always emptied T4, T5, T12 and T17, which made a repeated
+    // visit look scripted.
+    const helpers = setup();
+
+    const first = await visit(helpers);
+    const refill = helpers.registry.get(AGRICULTURE_DEVICE_KEYS.troughRefill)!;
+    await refill.model.onCommand!(helpers.command(AGRICULTURE_COMMAND_TOPICS.troughRefill, { active: true, targets: first }));
+    await vi.advanceTimersByTimeAsync(6000);
+
+    const second = await visit(helpers);
+    expect(second).not.toEqual(first);
+  });
+
+  it("drinks from the cluster reticulated to the paddock the herd is in", async () => {
+    const helpers = setup();
+
+    // Move the herd to Paddock B, whose cluster is T6–T10.
+    await helpers.fire(AGRICULTURE_STIMULUS.moveHerd);
+    const emptied = await visit(helpers);
+
+    expect(emptied.length).toBeGreaterThan(0);
+    for (const id of emptied) {
+      expect(["T6", "T7", "T8", "T9", "T10"]).toContain(id);
+    }
+  });
+
+  it("keeps the herd present through approaching, drinking and clearing", async () => {
+    const helpers = setup();
+    await helpers.fire(AGRICULTURE_STIMULUS.troughsDrink);
+    await vi.advanceTimersByTimeAsync(9000);
+
+    const phases = helpers.published
+      .filter((entry) => entry.topic === AGRICULTURE_STATE_TOPICS.troughs)
+      .map((entry) => JSON.parse(entry.payload) as { phase: string; herdPresent: boolean });
+
+    expect(phases.map((p) => p.phase)).toEqual(expect.arrayContaining(["approaching", "drinking", "clearing"]));
+    // Refill must be held off for the whole visit, not just while cattle drink.
+    for (const snapshot of phases.filter((p) => p.phase !== "idle")) {
+      expect(snapshot.herdPresent).toBe(true);
+    }
+    expect(phases.at(-1)).toMatchObject({ phase: "idle", herdPresent: false });
+  });
+
+  it("refills troughs gradually and settles them below a uniform full", async () => {
+    const helpers = setup();
+    const emptied = await visit(helpers);
+
+    const refill = helpers.registry.get(AGRICULTURE_DEVICE_KEYS.troughRefill)!;
+    await refill.model.onCommand!(helpers.command(AGRICULTURE_COMMAND_TOPICS.troughRefill, { active: true, targets: emptied }));
+
+    const during = helpers.published
+      .filter((entry) => entry.topic === AGRICULTURE_STATE_TOPICS.troughs)
+      .length;
+    await vi.advanceTimersByTimeAsync(6000);
+    const after = helpers.published.filter((entry) => entry.topic === AGRICULTURE_STATE_TOPICS.troughs);
+
+    // Water arrives at a rate: the refill publishes a climb rather than jumping
+    // from a mid value straight to a flat full.
+    expect(after.length - during).toBeGreaterThan(4);
+
+    const settled = JSON.parse(after.at(-1)!.payload) as { levels: number[]; low: number; refilling: number; refillFlowLpm: number };
+    expect(settled.low).toBe(0);
+    expect(settled.refilling).toBe(0);
+    // Flow stopping is the observation the refill command waits on.
+    expect(settled.refillFlowLpm).toBe(0);
+
+    const refilled = emptied.map((id) => settled.levels[Number(id.slice(1)) - 1]);
+    for (const level of refilled) {
+      expect(level).toBeGreaterThanOrEqual(78);
+      expect(level).toBeLessThanOrEqual(90);
+    }
+    // Float valves close at slightly different points rather than every trough
+    // landing on one identical figure.
+    expect(new Set(refilled).size).toBeGreaterThan(1);
+  });
+
+  it("refuses to open the manifold while the herd is still at the water", async () => {
+    const helpers = setup();
+    // Assert before advancing timers: this harness clamps every delay to zero, so
+    // advancing at all would run the whole visit to completion.
+    await helpers.fire(AGRICULTURE_STIMULUS.troughsDrink);
+
+    const arriving = helpers.last(AGRICULTURE_STATE_TOPICS.troughs)!;
+    expect(arriving).toMatchObject({ phase: "approaching", herdPresent: true });
+
+    const refill = helpers.registry.get(AGRICULTURE_DEVICE_KEYS.troughRefill)!;
+    await refill.model.onCommand!(helpers.command(AGRICULTURE_COMMAND_TOPICS.troughRefill, { active: true, targets: ["T1"] }));
+
+    // Cattle are physically at the troughs, so no valve opens.
+    expect(helpers.last(AGRICULTURE_STATE_TOPICS.troughs)!.refilling).toBe(0);
   });
 });

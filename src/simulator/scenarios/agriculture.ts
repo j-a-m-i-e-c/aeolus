@@ -90,8 +90,6 @@ const HEADER_CAPACITY_L = 5_000;
 const SHED_CAPACITY_L = 8_000;
 const HOUSE_CAPACITY_L = 4_000;
 const TROUGH_LOW_THRESHOLD = 45;
-/** Transition group for the herd-drinking animation, so a trough reset cancels only it. */
-const TROUGH_DRINKING_GROUP = "trough-drinking";
 /** Transition group for a working-dog deployment. */
 const DOG_WORK_GROUP = "dog-work";
 
@@ -202,6 +200,14 @@ interface TroughState extends SimulatedState {
   consumptionTodayLitres: number;
   lastDrinkLitres: number;
   refillFlowLpm: number;
+  /** idle · approaching · drinking · clearing · refilling. */
+  phase: string;
+  /** True from the moment cattle start walking in until the last one leaves. */
+  herdPresent: boolean;
+  /** Completed herd visits, which is also what rotates the visited cluster. */
+  visit: number;
+  /** Paddock whose trough cluster the current or last visit used. */
+  visitPaddock: string;
 }
 interface BatteryState {
   soc: number;
@@ -230,6 +236,39 @@ function troughId(index: number): string {
   return `T${index + 1}`;
 }
 
+/** Litres drawn per percentage point of a trough. */
+const TROUGH_LITRES_PER_PERCENT = 3.2;
+/** Head of cattle that come in to water together. */
+const TROUGH_HERD_HEAD = 18;
+/** Transition group for the herd-visit sequence. */
+const TROUGH_VISIT_GROUP = "trough-visit";
+/** Transition group for a manifold refill. */
+const TROUGH_REFILL_GROUP = "trough-refill";
+
+/**
+ * The five troughs reticulated to one paddock, matching the paddock rows the pane
+ * draws. Cattle can only drink from the paddock they are standing in, so this is
+ * what ties trough location to herd location.
+ */
+function paddockCluster(paddock: string): number[] {
+  const row = Math.max(0, Math.min(3, (paddock.charCodeAt(0) || 65) - 65));
+  return [0, 1, 2, 3, 4].map((offset) => row * 5 + offset);
+}
+
+/**
+ * Which troughs the herd uses on a given visit.
+ *
+ * A rotating window over the paddock's cluster rather than a random pick: the
+ * hosted demo and its tests both need repeatability, but the same four troughs
+ * draining on every single visit was what made the scenario look scripted.
+ */
+function visitedTroughs(paddock: string, visit: number): number[] {
+  const cluster = paddockCluster(paddock);
+  const start = visit % cluster.length;
+  const count = 3 + (visit % 2);
+  return Array.from({ length: count }, (_, offset) => cluster[(start + offset) % cluster.length]);
+}
+
 function summarizeTroughs(
   levels: number[],
   extras: Partial<TroughState> = {},
@@ -251,6 +290,10 @@ function summarizeTroughs(
     consumptionTodayLitres: 1240,
     lastDrinkLitres: 0,
     refillFlowLpm: 0,
+    phase: "idle",
+    herdPresent: false,
+    visit: 0,
+    visitPaddock: "A",
     ...extras,
   };
 }
@@ -299,7 +342,6 @@ class AgricultureEnvironment {
   private transferTimer?: ReturnType<typeof setTimeout>;
   private transferFailsafeTimer?: ReturnType<typeof setTimeout>;
 
-  private troughRefillTimers: Array<ReturnType<typeof setTimeout>> = [];
 
   register(key: string, controller: SimulatedStateController): void {
     this.controllers.set(key, controller);
@@ -358,55 +400,83 @@ class AgricultureEnvironment {
     const troughs = this.controller(AGRICULTURE_DEVICE_KEYS.troughs);
     if (!troughs) return;
     const state = troughs.read() as TroughState;
-    // `drinkingActive` is the guard rather than a timer handle: it is the physical
-    // fact that cattle are at the troughs, and it survives however the visit is
-    // being animated.
-    if (state.drinkingActive || Number(state.refilling || 0) > 0) return;
+    // `herdPresent` is the guard rather than a timer handle: it is the physical fact
+    // that cattle are at the water, it covers walking in and clearing out as well
+    // as drinking, and it survives however the visit is being animated.
+    if (state.herdPresent || Number(state.refilling || 0) > 0) return;
+
+    // Cattle drink from the paddock they are standing in, so the herd's location
+    // decides which cluster empties.
+    const collars = this.controller(AGRICULTURE_DEVICE_KEYS.collars)?.read() as CollarState | undefined;
+    const paddock = String(collars?.paddock ?? "A");
+    const visit = Math.max(0, Number(state.visit) || 0) + 1;
 
     const startLevels = Array.isArray(state.levels) ? [...state.levels] : [...INITIAL_TROUGH_LEVELS];
-    const drinkIndexes = [3, 4, 11, 16]; // T4, T5, T12, T17
-    const drops = [42, 48, 40, 44];
+    const drinkIndexes = visitedTroughs(paddock, visit);
     const finalLevels = [...startLevels];
     let totalConsumed = 0;
     drinkIndexes.forEach((index, offset) => {
       const before = Number(startLevels[index]) || 0;
-      const after = Math.max(18, before - drops[offset]);
+      // Deterministic per-visit variation: repeated visits differ without becoming
+      // unrepeatable for a test or the hosted demo.
+      const drop = 38 + ((visit * 7 + offset * 5) % 15);
+      const after = Math.max(16, before - drop);
       finalLevels[index] = after;
-      totalConsumed += Math.round((before - after) * 3.2);
+      totalConsumed += Math.round((before - after) * TROUGH_LITRES_PER_PERCENT);
     });
     const drinkingIds = drinkIndexes.map(troughId);
     const startingConsumption = Number(state.consumptionTodayLitres || 0);
-    const steps = 4;
 
+    // Cattle are walking in, not drinking yet. Saying so is the point: the pane can
+    // explain why an automatic refill is holding off.
     troughs.update(summarizeTroughs(startLevels, {
+      phase: "approaching",
+      herdPresent: true,
+      visit,
+      visitPaddock: paddock,
       drinkingIds,
-      drinkingHead: 18,
-      drinkingActive: true,
+      drinkingHead: TROUGH_HERD_HEAD,
+      drinkingActive: false,
       drinkingProgress: 0,
       consumptionTodayLitres: startingConsumption,
       lastDrinkLitres: 0,
       refillFlowLpm: 0,
     }), { forcePublish: true });
 
-    // Levels fall over the visit rather than dropping in one step. The controller
-    // owns the timing, so the budget bounds it and disposing the device stops it.
+    // One visit: approach, drink, clear. Levels fall only while cattle are actually
+    // at the water, so the drop is something you watch rather than a step change.
+    const APPROACH_END = 0.19;
+    const DRINK_END = 0.81;
     troughs.transition({
-      durationMs: steps * 650,
-      steps,
-      group: TROUGH_DRINKING_GROUP,
+      durationMs: 8000,
+      steps: 24,
+      group: TROUGH_VISIT_GROUP,
       frame: (progress) => {
-        const levels = startLevels.map((start, index) => {
-          const target = finalLevels[index];
-          return start + (target - start) * progress;
-        });
-        const complete = progress >= 1;
+        const finished = progress >= 1;
+        let phase = "clearing";
+        let drinkProgress = 1;
+        if (progress < APPROACH_END) {
+          phase = "approaching";
+          drinkProgress = 0;
+        } else if (progress < DRINK_END) {
+          phase = "drinking";
+          drinkProgress = (progress - APPROACH_END) / (DRINK_END - APPROACH_END);
+        } else if (finished) {
+          phase = "idle";
+        }
+
+        const levels = startLevels.map((start, index) => start + (finalLevels[index] - start) * drinkProgress);
         return summarizeTroughs(levels, {
-          drinkingIds: complete ? [] : drinkingIds,
-          drinkingHead: complete ? 0 : 18,
-          drinkingActive: !complete,
-          drinkingProgress: Math.round(progress * 100),
-          consumptionTodayLitres: startingConsumption + Math.round(totalConsumed * progress),
-          lastDrinkLitres: complete ? totalConsumed : 0,
+          phase,
+          herdPresent: !finished,
+          visit,
+          visitPaddock: paddock,
+          drinkingIds: phase === "drinking" ? drinkingIds : [],
+          drinkingHead: finished ? 0 : TROUGH_HERD_HEAD,
+          drinkingActive: phase === "drinking",
+          drinkingProgress: Math.round(drinkProgress * 100),
+          consumptionTodayLitres: startingConsumption + Math.round(totalConsumed * drinkProgress),
+          lastDrinkLitres: finished ? totalConsumed : 0,
           refillFlowLpm: 0,
         });
       },
@@ -700,52 +770,63 @@ class AgricultureEnvironment {
     const troughs = this.controller(AGRICULTURE_DEVICE_KEYS.troughs);
     if (!troughs) return;
     const state = troughs.read() as TroughState;
-    if (state.drinkingActive || this.troughRefillTimers.length > 0) return;
-    const levels = Array.isArray(state.levels) ? [...state.levels] : [...INITIAL_TROUGH_LEVELS];
+    // Never fill a trough cattle are standing at, and never stack two refills.
+    if (state.herdPresent || Number(state.refilling || 0) > 0) return;
+    const startLevels = Array.isArray(state.levels) ? [...state.levels] : [...INITIAL_TROUGH_LEVELS];
     const targets = (targetIds.length > 0 ? targetIds : state.lowIds || []).filter((id) => /^T(?:[1-9]|1\d|20)$/.test(id));
     if (targets.length === 0) return;
 
-    troughs.update({ refilling: targets.length, refillTargets: targets, refillFlowLpm: 46 }, { forcePublish: true });
+    const consumptionToday = Number(state.consumptionTodayLitres || 0);
+    const lastDrink = Number(state.lastDrinkLitres || 0);
+    const visit = Math.max(0, Number(state.visit) || 0);
 
-    const mid = [...levels];
-    for (const id of targets) {
+    // Float valves close at slightly different points, so troughs finish between
+    // 78% and 90% rather than every one landing on an identical figure.
+    const finalLevels = [...startLevels];
+    targets.forEach((id, offset) => {
       const index = Number(id.slice(1)) - 1;
-      mid[index] = Math.min(78, Math.max(mid[index] || 0, 66));
-    }
-    const midTimer = setTimeout(() => {
-      troughs.update(summarizeTroughs(mid, {
-        refilling: targets.length,
-        refillTargets: targets,
-        drinkingIds: [],
-        drinkingHead: 0,
-        drinkingActive: false,
-        drinkingProgress: 100,
-        consumptionTodayLitres: Number(state.consumptionTodayLitres || 0),
-        lastDrinkLitres: Number(state.lastDrinkLitres || 0),
-        refillFlowLpm: 46,
-      }), { forcePublish: true });
-    }, 900);
+      const target = 78 + ((visit * 3 + offset * 5) % 13);
+      finalLevels[index] = Math.max(Number(startLevels[index]) || 0, target);
+    });
 
-    const finalTimer = setTimeout(() => {
-      const finalLevels = [...mid];
-      for (const id of targets) {
-        const index = Number(id.slice(1)) - 1;
-        finalLevels[index] = 90;
-      }
-      troughs.update(summarizeTroughs(finalLevels, {
-        refilling: 0,
-        refillTargets: [],
-        drinkingIds: [],
-        drinkingHead: 0,
-        drinkingActive: false,
-        drinkingProgress: 100,
-        consumptionTodayLitres: Number(state.consumptionTodayLitres || 0),
-        lastDrinkLitres: Number(state.lastDrinkLitres || 0),
-        refillFlowLpm: 0,
-      }), { forcePublish: true });
-      this.troughRefillTimers = [];
-    }, 2400);
-    this.troughRefillTimers = [midTimer, finalTimer];
+    troughs.update(summarizeTroughs(startLevels, {
+      phase: "refilling",
+      herdPresent: false,
+      visit,
+      visitPaddock: String(state.visitPaddock ?? "A"),
+      refilling: targets.length,
+      refillTargets: targets,
+      drinkingProgress: 100,
+      consumptionTodayLitres: consumptionToday,
+      lastDrinkLitres: lastDrink,
+      refillFlowLpm: 46,
+    }), { forcePublish: true });
+
+    // Water arrives at a rate, so levels climb. Jumping to a mid value and then to
+    // a flat 90 made a physical refill look like two assignments.
+    troughs.transition({
+      durationMs: 5200,
+      steps: 16,
+      group: TROUGH_REFILL_GROUP,
+      frame: (progress) => {
+        const finished = progress >= 1;
+        const levels = startLevels.map((start, index) => start + (finalLevels[index] - start) * progress);
+        return summarizeTroughs(levels, {
+          phase: finished ? "idle" : "refilling",
+          herdPresent: false,
+          visit,
+          visitPaddock: String(state.visitPaddock ?? "A"),
+          refilling: finished ? 0 : targets.length,
+          refillTargets: finished ? [] : targets,
+          drinkingProgress: 100,
+          consumptionTodayLitres: consumptionToday,
+          lastDrinkLitres: lastDrink,
+          // Flow stops when the last valve closes, which is the observation the
+          // refill command is waiting on.
+          refillFlowLpm: finished ? 0 : 46,
+        });
+      },
+    });
   }
 
   dispose(): void {
@@ -761,11 +842,11 @@ class AgricultureEnvironment {
   }
 
   private clearTroughTimers(): void {
-    // The drinking animation is owned by the trough controller, so cancelling its
-    // group stops it without this scenario tracking a timer handle.
-    this.controller(AGRICULTURE_DEVICE_KEYS.troughs)?.cancelTransitions(TROUGH_DRINKING_GROUP);
-    for (const timer of this.troughRefillTimers) clearTimeout(timer);
-    this.troughRefillTimers = [];
+    // Both trough animations are owned by the trough controller, so cancelling its
+    // groups stops them without this scenario tracking any timer handles.
+    const troughs = this.controller(AGRICULTURE_DEVICE_KEYS.troughs);
+    troughs?.cancelTransitions(TROUGH_VISIT_GROUP);
+    troughs?.cancelTransitions(TROUGH_REFILL_GROUP);
   }
 }
 
