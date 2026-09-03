@@ -12,13 +12,21 @@ import agriculture from "./agriculture.mjs";
 import wildlife from "./wildlife.mjs";
 import space from "./space.mjs";
 
+// This order is deliberate, not alphabetical and not grouped by domain.
+//
+// Agriculture leads because it is the clearest demonstration of automating a
+// whole physical site. Stage & Show follows immediately so a visitor who arrived
+// thinking Aeolus is farm software is corrected on the second tab rather than the
+// sixth. The remaining site domains then broaden progressively, and Space sits
+// last because it is the one tab driven by real external data instead of the
+// simulator, which makes it the odd one out rather than the finale.
 export const tabModules = [
   agriculture,
+  stageShow,
   wildlife,
   researchVessel,
   undergroundMining,
   escapeRoom,
-  stageShow,
   offGridBunker,
   space,
 ];
