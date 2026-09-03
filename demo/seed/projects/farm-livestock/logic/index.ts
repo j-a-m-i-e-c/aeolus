@@ -5,6 +5,7 @@ import {
   handleLivestockOperatorEvent,
   initialiseLivestockState,
   projectCollarTelemetry,
+  projectDogTelemetry,
   projectFenceTelemetry,
 } from "./livestock-control";
 
@@ -21,6 +22,8 @@ export default async function run(context: EventContext) {
 
   if (topic === "sensor/fence/collars") {
     projectCollarTelemetry(context);
+  } else if (topic === "sensor/fence/working-dogs") {
+    projectDogTelemetry(context);
   } else if (topic === "sensor/fence/energiser") {
     projectFenceTelemetry(context);
   }

@@ -29,6 +29,7 @@ export const AGRICULTURE_DEVICE_KEYS = {
   houseFill: "farm-house-fill",
   energiser: "farm-fence-energiser",
   collars: "farm-collars",
+  dogs: "farm-working-dogs",
   recall: "farm-recall",
   troughs: "farm-troughs",
   troughRefill: "farm-trough-refill",
@@ -47,6 +48,9 @@ export const AGRICULTURE_STATE_TOPICS = {
   houseFill: "switch/farm/house-fill/state",
   energiser: "sensor/fence/energiser",
   collars: "sensor/fence/collars",
+  // Same collar network as the cattle, so the same topic family and the same
+  // Livestock automation trigger.
+  dogs: "sensor/fence/working-dogs",
   recall: "switch/fence/recall/state",
   troughs: "sensor/farm/troughs",
   troughRefill: "switch/farm/trough-refill/state",
@@ -88,6 +92,79 @@ const HOUSE_CAPACITY_L = 4_000;
 const TROUGH_LOW_THRESHOLD = 45;
 /** Transition group for the herd-drinking animation, so a trough reset cancels only it. */
 const TROUGH_DRINKING_GROUP = "trough-drinking";
+/** Transition group for a working-dog deployment. */
+const DOG_WORK_GROUP = "dog-work";
+
+/**
+ * Bounding box of the simulated property. The dogs wear real GPS collars, so they
+ * report latitude and longitude like the hardware would; consumers map those into
+ * whatever view they draw. Coordinates are a plausible slice of pastoral NSW.
+ */
+const PROPERTY_BOUNDS = {
+  north: -33.8210,
+  south: -33.8290,
+  west: 149.5680,
+  east: 149.5810,
+} as const;
+
+/** Where each fixed point of interest sits, as a 0..1 fraction of the property box. */
+const DOG_KENNEL = { x: 0.08, y: 0.86 };
+/** Roughly the middle of each paddock, used as the drive-to destination. */
+const PADDOCK_CENTRES: Record<string, { x: number; y: number }> = {
+  A: { x: 0.27, y: 0.45 },
+  B: { x: 0.72, y: 0.45 },
+};
+/** Where strays end up after a breach, per breached sector. */
+const BREACH_POINTS: Record<string, { x: number; y: number }> = {
+  east: { x: 0.95, y: 0.32 },
+  west: { x: 0.04, y: 0.32 },
+};
+
+/** Convert a property-relative point into the GPS position a collar would report. */
+function toGps(point: { x: number; y: number }): { lat: number; lon: number } {
+  const lat = PROPERTY_BOUNDS.north + (PROPERTY_BOUNDS.south - PROPERTY_BOUNDS.north) * point.y;
+  const lon = PROPERTY_BOUNDS.west + (PROPERTY_BOUNDS.east - PROPERTY_BOUNDS.west) * point.x;
+  // Six decimals is about 0.1 m — the precision a real collar reports, and enough
+  // that a consumer never has to render a raw float artefact.
+  return { lat: Number(lat.toFixed(6)), lon: Number(lon.toFixed(6)) };
+}
+
+/** Interpolate between two property-relative points. */
+function between(from: { x: number; y: number }, to: { x: number; y: number }, progress: number) {
+  return { x: from.x + (to.x - from.x) * progress, y: from.y + (to.y - from.y) * progress };
+}
+
+/** One GPS-collared working dog. */
+interface WorkingDog extends SimulatedState {
+  name: string;
+  /** kenneled → released → intercepting → driving → returning → kenneled. */
+  activity: string;
+  lat: number;
+  lon: number;
+  battery: number;
+  /** Which stray the dog is working, when it is working one. */
+  targetStray: number | null;
+}
+
+interface DogPackState extends SimulatedState {
+  dogs: WorkingDog[];
+  /** How many dogs are out of the kennel. */
+  deployed: number;
+  working: boolean;
+}
+
+/** Build the pack's resting state. Dogs sit in the kennel with topped-up collars. */
+function kenneledPack(): DogPackState {
+  const kennel = toGps(DOG_KENNEL);
+  return {
+    working: false,
+    deployed: 0,
+    dogs: [
+      { name: "Scout", activity: "kenneled", ...kennel, battery: 91, targetStray: null },
+      { name: "Moss", activity: "kenneled", ...kennel, battery: 88, targetStray: null },
+    ],
+  };
+}
 const BASE_LOAD_KW = 0.72;
 const PUMP_LOAD_KW = 1.05;
 const CHARGER_LOAD_KW = 0.45;
@@ -197,6 +274,8 @@ const INITIAL = {
     breachSector: null,
     movement: "grazing",
   } as CollarState,
+  // The dog pack's resting state comes from kenneledPack(), which builds a fresh
+  // object each time so a reset cannot hand out a shared mutable array of dogs.
   recall: { active: false },
   troughs: summarizeTroughs(INITIAL_TROUGH_LEVELS) as TroughState,
   troughRefill: { active: false },
@@ -363,8 +442,14 @@ class AgricultureEnvironment {
   }
 
   resetLivestock(): void {
+    // Cancel the pack's own movement first, so a reset mid-recall does not leave a
+    // transition writing dog positions over the state just restored. Scoped to the
+    // dog group, so nothing else in the simulated property is disturbed.
+    const dogs = this.controller(AGRICULTURE_DEVICE_KEYS.dogs);
+    dogs?.cancelTransitions(DOG_WORK_GROUP);
     this.controller(AGRICULTURE_DEVICE_KEYS.energiser)?.update({ ...INITIAL.energiser }, { forcePublish: true });
     this.controller(AGRICULTURE_DEVICE_KEYS.collars)?.update({ ...INITIAL.collars }, { forcePublish: true });
+    dogs?.update(kenneledPack(), { forcePublish: true });
     this.controller(AGRICULTURE_DEVICE_KEYS.recall)?.update({ ...INITIAL.recall }, { forcePublish: true });
   }
 
@@ -519,9 +604,96 @@ class AgricultureEnvironment {
   completeRecall(): void {
     const collars = this.controller(AGRICULTURE_DEVICE_KEYS.collars);
     if (!collars) return;
+    // `paddock` is deliberately absent from these patches. A breach does not move
+    // the herd's paddock, so recall has nothing to restore — and naming it here is
+    // how the herd used to be teleported to Paddock A from wherever it had actually
+    // rotated to.
     collars.update({ movement: "returning" }, { delayMs: 120 });
-    collars.update({ strays: 0, breachSector: null, paddock: "A", movement: "contained" }, { delayMs: 1400 });
+    collars.update({ strays: 0, breachSector: null, movement: "contained" }, { delayMs: 1400 });
     collars.update({ movement: "grazing" }, { delayMs: 2200 });
+
+    // The dogs are a separate physical device and their movement is deliberately
+    // NOT what tells Aeolus the herd is contained — the collars above are. The pack
+    // is dispatched alongside so the recall is something you can watch happen,
+    // and it keeps working after the command has already been verified.
+    this.deployDogs();
+  }
+
+  /**
+   * Send the pack out to the strays and back.
+   *
+   * Timing matters for a reason beyond looking right: containment above lands at
+   * about 1.4s, well inside the recall command's five-second observation window, so
+   * the command reaches OBSERVED on collar evidence. The dogs then trot home over
+   * the following few seconds, after the command has already completed. The visible
+   * sequence is longer than the verified one, which is exactly the distinction the
+   * showcase is trying to make.
+   */
+  private deployDogs(): void {
+    const dogsController = this.controller(AGRICULTURE_DEVICE_KEYS.dogs);
+    const collars = this.controller(AGRICULTURE_DEVICE_KEYS.collars);
+    if (!dogsController) return;
+
+    const collarState = collars?.read() as CollarState | undefined;
+    const paddock = String(collarState?.paddock ?? "A");
+    const sector = String(collarState?.breachSector ?? "east");
+    const home = PADDOCK_CENTRES[paddock] ?? PADDOCK_CENTRES.A;
+    const breach = BREACH_POINTS[sector] ?? BREACH_POINTS.east;
+
+    const resting = kenneledPack();
+    // Each dog takes a slightly different line, so the pack reads as two animals
+    // working rather than one sprite drawn twice.
+    const spread = [-0.035, 0.035];
+
+    dogsController.update({
+      ...resting,
+      working: true,
+      deployed: resting.dogs.length,
+      dogs: resting.dogs.map((dog, index) => ({
+        ...dog,
+        activity: "released",
+        targetStray: index,
+      })),
+    }, { forcePublish: true });
+
+    dogsController.transition({
+      durationMs: 6600,
+      steps: 22,
+      group: DOG_WORK_GROUP,
+      frame: (progress) => {
+        // Out to the breach for the first third, driving the strays home for the
+        // second, then back to the kennel.
+        let activity: string;
+        let point: { x: number; y: number };
+        if (progress < 0.34) {
+          activity = "intercepting";
+          point = between(DOG_KENNEL, breach, progress / 0.34);
+        } else if (progress < 0.62) {
+          activity = "driving";
+          point = between(breach, home, (progress - 0.34) / 0.28);
+        } else if (progress < 1) {
+          activity = "returning";
+          point = between(home, DOG_KENNEL, (progress - 0.62) / 0.38);
+        } else {
+          activity = "kenneled";
+          point = DOG_KENNEL;
+        }
+
+        const finished = progress >= 1;
+        return {
+          working: !finished,
+          deployed: finished ? 0 : resting.dogs.length,
+          dogs: resting.dogs.map((dog, index) => ({
+            ...dog,
+            activity,
+            ...toGps({ x: point.x + (finished ? 0 : spread[index]), y: point.y }),
+            // Working collars drain measurably faster than resting ones.
+            battery: Math.max(0, Math.round(dog.battery - progress * 3)),
+            targetStray: finished || activity === "returning" ? null : index,
+          })),
+        };
+      },
+    });
   }
 
   startTroughRefill(targetIds: string[]): void {
@@ -759,6 +931,7 @@ export function createAgricultureScenario(): SimulatorScenario {
     houseFill,
     sensorDefinition(AGRICULTURE_DEVICE_KEYS.energiser, "Fence Energiser", AGRICULTURE_STATE_TOPICS.energiser, { ...INITIAL.energiser }, env),
     sensorDefinition(AGRICULTURE_DEVICE_KEYS.collars, "GPS Cattle Collars", AGRICULTURE_STATE_TOPICS.collars, { ...INITIAL.collars }, env),
+    sensorDefinition(AGRICULTURE_DEVICE_KEYS.dogs, "GPS Working Dog Collars", AGRICULTURE_STATE_TOPICS.dogs, kenneledPack(), env),
     recall,
     sensorDefinition(AGRICULTURE_DEVICE_KEYS.troughs, "Distributed Troughs", AGRICULTURE_STATE_TOPICS.troughs, { ...INITIAL.troughs, levels: [...INITIAL_TROUGH_LEVELS] }, env),
     troughRefill,

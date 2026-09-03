@@ -54,7 +54,7 @@ function setup() {
     receivedAt: 1,
   });
 
-  return { registry, scenario, fire, last, command };
+  return { registry, scenario, fire, last, command, published };
 }
 
 describe("agriculture simulator scenario", () => {
@@ -125,6 +125,100 @@ describe("agriculture simulator scenario", () => {
     const outcome = await recall.model.onCommand!(command(AGRICULTURE_COMMAND_TOPICS.recall, { active: true }));
     expect(outcome).toMatchObject({ accepted: true });
     expect(last(AGRICULTURE_STATE_TOPICS.collars)).toMatchObject({ strays: 0, paddock: "A", movement: "grazing" });
+  });
+
+  it("returns strays to the paddock the herd is actually in, not always Paddock A", async () => {
+    const { registry, command, fire, last } = setup();
+
+    await fire(AGRICULTURE_STIMULUS.moveHerd);
+    expect(last(AGRICULTURE_STATE_TOPICS.collars)).toMatchObject({ paddock: "B" });
+
+    await fire(AGRICULTURE_STIMULUS.boundaryBreach);
+    expect(last(AGRICULTURE_STATE_TOPICS.collars)).toMatchObject({ strays: 2, paddock: "B" });
+
+    const recall = registry.get(AGRICULTURE_DEVICE_KEYS.recall)!;
+    await recall.model.onCommand!(command(AGRICULTURE_COMMAND_TOPICS.recall, { active: true }));
+
+    // Containment must return the strays to Paddock B. Recall previously named
+    // Paddock A in its own state patch, teleporting the whole herd across the
+    // property whenever it had rotated away from A.
+    expect(last(AGRICULTURE_STATE_TOPICS.collars)).toMatchObject({
+      strays: 0,
+      paddock: "B",
+      movement: "grazing",
+    });
+  });
+
+  it("works the dogs through the recall without letting them report containment", async () => {
+    const { registry, command, fire, last } = setup();
+
+    // Read the model rather than the wire here: nothing has published yet, and the
+    // resting pack is the device's declared initial state.
+    const resting = registry.get(AGRICULTURE_DEVICE_KEYS.dogs)!.model.getState();
+    expect(resting).toMatchObject({ working: false, deployed: 0 });
+    expect((resting.dogs as Array<{ name: string; activity: string }>).map((d) => d.name))
+      .toEqual(["Scout", "Moss"]);
+
+    await fire(AGRICULTURE_STIMULUS.boundaryBreach);
+    const recall = registry.get(AGRICULTURE_DEVICE_KEYS.recall)!;
+    await recall.model.onCommand!(command(AGRICULTURE_COMMAND_TOPICS.recall, { active: true }));
+
+    // The pack leaves the kennel as soon as the recall is accepted.
+    const dispatched = last(AGRICULTURE_STATE_TOPICS.dogs)!;
+    expect(dispatched).toMatchObject({ working: true, deployed: 2 });
+
+    await vi.advanceTimersByTimeAsync(8000);
+
+    const settled = last(AGRICULTURE_STATE_TOPICS.dogs)!;
+    const dogs = settled.dogs as Array<{ activity: string; targetStray: number | null; battery: number }>;
+    expect(settled).toMatchObject({ working: false, deployed: 0 });
+    for (const dog of dogs) {
+      expect(dog.activity).toBe("kenneled");
+      expect(dog.targetStray).toBeNull();
+      // Working the recall drains the collar measurably.
+      expect(dog.battery).toBeLessThan(91);
+    }
+  });
+
+  it("moves the dogs through interception, driving and returning", async () => {
+    const { registry, command, fire, published } = setup();
+
+    await fire(AGRICULTURE_STIMULUS.boundaryBreach);
+    const recall = registry.get(AGRICULTURE_DEVICE_KEYS.recall)!;
+    await recall.model.onCommand!(command(AGRICULTURE_COMMAND_TOPICS.recall, { active: true }));
+    await vi.advanceTimersByTimeAsync(8000);
+
+    const activities = published
+      .filter((entry) => entry.topic === AGRICULTURE_STATE_TOPICS.dogs)
+      .map((entry) => (JSON.parse(entry.payload) as { dogs: Array<{ activity: string }> }).dogs[0].activity);
+
+    // The pack visibly does the work in stages rather than teleporting to the
+    // strays and back.
+    expect(activities).toContain("released");
+    expect(activities).toContain("intercepting");
+    expect(activities).toContain("driving");
+    expect(activities).toContain("returning");
+    expect(activities.at(-1)).toBe("kenneled");
+  });
+
+  it("returns the pack to the kennel when livestock is reset mid-recall", async () => {
+    const { registry, command, fire, last } = setup();
+
+    await fire(AGRICULTURE_STIMULUS.boundaryBreach);
+    const recall = registry.get(AGRICULTURE_DEVICE_KEYS.recall)!;
+    await recall.model.onCommand!(command(AGRICULTURE_COMMAND_TOPICS.recall, { active: true }));
+    await vi.advanceTimersByTimeAsync(600);
+
+    await fire(AGRICULTURE_STIMULUS.livestockReset);
+    // A reset must win: no leftover transition may keep writing dog positions
+    // over the state the reset just restored.
+    await vi.advanceTimersByTimeAsync(8000);
+
+    const settled = last(AGRICULTURE_STATE_TOPICS.dogs)!;
+    expect(settled).toMatchObject({ working: false, deployed: 0 });
+    for (const dog of settled.dogs as Array<{ activity: string }>) {
+      expect(dog.activity).toBe("kenneled");
+    }
   });
 
   it("models one guarded herd-drinking sequence and a targeted refill", async () => {

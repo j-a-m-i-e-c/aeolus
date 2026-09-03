@@ -1,6 +1,30 @@
 // farm-livestock — visual implementation behind ui/index.tsx
 import { useEffect, useMemo, useState } from "react";
-import { control } from "@aeolus/ui";
+import { control, percent } from "@aeolus/ui";
+
+/** One working dog as its GPS collar reports it. */
+type DogReading = {
+    name: string;
+    activity: string;
+    lat: number;
+    lon: number;
+    battery: number;
+    targetStray: number | null;
+};
+
+// The dogs report real latitude and longitude, so the pane maps them into the
+// paddock diagram rather than the simulator publishing view coordinates.
+const PROPERTY_BOUNDS = { north: -33.8210, south: -33.8290, west: 149.5680, east: 149.5810 };
+const DIAGRAM = { x: 25, y: 22, width: 421, height: 190 };
+
+function dogPosition(dog: DogReading): { x: number; y: number } {
+    const fx = (dog.lon - PROPERTY_BOUNDS.west) / (PROPERTY_BOUNDS.east - PROPERTY_BOUNDS.west);
+    const fy = (dog.lat - PROPERTY_BOUNDS.north) / (PROPERTY_BOUNDS.south - PROPERTY_BOUNDS.north);
+    return {
+        x: DIAGRAM.x + Math.max(0, Math.min(1, fx)) * DIAGRAM.width,
+        y: DIAGRAM.y + Math.max(0, Math.min(1, fy)) * DIAGRAM.height,
+    };
+}
 export default function LivestockDashboard({ model, actions }: {
     model: Record<string, any>;
     actions: Record<string, (...args: any[]) => void>;
@@ -30,6 +54,8 @@ export default function LivestockDashboard({ model, actions }: {
     })), []);
     const alert = strays > 0;
     const activeA = paddock === "A";
+    const dogs = (model.dogs as DogReading[] | undefined) || [];
+    const dogsWorking = Boolean(model.dogsWorking);
     const actionLabel = lastAction?.label ? String(lastAction.label) : "Collar network online";
     const mainStatus = recallInProgress ? "RECALL IN PROGRESS" : alert ? strays + " OUTSIDE" : "HERD CONTAINED";
     // Recall is an observed-tier command, so the wait is the interesting part:
@@ -61,7 +87,12 @@ export default function LivestockDashboard({ model, actions }: {
         </div>
         <div style={{ textAlign: "right" }}>
           <div style={{ color: recallInProgress ? "#F3C568" : alert ? "#FF776B" : "#7CEB9B", fontSize: 11, fontWeight: 800 }}>{mainStatus}</div>
-          <div style={{ color: "#657269", fontSize: 11 }}>{tracked}/{herd} tracked · {Math.round(avgBattery)}% collar battery</div>
+          <div style={{ color: "#657269", fontSize: 11 }}>{tracked}/{herd} tracked · {percent(avgBattery)} collar battery</div>
+          {dogs.length > 0 && <div style={{ color: dogsWorking ? "#9FE6C0" : "#5B685E", fontSize: 11, marginTop: 2 }}>
+            {dogsWorking
+              ? dogs.map((dog) => dog.name + " " + dog.activity).join(" · ")
+              : dogs.length + " working dogs kenneled"}
+          </div>}
         </div>
       </div>
 
@@ -86,6 +117,29 @@ export default function LivestockDashboard({ model, actions }: {
         })}
 
           {recallInProgress && Array.from({ length: 4 }).map((_, i) => <path key={i} d="M438 86 C390 95 350 110 310 128" fill="none" stroke="#F0C967" strokeWidth="2" strokeDasharray="5 7" strokeDashoffset={-(phase * 2 + i * 12)} opacity={.35 + i * .12}/>)}
+
+          {/* Kennel, and the dogs wherever their GPS collars currently place them. */}
+          <g transform="translate(26 185)" opacity={dogsWorking ? .5 : .9}>
+            <path d="M0 12 L9 0 L18 12 Z" fill="#2C3A2C" stroke="#5B7355"/>
+            <rect x="3" y="11" width="12" height="9" fill="#1B241B" stroke="#5B7355"/>
+            <text x="9" y="30" textAnchor="middle" fill="#5E6E60" fontSize="9">KENNEL</text>
+          </g>
+          {dogs.map((dog, i) => {
+            const at = dogPosition(dog);
+            const trot = Math.sin(phase * .22 + i * 1.7) * (dog.activity === "kenneled" ? 0 : 1.8);
+            const busy = dog.activity !== "kenneled";
+            return <g key={dog.name} transform={"translate(" + at.x.toFixed(1) + " " + (at.y + trot).toFixed(1) + ")"}>
+              {busy && <circle r="9" fill="none" stroke="#7FD4F0" strokeOpacity=".3"/>}
+              {/* A working dog reads as a dog, not a dot: low body, tail up, ears forward. */}
+              <ellipse rx="5.5" ry="2.8" fill={busy ? "#D7C08A" : "#8A8570"}/>
+              <circle cx="4.6" cy="-1.4" r="2.1" fill={busy ? "#D7C08A" : "#8A8570"}/>
+              <path d="M3.6 -3 L4.4 -5.2 L5.8 -3.2" fill={busy ? "#D7C08A" : "#8A8570"}/>
+              <path d="M-5 -1 Q-8.5 -4.5 -7 -6.5" fill="none" stroke={busy ? "#D7C08A" : "#8A8570"} strokeWidth="1.4"/>
+              <line x1="-2" y1="2.4" x2="-2.6" y2="5.4" stroke={busy ? "#D7C08A" : "#8A8570"} strokeWidth="1.1"/>
+              <line x1="2.4" y1="2.4" x2="3" y2="5.4" stroke={busy ? "#D7C08A" : "#8A8570"} strokeWidth="1.1"/>
+              <text x="0" y="-8" textAnchor="middle" fill={busy ? "#9FE6C0" : "#6C7A6E"} fontSize="9" fontWeight="700">{dog.name}</text>
+            </g>;
+          })}
 
           <g transform="translate(310 169)">
             <rect width="145" height="54" rx="9" fill="#0A120D" stroke={fault ? "#7B4439" : "#31543B"}/>

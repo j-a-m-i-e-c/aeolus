@@ -18,6 +18,9 @@ export default function Livestock(aeolus: CustomComponentProps) {
     fenceCurrent: aeolus.read("fenceCurrent"),
     fenceFault: aeolus.read("fenceFault"),
     recallInProgress: aeolus.read("recallInProgress"),
+    dogs: aeolus.read("dogs"),
+    dogsWorking: aeolus.read("dogsWorking"),
+    dogsDeployed: aeolus.read("dogsDeployed"),
     demoScenarioPending: aeolus.read("demoScenarioPending"),
     lastAction: aeolus.read("lastAction"),
   };

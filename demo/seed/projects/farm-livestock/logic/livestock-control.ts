@@ -72,6 +72,16 @@ export function projectCollarTelemetry(context: EventContext) {
         events.emit("farm/livestock/contained", { herd, tracked, paddock });
     }
 }
+export function projectDogTelemetry(context: EventContext) {
+    const source = context.state && typeof context.state === "object" ? context.state : {};
+    const dogs = Array.isArray(source.dogs) ? source.dogs : [];
+    // Projected for the pane to draw. Deliberately never used to decide whether the
+    // herd is contained: that remains the cattle collars' observation, so the dogs
+    // stay a depiction of the work rather than a second source of truth.
+    state.set("dogs", dogs);
+    state.set("dogsWorking", source.working === true);
+    state.set("dogsDeployed", Math.max(0, Number(source.deployed) || 0));
+}
 export function projectFenceTelemetry(context: EventContext) {
     const source = context.state && typeof context.state === "object" ? context.state : {};
     const voltage = Number(source.voltage);
