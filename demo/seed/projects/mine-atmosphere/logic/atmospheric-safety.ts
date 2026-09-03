@@ -59,12 +59,9 @@ export function projectAtmosphere(publishDemand: boolean) {
             events.emit("mine/atmosphere/vent-demand", { demand, severity, ch4: d7Ch4 });
         }
     }
-    const now = Date.now();
-    const lastSample = Number(state.get("lastDataSampleAt") || 0);
-    if (now - lastSample >= 5 * 60_000) {
-        db.write("gas-readings", { location: "Drift 7", ch4: d7Ch4, co, o2, no2 });
-        state.set("lastDataSampleAt", now);
-    }
+    // The gas record is written by the separate scheduled Atmospheric History
+    // automation. This path must react to every reading; the record only needs a
+    // regular one, and how often it is written is a retention decision.
     events.emit("mine/summary/atmosphere", {
         l3Ch4,
         d7Ch4,

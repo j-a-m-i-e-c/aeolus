@@ -44,20 +44,10 @@ export function projectCtdState() {
     return { depth, tension, winchOn };
 }
 
-export function sampleCtdHistory() {
-    const now = Date.now();
-    const last = Number(state.get("lastDataSampleAt") || 0);
-    if (now - last < 5 * 60_000)
-        return;
-    const depth = Number(state.get("depth"));
-    const temperature = Number(state.get("temperature"));
-    const salinity = Number(state.get("salinity"));
-    const oxygen = Number(state.get("oxygen"));
-    if ([depth, temperature, salinity, oxygen].some((value) => isNaN(value)))
-        return;
-    db.write("ctd-casts", { depth, temperature, salinity, oxygen });
-    state.set("lastDataSampleAt", now);
-}
+// The cast record is written by the separate scheduled CTD History automation.
+// Sampling opportunistically from telemetry made the record's density a function
+// of how often the sonde published, and tied the sampling interval to the publish
+// interval; both are retention decisions that do not belong in this control loop.
 
 export async function commandCtdWinch(mode: string, targetDepth: number) {
     const winch = byTopic("switch/vessel/ctd-winch/state");

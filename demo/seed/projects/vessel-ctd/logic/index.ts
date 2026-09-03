@@ -5,7 +5,6 @@ import {
   handleCtdOperatorEvent,
   projectCtdState,
   protectCtdTension,
-  sampleCtdHistory,
 } from "./ctd-operations";
 
 export default async function run(context: EventContext) {
@@ -18,7 +17,6 @@ export default async function run(context: EventContext) {
   }
 
   const ctd = projectCtdState();
-  sampleCtdHistory();
   if (ctd.tension >= 650 && ctd.winchOn) {
     await protectCtdTension();
   }
