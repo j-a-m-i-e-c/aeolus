@@ -12,6 +12,37 @@ export function initialisePredatorPolicy() {
         state.set("responsesToday", 3);
     if (state.get("lastOutcome") === undefined)
         state.set("lastOutcome", "Waiting for classified wildlife event");
+    if (state.get("predatorMovement") === undefined) {
+        state.set("predatorMovement", "clear");
+        state.set("predatorDistanceM", 0);
+        state.set("predatorSpeedMps", 0);
+    }
+}
+/**
+ * Project the station's physical readings into this automation's own state.
+ *
+ * The pane cannot read devices, so the readings only reach the operator through
+ * here. It is called at every point the policy runs — including immediately after
+ * a command settles — so the commanded rpm and the tachometer that verified it are
+ * both observed values rather than assumptions.
+ */
+export function projectStationReadings() {
+    const deterrent = byTopic("switch/wildlife/deterrent/state");
+    const power = byTopic("sensor/wildlife/site-power");
+    const animal = byTopic("sensor/wildlife/detection");
+    const deterrentState = deterrent && deterrent.state ? deterrent.state : {};
+    const powerState = power && power.state ? power.state : {};
+    const animalState = animal && animal.state ? animal.state : {};
+    state.set("commandRpm", Number(deterrentState.commandRpm || 0));
+    state.set("measuredRpm", Number(deterrentState.measuredRpm || 0));
+    state.set("deterrentActive", Boolean(deterrentState.active));
+    state.set("solarW", Number(powerState.solarW || 0));
+    state.set("batteryPct", Number(powerState.battery || 0));
+    // The camera ranges the animal; this pane reports that reading rather than
+    // inferring a position from how long ago the detection fired.
+    state.set("predatorDistanceM", Number(animalState.distanceM || 0));
+    state.set("predatorSpeedMps", Number(animalState.speedMps || 0));
+    state.set("predatorMovement", String(animalState.movement || "clear"));
 }
 export function publishResponseStatus() {
     events.emit("wildlife/response/status", {
@@ -27,10 +58,12 @@ export async function stopDeterrent() {
     const deterrent = byTopic("switch/wildlife/deterrent/state");
     if (!deterrent)
         return;
+    // A stop is proven by the fan slowing to a standstill, so the observation is the
+    // tachometer falling rather than the actuator clearing its own flag.
     const result = await devices.action(deterrent.id, "command", { payload: { active: false, target: "none", pulseMs: 0 } }, {
         tier: "observed",
         deviceId: deterrent.id,
-        condition: { field: "active", op: "eq", value: false },
+        condition: { field: "measuredRpm", op: "lte", value: 100 },
         timeoutMs: 5000,
     });
     if (result.success) {
@@ -41,6 +74,7 @@ export async function stopDeterrent() {
         state.set("lastOutcome", "Deterrent stop not verified");
         setAction("Deterrent stop not verified: " + String(result.error || result.lifecycleState || "unknown"));
     }
+    projectStationReadings();
     publishResponseStatus();
 }
 export async function handlePredatorOperatorEvent(event: string | undefined) {
@@ -97,13 +131,19 @@ export async function applyPredatorPolicy(classification: {
     state.set("commandPending", true);
     state.set("lastOutcome", "Issuing verified deterrent command");
     setAction(classification.label + " detected · issuing humane light/sound pulse");
-    const result = await devices.action(deterrent.id, "command", { payload: { active: true, target: classification.label, pulseMs } }, {
+    // Verified against the tachometer, not the actuator's own `active` flag. A
+    // controller reporting "yes, I'm on" only proves it accepted the command; a
+    // measured 2000+ rpm proves the fan is actually turning.
+    const result = await devices.action(deterrent.id, "command", { payload: { active: true, target: classification.label, pulseMs, rpm: 2400 } }, {
         tier: "observed",
         deviceId: deterrent.id,
-        condition: { field: "active", op: "eq", value: true },
+        condition: { field: "measuredRpm", op: "gte", value: 2000 },
         timeoutMs: 5000,
     });
     state.set("commandPending", false);
+    // Re-read the station now the command has settled: the tachometer value the
+    // verification waited on is the evidence the operator should see.
+    projectStationReadings();
     if (result.success) {
         const at = Date.now();
         state.set("activeUntil", at + pulseMs);

@@ -22,7 +22,17 @@ export default function WildlifeDetectionDashboard({ model, actions }: {
     const species = String(model.species || "ringtail-possum"), label = String(model.label || "Ringtail Possum"), category = String(model.category || "native"), confidence = Number(model.confidence ?? .91), distance = Number(model.distanceM ?? 7.2), detectedAt = Number(model.detectedAt ?? 0), battery = Number(model.battery ?? 87), solar = Number(model.solarW ?? 41), fps = Number(model.fps ?? 30), inference = Number(model.inferenceMs ?? 17), total = Number(model.detectionsToday ?? 47), native = Number(model.nativeToday ?? 39), predators = Number(model.predatorsToday ?? 8), denOccupied = model.denOccupied !== false, denAdult = Boolean(model.denAdultPresent), joeys = Number(model.denJoeys ?? 2), denTemp = Number(model.denTemp ?? 31.8), last = model.lastAction as any;
     const [now, setNow] = useState(Date.now());
     useEffect(() => { const id = setInterval(() => setNow(Date.now()), 100); return () => clearInterval(id); }, []);
-    const age = Math.max(0, now - detectedAt), travel = Math.min(1, age / 6500), x = 104 + travel * 330, y = 213 + Math.sin(travel * Math.PI * 3) * 4, predator = category === "predator", active = age < 9500, color = predator ? "#F08A68" : "#83D49A";
+    // The animal is drawn where the camera says it is. This used to interpolate a
+    // position from how long ago the detection fired and then stop rendering at 9.5s,
+    // so the creature blinked out of existence instead of leaving — and Predator
+    // Response, looking at the same physical device, disagreed with this pane.
+    const movement = String(model.movement ?? "clear");
+    const age = Math.max(0, now - detectedAt);
+    const range = Math.max(0, Math.min(1, (distance - 5) / 33));
+    const x = 104 + range * 330;
+    // Only the gait bob is a UI flourish; the position itself is physical state.
+    const y = 213 + Math.sin(now / 190) * 3;
+    const predator = category === "predator", active = movement !== "clear", color = predator ? "#F08A68" : "#83D49A";
     return <div style={{ padding: 14, minHeight: "100%", background: "linear-gradient(180deg,#07110E,#050A08)", color: "#EDF4EF" }}>
   <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10, gap: 12 }}><div><div style={{ fontSize: 18, fontWeight: 900 }}>WILDLIFE DETECTION</div><div style={{ fontSize: 12, color: "#82958A", marginTop: 3 }}>Trail camera → on-device inference → classified domain event · no cloud required</div></div><div style={{ textAlign: "right" }}><div style={{ fontSize: 12, fontWeight: 850, color }}>{predator ? "PREDATOR DETECTED" : "NATIVE FAUNA"}</div><div style={{ fontSize: 11, color: "#718278", marginTop: 2 }}>edge node {percent(battery)} · solar {watts(solar)}</div></div></div>
   <div style={{ display: "grid", gridTemplateColumns: "1.45fr .55fr", gap: 10 }}>

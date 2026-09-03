@@ -12,6 +12,8 @@ export default function WildlifeDetection(aeolus: CustomComponentProps) {
     category: aeolus.read("category"),
     confidence: aeolus.read("confidence"),
     distanceM: aeolus.read("distanceM"),
+    movement: aeolus.read("movement"),
+    speedMps: aeolus.read("speedMps"),
     detectedAt: aeolus.read("detectedAt"),
     battery: aeolus.read("battery"),
     solarW: aeolus.read("solarW"),

@@ -6,6 +6,7 @@ import {
   applyPredatorPolicy,
   handlePredatorOperatorEvent,
   initialisePredatorPolicy,
+  projectStationReadings,
 } from "./predator-policy";
 
 export default async function run(context: EventContext) {
@@ -13,6 +14,9 @@ export default async function run(context: EventContext) {
   const event = topic.split("/").pop();
 
   initialisePredatorPolicy();
+  // The pane has no device access of its own, so every invocation refreshes the
+  // station's physical readings before any policy runs.
+  projectStationReadings();
 
   if (topic.startsWith("ui/")) {
     await handlePredatorOperatorEvent(event);

@@ -40,10 +40,22 @@ export const WILDLIFE_STIMULUS = {
   reset: "wildlife/sim/reset",
 } as const;
 
+/** Transition group for the animal's own movement through the camera's field. */
+const ANIMAL_MOVE_GROUP = "animal-move";
+/** Transition group for the deterrent fan spinning up and down. */
+const DETERRENT_RPM_GROUP = "deterrent-rpm";
+/** Fan speed the deterrent controller is asked for, in rpm. */
+const DETERRENT_TARGET_RPM = 2400;
+/** Tachometer reading that counts as the fan being up to speed. */
+const DETERRENT_VERIFIED_RPM = 2000;
+
 const INITIAL = {
   camera: { online: true, model: "TrailCam-01", accelerator: "Hailo-8L", fps: 30, inferenceMs: 17, framesToday: 18432 },
-  detection: { eventId: "dawn-001", species: "ringtail-possum", label: "Ringtail Possum", category: "native", confidence: 0.91, distanceM: 7.2, direction: "east", ts: 0 },
-  deterrent: { active: false, mode: "light-sound", target: "none", pulseMs: 0, activationsToday: 3 },
+  detection: { eventId: "dawn-001", species: "ringtail-possum", label: "Ringtail Possum", category: "native", confidence: 0.91, distanceM: 7.2, speedMps: 0, movement: "clear", direction: "east", ts: 0 },
+  // `commandRpm` is what the controller was told; `measuredRpm` is what the
+  // tachometer reads. Keeping them apart is what lets a command distinguish
+  // ACKNOWLEDGED from OBSERVED instead of trusting the actuator's own flag.
+  deterrent: { active: false, mode: "light-sound", target: "none", pulseMs: 0, activationsToday: 3, commandRpm: 0, measuredRpm: 0 },
   nest: { temp: 31.8, humidity: 61, occupied: true, adultPresent: false, adultGliders: 2, joeys: 2, visitsToday: 7, thermalState: "normal" },
   power: { solarW: 41, battery: 87, nodeW: 8.4, status: "solar" },
 };
@@ -64,6 +76,10 @@ class WildlifeEnvironment {
 
   reset(): void {
     this.clearTimers();
+    // Stop any movement or spin-up still in flight, or it would keep writing over
+    // the state this reset is restoring.
+    this.controller(WILDLIFE_DEVICE_KEYS.detection)?.cancelTransitions(ANIMAL_MOVE_GROUP);
+    this.controller(WILDLIFE_DEVICE_KEYS.deterrent)?.cancelTransitions(DETERRENT_RPM_GROUP);
     this.controller(WILDLIFE_DEVICE_KEYS.camera)?.update({ ...INITIAL.camera }, { forcePublish: true });
     this.controller(WILDLIFE_DEVICE_KEYS.detection)?.update({ ...INITIAL.detection, ts: Date.now() - 16000 }, { forcePublish: true });
     this.controller(WILDLIFE_DEVICE_KEYS.deterrent)?.update({ ...INITIAL.deterrent }, { forcePublish: true });
@@ -88,14 +104,122 @@ class WildlifeEnvironment {
         : natives[(this.nativeIndex = (this.nativeIndex + 1) % natives.length)];
     const category = kind === "native" ? "native" : "predator";
     camera.update({ framesToday: Number(camera.read().framesToday ?? 18432) + 28, inferenceMs: kind === "native" ? 18 : 16 });
-    detection.update({ eventId: `wild-${this.seq}`, ...selected, category, direction: kind === "fox" ? "west" : "east", ts: Date.now() }, { forcePublish: true, delayMs: 160 });
+
+    // The animal walks into the camera's field. Its distance is physical state the
+    // simulator owns, so both Wildlife automations project the same movement rather
+    // than each pane animating a private copy of the same creature.
+    const settleAt = selected.distanceM;
+    const enterAt = Math.round((settleAt + 13) * 10) / 10;
+    detection.update({
+      eventId: `wild-${this.seq}`,
+      ...selected,
+      category,
+      direction: kind === "fox" ? "west" : "east",
+      ts: Date.now(),
+      distanceM: enterAt,
+      speedMps: 1.1,
+      movement: "approaching",
+    }, { forcePublish: true });
+
+    detection.transition({
+      durationMs: 2600,
+      steps: 10,
+      group: ANIMAL_MOVE_GROUP,
+      frame: (progress) => {
+        const arrived = progress >= 1;
+        return {
+          distanceM: Math.round((enterAt + (settleAt - enterAt) * progress) * 10) / 10,
+          speedMps: arrived ? 0.3 : 1.1,
+          movement: arrived ? "browsing" : "approaching",
+        };
+      },
+      onSettled: (completed) => {
+        // Nothing is ever deleted from the scene. An animal the deterrent never
+        // touches loses interest and wanders off on its own; if a deterrent fires
+        // first, the flight replaces this because both use the same group.
+        if (completed) this.later(4200, () => this.animalDeparts(2.2, 6200));
+      },
+    });
   }
 
-  setDeterrent(controller: SimulatedStateController, active: boolean, target: string, pulseMs: number): void {
-    if (!active) { controller.update({ active: false, target: "none", pulseMs: 0 }); return; }
+  /** Move the current animal away from the camera. */
+  private animalDeparts(peakSpeedMps: number, durationMs: number): void {
+    const detection = this.controller(WILDLIFE_DEVICE_KEYS.detection);
+    if (!detection) return;
+    const from = Number(detection.read().distanceM ?? 12);
+    const to = Math.round((from + 24) * 10) / 10;
+    detection.transition({
+      durationMs,
+      steps: 14,
+      group: ANIMAL_MOVE_GROUP,
+      frame: (progress) => {
+        const gone = progress >= 1;
+        return {
+          distanceM: Math.round((from + (to - from) * progress) * 10) / 10,
+          // It accelerates away rather than drifting off at a constant walk.
+          speedMps: gone ? 0 : Math.round((0.8 + peakSpeedMps * progress) * 10) / 10,
+          movement: gone ? "clear" : "fleeing",
+        };
+      },
+    });
+  }
+
+  setDeterrent(controller: SimulatedStateController, active: boolean, target: string, pulseMs: number, commandRpm: number): void {
+    if (!active) {
+      const from = Number(controller.read().measuredRpm ?? 0);
+      controller.update({ active: false, target: "none", pulseMs: 0, commandRpm: 0 }, { forcePublish: true });
+      // Spin-down is physical too, so a stop is verified by the fan actually
+      // slowing rather than by the actuator reporting its own flag.
+      controller.transition({
+        durationMs: 900,
+        steps: 6,
+        group: DETERRENT_RPM_GROUP,
+        frame: (progress) => ({ measuredRpm: Math.round(from * (1 - progress)) }),
+      });
+      return;
+    }
+
     const activations = Number(controller.read().activationsToday ?? 0) + 1;
-    controller.update({ active: true, target, pulseMs, activationsToday: activations });
-    this.later(Math.max(800, Math.min(7000, pulseMs || 4200)), () => controller.update({ active: false, target: "none", pulseMs: 0 }, { forcePublish: true }));
+    // The controller has accepted a target; the fan has not reached it yet. This is
+    // the difference between "the device confirmed receipt" and "the physical thing
+    // happened", which is the whole point of the evidence ladder.
+    controller.update({
+      active: true,
+      target,
+      pulseMs,
+      commandRpm,
+      measuredRpm: 0,
+      activationsToday: activations,
+    }, { forcePublish: true });
+
+    let fanUpToSpeed = false;
+    controller.transition({
+      durationMs: 1100,
+      steps: 8,
+      group: DETERRENT_RPM_GROUP,
+      frame: (progress) => {
+        const measuredRpm = Math.round(commandRpm * (0.06 + 0.94 * progress));
+        // The animal reacts to the fan actually being up to speed, not to the
+        // command being sent. Physical cause, physical effect — and a fan that
+        // never reaches DETERRENT_VERIFIED_RPM never scares anything off.
+        if (!fanUpToSpeed && measuredRpm >= DETERRENT_VERIFIED_RPM) {
+          fanUpToSpeed = true;
+          this.predatorFlees();
+        }
+        return { measuredRpm };
+      },
+    });
+
+    this.later(Math.max(800, Math.min(7000, pulseMs || 4200)), () => {
+      this.setDeterrent(controller, false, "none", 0, 0);
+    });
+  }
+
+  /** A predator that has been deterred turns and runs. */
+  private predatorFlees(): void {
+    const detection = this.controller(WILDLIFE_DEVICE_KEYS.detection);
+    if (!detection || String(detection.read().category) !== "predator") return;
+    this.animalDeparts(3.6, 4200);
   }
 
   nestVisit(): void {
@@ -138,8 +262,12 @@ export function createWildlifeScenario(): SimulatorScenario {
       const active = command.params.active;
       const target = String(command.params.target || "predator");
       const pulseMs = Number(command.params.pulseMs || 4200);
-      env.setDeterrent(ctx.state, active, target, pulseMs);
-      return { accepted: true, state: { patch: active ? { active: true, target, pulseMs } : { active: false, target: "none", pulseMs: 0 } } };
+      const commandRpm = Number(command.params.rpm) || DETERRENT_TARGET_RPM;
+      // The runtime's own resulting-state patch is deliberately not used here:
+      // setDeterrent publishes the commanded target immediately and then ramps the
+      // tachometer, so the two facts stay separately observable.
+      env.setDeterrent(ctx.state, active, target, pulseMs, commandRpm);
+      return { accepted: true };
     },
   );
 

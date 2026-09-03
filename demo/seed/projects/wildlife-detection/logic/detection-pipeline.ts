@@ -38,7 +38,12 @@ export function projectWildlifeStation() {
     state.set("label", String(detectionState.label || "Ringtail Possum"));
     state.set("category", String(detectionState.category || "native"));
     state.set("confidence", numberAt(detection, "confidence", 0.91));
+    // Distance, speed and movement are physical state the simulator owns. The pane
+    // draws the animal where the camera says it is instead of animating a private
+    // copy from how long ago the detection fired.
     state.set("distanceM", numberAt(detection, "distanceM", 7.2));
+    state.set("speedMps", numberAt(detection, "speedMps", 0));
+    state.set("movement", String(detectionState.movement || "clear"));
     state.set("direction", String(detectionState.direction || "east"));
     state.set("detectedAt", numberAt(detection, "ts", Date.now() - 16000));
     state.set("battery", numberAt(power, "battery", 87));
