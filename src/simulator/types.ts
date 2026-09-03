@@ -94,6 +94,57 @@ export interface SimulatedStateController<TState extends SimulatedState = Simula
   update(patch: Partial<TState>, options?: StateUpdateOptions): void;
   /** Publish the current state now. `force` bypasses no-op suppression. */
   publish(options?: { force?: boolean }): void;
+  /** Advance state over time in bounded, cancellable steps. */
+  transition(options: StateTransitionOptions<TState>): StateTransition;
+  /** Cancel running transitions, optionally only those in one group. */
+  cancelTransitions(group?: string): number;
+}
+
+/** A running timed transition. */
+export interface StateTransition {
+  /** Stop before the next step. Idempotent; a settled transition ignores it. */
+  cancel(): void;
+  /** True once every step has run, or the transition was cancelled. */
+  readonly settled: boolean;
+}
+
+/**
+ * A movement of physical state over time.
+ *
+ * Physical things move; publishing a single patch makes them teleport, which is
+ * why scenarios kept hand-rolling `setTimeout` chains. Those chains escaped the
+ * controller's timer budget and delay clamp and leaked whenever a scenario forgot
+ * to clear them on dispose. A transition is the supported form: one outstanding
+ * timer at a time, charged to the shared budget, cancelled automatically on
+ * dispose, and free to run longer than a single delay may — because its duration
+ * is composed of short steps rather than one long wait.
+ */
+export interface StateTransitionOptions<TState extends SimulatedState = SimulatedState> {
+  /** Total wall-clock duration across every step. */
+  durationMs: number;
+  /** How many patches are published, including the final one. At least 1. */
+  steps: number;
+  /**
+   * Produces the patch for one step. `progress` runs from just above 0 to
+   * exactly 1 on the final step; `index` is 1-based. Returning undefined skips
+   * the publish for that step without ending the transition.
+   */
+  frame: (progress: number, index: number) => Partial<TState> | undefined;
+  /**
+   * Publish every step even when the serialized state is unchanged. Defaults to
+   * true: movement the operator is meant to watch should not be suppressed as a
+   * no-op just because one interpolated step rounded to the previous value.
+   */
+  forcePublish?: boolean;
+  /**
+   * Domain label for coordination. Starting a transition in a group cancels any
+   * running transition on this device in the same group, so a repeated
+   * interaction replaces its animation instead of fighting it, and a scoped reset
+   * can cancel one domain without disturbing the others.
+   */
+  group?: string;
+  /** Called once when the transition ends. `completed` is false when cancelled. */
+  onSettled?: (completed: boolean) => void;
 }
 
 /** Options controlling a single {@link SimulatedStateController.update}. */

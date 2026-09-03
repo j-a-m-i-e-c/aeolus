@@ -86,6 +86,8 @@ const HEADER_CAPACITY_L = 5_000;
 const SHED_CAPACITY_L = 8_000;
 const HOUSE_CAPACITY_L = 4_000;
 const TROUGH_LOW_THRESHOLD = 45;
+/** Transition group for the herd-drinking animation, so a trough reset cancels only it. */
+const TROUGH_DRINKING_GROUP = "trough-drinking";
 const BASE_LOAD_KW = 0.72;
 const PUMP_LOAD_KW = 1.05;
 const CHARGER_LOAD_KW = 0.45;
@@ -217,7 +219,7 @@ class AgricultureEnvironment {
   private chargerKw = 0;
   private transferTimer?: ReturnType<typeof setTimeout>;
   private transferFailsafeTimer?: ReturnType<typeof setTimeout>;
-  private troughDrinkTimer?: ReturnType<typeof setTimeout>;
+
   private troughRefillTimers: Array<ReturnType<typeof setTimeout>> = [];
 
   register(key: string, controller: SimulatedStateController): void {
@@ -275,8 +277,11 @@ class AgricultureEnvironment {
 
   drinkTroughs(): void {
     const troughs = this.controller(AGRICULTURE_DEVICE_KEYS.troughs);
-    if (!troughs || this.troughDrinkTimer) return;
+    if (!troughs) return;
     const state = troughs.read() as TroughState;
+    // `drinkingActive` is the guard rather than a timer handle: it is the physical
+    // fact that cattle are at the troughs, and it survives however the visit is
+    // being animated.
     if (state.drinkingActive || Number(state.refilling || 0) > 0) return;
 
     const startLevels = Array.isArray(state.levels) ? [...state.levels] : [...INITIAL_TROUGH_LEVELS];
@@ -293,7 +298,6 @@ class AgricultureEnvironment {
     const drinkingIds = drinkIndexes.map(troughId);
     const startingConsumption = Number(state.consumptionTodayLitres || 0);
     const steps = 4;
-    let step = 0;
 
     troughs.update(summarizeTroughs(startLevels, {
       drinkingIds,
@@ -305,33 +309,29 @@ class AgricultureEnvironment {
       refillFlowLpm: 0,
     }), { forcePublish: true });
 
-    const tick = (): void => {
-      step += 1;
-      const progress = Math.min(1, step / steps);
-      const levels = startLevels.map((start, index) => {
-        const target = finalLevels[index];
-        return start + (target - start) * progress;
-      });
-      const consumedSoFar = Math.round(totalConsumed * progress);
-      const complete = step >= steps;
-      troughs.update(summarizeTroughs(levels, {
-        drinkingIds: complete ? [] : drinkingIds,
-        drinkingHead: complete ? 0 : 18,
-        drinkingActive: !complete,
-        drinkingProgress: Math.round(progress * 100),
-        consumptionTodayLitres: startingConsumption + consumedSoFar,
-        lastDrinkLitres: complete ? totalConsumed : 0,
-        refillFlowLpm: 0,
-      }), { forcePublish: true });
-
-      if (complete) {
-        this.troughDrinkTimer = undefined;
-        return;
-      }
-      this.troughDrinkTimer = setTimeout(tick, 650);
-    };
-
-    this.troughDrinkTimer = setTimeout(tick, 550);
+    // Levels fall over the visit rather than dropping in one step. The controller
+    // owns the timing, so the budget bounds it and disposing the device stops it.
+    troughs.transition({
+      durationMs: steps * 650,
+      steps,
+      group: TROUGH_DRINKING_GROUP,
+      frame: (progress) => {
+        const levels = startLevels.map((start, index) => {
+          const target = finalLevels[index];
+          return start + (target - start) * progress;
+        });
+        const complete = progress >= 1;
+        return summarizeTroughs(levels, {
+          drinkingIds: complete ? [] : drinkingIds,
+          drinkingHead: complete ? 0 : 18,
+          drinkingActive: !complete,
+          drinkingProgress: Math.round(progress * 100),
+          consumptionTodayLitres: startingConsumption + Math.round(totalConsumed * progress),
+          lastDrinkLitres: complete ? totalConsumed : 0,
+          refillFlowLpm: 0,
+        });
+      },
+    });
   }
 
   lowerTroughs(): void {
@@ -589,8 +589,9 @@ class AgricultureEnvironment {
   }
 
   private clearTroughTimers(): void {
-    if (this.troughDrinkTimer) clearTimeout(this.troughDrinkTimer);
-    this.troughDrinkTimer = undefined;
+    // The drinking animation is owned by the trough controller, so cancelling its
+    // group stops it without this scenario tracking a timer handle.
+    this.controller(AGRICULTURE_DEVICE_KEYS.troughs)?.cancelTransitions(TROUGH_DRINKING_GROUP);
     for (const timer of this.troughRefillTimers) clearTimeout(timer);
     this.troughRefillTimers = [];
   }
