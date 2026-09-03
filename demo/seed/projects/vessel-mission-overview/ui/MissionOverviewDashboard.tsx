@@ -1,11 +1,20 @@
 // vessel-mission-overview — visual implementation behind ui/index.tsx
 import { useEffect, useState } from "react";
 import { percent } from "@aeolus/ui";
+/** The CTD wire's phase in operator language, not the slug the winch reports. */
+const CTD_PHASE_LABEL: Record<string, string> = {
+    "on-deck": "ON DECK",
+    deploying: "DESCENDING",
+    "at-depth": "AT DEPTH",
+    recovering: "ASCENDING",
+    holding: "HOLDING",
+};
 export default function MissionOverviewDashboard({ model }: {
     model: Record<string, any>;
 }) {
-    const ctdDepth = Number(model.ctdDepth ?? 120);
-    const ctdStatus = String(model.ctdStatus || "holding");
+    const ctdDepth = Number(model.ctdDepth ?? 3);
+    const ctdStatus = String(model.ctdStatus || "on-deck");
+    const ctdMoving = ctdStatus === "deploying" || ctdStatus === "recovering";
     const ctdTemp = Number(model.ctdTemperature ?? 12.1);
     const ctdSalinity = Number(model.ctdSalinity ?? 35.1);
     const ctdTension = Number(model.ctdTension ?? 220);
@@ -61,7 +70,7 @@ export default function MissionOverviewDashboard({ model }: {
         </g>
 
         <line x1="270" y1="72" x2="270" y2={ctdY} stroke="#A4B3B9" strokeWidth="1.1"/>
-        {ctdStatus !== "holding" && Array.from({ length: 4 }).map((_, i) => <circle key={i} cx="270" cy={90 + ((phase * 2 + i * 43) % Math.max(30, ctdY - 90))} r="1.8" fill="#75DFF7" opacity=".8"/>)}
+        {ctdMoving && Array.from({ length: 4 }).map((_, i) => <circle key={i} cx="270" cy={90 + ((phase * 2 + i * 43) % Math.max(30, ctdY - 90))} r="1.8" fill="#75DFF7" opacity=".8"/>)}
         <g transform={"translate(270 " + ctdY + ")"} filter="url(#mvGlow)"><circle r="9" fill="#E6A94F" stroke="#FFD58B"/><rect x="-6" y="-12" width="12" height="3" rx="1.5" fill="#CAD3D5"/></g>
         <text x="284" y={ctdY + 4} fill="#F2C477" fontSize="10">CTD {Math.round(ctdDepth)}m</text>
 
@@ -72,7 +81,7 @@ export default function MissionOverviewDashboard({ model }: {
         <g transform="translate(540 94)">
           <rect width="190" height="158" rx="10" fill="#06131C" stroke="#1B3A4A"/>
           <text x="14" y="21" fill="#7894A4" fontSize="10" letterSpacing="1.1">SCIENCE SYSTEMS</text>
-          <text x="14" y="50" fill="#F0C36D" fontSize="11" fontWeight="800">CTD {ctdStatus.toUpperCase()}</text><text x="176" y="50" textAnchor="end" fill="#B8C4CA" fontSize="10">{ctdTemp.toFixed(1)}°C · {Math.round(ctdTension)}N</text>
+          <text x="14" y="50" fill="#F0C36D" fontSize="11" fontWeight="800">CTD {CTD_PHASE_LABEL[ctdStatus] || ctdStatus.toUpperCase()}</text><text x="176" y="50" textAnchor="end" fill="#B8C4CA" fontSize="10">{ctdTemp.toFixed(1)}°C · {Math.round(ctdTension)}N</text>
           <line x1="14" y1="61" x2="176" y2="61" stroke="#18303C"/>
           <text x="14" y="85" fill="#68D7EC" fontSize="11" fontWeight="800">ROV {rovMode.toUpperCase()}</text><text x="176" y="85" textAnchor="end" fill="#B8C4CA" fontSize="10">tether {Math.round(rovTether)}N</text>
           <line x1="14" y1="96" x2="176" y2="96" stroke="#18303C"/>

@@ -8,11 +8,13 @@ function copy(source: Record<string, unknown>, name: string) {
         state.set(name, source[name]);
 }
 export function initialiseMissionOverview() {
-    init("ctdDepth", 120);
-    init("ctdStatus", "holding");
-    init("ctdTemperature", 12.1);
-    init("ctdSalinity", 35.1);
-    init("ctdOxygen", 5.8);
+    // Matches the simulator's resting state: the package is on deck before a cast,
+    // not parked indefinitely at 120 m.
+    init("ctdDepth", 3);
+    init("ctdStatus", "on-deck");
+    init("ctdTemperature", 18.4);
+    init("ctdSalinity", 35.0);
+    init("ctdOxygen", 6.3);
     init("ctdTension", 220);
     init("rovDepth", 310);
     init("rovMode", "holding");

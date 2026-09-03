@@ -31,8 +31,12 @@ export function projectCtdState() {
         state.set("tension", tension);
     if (!isNaN(targetDepth))
         state.set("targetDepth", targetDepth);
+    // `status` is the wire's phase, not a boolean dressed up as one: on-deck and
+    // at-depth are both stationary but offer different next actions.
     state.set("status", mode);
     state.set("winchOn", winchOn);
+    if (state.get("interlockAt") === undefined)
+        state.set("interlockAt", 0);
     events.emit("vessel/summary/ctd", {
         ctdDepth: isNaN(depth) ? 0 : depth,
         ctdStatus: mode,
@@ -58,21 +62,22 @@ export async function commandCtdWinch(mode: string, targetDepth: number) {
     }
     if (Boolean(state.get("commandPending")))
         return;
-    const currentMode = String(winch.state && winch.state.mode || "holding");
-    if ((currentMode === "deploying" || currentMode === "recovering") && mode !== "hold") {
-        setAction("Winch already moving · hold before changing direction");
-        return;
-    }
-    state.set("commandPending", true);
+    // A moving winch is not a reason to refuse a valid command. Reversing direction
+    // mid-cast is a normal — sometimes urgent — operator action, and requiring a
+    // Hold first is what made Hold look like a mandatory intermediate step.
     const options = mode === "deploy"
-        ? { tier: "observed", deviceId: sonde.id, condition: { field: "depth", op: "gte", value: targetDepth - 5 }, timeoutMs: 8000 }
+        ? { tier: "observed", deviceId: sonde.id, condition: { field: "depth", op: "gte", value: targetDepth - 5 }, timeoutMs: 9000 }
         : mode === "recover"
-            ? { tier: "observed", deviceId: sonde.id, condition: { field: "depth", op: "lte", value: targetDepth + 5 }, timeoutMs: 8000 }
-            : { tier: "observed", deviceId: winch.id, condition: { field: "mode", op: "eq", value: "holding" }, timeoutMs: 5000 };
+            ? { tier: "observed", deviceId: sonde.id, condition: { field: "depth", op: "lte", value: targetDepth + 5 }, timeoutMs: 9000 }
+            // A hold is proven by the package stopping, read off the sonde, not by
+            // the winch reporting its own mode back.
+            : { tier: "observed", deviceId: sonde.id, condition: { field: "verticalSpeed", op: "eq", value: 0 }, timeoutMs: 5000 };
+    state.set("commandPending", true);
+    const reversing = String(winch.state && winch.state.mode || "on-deck");
     setAction(mode === "deploy"
-        ? "Deploying CTD to " + targetDepth + " m"
+        ? (reversing === "recovering" ? "Reversing winch · deploying to " + targetDepth + " m" : "Deploying CTD to " + targetDepth + " m")
         : mode === "recover"
-            ? "Recovering CTD to deck"
+            ? (reversing === "deploying" ? "Reversing winch · recovering to deck" : "Recovering CTD to deck")
             : "Holding CTD at current depth");
     const result = await devices.action(winch.id, "command", { payload: { mode, targetDepth } }, options);
     state.set("commandPending", false);
@@ -95,16 +100,23 @@ export async function protectCtdTension() {
     const winch = byTopic("switch/vessel/ctd-winch/state");
     if (!winch || !Boolean(winch.state && winch.state.on))
         return;
+    const sonde = byTopic("sensor/ctd/sonde");
+    if (!sonde)
+        return;
     state.set("tensionProtectionActive", true);
     setAction("Cable tension high · arresting winch motion");
     const result = await devices.action(winch.id, "command", { payload: { mode: "hold", targetDepth: Number(state.get("depth") || 0) } }, {
         tier: "observed",
-        deviceId: winch.id,
-        condition: { field: "mode", op: "eq", value: "holding" },
+        deviceId: sonde.id,
+        condition: { field: "verticalSpeed", op: "eq", value: 0 },
         timeoutMs: 5000,
     });
     state.set("tensionProtectionActive", false);
     if (result.success) {
+        // Recorded so the pane can say plainly that Aeolus did this, not the
+        // operator: an automatic action the operator cannot account for is worse
+        // than no automation at all.
+        state.set("interlockAt", Date.now());
         setAction("Winch stopped on high-tension interlock");
         events.emit("vessel/ctd/tension-protection", { lifecycleState: result.lifecycleState });
     }
@@ -119,7 +131,7 @@ export async function handleCtdOperatorEvent(event: string | undefined) {
     else if (event === "hold-ctd")
         await commandCtdWinch("hold", Number(state.get("depth") || 120));
     else if (event === "recover-ctd")
-        await commandCtdWinch("recover", 5);
+        await commandCtdWinch("recover", 3);
     else if (event === "simulate-snag") {
         events.emit("vessel/sim/ctd-snag", {});
         setAction("Injecting cable snag into simulator");
@@ -127,6 +139,7 @@ export async function handleCtdOperatorEvent(event: string | undefined) {
     else if (event === "reset-ctd") {
         events.emit("vessel/sim/ctd-reset", {});
         state.set("tensionProtectionActive", false);
-        setAction("Resetting CTD cast to nominal hold");
+        state.set("interlockAt", 0);
+        setAction("Resetting CTD to on deck");
     }
 }

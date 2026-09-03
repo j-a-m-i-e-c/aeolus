@@ -49,6 +49,29 @@ describe("Research Vessel demo architecture", () => {
     expect(automation.uiSource).toContain("DEMO SCENARIO");
   });
 
+  // On deck and at depth are both "the winch is stopped", but the valid next action
+  // differs. Collapsing them into one "holding" state is what made Hold look like a
+  // mandatory step between deploying and recovering.
+  it("treats the CTD wire as a phase, not a boolean", () => {
+    for (const phase of ["on-deck", "deploying", "at-depth", "recovering", "holding"]) {
+      expect(ctdAutomation.uiSource, `UI never distinguishes the ${phase} phase`).toContain(phase);
+    }
+    expect(ctdAutomation.uiSource).toContain("Resume descent");
+    expect(ctdAutomation.uiSource).toContain("Pause winch");
+  });
+
+  it("never makes an operator press Hold before reversing the CTD winch", () => {
+    expect(ctdAutomation.scriptSource).not.toContain("hold before changing direction");
+    // A hold is proven by the package stopping, read off the sonde, rather than by
+    // the winch reporting its own mode back.
+    expect(ctdAutomation.scriptSource).toContain('field: "verticalSpeed"');
+  });
+
+  it("says plainly when Aeolus arrested the winch on its own", () => {
+    expect(ctdAutomation.scriptSource).toContain('state.set("interlockAt"');
+    expect(ctdAutomation.uiSource).toMatch(/Aeolus arrested the winch/);
+  });
+
   it("the hero receives summaries only over Automation Events", () => {
     for (const automation of commandAutomations) expect(automation.scriptSource).toContain('events.emit("vessel/summary/');
     expect(missionOverviewAutomation.triggerTopic).toBe("aeolus/events/+/vessel/summary/#");
