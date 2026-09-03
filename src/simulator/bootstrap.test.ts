@@ -195,6 +195,6 @@ describe("every demo world's actuator specs are shaped for the bootstrap", () =>
     // Keeps this guard honest: if a new world is wired into demo/seed/seed.mjs but not
     // added here, the count drifts and this fails.
     const declared = WORLD_ACTUATOR_SPECS.reduce((n, [, specs]) => n + specs.length, 0);
-    expect(declared).toBe(23);
+    expect(declared).toBe(24);
   });
 });

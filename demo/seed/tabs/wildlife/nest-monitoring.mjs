@@ -5,7 +5,8 @@ export const nestMonitoringAutomation = {
   "triggerTopic": "sensor/wildlife/nest",
   "demoAccess": {
     "fireEvents": [
-      "acknowledge-alert",
+      "toggle-auto-cooling",
+      "stop-cooling",
       "simulate-visit",
       "simulate-heat",
       "reset-nest"

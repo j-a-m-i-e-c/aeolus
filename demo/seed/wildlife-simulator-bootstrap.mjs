@@ -4,4 +4,5 @@
 // so only the state topic and the desired profile are declared here.
 export const WILDLIFE_ACTUATOR_SPECS = [
   { stateTopic: "switch/wildlife/deterrent/state", profile: { acknowledgement: { supported: true }, qos: 1 } },
+  { stateTopic: "switch/wildlife/den-fan/state", profile: { acknowledgement: { supported: true }, qos: 1 } },
 ];

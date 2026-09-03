@@ -15,6 +15,7 @@ export const WILDLIFE_DEVICE_KEYS = {
   detection: "wildlife-detection",
   deterrent: "wildlife-deterrent",
   nest: "wildlife-nest",
+  denFan: "wildlife-den-fan",
   power: "wildlife-power",
 } as const;
 
@@ -23,11 +24,13 @@ export const WILDLIFE_STATE_TOPICS = {
   detection: "sensor/wildlife/detection",
   deterrent: "switch/wildlife/deterrent/state",
   nest: "sensor/wildlife/nest",
+  denFan: "switch/wildlife/den-fan/state",
   power: "sensor/wildlife/site-power",
 } as const;
 
 export const WILDLIFE_COMMAND_TOPICS = {
   deterrent: "switch/wildlife/deterrent/set",
+  denFan: "switch/wildlife/den-fan/set",
 } as const;
 
 export const WILDLIFE_STIMULUS = {
@@ -48,6 +51,20 @@ const DETERRENT_RPM_GROUP = "deterrent-rpm";
 const DETERRENT_TARGET_RPM = 2400;
 /** Tachometer reading that counts as the fan being up to speed. */
 const DETERRENT_VERIFIED_RPM = 2000;
+/** Transition group for the den-box cooling fan spinning up and down. */
+const DEN_FAN_RPM_GROUP = "den-fan-rpm";
+/** Transition group for the den box's own temperature moving. */
+const DEN_TEMP_GROUP = "den-temp";
+/** Impeller speed the den fan is asked for, in rpm. */
+const DEN_FAN_TARGET_RPM = 1800;
+/** Tachometer reading at which the fan is actually moving air. */
+const DEN_FAN_VERIFIED_RPM = 1500;
+/** Where an unmitigated hot afternoon takes the den box, in °C. */
+const DEN_HOT_TEMP = 38.4;
+/** The den box's resting temperature, in °C. */
+const DEN_NORMAL_TEMP = 31.8;
+/** At or above this the box is a welfare problem for the joeys, in °C. */
+const DEN_ALERT_TEMP = 37.5;
 
 const INITIAL = {
   camera: { online: true, model: "TrailCam-01", accelerator: "Hailo-8L", fps: 30, inferenceMs: 17, framesToday: 18432 },
@@ -56,7 +73,10 @@ const INITIAL = {
   // tachometer reads. Keeping them apart is what lets a command distinguish
   // ACKNOWLEDGED from OBSERVED instead of trusting the actuator's own flag.
   deterrent: { active: false, mode: "light-sound", target: "none", pulseMs: 0, activationsToday: 3, commandRpm: 0, measuredRpm: 0 },
-  nest: { temp: 31.8, humidity: 61, occupied: true, adultPresent: false, adultGliders: 2, joeys: 2, visitsToday: 7, thermalState: "normal" },
+  nest: { temp: DEN_NORMAL_TEMP, humidity: 61, occupied: true, adultPresent: false, adultGliders: 2, joeys: 2, visitsToday: 7, thermalState: "normal", heatLoad: false },
+  // The den fan is a second ACK-capable actuator, and the same command/measured
+  // split applies: a controller that accepted 1800 rpm is not a fan moving air.
+  denFan: { active: false, commandRpm: 0, measuredRpm: 0, runsToday: 4, mode: "thermostat" },
   power: { solarW: 41, battery: 87, nodeW: 8.4, status: "solar" },
 };
 
@@ -80,10 +100,13 @@ class WildlifeEnvironment {
     // the state this reset is restoring.
     this.controller(WILDLIFE_DEVICE_KEYS.detection)?.cancelTransitions(ANIMAL_MOVE_GROUP);
     this.controller(WILDLIFE_DEVICE_KEYS.deterrent)?.cancelTransitions(DETERRENT_RPM_GROUP);
+    this.controller(WILDLIFE_DEVICE_KEYS.nest)?.cancelTransitions(DEN_TEMP_GROUP);
+    this.controller(WILDLIFE_DEVICE_KEYS.denFan)?.cancelTransitions(DEN_FAN_RPM_GROUP);
     this.controller(WILDLIFE_DEVICE_KEYS.camera)?.update({ ...INITIAL.camera }, { forcePublish: true });
     this.controller(WILDLIFE_DEVICE_KEYS.detection)?.update({ ...INITIAL.detection, ts: Date.now() - 16000 }, { forcePublish: true });
     this.controller(WILDLIFE_DEVICE_KEYS.deterrent)?.update({ ...INITIAL.deterrent }, { forcePublish: true });
     this.controller(WILDLIFE_DEVICE_KEYS.nest)?.update({ ...INITIAL.nest }, { forcePublish: true });
+    this.controller(WILDLIFE_DEVICE_KEYS.denFan)?.update({ ...INITIAL.denFan }, { forcePublish: true });
     this.controller(WILDLIFE_DEVICE_KEYS.power)?.update({ ...INITIAL.power }, { forcePublish: true });
   }
 
@@ -224,17 +247,111 @@ class WildlifeEnvironment {
 
   nestVisit(): void {
     const nest = this.controller(WILDLIFE_DEVICE_KEYS.nest); if (!nest || Boolean(nest.read().adultPresent)) return;
-    nest.update({ adultPresent: true, occupied: true, visitsToday: Number(nest.read().visitsToday ?? 11) + 1, temp: Math.min(34, Number(nest.read().temp ?? 31.8) + 0.4) }, { forcePublish: true });
+    nest.update({ adultPresent: true, occupied: true, visitsToday: Number(nest.read().visitsToday ?? 11) + 1, temp: Math.min(34, Number(nest.read().temp ?? DEN_NORMAL_TEMP) + 0.4) }, { forcePublish: true });
     this.later(2400, () => nest.update({ adultPresent: false }, { forcePublish: true }));
   }
 
-  nestHeat(): void {
-    const nest = this.controller(WILDLIFE_DEVICE_KEYS.nest); if (!nest) return;
-    nest.update({ temp: 35.6, humidity: 50, thermalState: "watch" }, { forcePublish: true });
-    this.later(650, () => nest.update({ temp: 38.2, humidity: 45, thermalState: "high" }, { forcePublish: true }));
+  /**
+   * A hot afternoon on the den box. The heat load stays on until the fan has held
+   * the box in range long enough for the afternoon to pass, so stopping the fan
+   * early has a visible consequence instead of freezing the reading.
+   */
+  nestHeat(): void { this.denWarms(2600); }
+
+  /** Drive the den box up towards its unmitigated hot-afternoon temperature. */
+  private denWarms(durationMs: number): void {
+    const nest = this.controller(WILDLIFE_DEVICE_KEYS.nest);
+    if (!nest) return;
+    const from = Number(nest.read().temp ?? DEN_NORMAL_TEMP);
+    nest.update({ heatLoad: true }, { forcePublish: true });
+    nest.transition({
+      durationMs,
+      steps: 12,
+      group: DEN_TEMP_GROUP,
+      frame: (progress) => {
+        const temp = Math.round((from + (DEN_HOT_TEMP - from) * progress) * 10) / 10;
+        return {
+          temp,
+          humidity: Math.round(61 - 16 * progress),
+          thermalState: temp >= DEN_ALERT_TEMP ? "high" : "watch",
+        };
+      },
+    });
   }
 
-  nestReset(): void { this.controller(WILDLIFE_DEVICE_KEYS.nest)?.update({ ...INITIAL.nest }, { forcePublish: true }); }
+  /** Air is moving, so the box sheds heat back towards its resting temperature. */
+  private denCools(durationMs: number): void {
+    const nest = this.controller(WILDLIFE_DEVICE_KEYS.nest);
+    if (!nest) return;
+    const from = Number(nest.read().temp ?? DEN_HOT_TEMP);
+    nest.transition({
+      durationMs,
+      steps: 14,
+      group: DEN_TEMP_GROUP,
+      frame: (progress) => {
+        const temp = Math.round((from + (DEN_NORMAL_TEMP - from) * progress) * 10) / 10;
+        return {
+          temp,
+          humidity: Math.round(45 + 16 * progress),
+          thermalState: temp >= DEN_ALERT_TEMP ? "high" : temp >= 34 ? "cooling" : "normal",
+        };
+      },
+      onSettled: (completed) => {
+        // By the time the box is back in range the hot part of the afternoon has
+        // passed, so a later stop does not immediately undo the recovery.
+        if (completed) nest.update({ heatLoad: false }, { forcePublish: true });
+      },
+    });
+  }
+
+  setDenFan(controller: SimulatedStateController, active: boolean, commandRpm: number): void {
+    if (!active) {
+      const from = Number(controller.read().measuredRpm ?? 0);
+      controller.update({ active: false, commandRpm: 0 }, { forcePublish: true });
+      controller.transition({
+        durationMs: 800,
+        steps: 6,
+        group: DEN_FAN_RPM_GROUP,
+        frame: (progress) => ({ measuredRpm: Math.round(from * (1 - progress)) }),
+        onSettled: (completed) => {
+          const nest = this.controller(WILDLIFE_DEVICE_KEYS.nest);
+          if (completed && nest && Boolean(nest.read().heatLoad)) this.denWarms(5200);
+        },
+      });
+      return;
+    }
+
+    controller.update({
+      active: true,
+      commandRpm,
+      measuredRpm: 0,
+      runsToday: Number(controller.read().runsToday ?? 4) + 1,
+    }, { forcePublish: true });
+
+    let movingAir = false;
+    controller.transition({
+      durationMs: 1200,
+      steps: 8,
+      group: DEN_FAN_RPM_GROUP,
+      frame: (progress) => {
+        const measuredRpm = Math.round(commandRpm * (0.05 + 0.95 * progress));
+        // The box only starts losing heat once the impeller is genuinely turning.
+        // Accepting the command cools nothing.
+        if (!movingAir && measuredRpm >= DEN_FAN_VERIFIED_RPM) {
+          movingAir = true;
+          this.denCools(9000);
+        }
+        return { measuredRpm };
+      },
+    });
+  }
+
+  nestReset(): void {
+    this.controller(WILDLIFE_DEVICE_KEYS.nest)?.cancelTransitions(DEN_TEMP_GROUP);
+    this.controller(WILDLIFE_DEVICE_KEYS.denFan)?.cancelTransitions(DEN_FAN_RPM_GROUP);
+    this.controller(WILDLIFE_DEVICE_KEYS.nest)?.update({ ...INITIAL.nest }, { forcePublish: true });
+    this.controller(WILDLIFE_DEVICE_KEYS.denFan)?.update({ ...INITIAL.denFan }, { forcePublish: true });
+  }
   dispose(): void { this.clearTimers(); }
 }
 
@@ -271,6 +388,23 @@ export function createWildlifeScenario(): SimulatorScenario {
     },
   );
 
+  const denFan = commandDefinition(
+    WILDLIFE_DEVICE_KEYS.denFan, "Den Box Cooling Fan", WILDLIFE_STATE_TOPICS.denFan, WILDLIFE_COMMAND_TOPICS.denFan, { ...INITIAL.denFan }, env,
+    (ctx, command) => {
+      if (typeof command.params.active !== "boolean") return { accepted: false, error: "den fan requires boolean active" };
+      const active = command.params.active;
+      const requested = Number(command.params.rpm);
+      const commandRpm = Number.isFinite(requested) && requested > 0 ? requested : DEN_FAN_TARGET_RPM;
+      // A fan is not a thermostat: it can be asked for a speed it cannot reach, and
+      // refusing an impossible target is more honest than pretending to hold it.
+      if (active && commandRpm > DEN_FAN_TARGET_RPM) {
+        return { accepted: false, error: `den fan cannot exceed ${DEN_FAN_TARGET_RPM} rpm` };
+      }
+      env.setDenFan(ctx.state, active, commandRpm);
+      return { accepted: true };
+    },
+  );
+
   return {
     key: WILDLIFE_SCENARIO_KEY,
     devices: [
@@ -278,6 +412,7 @@ export function createWildlifeScenario(): SimulatorScenario {
       sensorDefinition(WILDLIFE_DEVICE_KEYS.detection, "Wildlife Classifier", WILDLIFE_STATE_TOPICS.detection, { ...INITIAL.detection, ts: Date.now() - 16000 }, env),
       deterrent,
       sensorDefinition(WILDLIFE_DEVICE_KEYS.nest, "Sugar Glider Den Monitor", WILDLIFE_STATE_TOPICS.nest, { ...INITIAL.nest }, env),
+      denFan,
       sensorDefinition(WILDLIFE_DEVICE_KEYS.power, "Wildlife Edge Power", WILDLIFE_STATE_TOPICS.power, { ...INITIAL.power }, env),
     ],
     stimuli: {

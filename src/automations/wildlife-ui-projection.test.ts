@@ -11,7 +11,28 @@ const rules=[wildlifeDetectionAutomation,predatorResponseAutomation,nestMonitori
 describe("Wildlife showcase architecture",()=>{
  it("has three first-class automations and no direct device reads in UIs",()=>{expect(rules).toHaveLength(3);for(const rule of rules)expect(rule.uiSource).not.toContain("aeolus.devices");});
  it("routes classification to Predator Response over Automation Events",()=>{expect(wildlifeDetectionAutomation.scriptSource).toContain('events.emit("wildlife/detection/classified"');expect(predatorResponseAutomation.triggerTopic).toBe("aeolus/events/+/wildlife/detection/classified");});
- it("only Predator Response owns the physical deterrent",()=>{expect(predatorResponseAutomation.scriptSource).toContain("devices.action(");expect(wildlifeDetectionAutomation.scriptSource).not.toContain("devices.action(");expect(nestMonitoringAutomation.scriptSource).not.toContain("devices.action(");});
+ // Each actuator has exactly one owner. Detection observes and classifies only;
+ // the deterrent belongs to Predator Response and the den fan to Sugar Glider Den,
+ // so no two automations can fight over the same physical thing.
+ it("gives every actuator exactly one owning automation",()=>{
+   expect(wildlifeDetectionAutomation.scriptSource).not.toContain("devices.action(");
+   expect(predatorResponseAutomation.scriptSource).toContain("switch/wildlife/deterrent/state");
+   expect(predatorResponseAutomation.scriptSource).not.toContain("switch/wildlife/den-fan/state");
+   expect(nestMonitoringAutomation.scriptSource).toContain("switch/wildlife/den-fan/state");
+   expect(nestMonitoringAutomation.scriptSource).not.toContain("switch/wildlife/deterrent/state");
+ });
+
+ // The den alert used to be something an operator dismissed, which changed nothing
+ // physical. It is now a cooling request Aeolus verifies against a tachometer.
+ it("answers a den thermal alert with verified cooling rather than an acknowledgement",()=>{
+   const script=String(nestMonitoringAutomation.scriptSource);
+   expect(script).toContain("devices.action(");
+   expect(script).toContain('tier: "observed"');
+   expect(script).toContain('field: "measuredRpm"');
+   expect(script).not.toContain("acknowledge");
+   expect(nestMonitoringAutomation.uiSource).not.toContain("acknowledge");
+   expect(nestMonitoringAutomation.demoAccess?.fireEvents).toContain("stop-cooling");
+ });
  it("labels simulator injection controls as demo scenarios",()=>{expect(wildlifeDetectionAutomation.uiSource).toContain("DEMO SCENARIO");expect(nestMonitoringAutomation.uiSource).toContain("DEMO SCENARIO");expect(predatorResponseAutomation.uiSource).not.toContain("DEMO SCENARIO");});
 
  // Every value a UI renders must come from its own automation's projection, and

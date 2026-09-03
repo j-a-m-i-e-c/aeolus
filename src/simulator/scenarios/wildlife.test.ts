@@ -21,12 +21,12 @@ function logger(): Logger {
  * stub, so timed transitions, delay clamping and publish suppression behave the
  * way they do at runtime.
  */
-function setup() {
+function setup(maxDelayMs = 0) {
   const published: Array<{ topic: string; payload: string }> = [];
   const registry = new SimulatorDeviceRegistry({
     publish: (topic, payload) => published.push({ topic, payload }),
     logger: logger(),
-    maxDelayMs: 0,
+    maxDelayMs,
   });
   const faults = new FaultController({ maxDelayMs: 0, logger: logger() });
   const scenario = createWildlifeScenario();
@@ -62,25 +62,33 @@ function setup() {
     receivedAt: 1,
   });
 
-  const sendDeterrent = async (params: Record<string, unknown>) => {
-    const device = registry.getByCommandTopic(WILDLIFE_COMMAND_TOPICS.deterrent)!;
-    return await device.model.onCommand!(command(WILDLIFE_COMMAND_TOPICS.deterrent, params));
+  const send = async (topic: string, params: Record<string, unknown>) => {
+    const device = registry.getByCommandTopic(topic)!;
+    return await device.model.onCommand!(command(topic, params));
   };
+  const sendDeterrent = async (params: Record<string, unknown>) => await send(WILDLIFE_COMMAND_TOPICS.deterrent, params);
+  const sendDenFan = async (params: Record<string, unknown>) => await send(WILDLIFE_COMMAND_TOPICS.denFan, params);
 
-  return { registry, scenario, fire, state, last, published, sendDeterrent };
+  return { registry, scenario, fire, state, last, published, sendDeterrent, sendDenFan };
 }
 
 describe("wildlife simulator scenario", () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
-  it("declares one ACK-capable deterrent actuator", () => {
+  it("declares exactly two ACK-capable actuators", () => {
     const { scenario } = setup();
-    const actuator = scenario.devices.find((device) => device.key === WILDLIFE_DEVICE_KEYS.deterrent)!;
-    expect(actuator.commandTopic).toBe(WILDLIFE_COMMAND_TOPICS.deterrent);
-    expect(actuator.commandProfile?.acknowledgement.supported).toBe(true);
-    const others = scenario.devices.filter((device) => device.commandTopic !== undefined);
-    expect(others).toHaveLength(1);
+    const actuators = scenario.devices.filter((device) => device.commandTopic !== undefined);
+    expect(actuators.map((device) => device.key).sort()).toEqual(
+      [WILDLIFE_DEVICE_KEYS.denFan, WILDLIFE_DEVICE_KEYS.deterrent].sort(),
+    );
+    for (const actuator of actuators) {
+      expect(actuator.commandProfile?.acknowledgement.supported).toBe(true);
+    }
+    const deterrent = actuators.find((device) => device.key === WILDLIFE_DEVICE_KEYS.deterrent)!;
+    expect(deterrent.commandTopic).toBe(WILDLIFE_COMMAND_TOPICS.deterrent);
+    const fan = actuators.find((device) => device.key === WILDLIFE_DEVICE_KEYS.denFan)!;
+    expect(fan.commandTopic).toBe(WILDLIFE_COMMAND_TOPICS.denFan);
   });
 
   it("injects a predator that walks into frame as physical classifier telemetry", async () => {
@@ -218,14 +226,102 @@ describe("wildlife simulator scenario", () => {
     expect(state(WILDLIFE_DEVICE_KEYS.nest).adultPresent).toBe(false);
   });
 
-  it("escalates den temperature through a heat event and recovers on reset", async () => {
+  it("climbs the den box through a hot afternoon and recovers on reset", async () => {
     const { fire, state } = setup();
     await fire(WILDLIFE_STIMULUS.heatWave);
-    expect(state(WILDLIFE_DEVICE_KEYS.nest).thermalState).toBe("watch");
-    vi.advanceTimersByTime(700);
-    expect(state(WILDLIFE_DEVICE_KEYS.nest).thermalState).toBe("high");
+    // The heat load is on immediately; the temperature has to travel.
+    expect(state(WILDLIFE_DEVICE_KEYS.nest).heatLoad).toBe(true);
+    expect(Number(state(WILDLIFE_DEVICE_KEYS.nest).temp)).toBeCloseTo(31.8, 5);
+
+    vi.advanceTimersByTime(1500);
+    const hot = state(WILDLIFE_DEVICE_KEYS.nest);
+    expect(hot.thermalState).toBe("high");
+    expect(Number(hot.temp)).toBeGreaterThanOrEqual(37.5);
+    expect(Number(hot.humidity)).toBeLessThan(61);
 
     await fire(WILDLIFE_STIMULUS.nestReset);
-    expect(state(WILDLIFE_DEVICE_KEYS.nest).thermalState).toBe("normal");
+    const reset = state(WILDLIFE_DEVICE_KEYS.nest);
+    expect(reset.thermalState).toBe("normal");
+    expect(reset.heatLoad).toBe(false);
+    expect(Number(reset.temp)).toBeCloseTo(31.8, 5);
+  });
+
+  it("acknowledges a cooling command before the impeller is moving air", async () => {
+    const { state, sendDenFan } = setup();
+    const result = await sendDenFan({ active: true, rpm: 1800 });
+
+    expect(result.accepted).toBe(true);
+    const accepted = state(WILDLIFE_DEVICE_KEYS.denFan);
+    expect(accepted.active).toBe(true);
+    expect(accepted.commandRpm).toBe(1800);
+    expect(accepted.measuredRpm).toBe(0);
+  });
+
+  it("refuses a fan speed the hardware cannot reach instead of pretending to hold it", async () => {
+    const { state, sendDenFan } = setup();
+    const result = await sendDenFan({ active: true, rpm: 4000 });
+    expect(result.accepted).toBe(false);
+    const fan = state(WILDLIFE_DEVICE_KEYS.denFan);
+    expect(fan.active).toBe(false);
+    expect(fan.commandRpm).toBe(0);
+  });
+
+  it("cools the den box once the tachometer proves the fan is moving air", async () => {
+    const { fire, state, sendDenFan } = setup();
+    await fire(WILDLIFE_STIMULUS.heatWave);
+    vi.advanceTimersByTime(1500);
+    const hotAt = Number(state(WILDLIFE_DEVICE_KEYS.nest).temp);
+    expect(hotAt).toBeGreaterThanOrEqual(37.5);
+
+    await sendDenFan({ active: true, rpm: 1800 });
+    // Accepting the command moves no air, so the box is exactly as hot as it was.
+    expect(Number(state(WILDLIFE_DEVICE_KEYS.nest).temp)).toBeCloseTo(hotAt, 5);
+
+    vi.advanceTimersByTime(12000);
+    const cooled = state(WILDLIFE_DEVICE_KEYS.nest);
+    expect(Number(state(WILDLIFE_DEVICE_KEYS.denFan).measuredRpm)).toBeGreaterThanOrEqual(1500);
+    expect(Number(cooled.temp)).toBeLessThan(34);
+    expect(cooled.thermalState).toBe("normal");
+    // The hot part of the afternoon has passed, so the box stays in range.
+    expect(cooled.heatLoad).toBe(false);
+  });
+
+  it("lets the box heat up again when cooling is stopped while the afternoon is still hot", async () => {
+    // Steps take real time here so the recovery can be interrupted part-way. With
+    // maxDelayMs 0 every transition collapses into a single tick and there is no
+    // mid-transition state to observe.
+    const { fire, state, sendDenFan } = setup(1000);
+    await fire(WILDLIFE_STIMULUS.heatWave);
+    vi.advanceTimersByTime(3000);
+    expect(Number(state(WILDLIFE_DEVICE_KEYS.nest).temp)).toBeGreaterThanOrEqual(37.5);
+
+    await sendDenFan({ active: true, rpm: 1800 });
+    vi.advanceTimersByTime(2800);
+    const partway = Number(state(WILDLIFE_DEVICE_KEYS.nest).temp);
+    expect(partway).toBeLessThan(38.4);
+    expect(state(WILDLIFE_DEVICE_KEYS.nest).heatLoad).toBe(true);
+
+    await sendDenFan({ active: false });
+    vi.advanceTimersByTime(8000);
+    const rebound = state(WILDLIFE_DEVICE_KEYS.nest);
+    expect(state(WILDLIFE_DEVICE_KEYS.denFan).measuredRpm).toBe(0);
+    expect(Number(rebound.temp)).toBeGreaterThan(partway);
+    expect(rebound.thermalState).toBe("high");
+  });
+
+  it("stands the fan down and cancels the temperature transition on reset", async () => {
+    const { fire, state, sendDenFan } = setup();
+    await fire(WILDLIFE_STIMULUS.heatWave);
+    await sendDenFan({ active: true, rpm: 1800 });
+    await fire(WILDLIFE_STIMULUS.nestReset);
+
+    expect(state(WILDLIFE_DEVICE_KEYS.denFan).active).toBe(false);
+    expect(state(WILDLIFE_DEVICE_KEYS.denFan).measuredRpm).toBe(0);
+
+    vi.advanceTimersByTime(15000);
+    const settled = state(WILDLIFE_DEVICE_KEYS.nest);
+    expect(Number(settled.temp)).toBeCloseTo(31.8, 5);
+    expect(settled.thermalState).toBe("normal");
+    expect(state(WILDLIFE_DEVICE_KEYS.denFan).measuredRpm).toBe(0);
   });
 });
