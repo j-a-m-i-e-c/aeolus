@@ -5,6 +5,7 @@ import {
   handleGameMasterAction,
   initialiseGameSession,
   projectPuzzleStatus,
+  projectRoomLook,
   reconcileExitForCompletion,
 } from "./game-master";
 
@@ -16,9 +17,14 @@ export default async function run(context: EventContext) {
     : {};
 
   initialiseGameSession();
+  // Refresh what the room is physically doing before and after acting, so the
+  // console reports the controller's observed scene rather than the last thing this
+  // automation asked for.
+  projectRoomLook();
 
   if (topic.startsWith("ui/")) {
     await handleGameMasterAction(event, payload);
+    projectRoomLook();
     return;
   }
 
@@ -26,4 +32,5 @@ export default async function run(context: EventContext) {
 
   const complete = projectPuzzleStatus(payload);
   await reconcileExitForCompletion(complete);
+  projectRoomLook();
 }

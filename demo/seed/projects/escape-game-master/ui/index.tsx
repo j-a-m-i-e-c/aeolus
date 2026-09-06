@@ -23,6 +23,9 @@ export default function GameMaster(aeolus: CustomComponentProps) {
     intercomTx: aeolus.read("intercomTx"),
     intercomPending: aeolus.read("intercomPending"),
     requestedLook: aeolus.read("requestedLook"),
+    appliedLook: aeolus.read("appliedLook"),
+    lookRequestedAt: aeolus.read("lookRequestedAt"),
+    roomHaze: aeolus.read("roomHaze"),
     lastAction: aeolus.read("lastAction"),
   };
 

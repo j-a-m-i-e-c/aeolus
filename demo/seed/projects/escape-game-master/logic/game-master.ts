@@ -25,6 +25,23 @@ export function initialiseGameSession() {
     state.set("requestedLook", "puzzle");
     state.set("intercomTx", false);
     state.set("intercomRoom", "Library");
+    state.set("lookRequestedAt", 0);
+}
+/**
+ * Read the room controller's observed scene.
+ *
+ * Game Master *requests* a look; Room Systems owns and commands the controller. This
+ * only reads it, which is what lets the console tell a request it has sent apart
+ * from the scene the room is physically in — without either automation's UI knowing
+ * the other exists. The request goes out as a domain event and the confirmation
+ * comes back as physical device state, which is the same evidence a visitor sees on
+ * the Room Systems pane.
+ */
+export function projectRoomLook() {
+    const fx = byTopic("switch/escape/fx/state");
+    const applied = String(fx && fx.state && fx.state.scene || "");
+    state.set("appliedLook", applied || "puzzle");
+    state.set("roomHaze", Boolean(fx && fx.state && fx.state.smoke));
 }
 const HINTS: Record<string, string[]> = {
     Library: [
@@ -140,9 +157,13 @@ export async function handleGameMasterAction(event: string | undefined, payload:
         await sendHint(3);
     else if (event === "look-calm" || event === "look-puzzle" || event === "look-tension") {
         const look = String(event.split("-").pop());
+        // The request is recorded and published straight away. Whether the room is
+        // physically in that state is a separate question, answered by the
+        // controller's own telemetry rather than by this automation assuming it.
         state.set("requestedLook", look);
+        state.set("lookRequestedAt", Date.now());
         events.emit("escape/game/look-request", { scene: look });
-        setAction("Requested " + look + " room look");
+        setAction("Requested " + look + " room look · awaiting room systems");
     }
     else if (event === "talk-start")
         await setIntercom(true);
@@ -163,11 +184,13 @@ export async function reconcileExitForCompletion(complete: boolean) {
     if (complete && !Boolean(state.get("exitUnlocked"))) {
         await setExit(true);
         state.set("requestedLook", "victory");
+        state.set("lookRequestedAt", Date.now());
         events.emit("escape/game/completed", { scene: "victory", solved: 4 });
     }
     else if (!complete && Boolean(state.get("exitUnlocked"))) {
         await setExit(false);
         state.set("requestedLook", "puzzle");
+        state.set("lookRequestedAt", Date.now());
         events.emit("escape/game/look-request", { scene: "puzzle" });
     }
 }
