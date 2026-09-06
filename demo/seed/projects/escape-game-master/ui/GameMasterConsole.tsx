@@ -39,6 +39,12 @@ export default function GameMasterConsole({ model, actions }: {
     // A hint is delivered to a physical screen in the room, so the wait for that
     // to be confirmed is real and the buttons say so rather than going quietly inert.
     const hintVisual = control({ pending });
+    // Opening the mic is a request to the room's intercom, so the wait is real too.
+    // This button used to carry a bare `disabled` attribute: while the request was in
+    // flight it went inert but kept its colour, its pointer cursor and the label
+    // "HOLD TO TALK", so the only way to discover the wait was that pressing did
+    // nothing. The kit's pending state is what makes that wait visible.
+    const micVisual = control({ pending: intercomPending });
     // Requested is what this console asked for; applied is what the room controller
     // reports it is actually doing. The gap between them is Room Systems working, so
     // the plan shows the request immediately and only claims APPLIED once observed.
@@ -62,6 +68,6 @@ export default function GameMasterConsole({ model, actions }: {
       // Scene colour is kept because it is genuinely informative, but the request and
       // the physical state are separate facts, so they are marked separately.
       return <button key={scene} aria-pressed={requested} onClick={() => roomLook("look-" + scene)} style={{ flex: 1, padding: "9px 3px", borderRadius: 7, border: (requested ? "2px solid " : "1px solid ") + (requested ? s.stroke : s.stroke + "55"), background: requested ? s.stroke + "2E" : s.stroke + "14", color: requested ? s.text : s.stroke, fontSize: 11, fontWeight: requested ? 800 : 600, cursor: "pointer" }}>{s.label}{live ? " ●" : requested ? " ○" : ""}</button>; })}</div><div style={{ fontSize: 10, color: "#7C7280", marginTop: 6 }}>● in the room now · ○ requested, Room Systems applying</div></div>
-    <div style={{ border: "1px solid " + (talking ? "#8E3E55" : "#49394F"), borderRadius: 10, padding: 9, background: talking ? "#1B0E13" : "#0E0C10" }}><div style={{ fontSize: 11, color: "#A097A5", letterSpacing: ".08em", marginBottom: 7 }}>GAME MASTER MIC · {currentRoom.toUpperCase()}</div><button disabled={intercomPending} onPointerDown={talkStart} onPointerUp={talkStop} onPointerLeave={talkStop} onPointerCancel={talkStop} style={{ width: "100%", padding: "10px", borderRadius: 7, border: "1px solid " + (talking ? "#EC6A85" : "#67516D"), background: talking ? "#451824" : "#18121B", color: talking ? "#FFB0C0" : "#D0BCD5", fontSize: 12, fontWeight: 800, cursor: "pointer", userSelect: "none" }}>{talking ? "● LIVE · RELEASE TO STOP" : "HOLD TO TALK"}</button></div></div>
+    <div style={{ border: "1px solid " + (talking ? "#8E3E55" : "#49394F"), borderRadius: 10, padding: 9, background: talking ? "#1B0E13" : "#0E0C10" }}><div style={{ fontSize: 11, color: "#A097A5", letterSpacing: ".08em", marginBottom: 7 }}>GAME MASTER MIC · {currentRoom.toUpperCase()}</div><button {...micVisual} aria-pressed={talking} onPointerDown={talkStart} onPointerUp={talkStop} onPointerLeave={talkStop} onPointerCancel={talkStop} style={{ ...micVisual.style, width: "100%", padding: "10px", fontSize: 12, fontWeight: 800, userSelect: "none", ...(talking ? { border: "1px solid #EC6A85", background: "#451824", color: "#FFB0C0" } : {}) }}>{intercomPending ? "OPENING MIC…" : talking ? "● LIVE · RELEASE TO STOP" : "HOLD TO TALK"}</button></div></div>
     <div style={{ fontSize: 11, color: "#777079", marginTop: 7 }}>{last?.label ? String(last.label) : "Game session ready"}</div></div>;
 }
