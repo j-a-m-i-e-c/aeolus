@@ -26,6 +26,7 @@ export default function WaterManagement(aeolus: CustomComponentProps) {
     flowTotalLitres: aeolus.read("flowTotalLitres"),
     lastTransferLitres: aeolus.read("lastTransferLitres"),
     demoScenarioPending: aeolus.read("demoScenarioPending"),
+    lastCommand: aeolus.read("lastCommand"),
     lastAction: aeolus.read("lastAction"),
   };
 

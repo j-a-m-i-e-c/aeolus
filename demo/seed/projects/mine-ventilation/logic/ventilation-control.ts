@@ -45,6 +45,9 @@ export async function commandVentilation(mode: string, reason: string) {
         timeoutMs: 5000,
     });
     state.set("commandPending", false);
+    // Keep the proof, not just the verdict: every rung this command reached, with
+    // the evidence the runtime recorded for it.
+    state.set("lastCommand", devices.commandEvidence(result.commandId));
     if (!result.success) {
         setAction("Ventilation command not verified: " + String(result.error || result.lifecycleState || "unknown"));
     }

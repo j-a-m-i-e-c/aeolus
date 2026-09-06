@@ -1,6 +1,6 @@
 // vessel-ctd — visual implementation behind ui/index.tsx
 import { useEffect, useState } from "react";
-import { control, decimal, integer, metres, salinity as psu, temperature } from "@aeolus/ui";
+import { commandLadder, commandVerdict, control, decimal, integer, metres, salinity as psu, rungProps, temperature, verdictProps } from "@aeolus/ui";
 function clamp(v: number, a: number, b: number) { return Math.min(b, Math.max(a, v)); }
 /** The wire's phase in the words a deck operator would use. */
 const PHASE_LABEL: Record<string, string> = {
@@ -53,7 +53,8 @@ export default function CtdOperationsDashboard({ model, actions }: {
         : atDepth ? "On station at " + Math.round(target) + " m"
             : canResume ? "Resume descent to " + Math.round(target) + " m"
                 : "Deploy to " + Math.round(target) + " m";
-    return <div style={{ padding: 11, minHeight: "100%", background: "linear-gradient(180deg,#09131A,#061018)", color: "#EDF2F4" }}>
+    const verdict = commandVerdict(model.lastCommand), rungs = commandLadder(model.lastCommand);
+ return <div style={{ padding: 11, minHeight: "100%", background: "linear-gradient(180deg,#09131A,#061018)", color: "#EDF2F4" }}>
     <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 7 }}><div><div style={{ fontSize: 12, fontWeight: 900 }}>CTD OPERATIONS</div><div style={{ color: "#687C87", fontSize: 11, marginTop: 2 }}>Winch control · water-column profile · cable-tension protection</div></div><div style={{ textAlign: "right" }}><div style={{ color: tensionHigh ? "#EF8A67" : moving ? "#69D7EF" : onDeck ? "#84DBA2" : "#9FD3B4", fontSize: 11, fontWeight: 850 }}>{tensionHigh ? "TENSION INTERLOCK" : (PHASE_LABEL[status] || status.toUpperCase())}</div><div style={{ color: "#60737D", fontSize: 11 }}>{metres(depth)} · target {metres(target)}</div></div></div>
     <div style={{ border: "1px solid #1F3948", borderRadius: 10, background: "#05131C", overflow: "hidden" }}><svg width="100%" height="220" viewBox="0 0 500 220">
       <rect width="190" height="220" fill="#08283E"/><rect y="42" width="190" height="178" fill="#061A2A"/><path d="M0 42 Q45 36 95 42 T190 42" fill="none" stroke="#62BDD7" opacity=".45"/>
@@ -71,5 +72,12 @@ export default function CtdOperationsDashboard({ model, actions }: {
     <div style={{ marginTop: 7, border: "1px solid #263E49", borderRadius: 9, padding: 8, background: "#07141C" }}><div style={{ color: "#80939C", fontSize: 11, letterSpacing: ".12em", marginBottom: 6 }}>OPERATOR CONTROLS</div><div style={{ display: "flex", gap: 5 }}><button {...deployVisual} style={{ ...deployVisual.style, flex: 1 }} onClick={() => actions.deploy420()}>{deployLabel}</button><button {...holdVisual} style={{ ...holdVisual.style, padding: "7px 9px" }} onClick={() => actions.holdCtd()}>Pause winch</button><button {...recoverVisual} style={{ ...recoverVisual.style, padding: "7px 9px" }} onClick={() => actions.recoverCtd()}>{recovering ? "Recovering" : "Recover"}</button></div></div>
     <div style={{ marginTop: 16, border: "1px dashed #69502E", borderRadius: 9, padding: 8, background: "#171309" }}><div style={{ color: "#D8B66D", fontSize: 11, letterSpacing: ".12em" }}>DEMO SCENARIO</div><div style={{ color: "#806F50", fontSize: 11, margin: "3px 0 6px" }}>Inject a physical cable problem. The CTD automation should arrest the winch itself.</div><div style={{ display: "flex", gap: 5 }}><button onClick={() => actions.simulateSnag()} style={{ flex: 1, padding: "6px", borderRadius: 6, border: "1px solid #6A5130", background: "#21180B", color: "#E3B866", fontSize: 11, cursor: "pointer" }}>Inject cable snag</button><button onClick={() => actions.resetCtd()} style={{ padding: "6px 9px", borderRadius: 6, border: "1px solid #454138", background: "#171713", color: "#898B82", fontSize: 11, cursor: "pointer" }}>Reset cast</button></div></div>
     <div style={{ color: "#5B6E77", fontSize: 11, marginTop: 6, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{action}</div>
-  </div>;
+      {/* What the last command actually proved. Every rung is a durable record the
+        runtime wrote, not a step this pane inferred from the outcome. */}
+    {verdict && <div style={{ marginTop: 8, border: "1px solid #263E49", borderRadius: 9, padding: 9, background: "#07141C" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginBottom: 5 }}><div style={{ fontSize: 11, color: "#80939C", letterSpacing: ".1em" }}>COMMAND EVIDENCE</div><div style={verdictProps(verdict)}>{verdict.headline}</div></div>
+      {rungs.map((rung: any) => { const rv = rungProps(rung); return <div key={rung.state} style={rv.style}><span>{rv.mark}</span><span>{rung.label}</span>{rung.detail && <span style={{ color: "#5B6E77" }}>{rung.detail}</span>}</div>; })}
+      <div style={{ fontSize: 11, color: "#5B6E77", marginTop: 5 }}>{verdict.clampNote || verdict.detail}</div>
+    </div>}
+    </div>;
 }

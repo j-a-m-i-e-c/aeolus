@@ -1,6 +1,6 @@
 // bunker-perimeter — visual implementation behind ui/index.tsx
 import { useEffect, useState } from "react";
-import { control, integer, metres, percent, toggleProps } from "@aeolus/ui";
+import { commandLadder, commandVerdict, control, integer, metres, percent, rungProps, toggleProps, verdictProps } from "@aeolus/ui";
 function Z({ x, y, p, lit, scale = 1 }: {
     x: number;
     y: number;
@@ -38,7 +38,8 @@ export default function PerimeterSecurityPanel({ model, actions }: {
     const autoVisual = control({ pending, current: auto });
     const headline = threat ? integer(contacts) + (contacts === 1 ? " CONTACT" : " CONTACTS") : withdrawing ? "WITHDRAWING" : "CLEAR";
     const movementLabel = MOVEMENT_LABEL[movement] || movement.toUpperCase();
-    return <div style={{ padding: 13, minHeight: "100%", background: "#0B0D09", color: "#EEF0E9" }}><div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}><div><div style={{ fontSize: 17, fontWeight: 900 }}>PERIMETER SECURITY</div><div style={{ fontSize: 12, color: "#858D82", marginTop: 3 }}>Local classification → policy → verified floodlighting</div></div><div style={{ textAlign: "right" }}><div style={{ fontSize: 12, fontWeight: 850, color: threat ? "#ED8B72" : withdrawing ? "#D9C46A" : "#7FD19A" }}>{headline}</div><div style={{ fontSize: 11, color: auto ? "#83C99A" : "#D9B06A", marginTop: 2 }}>LIGHTING {auto ? "AUTO" : "MANUAL"}</div></div></div>
+    const verdict = commandVerdict(model.lastCommand), rungs = commandLadder(model.lastCommand);
+ return <div style={{ padding: 13, minHeight: "100%", background: "#0B0D09", color: "#EEF0E9" }}><div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}><div><div style={{ fontSize: 17, fontWeight: 900 }}>PERIMETER SECURITY</div><div style={{ fontSize: 12, color: "#858D82", marginTop: 3 }}>Local classification → policy → verified floodlighting</div></div><div style={{ textAlign: "right" }}><div style={{ fontSize: 12, fontWeight: 850, color: threat ? "#ED8B72" : withdrawing ? "#D9C46A" : "#7FD19A" }}>{headline}</div><div style={{ fontSize: 11, color: auto ? "#83C99A" : "#D9B06A", marginTop: 2 }}>LIGHTING {auto ? "AUTO" : "MANUAL"}</div></div></div>
     <div style={{ border: "1px solid #34382F", borderRadius: 11, background: "#10120D", marginTop: 9, overflow: "hidden" }}><svg width="100%" height="185" viewBox="0 0 430 170"><rect width="430" height="170" fill="#11150F"/>
       {/* Treeline, alert ring and fence, drawn at the ranges the classifier reports. */}
       <path d="M0 116 H430" stroke="#485044" strokeDasharray="4 4"/>
@@ -65,5 +66,12 @@ export default function PerimeterSecurityPanel({ model, actions }: {
     </div>)}</div>
     <div style={{ marginTop: 8, border: "1px solid #373A33", borderRadius: 10, padding: 9, background: "#0F110E" }}><div style={{ fontSize: 11, color: "#9BA097", letterSpacing: ".1em", marginBottom: 7 }}>OPERATOR CONTROLS</div><div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}><button {...lightVisual} style={{ ...lightVisual.style, padding: "9px" }} onClick={() => actions.toggleLights()}>{!available ? "Floodlight controller offline" : pending ? "Verifying floodlight command…" : lights ? "Turn floodlights off" : "Turn floodlights on"}</button><button {...autoVisual} style={{ ...autoVisual.style, padding: "9px" }} onClick={() => actions.returnAuto()}>{auto ? "AUTO policy active" : "Return to automatic control"}</button></div><div style={{ fontSize: 11, color: "#7D847A", marginTop: 7 }}>The button reflects the floodlights Aeolus last OBSERVED, not what it asked for. A verified manual command enters MANUAL override; Return to AUTO hands the lights back to contact policy.</div></div>
     <div style={{ marginTop: 16, border: "1px dashed #685237", borderRadius: 10, padding: 9, background: "#171309" }}><div style={{ fontSize: 11, color: "#D6B773", letterSpacing: ".1em" }}>DEMO SCENARIO</div><div style={{ fontSize: 11, color: "#9C8964", margin: "4px 0 7px" }}>Inject something regrettably bipedal crossing the treeline. It walks in, and lit floodlights turn it back.</div><div style={{ display: "flex", gap: 6 }}><button disabled={threat} onClick={() => actions.simulateContacts()} style={{ flex: 1, padding: "9px", borderRadius: 7, border: "1px solid #6D4936", background: "#21130D", color: "#E7A47E", fontSize: 12 }}>Shambling contacts</button><button onClick={() => actions.clearPerimeter()} style={{ padding: "9px 12px", borderRadius: 7, border: "1px solid #48483D", background: "#161713", color: "#A3A398", fontSize: 12 }}>Send them away</button></div></div>
-    <div style={{ fontSize: 11, color: "#777E74", marginTop: 7 }}>{last?.label ? String(last.label) : "Perimeter classifier online"}</div></div>;
+    <div style={{ fontSize: 11, color: "#777E74", marginTop: 7 }}>{last?.label ? String(last.label) : "Perimeter classifier online"}</div>    {/* What the last command actually proved. Every rung is a durable record the
+        runtime wrote, not a step this pane inferred from the outcome. */}
+    {verdict && <div style={{ marginTop: 8, border: "1px solid #34382F", borderRadius: 9, padding: 9, background: "#10120D" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginBottom: 5 }}><div style={{ fontSize: 11, color: "#868E83", letterSpacing: ".1em" }}>COMMAND EVIDENCE</div><div style={verdictProps(verdict)}>{verdict.headline}</div></div>
+      {rungs.map((rung: any) => { const rv = rungProps(rung); return <div key={rung.state} style={rv.style}><span>{rv.mark}</span><span>{rung.label}</span>{rung.detail && <span style={{ color: "#7D847A" }}>{rung.detail}</span>}</div>; })}
+      <div style={{ fontSize: 11, color: "#7D847A", marginTop: 5 }}>{verdict.clampNote || verdict.detail}</div>
+    </div>}
+    </div>;
 }

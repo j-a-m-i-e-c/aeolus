@@ -14,6 +14,7 @@ export default function Dewatering(aeolus: CustomComponentProps) {
     pumpFlowLps: aeolus.read("pumpFlowLps"),
     autoEnabled: aeolus.read("autoEnabled"),
     commandPending: aeolus.read("commandPending"),
+    lastCommand: aeolus.read("lastCommand"),
     lastAction: aeolus.read("lastAction"),
   };
 

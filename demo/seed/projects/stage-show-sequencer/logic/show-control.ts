@@ -73,6 +73,9 @@ export async function runLightingCue(scene: string, master: number, transitionMs
         timeoutMs: 7000,
     });
     state.set("pending", false);
+    // Keep the proof, not just the verdict: every rung this command reached, with
+    // the evidence the runtime recorded for it.
+    state.set("lastCommand", devices.commandEvidence(result.commandId));
     if (!result.success) {
         setAction("Lighting cue not verified: " + String(result.error || result.lifecycleState || "unknown"));
         return false;

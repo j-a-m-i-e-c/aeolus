@@ -12,6 +12,7 @@ export default function RoomSystems(aeolus: CustomComponentProps) {
     pending: aeolus.read("pending"),
     transitioning: aeolus.read("transitioning"),
     changedAt: aeolus.read("changedAt"),
+    lastCommand: aeolus.read("lastCommand"),
     lastAction: aeolus.read("lastAction"),
   };
 

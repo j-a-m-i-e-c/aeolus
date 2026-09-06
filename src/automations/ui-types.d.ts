@@ -295,6 +295,21 @@ declare module "@aeolus/ui" {
    * `"measuredRpm ≥ 2000"`. Returns an empty string for anything unrecognised.
    */
   export function describeCondition(condition: unknown): string;
+
+  /** Presentation for one rung: a glyph plus the style matching its status. */
+  export interface RungVisual {
+    mark: string;
+    style: Record<string, string | number>;
+  }
+
+  /**
+   * Resolve how a rung should look, so the three statuses cannot come to mean
+   * different things on different tabs.
+   */
+  export function rungProps(rung: CommandRung): RungVisual;
+
+  /** Style for a verdict headline, matching the rung colours. */
+  export function verdictProps(verdict: CommandVerdict): Record<string, string | number>;
 }
 
 // ── Minimal React type declarations for IntelliSense ──

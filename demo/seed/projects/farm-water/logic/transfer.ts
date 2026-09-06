@@ -16,6 +16,9 @@ export async function stopPump(reason: string) {
         timeoutMs: 5000,
     });
     state.set("transferStopping", false);
+    // Keep the proof, not just the verdict: every rung this command reached, with
+    // the evidence recorded for it. The pane renders it; nothing is inferred.
+    state.set("lastCommand", devices.commandEvidence(result.commandId));
     if (result.success) {
         const delivered = Math.max(0, Number(state.get("transferProgressLitres")) || 0);
         state.set("lastTransferLitres", delivered);
@@ -93,6 +96,7 @@ export async function startTransfer(requestedLitres: number, source: string) {
         condition: { field: "litresPerMinute", op: "gt", value: 0 },
         timeoutMs: 5000,
     });
+    state.set("lastCommand", devices.commandEvidence(result.commandId));
     if (result.success) {
         setAction((source === "automatic-header-recovery" ? "Automatic recovery" : litres + " L batch") + " running · flow verified");
         events.emit("farm/water/transfer-started", { litres, source: source || "automation", lifecycleState: result.lifecycleState });

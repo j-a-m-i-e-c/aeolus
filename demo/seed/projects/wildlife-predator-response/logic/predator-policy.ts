@@ -141,6 +141,9 @@ export async function applyPredatorPolicy(classification: {
         timeoutMs: 5000,
     });
     state.set("commandPending", false);
+    // Keep the proof, not just the verdict: every rung this command reached, with
+    // the evidence the runtime recorded for it.
+    state.set("lastCommand", devices.commandEvidence(result.commandId));
     // Re-read the station now the command has settled: the tachometer value the
     // verification waited on is the evidence the operator should see.
     projectStationReadings();

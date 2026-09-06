@@ -535,3 +535,53 @@ export function commandVerdict(evidence: unknown): CommandVerdict | null {
       : "",
   };
 }
+
+/** Presentation for one rung: a glyph plus the style that matches its status. */
+export interface RungVisual {
+  /** A single character standing in for the status, safe in any font. */
+  mark: string;
+  style: Record<string, string | number>;
+}
+
+const RUNG_BASE: Record<string, string | number> = {
+  fontFamily: tokens.font.sans,
+  fontSize: 11,
+  display: "flex",
+  gap: 6,
+  alignItems: "baseline",
+  padding: "2px 0",
+};
+
+/**
+ * Resolve how a rung should look.
+ *
+ * Kept here rather than in each pane so the three statuses cannot come to mean
+ * different things on different tabs: a reached rung is never the same colour as a
+ * failed one, and a pending rung is visibly not an outcome.
+ */
+export function rungProps(rung: CommandRung): RungVisual {
+  switch (rung.status) {
+    case "reached":
+      return { mark: "✓", style: { ...RUNG_BASE, color: tokens.color.success } };
+    case "failed":
+      return { mark: "✕", style: { ...RUNG_BASE, color: tokens.color.error } };
+    case "pending":
+      return { mark: "○", style: { ...RUNG_BASE, color: tokens.color.textMuted } };
+  }
+}
+
+/** Style for a {@link CommandVerdict} headline, matching the rung colours. */
+export function verdictProps(verdict: CommandVerdict): Record<string, string | number> {
+  const color = !verdict.settled
+    ? tokens.color.warning
+    : verdict.proven
+      ? tokens.color.success
+      : tokens.color.error;
+  return {
+    fontFamily: tokens.font.sans,
+    fontSize: 11,
+    fontWeight: 850,
+    letterSpacing: ".08em",
+    color,
+  };
+}

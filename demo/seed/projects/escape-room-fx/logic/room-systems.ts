@@ -39,6 +39,9 @@ export async function setRoomScene(scene: string, smoke: boolean, label: string)
     });
     state.set("pending", false);
     state.set("transitioning", false);
+    // Keep the proof, not just the verdict: every rung this command reached, with
+    // the evidence the runtime recorded for it.
+    state.set("lastCommand", devices.commandEvidence(result.commandId));
     if (result.success) {
         const preset = SCENES[scene as RoomScene] || SCENES.puzzle;
         state.set("scene", scene);

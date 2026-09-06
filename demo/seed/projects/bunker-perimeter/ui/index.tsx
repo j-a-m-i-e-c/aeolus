@@ -20,6 +20,7 @@ export default function PerimeterSecurity(aeolus: CustomComponentProps) {
     autoLights: aeolus.read("autoLights"),
     pending: aeolus.read("pending"),
     lightsAvailable: aeolus.read("lightsAvailable"),
+    lastCommand: aeolus.read("lastCommand"),
     lastAction: aeolus.read("lastAction"),
   };
 

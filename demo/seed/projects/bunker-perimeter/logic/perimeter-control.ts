@@ -57,6 +57,9 @@ export async function setFloodlights(on: boolean, reason: string) {
         timeoutMs: 5000,
     });
     state.set("pending", false);
+    // Keep the proof, not just the verdict: every rung this command reached, with
+    // the evidence the runtime recorded for it.
+    state.set("lastCommand", devices.commandEvidence(result.commandId));
     if (result && result.success) {
         state.set("lightsOn", on);
         setAction(reason);

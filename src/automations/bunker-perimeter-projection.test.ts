@@ -67,6 +67,8 @@ function makeWorld(options?: { lightsOn?: boolean; withLights?: boolean }) {
     /** Flip to false to model an unverified command (ack/observation timeout). */
     commandsVerify: true,
     commands: [] as CommandRecord[],
+    /** Evidence the fake command boundary recorded, keyed by command id. */
+    evidence: {} as Record<string, Record<string, unknown>>,
     emitted: [] as Array<{ topic: string; payload: Record<string, unknown> }>,
     devices: {
       list: () =>
@@ -79,16 +81,53 @@ function makeWorld(options?: { lightsOn?: boolean; withLights?: boolean }) {
       ) => {
         const topic = id.slice("dev:".length);
         world.commands.push({ topic, on: params.payload.on, tier: opts?.tier, condition: opts?.condition });
+        // A real physical command always carries an id, so the fake does too —
+        // otherwise the evidence read below would be exercised with undefined.
+        const commandId = `cmd-${world.commands.length}`;
         if (!world.commandsVerify) {
-          return { success: false, error: "observation timed out", lifecycleState: "TIMED_OUT" };
+          world.evidence[commandId] = {
+            commandId,
+            actionType: "device_action",
+            effectiveTier: "observed",
+            lifecycleState: "TIMED_OUT",
+            success: false,
+            error: "observation timed out",
+            targetDeviceId: id,
+            requestedAt: 1000,
+            terminalAt: 1500,
+            transitions: [
+              { toState: "REQUESTED", timestamp: 1000, details: { tier: "observed", condition: opts?.condition as Record<string, unknown> } },
+              { toState: "DISPATCHED", timestamp: 1100 },
+              { toState: "TIMED_OUT", timestamp: 1500, details: { reason: "observation timed out" } },
+            ],
+          };
+          return { success: false, error: "observation timed out", lifecycleState: "TIMED_OUT", commandId };
         }
         // A verified command means the actuator really moved and republished.
         if (topic === LIGHTS_TOPIC) {
           const on = params.payload.on;
           deviceState[LIGHTS_TOPIC] = { on, brightness: on ? 100 : 0, mode: "auto" };
         }
-        return { success: true, lifecycleState: "OBSERVED" };
+        world.evidence[commandId] = {
+          commandId,
+          actionType: "device_action",
+          effectiveTier: "observed",
+          lifecycleState: "OBSERVED",
+          success: true,
+          targetDeviceId: id,
+          requestedAt: 1000,
+          terminalAt: 1300,
+          transitions: [
+            { toState: "REQUESTED", timestamp: 1000, details: { tier: "observed", condition: opts?.condition as Record<string, unknown> } },
+            { toState: "DISPATCHED", timestamp: 1100 },
+            { toState: "OBSERVED", timestamp: 1300, details: { reason: "Observed device state satisfied the required condition" } },
+          ],
+        };
+        return { success: true, lifecycleState: "OBSERVED", commandId };
       },
+      /** Scoped in the real store; here it simply answers what the fake recorded. */
+      commandEvidence: (commandId?: string) =>
+        commandId ? world.evidence[commandId] : undefined,
     },
     state: {
       get: (key: string) => store.get(key),
@@ -144,6 +183,47 @@ function pane(world: World) {
 
 /** True physical state of the simulated floodlights. */
 const physicallyOn = (world: World): boolean => Boolean(world.deviceState[LIGHTS_TOPIC]?.on);
+
+/** The command evidence the automation projected for the pane to render. */
+const projectedEvidence = (world: World): Record<string, unknown> | undefined =>
+  world.store.get("lastCommand") as Record<string, unknown> | undefined;
+
+describe("Bunker Perimeter Security — command evidence", () => {
+  it("projects the rungs of a verified command for the pane to render", async () => {
+    const world = makeWorld();
+    await run(world, "ui/rule/toggle-lights");
+
+    const evidence = projectedEvidence(world);
+    expect(evidence).toBeDefined();
+    expect(evidence?.lifecycleState).toBe("OBSERVED");
+    // The rungs are the runtime's own record, carried through unreshaped so nothing
+    // can be lost or invented in a flatten.
+    const transitions = evidence?.transitions as Array<{ toState: string }>;
+    expect(transitions.map((t) => t.toState)).toEqual(["REQUESTED", "DISPATCHED", "OBSERVED"]);
+  });
+
+  it("projects the failure rungs when a command is never verified", async () => {
+    const world = makeWorld();
+    world.commandsVerify = false;
+    await run(world, "ui/rule/toggle-lights");
+
+    const evidence = projectedEvidence(world);
+    expect(evidence?.lifecycleState).toBe("TIMED_OUT");
+    expect(evidence?.success).toBe(false);
+    // The unmet condition travels with the failure, which is the whole content of it.
+    const transitions = evidence?.transitions as Array<{ toState: string; details?: Record<string, unknown> }>;
+    expect(transitions[0]?.details?.condition).toBeDefined();
+    expect(transitions.at(-1)?.toState).toBe("TIMED_OUT");
+  });
+
+  it("records evidence for the AUTO path too, not just operator clicks", async () => {
+    const world = makeWorld();
+    world.deviceState[PERIMETER_TOPIC] = { sector: "east", contacts: 2, classification: "shambling-biped" };
+    await run(world, PERIMETER_TOPIC);
+
+    expect(projectedEvidence(world)?.lifecycleState).toBe("OBSERVED");
+  });
+});
 
 describe("Bunker Perimeter Security — floodlight projection", () => {
   it("turns the floodlights on and back off across two clicks", async () => {

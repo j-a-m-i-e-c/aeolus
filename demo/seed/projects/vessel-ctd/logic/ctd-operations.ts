@@ -81,6 +81,9 @@ export async function commandCtdWinch(mode: string, targetDepth: number) {
             : "Holding CTD at current depth");
     const result = await devices.action(winch.id, "command", { payload: { mode, targetDepth } }, options);
     state.set("commandPending", false);
+    // Keep the proof, not just the verdict: every rung this command reached, with
+    // the evidence the runtime recorded for it.
+    state.set("lastCommand", devices.commandEvidence(result.commandId));
     if (result.success) {
         setAction(mode === "deploy"
             ? "Cast on station at " + targetDepth + " m"
