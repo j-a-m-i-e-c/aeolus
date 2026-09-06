@@ -32,6 +32,8 @@ import {
   fireAutomations,
   applyDemoAccess,
   provisionDemoIdentity,
+  waitForBackend,
+  backendPublicDemoEnabled,
 } from "./lib.mjs";
 import { tabModules } from "./tabs/index.mjs";
 import { demoBuckets } from "./data-store-buckets.mjs";
@@ -49,15 +51,57 @@ import { OFF_GRID_BUNKER_ACTUATOR_SPECS } from "./off-grid-bunker-simulator-boot
 
 const API = process.argv[2] || "http://localhost:3001";
 const USER = process.argv[3] || "admin";
-const PASS = process.argv[4] || "aeolus-demo-2026";
+const PASS = process.argv[4];
+
+// No default password. On a pristine database step 0 CREATES the admin with
+// whatever it is given, so a fallback here would quietly provision a real install
+// with a password that is public in this repo.
+if (!PASS) {
+  console.error("Error: an admin password is required.\n");
+  console.error("  make seed PASS=<password> [USER=admin]        # normal install");
+  console.error("  make seed-demo PASS=<password> [USER=admin]   # public demo\n");
+  console.error(`  node demo/seed/seed.mjs ${API} ${USER} <password>`);
+  process.exit(1);
+}
+
+const WANT_PUBLIC_DEMO = process.env.AEOLUS_PUBLIC_DEMO === "true";
+const WANT_SIMULATOR = process.env.AEOLUS_SIMULATOR_BOOTSTRAP === "true";
 
 console.log(`\n🌬️  Seeding Aeolus multi-domain demo → ${API}\n`);
 
 const { api, login } = createApi(API);
 
-// 0. Authenticate
-console.log("0. Authenticating...");
+// 0. Wait for the backend, then authenticate. `docker compose run` starts the
+// backend via depends_on but does not wait for its healthcheck.
+console.log("0. Waiting for the backend...");
+await waitForBackend(API);
+console.log("  ✓ Backend is answering /api/health");
 await login(USER, PASS);
+
+// 0b. Preflight the demo-mode contract BEFORE the clean slate below destroys
+// anything. Public-demo mode is read from the environment once at backend boot, and
+// the base compose file does not declare AEOLUS_PUBLIC_DEMO at all — it arrives only
+// with demo/compose/local-showcase.yml. Because `compose run` does not recreate an
+// already-running backend, seeding the demo against a stack started by `make up`
+// used to succeed while leaving the running server in normal mode: the demo group,
+// user and per-rule allowlists all existed, but /api/auth/demo-session was 404 and
+// the frontend bundle had no VITE_PUBLIC_DEMO. That is the state people were fixing
+// by hand with a rebuild. Now it is a refusal, before any data is touched.
+if (WANT_PUBLIC_DEMO) {
+  const live = await backendPublicDemoEnabled(API);
+  if (!live) {
+    console.error("\n✗ This seed provisions the PUBLIC DEMO, but the running backend is in normal mode.");
+    console.error("  /api/auth/demo-session answers 404, so AEOLUS_PUBLIC_DEMO was not set when it booted.");
+    console.error("  Nothing has been changed.\n");
+    console.error("  Start the stack with the demo overlay, then seed again:");
+    console.error("    make demo-up");
+    console.error("    make seed-demo PASS=<password>\n");
+    console.error("  demo-up is also what bakes VITE_PUBLIC_DEMO into the frontend image, which a");
+    console.error("  restart alone cannot do — it is a build argument.");
+    process.exit(1);
+  }
+  console.log("  ✓ Backend confirms public-demo mode is live");
+}
 
 // 1. Clean slate
 console.log("\n1. Cleaning existing data...");
@@ -108,7 +152,7 @@ await fireAutomations(api, Object.values(idMap), 4);
 
 // 8. Public demo identity — only when building the public demo (opt-in), so a
 // normal `make seed` on a personal install does not create a demo user/group.
-if (process.env.AEOLUS_PUBLIC_DEMO === "true") {
+if (WANT_PUBLIC_DEMO) {
   console.log("\n8. Provisioning public demo identity...");
   // Hybrid demo: a tab is interactive (`interact`) when any of its automations
   // declares a demo_access allowlist; otherwise it is look-only (`read`). This
@@ -129,7 +173,7 @@ if (process.env.AEOLUS_PUBLIC_DEMO === "true") {
 // command profiles through the normal API once the simulator has published its
 // devices. Opt-in (only when a simulator is running alongside), so a normal
 // `make seed` on a personal install is unaffected.
-if (process.env.AEOLUS_SIMULATOR_BOOTSTRAP === "true") {
+if (WANT_SIMULATOR) {
   console.log("\n9. Configuring simulated-hardware command profiles...");
   try {
     const bootstrapClient = createBootstrapClient(api);
@@ -141,7 +185,16 @@ if (process.env.AEOLUS_SIMULATOR_BOOTSTRAP === "true") {
     console.log(`  ✓ Simulated actuators — configured: ${configured.length}, already-current: ${skipped.length}`);
   } catch (err) {
     console.error(`  ✗ Simulator bootstrap failed: ${err.message}`);
-    console.error("    Ensure the simulator service is running and has published its devices.");
+    // The simulator publishes device state RETAINED, so the backend learns about the
+    // simulated actuators when the simulator connects — or on its own restart, by
+    // re-reading the broker's retained store. `docker compose down -v` deletes that
+    // store along with everything else, so after a full wipe nothing will arrive
+    // until the simulator reconnects, and waiting longer cannot help.
+    console.error("    The simulator publishes its device state retained, so the backend only sees");
+    console.error("    those devices after the simulator connects. If the broker volume was wiped");
+    console.error("    (docker compose down -v), make it republish and seed again:");
+    console.error("      make demo-reset");
+    console.error("      make seed-demo PASS=<password>");
     throw err;
   }
 }
@@ -151,7 +204,7 @@ const finalDevices = await api("GET", "/api/devices");
 if (!Array.isArray(finalAutomations) || finalAutomations.length !== allAutomations.length) {
   throw new Error(`Seed verification failed: expected ${allAutomations.length} automations, found ${Array.isArray(finalAutomations) ? finalAutomations.length : "invalid response"}`);
 }
-if (process.env.AEOLUS_SIMULATOR_BOOTSTRAP === "true" && (!Array.isArray(finalDevices) || finalDevices.length === 0)) {
+if (WANT_SIMULATOR && (!Array.isArray(finalDevices) || finalDevices.length === 0)) {
   throw new Error("Seed verification failed: simulator bootstrap is enabled but no devices are registered");
 }
 

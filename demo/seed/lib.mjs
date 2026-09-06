@@ -84,6 +84,62 @@ export function createApi(baseUrl) {
   return { api, login };
 }
 
+// ─── Preflight ───────────────────────────────────────────────────────────────
+
+/**
+ * Wait until the backend answers /api/health.
+ *
+ * `docker compose --profile seed run` starts the backend through `depends_on` but
+ * does NOT wait for its healthcheck, so a cold start races the seeder. The API
+ * client only retries outright connection failures three times over ~3s, which is
+ * not enough for a container that is still applying migrations.
+ *
+ * @param {string} baseUrl
+ */
+export async function waitForBackend(baseUrl, { timeoutMs = 90_000, pollMs = 2_000 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  let lastError = "not attempted";
+
+  for (;;) {
+    try {
+      const res = await fetch(`${baseUrl}/api/health`);
+      if (res.ok) return;
+      lastError = `HTTP ${res.status}`;
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : String(err);
+    }
+
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `Backend not reachable at ${baseUrl} after ${Math.round(timeoutMs / 1000)}s `
+        + `(last error: ${lastError}). Is the stack up? Try: docker compose up -d`,
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+  }
+}
+
+/**
+ * Whether the RUNNING backend actually has public-demo mode enabled.
+ *
+ * POST /api/auth/demo-session is mounted unconditionally but answers 404 unless
+ * `config.publicDemo.enabled` (auth.routes.ts), and that config is read from the
+ * environment once at module load. So the route's presence is the only way to ask a
+ * live container which mode it booted in — the env of the seed container says
+ * nothing about the backend's.
+ *
+ * Only 404 means disabled. Anything else means the route is live: before this seed
+ * runs there is no `demo` user yet, so a demo-mode backend answers 401 here — which
+ * is why this cannot test for a successful session, only for the route's existence.
+ * A 429 from the demo-session limiter likewise means enabled.
+ *
+ * @param {string} baseUrl
+ */
+export async function backendPublicDemoEnabled(baseUrl) {
+  const res = await fetch(`${baseUrl}/api/auth/demo-session`, { method: "POST" });
+  return res.status !== 404;
+}
+
 // ─── Cleanup ─────────────────────────────────────────────────────────────────
 
 /**

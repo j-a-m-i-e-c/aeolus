@@ -1,4 +1,4 @@
-.PHONY: deploy deploy-demo public-demo-preflight public-demo-build public-demo-up public-demo-seed public-demo-golden public-demo-reset up demo-up demo-reset down restart logs logs-backend status clean dev sim seed seed-demo reset test test-integration e2e e2e-fresh lint check verify verify-all help
+.PHONY: deploy deploy-demo public-demo-preflight public-demo-build public-demo-up public-demo-seed public-demo-golden public-demo-reset up demo-up demo-reset down restart logs logs-backend status clean dev sim seed-image seed seed-demo reset test test-integration e2e e2e-fresh lint check verify verify-all help
 
 # `USER` is normally set by the shell (your login name), which would leak into
 # the seed command. Ignore the environment value and default to "admin" unless
@@ -89,11 +89,7 @@ dev: ## Start backend in dev mode (hot reload)
 sim: ## Start the demo MQTT simulator process (separate from the backend; off by default)
 	AEOLUS_SIMULATOR_ENABLED=true AEOLUS_SIMULATOR_SCENARIOS=agriculture,research-vessel,underground-mining,wildlife,stage-show,escape-room,off-grid-bunker npm run sim
 
-seed: ## Seed demo data via Docker, no host Node needed (usage: make seed PASS=yourpass [USER=admin])
-	@if [ -z "$(PASS)" ]; then \
-		echo "Error: PASS is required.  Usage: make seed PASS=<admin-password> [USER=admin]"; \
-		exit 1; \
-	fi
+seed-image: ## Ensure the Node image the seeder runs in is present locally
 	@if ! docker image inspect node:24.20.0-slim >/dev/null 2>&1; then \
 		echo "Fetching the node:24.20.0-slim image the seeder runs in..."; \
 		docker pull node:24.20.0-slim || { \
@@ -112,21 +108,43 @@ seed: ## Seed demo data via Docker, no host Node needed (usage: make seed PASS=y
 			exit 1; \
 		}; \
 	fi
+
+seed: ## Seed demo data via Docker, no host Node needed (usage: make seed PASS=yourpass [USER=admin])
+	@if [ -z "$(PASS)" ]; then \
+		echo "Error: PASS is required.  Usage: make seed PASS=<admin-password> [USER=admin]"; \
+		exit 1; \
+	fi
+	@$(MAKE) --no-print-directory seed-image
 	docker compose --profile seed run --rm -e SEED_USER="$(USER)" -e SEED_PASS="$(PASS)" seed
 
-seed-demo: ## Seed the PUBLIC DEMO (adds demo identity + configures simulator command profiles). Usage: make seed-demo PASS=yourpass [USER=admin]
+seed-demo: ## Seed the PUBLIC DEMO (needs the demo overlay running: make demo-up). Usage: make seed-demo PASS=yourpass [USER=admin]
 	@if [ -z "$(PASS)" ]; then \
 		echo "Error: PASS is required.  Usage: make seed-demo PASS=<admin-password> [USER=admin]"; \
 		exit 1; \
 	fi
+	@$(MAKE) --no-print-directory seed-image
+	@echo "⏳ Making the simulator republish its device state before seeding..."
+	@# The simulator publishes device state RETAINED, so the backend only learns about
+	@# the simulated actuators when the simulator connects. After `docker compose down -v`
+	@# the broker's retained store is gone too, so nothing will ever arrive and the
+	@# seeder's command-profile step would wait 30s and fail. Reconnecting first makes
+	@# that step deterministic. --no-deps so this never quietly recreates the backend.
+	docker compose $(LOCAL_SHOWCASE_COMPOSE) up -d --no-deps simulator
+	docker compose $(LOCAL_SHOWCASE_COMPOSE) restart simulator
+	@sleep 5
 	docker compose $(LOCAL_SHOWCASE_COMPOSE) --profile seed run --rm -e SEED_USER="$(USER)" -e SEED_PASS="$(PASS)" seed
 
-reset: ## Wipe database and restart fresh (deletes all data!)
+reset: ## Wipe database and restart fresh, BASE stack (deletes all data!)
 	docker compose down -v
 	docker compose up -d
 	@echo "⏳ Waiting for backend to start..."
 	@sleep 12
-	@echo "✅ Fresh start. Visit http://localhost:3000 to create admin, then run: make seed PASS=yourpass"
+	@echo "✅ Fresh start (base stack). The seeder creates the admin itself:"
+	@echo "     make seed PASS=yourpass"
+	@echo "   Or visit http://localhost:3000 to create it by hand first."
+	@echo "   For the public demo, use the overlay instead: down -v dropped it,"
+	@echo "   along with the simulator and the broker's retained device state:"
+	@echo "     make demo-up && make seed-demo PASS=yourpass"
 
 test: ## Run backend + frontend suites WITH coverage (mirrors CI's coverage thresholds)
 	npx vitest run --coverage
