@@ -11,7 +11,7 @@
 import { useEffect, useState, createElement, type ComponentType, type ReactElement } from "react";
 import type { AeolusUiSdk } from "./sdk-client";
 import type { CustomComponentProps } from "../../components/panes/custom/types";
-import type { EntityType, PropsPayload } from "../rpc-types";
+import type { CommandResult, EntityType, PropsPayload } from "../rpc-types";
 
 /**
  * Custom panel props shape (per the `custom-panels` spec). Defined locally here
@@ -22,7 +22,7 @@ export interface CustomPanelProps {
   devices: PropsPayload["devices"];
   panelId: string;
   panelName: string;
-  deviceAction: (deviceId: string, actionType: string, params?: Record<string, unknown>) => Promise<void>;
+  deviceAction: (deviceId: string, actionType: string, params?: Record<string, unknown>) => Promise<CommandResult>;
   mqttPublish: (topic: string, payload: string) => void;
   state: Map<string, unknown>;
   stateSet: (key: string, value: unknown) => void;

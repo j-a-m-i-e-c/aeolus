@@ -296,6 +296,93 @@ describe("CommandHistoryStore — onTransitionRecorded hook (Req 7.5)", () => {
     expect(() => s.create(baseRecord({ commandId: "c9" }))).not.toThrow();
     expect(s.get("c9")?.lifecycleState).toBe("REQUESTED");
   });
+
+  // Without these an observer can see a rung but not what it was for: a
+  // DISPATCHED that completed a dispatch-tier command is indistinguishable from
+  // one still climbing towards OBSERVED.
+  it("carries the action and the tier the command must reach", () => {
+    const events: CommandLifecycleTransitionEvent[] = [];
+    const s = new CommandHistoryStore(db, (e) => events.push(e));
+
+    s.create(baseRecord({ commandId: "c1", effectiveTier: "observed", actionType: "device_action" }));
+    s.transition({ commandId: "c1", toState: "DISPATCHED", timestamp: nextTs(), terminal: false });
+    s.transition({
+      commandId: "c1",
+      toState: "TIMED_OUT",
+      timestamp: nextTs(),
+      success: false,
+      failureKind: "execution",
+      error: "no reply",
+      terminal: true,
+    });
+
+    expect(events.map((e) => e.state)).toEqual(["REQUESTED", "DISPATCHED", "TIMED_OUT"]);
+    // Every rung names the action and the standard it is being measured against.
+    for (const event of events) {
+      expect(event).toMatchObject({ actionType: "device_action", effectiveTier: "observed" });
+    }
+    expect(events[2]).toMatchObject({ failureKind: "execution", error: "no reply" });
+    // A rung that did not fail carries no failure fields at all.
+    expect(events[1]?.failureKind).toBeUndefined();
+    expect(events[1]?.error).toBeUndefined();
+  });
+});
+
+describe("CommandHistoryStore — per-rung evidence", () => {
+  it("round-trips evidence recorded on the opening rung", () => {
+    store.create(baseRecord({ commandId: "c1", effectiveTier: "observed" }), {
+      tier: "observed",
+      observedDeviceId: "flow-1",
+      condition: { field: "litresPerMinute", op: "gt", value: 0 },
+      timeoutMs: 5000,
+      reason: "Command accepted into the pipeline",
+    });
+
+    const [requested] = store.get("c1")!.transitions;
+    expect(requested?.details).toEqual({
+      tier: "observed",
+      observedDeviceId: "flow-1",
+      condition: { field: "litresPerMinute", op: "gt", value: 0 },
+      timeoutMs: 5000,
+      reason: "Command accepted into the pipeline",
+    });
+  });
+
+  it("keeps details NULL rather than an empty object when nothing was recorded", () => {
+    store.create(baseRecord({ commandId: "c1" }));
+    store.transition({ commandId: "c1", toState: "DISPATCHED", timestamp: nextTs(), terminal: true, success: true });
+
+    for (const transition of store.get("c1")!.transitions) {
+      // "No evidence recorded" must stay distinguishable from "recorded, and empty".
+      expect(transition.details).toBeUndefined();
+    }
+  });
+
+  it("attaches evidence to the rung it explains, not to the record", () => {
+    store.create(baseRecord({ commandId: "c1", effectiveTier: "observed" }), { reason: "opening" });
+    store.transition({ commandId: "c1", toState: "DISPATCHED", timestamp: nextTs(), terminal: false, details: { reason: "dispatched" } });
+    store.transition({
+      commandId: "c1",
+      toState: "STATE_MISMATCH",
+      timestamp: nextTs(),
+      terminal: true,
+      success: false,
+      details: { condition: { field: "on", op: "eq", value: true }, reason: "contradicted" },
+    });
+
+    expect(store.get("c1")!.transitions.map((t) => t.details?.reason)).toEqual([
+      "opening",
+      "dispatched",
+      "contradicted",
+    ]);
+  });
+
+  it("survives a details payload that is not valid JSON on read", () => {
+    store.create(baseRecord({ commandId: "c1" }));
+    db.prepare("UPDATE command_transitions SET details = ? WHERE command_id = ?").run("{not json", "c1");
+    // A corrupt row degrades to no evidence rather than throwing out of a read.
+    expect(store.get("c1")!.transitions[0]?.details).toBeUndefined();
+  });
 });
 
 describe("CommandHistoryStore — reconcileInterrupted (Req 4)", () => {

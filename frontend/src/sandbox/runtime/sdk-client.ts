@@ -14,6 +14,7 @@ import {
   type RpcResponse,
   type RpcEvent,
   type PropsPayload,
+  type CommandResult,
 } from "../rpc-types";
 
 /** Default per-request timeout (ms). Requirement 7.2 bound on RPC overhead. */
@@ -29,8 +30,8 @@ export interface AeolusUiSdk {
   saveAndFire(key: string, value: unknown): Promise<void>;
   /** Fire a named UI event with optional payload. */
   fire(eventName: string, payload?: Record<string, unknown>): Promise<void>;
-  /** Control a device; resolves after the host completes the action. */
-  control(deviceId: string, actionType: string, params?: Record<string, unknown>): Promise<void>;
+  /** Control a device; resolves with the command's outcome once the host completes it. */
+  control(deviceId: string, actionType: string, params?: Record<string, unknown>): Promise<CommandResult>;
   /** Publish an MQTT message. */
   publish(topic: string, payload: string): Promise<void>;
   /** Subscribe to state changes for this entity. Returns an unsubscribe fn. */
@@ -156,12 +157,15 @@ export function createSdkClient(
       await request("fire", { eventName, ...(payload !== undefined ? { payload } : {}) });
     },
 
-    async control(deviceId: string, actionType: string, params?: Record<string, unknown>): Promise<void> {
-      await request("control", {
+    async control(deviceId: string, actionType: string, params?: Record<string, unknown>): Promise<CommandResult> {
+      // The host resolves with the command's outcome. Discarding it here was why a
+      // UI could not tell an accepted command from a proven one.
+      const result = await request("control", {
         deviceId,
         actionType,
         ...(params !== undefined ? { params } : {}),
       });
+      return (result ?? { success: false, error: "No result returned for control" }) as CommandResult;
     },
 
     async publish(topic: string, payload: string): Promise<void> {

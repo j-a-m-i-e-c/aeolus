@@ -1,6 +1,9 @@
 // frontend/src/components/panes/custom/types.ts — Props interface for custom automation UI components
 
 import type { Device } from "../../../store/device-store";
+import type { CommandResult } from "../../../sandbox/sdk-broker";
+
+export type { CommandResult };
 
 export interface ExecutionEntry {
   id: string;
@@ -45,8 +48,13 @@ export interface CustomComponentProps {
    * @param payload - Optional data to pass to the Logic tab in `context.state`.
    */
   fire: (eventName: string, payload?: Record<string, unknown>) => void;
-  /** Control a device from the component. */
-  control: (deviceId: string, actionType: string, params?: Record<string, unknown>) => Promise<void>;
+  /**
+   * Control a device from the component, resolving with the command's outcome.
+   *
+   * It has always resolved with a result; the declaration said `Promise<void>`, so
+   * authors had no signal that the outcome was there to be read.
+   */
+  control: (deviceId: string, actionType: string, params?: Record<string, unknown>) => Promise<CommandResult>;
   /** Send an MQTT message from the component. */
   publish: (topic: string, payload: string) => void;
   /** The most recent execution log entries for this rule. */

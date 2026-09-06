@@ -11,7 +11,7 @@
 import type { Database as DatabaseType } from "better-sqlite3";
 import type { CommandLifecycleState, CommandFailureKind } from "../core/types.js";
 import { canTransition } from "./command-lifecycle.js";
-import type { ConfirmationTier } from "./command-lifecycle.js";
+import type { CommandEvidence, ConfirmationTier } from "./command-lifecycle.js";
 import logger from "../logger.js";
 
 /** Origin kind of a Verified Command; mirrors {@link CommandSource} in command-service. */
@@ -49,7 +49,8 @@ export interface CommandTransition {
   fromState?: CommandLifecycleState;
   toState: CommandLifecycleState;
   timestamp: number;
-  details?: Record<string, unknown>;
+  /** Per-rung evidence, when the writer recorded any. */
+  details?: CommandEvidence;
 }
 
 /** A command record plus its chronological transition timeline. */
@@ -74,6 +75,17 @@ export interface CommandLifecycleTransitionEvent {
   timestamp: number;
   terminal: boolean;
   success?: boolean;
+  /** What was asked of the device, so a rung can name the action it belongs to. */
+  actionType: string;
+  /**
+   * The tier this command must reach to count as proven. Without it an observer
+   * cannot tell a DISPATCHED that is finished from one still climbing.
+   */
+  effectiveTier: ConfirmationTier;
+  /** Coarse failure classification, when this transition is a failure. */
+  failureKind?: CommandFailureReason;
+  /** The device's or runtime's account of a failure, when there is one. */
+  error?: string;
 }
 
 /** Filters for a bounded recent-command listing. */
@@ -99,7 +111,8 @@ export interface CommandTransitionInput {
   error?: string;
   /** When true, `terminal_at` is stamped so the configured command wait is complete. */
   terminal: boolean;
-  details?: Record<string, unknown>;
+  /** Per-rung evidence for this transition. Built from a named shape, never ad hoc. */
+  details?: CommandEvidence;
 }
 
 export const DEFAULT_COMMAND_LIST_LIMIT = 50;
@@ -167,10 +180,10 @@ function rowToTransition(row: TransitionRow): CommandTransition {
   };
 }
 
-function safeParse(json: string): Record<string, unknown> | undefined {
+function safeParse(json: string): CommandEvidence | undefined {
   try {
     const parsed = JSON.parse(json) as unknown;
-    return typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : undefined;
+    return typeof parsed === "object" && parsed !== null ? (parsed as CommandEvidence) : undefined;
   } catch {
     return undefined;
   }
@@ -211,7 +224,7 @@ export class CommandHistoryStore {
    * Insert the initial durable record and its `REQUESTED` transition atomically.
    * The record must be created before dispatch is attempted (design §2.1).
    */
-  create(record: CommandRecord): void {
+  create(record: CommandRecord, evidence?: CommandEvidence): void {
     const tx = this.db.transaction(() => {
       this.db
         .prepare(
@@ -244,7 +257,13 @@ export class CommandHistoryStore {
         .prepare(
           "INSERT INTO command_transitions (command_id, from_state, to_state, timestamp, details) VALUES (?, ?, ?, ?, ?)",
         )
-        .run(record.commandId, null, record.lifecycleState, record.requestedAt, null);
+        .run(
+          record.commandId,
+          null,
+          record.lifecycleState,
+          record.requestedAt,
+          evidence ? JSON.stringify(evidence) : null,
+        );
     });
     tx();
 
@@ -259,6 +278,10 @@ export class CommandHistoryStore {
       timestamp: record.requestedAt,
       terminal: record.terminalAt !== undefined,
       ...(record.success !== undefined ? { success: record.success } : {}),
+      actionType: record.actionType,
+      effectiveTier: record.effectiveTier,
+      ...(record.failureKind ? { failureKind: record.failureKind } : {}),
+      ...(record.error ? { error: record.error } : {}),
     });
   }
 
@@ -284,7 +307,8 @@ export class CommandHistoryStore {
     const tx = this.db.transaction(() => {
       const current = this.db
         .prepare(
-          `SELECT lifecycle_state, terminal_at, correlation_id, target_device_id, source_kind, rule_id, execution_id
+          `SELECT lifecycle_state, terminal_at, correlation_id, target_device_id, source_kind,
+                  rule_id, execution_id, action_type, effective_tier
              FROM command_records WHERE command_id = ?`,
         )
         .get(input.commandId) as
@@ -296,6 +320,8 @@ export class CommandHistoryStore {
             source_kind: string;
             rule_id: string | null;
             execution_id: string | null;
+            action_type: string;
+            effective_tier: string;
           }
         | undefined;
 
@@ -360,12 +386,32 @@ export class CommandHistoryStore {
         timestamp: input.timestamp,
         terminal: input.terminal,
         ...(input.success !== undefined ? { success: input.success } : {}),
+        actionType: current.action_type,
+        effectiveTier: current.effective_tier as ConfirmationTier,
+        ...(input.failureKind ? { failureKind: input.failureKind } : {}),
+        ...(input.error ? { error: input.error } : {}),
       };
     });
     tx();
 
     // Emit only after the durable write commits (Req 7.5).
     if (recorded) this.emitRecorded(recorded);
+  }
+
+  /**
+   * Return a command with its timeline, but only when `ruleId` issued it.
+   *
+   * The scope check lives here, next to the data, so it cannot be forgotten by a
+   * caller: an automation may read back what happened to a command it caused, and
+   * nothing else. A command from another rule, from a REST or system source, or
+   * with no rule attribution at all is indistinguishable from one that does not
+   * exist (Req: ADR-0011).
+   */
+  getForRule(commandId: string, ruleId: string): CommandRecordWithTransitions | undefined {
+    if (!commandId || !ruleId) return undefined;
+    const record = this.get(commandId);
+    if (!record || record.ruleId !== ruleId) return undefined;
+    return record;
   }
 
   /** Return a command with its chronological transition timeline, or undefined. */
@@ -474,6 +520,12 @@ export class CommandHistoryStore {
         failureKind: "interrupted",
         error: "Process restarted while the command was in flight; live confirmation wait was lost",
         terminal: true,
+        // Says plainly that the outcome is unknown rather than negative: the
+        // physical command may well have taken effect, and nothing observed it.
+        details: {
+          reason:
+            "Aeolus restarted while this command was in flight, so its outcome was never observed. No command was replayed.",
+        },
       });
       reconciled += 1;
     }

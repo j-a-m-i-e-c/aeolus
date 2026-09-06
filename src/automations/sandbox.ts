@@ -6,6 +6,7 @@ import type { ConfirmationTier } from "./command-lifecycle.js";
 import { isConfirmationTier } from "./completion-tier.js";
 import type { CommandResultCollector } from "./command-result-collector.js";
 import type { AutomationEventService } from "./automation-event-service.js";
+import type { CommandHistoryStore } from "./command-history-store.js";
 import {
   currentExecutionContext,
   runInExecutionContext,
@@ -171,6 +172,10 @@ function buildConfirmOptions(
 
   return {
     condition: predicate,
+    // The same spec the predicate was built from, carried along as evidence only.
+    // The predicate stays the one decision path, so what an operator is shown can
+    // never diverge from what was actually checked.
+    conditionSpec: conditionSpec as Record<string, unknown>,
     ...(typeof confirmDeviceId === "string" ? { deviceId: confirmDeviceId } : {}),
     ...(typeof confirmTimeoutMs === "number" ? { timeoutMs: confirmTimeoutMs } : {}),
   };
@@ -347,6 +352,14 @@ export interface SandboxDeps {
    * and Data Store surface are exposed as before.
    */
   scopeResolver?: AutomationScopeResolver;
+  /**
+   * Durable command history, backing `devices.commandEvidence()` (ADR-0011).
+   *
+   * Read-only from the sandbox's point of view, and scoped by the store itself to
+   * commands the executing rule issued. When absent, `commandEvidence()` is not
+   * exposed rather than silently returning nothing.
+   */
+  commandHistoryStore?: Pick<CommandHistoryStore, "getForRule">;
 }
 
 /** Context describing the event that triggered the automation. */
@@ -478,6 +491,7 @@ const BOOTSTRAP_SCRIPT = `
   var dbDeleteRef = typeof __dbDeleteRef !== "undefined" ? __dbDeleteRef : undefined;
   var dbCollectionsRef = typeof __dbCollectionsRef !== "undefined" ? __dbCollectionsRef : undefined;
   var eventsEmitRef = typeof __eventsEmitRef !== "undefined" ? __eventsEmitRef : undefined;
+  var commandEvidenceRef = typeof __commandEvidenceRef !== "undefined" ? __commandEvidenceRef : undefined;
   // Closure-local logical command failure state. User-authored code must not be
   // able to clear it between actions and bypass the automation fail-fast rule.
   var commandFailed = false;
@@ -547,6 +561,13 @@ const BOOTSTRAP_SCRIPT = `
         if (result && (result.failed > 0 || result.error)) { commandFailed = true; }
         return result;
       });
+    },
+    commandEvidence: function(commandId) {
+      // Read back what physically happened to a command THIS automation issued.
+      // Synchronous: the transition rows are already durable by the time
+      // devices.action() resolves, so there is nothing to wait for.
+      if (!commandEvidenceRef || !commandId) return undefined;
+      return commandEvidenceRef.applySync(undefined, [String(commandId)], { result: { copy: true } });
     }
   };
 
@@ -704,6 +725,7 @@ const BOOTSTRAP_SCRIPT = `
   delete globalThis.__dbDeleteRef;
   delete globalThis.__dbCollectionsRef;
   delete globalThis.__eventsEmitRef;
+  delete globalThis.__commandEvidenceRef;
 })();
 `;
 
@@ -725,6 +747,7 @@ export class Sandbox {
   private onStateChange?: (ruleId: string, key: string, value: unknown) => void;
   private scopeResolver?: AutomationScopeResolver;
   private automationEventService?: AutomationEventService;
+  private commandHistoryStore?: Pick<CommandHistoryStore, "getForRule">;
 
   constructor(deps: SandboxDeps) {
     this.commandService = deps.commandService;
@@ -735,6 +758,7 @@ export class Sandbox {
     this.onStateChange = deps.onStateChange;
     this.scopeResolver = deps.scopeResolver;
     this.automationEventService = deps.automationEventService;
+    this.commandHistoryStore = deps.commandHistoryStore;
   }
 
   /**
@@ -1274,6 +1298,24 @@ export class Sandbox {
 
     const stateStore = this.stateStore;
     const onStateChange = this.onStateChange;
+
+    // Host-side callback for devices.commandEvidence(commandId). Exposed only when
+    // a history store is present, so an author gets `undefined` for the function
+    // rather than a function that always answers nothing.
+    if (this.commandHistoryStore) {
+      const historyStore = this.commandHistoryStore;
+      await jail.set(
+        "__commandEvidenceRef",
+        new ivm.Reference(function (commandId: string) {
+          // The store applies the scope: an automation reads back only commands it
+          // issued. A command belonging to another rule is indistinguishable from
+          // one that does not exist.
+          const evidence = historyStore.getForRule(commandId, ruleId);
+          if (!evidence) return undefined;
+          return new ivm.ExternalCopy(toPlainJson(evidence)).copyInto();
+        }),
+      );
+    }
 
     // Host-side callback for state.get(key)
     await jail.set(

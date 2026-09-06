@@ -17,7 +17,13 @@ import type { ConnectorManager } from "../connectors/connector-manager.js";
 import type { DeviceRegistry } from "../core/device-registry.js";
 import type { ActionResult, CommandLifecycleState, ConfirmOptions } from "../core/types.js";
 import { DEFAULT_CONFIRM_TIMEOUT_MS } from "../core/types.js";
-import { selectRequiredTier, type ConfirmationTier } from "./command-lifecycle.js";
+import {
+  buildCommandEvidence,
+  describeRung,
+  selectRequiredTier,
+  type CommandEvidence,
+  type ConfirmationTier,
+} from "./command-lifecycle.js";
 import type { PendingCommandTracker } from "./pending-command-tracker.js";
 import type { AutomationScopeResolver } from "./automation-scope-resolver.js";
 import type {
@@ -264,10 +270,22 @@ export class CommandService {
       toState: CommandLifecycleState,
       terminal: boolean,
       extra?: { success?: boolean; failureKind?: CommandFailureReason; error?: string },
+      evidence?: CommandEvidence,
     ): void => {
       if (!store || !commandId) return;
       try {
-        store.transition({ commandId, toState, timestamp: Date.now(), terminal, ...extra });
+        // Every rung carries its own account. Absent an explicit one, the standing
+        // description for the state is used, so no transition lands unexplained.
+        const details =
+          evidence ?? buildCommandEvidence({ reason: describeRung(toState, extra?.error) });
+        store.transition({
+          commandId,
+          toState,
+          timestamp: Date.now(),
+          terminal,
+          ...extra,
+          ...(details ? { details } : {}),
+        });
       } catch (err) {
         this.deps.logger.error(
           { commandId, toState, error: (err as Error).message },
@@ -333,8 +351,21 @@ export class CommandService {
         lifecycleState: "REQUESTED",
         requestedAt: Date.now(),
       };
+      // The opening rung states the contract: what this command must prove, on
+      // which device, and within how long. Recorded before dispatch so the
+      // standard is on record independently of whether it was met.
+      const observed = confirm?.deviceId ?? targetDeviceId;
+      const requestedEvidence = buildCommandEvidence({
+        tier,
+        ...(observed !== targetDeviceId ? { observedDeviceId: observed } : {}),
+        ...(confirm?.conditionSpec ? { condition: confirm.conditionSpec } : {}),
+        ...(tier !== "dispatch"
+          ? { timeoutMs: confirm?.timeoutMs ?? DEFAULT_CONFIRM_TIMEOUT_MS }
+          : {}),
+        reason: describeRung("REQUESTED"),
+      });
       try {
-        store.create(record);
+        store.create(record, requestedEvidence);
       } catch (err) {
         this.deps.logger.error(
           { commandId, error: (err as Error).message },
@@ -358,11 +389,19 @@ export class CommandService {
       this.deps.deviceRegistry &&
       !this.deps.deviceRegistry.getById(observedDeviceId)
     ) {
-      recordTransition("FAILED", true, {
-        success: false,
-        failureKind: "not_found",
-        error: `Confirmation observed device '${observedDeviceId}' not found`,
-      });
+      recordTransition(
+        "FAILED",
+        true,
+        {
+          success: false,
+          failureKind: "not_found",
+          error: `Confirmation observed device '${observedDeviceId}' not found`,
+        },
+        buildCommandEvidence({
+          observedDeviceId,
+          reason: `Nothing could confirm this command: observed device '${observedDeviceId}' is not present`,
+        }),
+      );
       return withId({
         success: false,
         error: `Confirmation observed device '${observedDeviceId}' not found`,
@@ -478,10 +517,29 @@ export class CommandService {
     // already resolved this promise during dispatch above.
     const resolution = await resolutionPromise;
 
-    recordTransition(resolution.lifecycleState, true, {
-      success: resolution.success,
-      ...(resolution.error ? { error: resolution.error } : {}),
-    });
+    // A failed wait restates what went unmet — the condition, the device that was
+    // watched and the window it had — because that is the whole content of the
+    // failure. A satisfied wait needs only to say so.
+    const unmet = resolution.lifecycleState === "TIMED_OUT" || resolution.lifecycleState === "STATE_MISMATCH";
+    recordTransition(
+      resolution.lifecycleState,
+      true,
+      {
+        success: resolution.success,
+        ...(resolution.error ? { error: resolution.error } : {}),
+      },
+      buildCommandEvidence({
+        tier,
+        ...(unmet
+          ? {
+              observedDeviceId,
+              ...(confirm?.conditionSpec ? { condition: confirm.conditionSpec } : {}),
+              timeoutMs,
+            }
+          : {}),
+        reason: describeRung(resolution.lifecycleState, resolution.error),
+      }),
+    );
 
     this.logCompletion(
       logId,

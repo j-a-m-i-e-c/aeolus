@@ -1,11 +1,11 @@
-# ADR-0011: Command evidence as an automation-scoped read capability
+# ADR-0011: Command evidence read by the automation that issued the command
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-09-03
 
 ## Context
 
-ADR-0006 established that Aeolus reports what physically happened rather than what
+ADR-0006 committed Aeolus to reporting what physically happened rather than what
 was requested. The runtime already keeps the proof: `CommandService` writes a
 durable `command_records` row before dispatch and appends an immutable
 `command_transitions` row for every lifecycle step, guarded by the central
@@ -18,158 +18,157 @@ None of that proof reaches an operator.
   nothing in `frontend/src` calls them.
 - The `command-lifecycle` WebSocket message is mapped in `src/index.ts` with no
   `visibility` resolver, so `ws-server.ts` treats it as admin-only by design
-  (`ADMIN_ONLY` is the fail-closed default). Nothing in `frontend/src` consumes it.
-- `command_transitions.details` exists, is parsed on read
-  (`rowToTransition`), and is typed on both the read and write interfaces — but
-  every INSERT site passes `null`. No caller has ever supplied it.
+  (`ADMIN_ONLY` is the fail-closed default). Nothing consumes it either.
+- `command_transitions.details` exists, is parsed on read (`rowToTransition`) and
+  is typed on both the read and write interfaces — but every INSERT site passes
+  `null`. No caller has ever supplied it.
 - The lifecycle event payload (`CommandLifecycleTransitionEvent`) omits
-  `actionType`, `effectiveTier`, `failureKind` and `error`, so a live ladder built
-  from it cannot say which rung the command was aiming for, or why it stopped.
+  `actionType`, `effectiveTier`, `failureKind` and `error`, so a rung built from it
+  cannot say which tier it was aiming for, or why it stopped.
 - A sandboxed showcase UI has no path to any of it. The SDK op allowlist
   (`SDK_OPS` in `frontend/src/sandbox/rpc-types.ts`) is closed, only `state` and
-  `props` events reach a frame, and the frame's CSP sets `connect-src 'none'` so it
-  cannot fetch anything itself.
+  `props` events reach a frame, and the frame's CSP sets `connect-src 'none'`.
 
 What showcase UIs display today is a collapsed verdict. Every project stores a
 string and a timestamp — `lastOutcome`, `coolingVerifiedAt`, `interlockAt` — because
-that is all `devices.action()` hands back. The evidence ladder that makes Aeolus
-different from a dashboard that fires and hopes is invisible to the people the
-demo is for.
+that is all `devices.action()` hands back. The evidence ladder that distinguishes
+Aeolus from a dashboard that fires and hopes is invisible to the people the demo
+exists for.
+
+The obvious cheap answer does not work. `devices.action()` resolves **once**, at the
+completion tier, so Logic never witnesses `DISPATCHED` and `ACKNOWLEDGED` as
+separate moments. A ladder drawn from the resolved result alone would have to invent
+timestamps for the rungs in the middle — the same class of fault as placing an
+animal from the age of its detection event, or an ROV from a clamped altitude. A
+plausible number that is not a measurement.
 
 ## Decision
 
-Expose command evidence as a **read capability scoped to the automation that
-issued the command**, reusing the existing visibility model rather than inventing
-one. Concretely:
+Give **Logic** a read of the evidence for commands it issued, and let the existing
+projection path carry it to the UI.
 
-1. **Populate `command_transitions.details`.** Each rung carries the evidence for
-   that rung: the tier being aimed for, the observed condition and the value that
-   satisfied it, the applied timeout, the acknowledgement correlation. No
-   migration — the column and its read path already exist.
+1. **Populate `command_transitions.details`** at every writer, built from a small
+   named shape rather than whatever happens to be in scope: the tier being aimed
+   for, the observed condition and the value that satisfied it, the applied timeout,
+   the failure reason. No migration — the column and its read path already exist.
 2. **Complete the lifecycle event payload** with `actionType`, `effectiveTier`,
-   `failureKind` and `error`, so a rung can label itself without a second fetch.
-3. **Scope the `command-lifecycle` broadcast** with a visibility resolver
-   composed from the resolvers already in `src/index.ts`: a transition is visible
-   on the tabs that expose the issuing automation
-   (`ownershipStore.getExposingTabs(ruleId)`) unioned with the tabs that expose the
-   target device (`deviceExposureResolver.getExposingTabs(targetDeviceId)`). No
-   rule id and no exposing tab stays admin-only, as now.
-4. **Add one automation-scoped HTTP read**, leaving the admin routes untouched:
-   the recent commands issued by a named rule, readable by a caller who can access
-   a tab that exposes that rule.
-5. **Add one SDK op, `commandEvidence`,** bound to the frame's own grant. The
-   frame does not pass a rule id; the broker uses the immutable `entityId` from its
-   `FrameGrant`, exactly as `read` already does. A `readOnly` grant still permits
-   it, because it is a read.
-6. **Type `aeolus.control` honestly.** It already resolves with a
-   `CommandResult` at runtime, but both declarations say `Promise<void>` and the
-   broker's `CommandResult` drops `commandId` and `failureKind`. Pass the whole
-   body through and declare it.
-7. **Derive the ladder in `@aeolus/ui`** as pure functions over a record and its
-   transitions — rung labels, reached/pending/failed status, per-rung evidence
-   text. Rendering stays in each project, so the module keeps its "no I/O, nothing
+   `failureKind` and `error`, so a rung can label itself. Remains admin-only.
+3. **Add a `devices.commandEvidence(commandId)` host binding** to the Logic
+   isolate, returning the record plus its chronological transitions as plain data.
+   It resolves only commands whose `rule_id` matches the calling rule; anything else
+   returns undefined.
+4. **Derive the ladder in `@aeolus/ui`** as pure functions over a record and its
+   transitions — rung labels, reached/pending/failed status, per-rung evidence text.
+   Rendering stays in each project, so the module keeps its "no I/O, nothing
    privileged" guarantee.
+5. **Type `aeolus.control` honestly.** It already resolves with a `CommandResult` at
+   runtime, but both declarations say `Promise<void>` and the broker's
+   `CommandResult` drops `commandId` and `failureKind`. Pass the whole body through
+   and declare it.
+
+Adoption is at least one automation per showcase tab, so the ladder is a property of
+the platform rather than a flourish on one pane.
 
 ## Why this fits Aeolus
 
-The evidence belongs to the automation that issued the command. That is already a
-first-class identity in the authorization model: `command_records.rule_id` is
-populated for automation-sourced commands, and `automationVisibility` in
-`src/index.ts` already answers "which tabs may see this rule's activity". Scoping
-evidence the same way adds a consumer of the existing model rather than a second
-model to keep consistent.
+The evidence belongs to the automation that issued the command, and that automation
+already runs with an authorization scope (`AutomationScopeResolver`) that
+`CommandService.checkScope` enforces on `devices.action` itself. Reading back what
+happened to a command it caused discloses nothing it did not already have the
+authority to do. The check is one comparison against `command_records.rule_id`.
 
-Binding the SDK op to the frame's own `entityId` means the capability introduces
-**no new authorization decision**. The grant already establishes that the frame
-speaks for one rule; asking "what happened to the commands that rule issued" is
-within the authority the frame was given. A general "query command history" op
-would have needed its own filtering, its own scoping, and its own failure modes.
+The timing works out because the store's writes are synchronous and land before the
+action resolves: `DISPATCHED`, the tracker's `ACKNOWLEDGED`, and the terminal
+transition are all durable by the time `devices.action()` returns. The moment Logic
+receives its result is exactly the moment the full timeline exists.
 
-Populating `details` rather than adding a table keeps the evidence attached to the
-transition it explains, which is the thing that is immutable and append-only. An
-evidence row that could drift from its transition would be worse than no evidence.
+Delivery then rides the path that already exists. Logic projects the rungs into its
+own automation state; the pane reads them with the `read` op every showcase UI
+already uses and every architecture test already enforces. No new HTTP surface, no
+new sandbox capability, no CSP question, no new authorization decision.
 
 ## Alternatives considered
 
-### Project-state projection only, no platform change
+### A tab-scoped HTTP route plus a new UI-sandbox SDK op
 
-`devices.action()` already returns the completion outcome, so Logic could write
-richer evidence into its own automation state and the UI could read it with the
-existing `read` op. This needs no new route, no new SDK op and no authorization
-work, and it is how the showcase collapses evidence today.
+This was the first shape of this ADR, and it was over-built. It added a non-admin
+read path to command history, a new op in the sandbox allowlist, a composed
+visibility resolver for the WebSocket broadcast, and a broker dependency — four new
+security-relevant surfaces to reach evidence the server could simply hand to Logic,
+which already had the authority for it.
 
-Rejected as the whole answer because `devices.action()` resolves **once**, at the
-completion tier. Logic never sees `DISPATCHED` and `ACKNOWLEDGED` as separate
-moments with their own timestamps, so a ladder built this way can only show the
-rung it landed on. It would have to fabricate the intermediate steps to draw them,
-which is precisely the failure this ADR exists to remove. The projection is still
-useful and stays — it is the offline/at-rest summary — but it cannot be the
-evidence.
+It also widened disclosure in a way the goal did not require: any pane could read
+its automation's whole command history, rather than the author choosing what the
+pane says. Rejected in favour of decision 3.
 
-### Open `/api/commands` to non-admins with a tab filter
+### Project-state projection with no platform change
 
-Simpler-sounding, but it widens the surface that already carries the "can disclose
-device names and behaviour" warning, and a per-record filter on a list endpoint is
-easy to get subtly wrong. An automation-scoped route answers the question the UI
-actually asks and cannot accidentally return a neighbouring tab's commands.
+Logic writes richer evidence from the resolved `ActionResult` and the UI reads it.
+No new binding at all.
 
-### Forward `command-lifecycle` into frames as an RPC event
+Rejected as insufficient, for the reason in the context above: the resolved result
+is a single rung. This ADR keeps the projection as the *delivery* mechanism — what
+changes is that Logic projects transitions it actually read, instead of rungs it
+inferred.
 
-A live ladder pushed as an event would animate without polling. Deferred rather
-than rejected: the broker currently forwards only `state` and `props`, and adding a
-third event kind means deciding how a frame subscribes to a filtered stream. The
-scoped WS broadcast in decision 3 is what the *dashboard* needs; a frame can read
-on demand until there is a reason to stream.
+### Scope the `command-lifecycle` WebSocket broadcast to tabs
 
-### Give the sandbox a generic authenticated fetch
+Deferred, not rejected. The resolver ingredients exist in `src/index.ts`, but
+nothing on the dashboard renders the message, so scoping it now would be speculative
+work on a security-sensitive path. Do it when there is a consumer.
 
-Rejected outright. `connect-src 'none'` and the absence of a token in the frame
-are load-bearing parts of ADR-0005. A named, grant-scoped op preserves both.
+### A generic authenticated fetch for the sandbox
+
+Rejected outright. `connect-src 'none'` and the absence of a token in the frame are
+load-bearing parts of ADR-0005.
 
 ## Consequences
 
 ### Positive
 
-- The evidence ladder becomes visible to the operators the demo is for, from the
-  same records the runtime already writes for its own correctness.
+- The evidence ladder becomes visible from the same records the runtime already
+  writes for its own correctness, with no fabricated rungs.
 - `command_transitions.details` stops being dead schema.
-- No new authorization model: one composed visibility resolver and one op bound to
-  an existing grant.
+- No new authorization model, HTTP route, or sandbox capability.
 - A failure rung (`TIMED_OUT`, `STATE_MISMATCH`) becomes as legible as a success
   one, which is the more valuable half of the story.
+- What a pane discloses stays an authoring decision, consistent with every other
+  projected value.
 
 ### Negative / accepted trade-offs
 
-- Command history becomes reachable by non-admin viewers for the automations their
-  tabs expose. That is the point, but it is a genuine widening: device names and
-  command timing become visible where they were not. The scoping must be tested as
-  carefully as the feature.
-- Six layers change together (store, event payload, WS visibility, HTTP route, SDK
-  protocol/broker, ui-kit). Each needs its own test; a partial landing would leave
-  a route with no consumer, which is the state this ADR is fixing.
-- `details` is free-form JSON. Without discipline it will become a dumping ground;
-  the writer sites should build it from a small named shape rather than spreading
-  whatever is in scope.
-- Evidence read on demand can lag a live command by one interaction. Acceptable
-  while the rungs are labelled honestly as pending.
+- Evidence reaches the UI only for commands the automation chose to project. An
+  operator cannot browse history the author did not surface. That is the intended
+  boundary, but it does mean the platform has no general evidence browser yet.
+- Anything projected into automation state is visible to anyone who can view the
+  pane. Authors must not project device internals they would not otherwise show.
+- `details` is free-form JSON. Without discipline it becomes a dumping ground, hence
+  the named shape in decision 1.
+- Six files change together across the store, the event payload, the Logic binding,
+  the ui-kit and the declarations. A partial landing leaves a binding with no
+  consumer.
+- The `dispatch` tier has only two rungs (`REQUESTED` → `DISPATCHED`). The ladder
+  must render an honestly short ladder rather than implying missing evidence.
 
 ## Revisit when
 
-- A frame needs the ladder to animate live rather than on demand — then decide the
-  frame-side event subscription model deliberately.
-- Untrusted third-party UI authors become possible. At that point
-  `commandEvidence` belongs in the per-project capability manifest ADR-0005 already
-  anticipates, not in a global allowlist.
-- Retention becomes a question. Nothing prunes `command_records` today; a visible
+- Something on the dashboard needs to render command lifecycle live — then decide
+  the WebSocket scoping and, if a frame needs it, the frame-side event subscription
+  model deliberately.
+- An operator needs to browse evidence the author did not project. That is a
+  general evidence browser, and it needs the tab-scoped read path this ADR declined
+  to build speculatively.
+- Retention becomes a question. Nothing prunes `command_records` today; visible
   history makes its growth a product concern rather than only an operational one.
+- Untrusted third-party UI authors become possible, at which point evidence access
+  belongs in the per-project capability manifest ADR-0005 anticipates.
 
 ## Implementation anchors
 
 - `src/automations/command-history-store.ts`
+- `src/automations/command-service.ts`
+- `src/automations/sandbox.ts` (Logic host bindings)
 - `src/automations/command-lifecycle.ts`
-- `src/api/routes/command.routes.ts`
-- `src/index.ts` (WS mappings and visibility resolvers)
-- `frontend/src/sandbox/rpc-types.ts`, `sdk-broker.ts`, `sandbox-host.ts`
 - `frontend/src/sandbox/ui-kit/index.ts`
 - `docs/adr/0006-truthful-command-lifecycle.md`
-- `docs/security/permissions.md`
+- `docs/reference/automations.md`

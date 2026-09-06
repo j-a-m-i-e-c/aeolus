@@ -196,6 +196,26 @@ export function isRpcFatal(raw: unknown): raw is RpcFatal {
   );
 }
 
+/**
+ * Structured outcome of a device command, as returned by the backend REST route.
+ *
+ * Part of the RPC contract rather than a host-only type: it is the result of the
+ * `control` op, so both sides of the channel need the same shape. Mirrors the whole
+ * body — dropping `commandId` and `failureKind` left a UI unable to tell a timeout
+ * from a rejection, or to refer to the command it had just issued.
+ */
+export interface CommandResult {
+  success: boolean;
+  data?: Record<string, unknown>;
+  error?: string;
+  lifecycleState?: string;
+  correlationId?: string;
+  /** Stable Aeolus id for a verified physical command. */
+  commandId?: string;
+  /** Coarse failure classification when `success` is false. */
+  failureKind?: string;
+}
+
 /** Validation result for per-op params checking. */
 export interface ParamsValidationResult {
   valid: boolean;

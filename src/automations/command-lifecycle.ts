@@ -46,6 +46,78 @@ const SUCCESS_STATES: ReadonlySet<CommandLifecycleState> = new Set([
 export type ConfirmationTier = "dispatch" | "acknowledged" | "observed";
 
 /**
+ * Per-rung evidence recorded alongside a lifecycle transition.
+ *
+ * Persisted to `command_transitions.details`, which is durable and — through an
+ * automation's own projection — operator-visible. It is therefore a named shape
+ * rather than free-form JSON: what an operator is told about a rung is a
+ * decision, not whatever happened to be in scope at the call site.
+ *
+ * Every field is optional because the rungs genuinely differ. `REQUESTED` states
+ * the contract the command must satisfy; `TIMED_OUT` restates it because that is
+ * precisely what went unmet; `DISPATCHED` has little to add beyond having
+ * happened.
+ */
+export interface CommandEvidence {
+  /** The completion tier this command must reach to count as proven. */
+  tier?: ConfirmationTier;
+  /** Device whose observed state settles the question, when not the target. */
+  observedDeviceId?: string;
+  /**
+   * The condition being waited for, as plain data. Recorded so an operator can be
+   * told WHAT was required, not merely that something was. Never re-evaluated
+   * from here — the live predicate is owned by the tracker.
+   */
+  condition?: Record<string, unknown>;
+  /** Bound on the confirmation wait, in ms. */
+  timeoutMs?: number;
+  /** Short operator-facing account of why this rung was reached. */
+  reason?: string;
+}
+
+/**
+ * Build a {@link CommandEvidence} from parts, or `undefined` when nothing is
+ * known.
+ *
+ * Returning `undefined` for an empty result keeps `details` NULL rather than
+ * writing `{}`, so "no evidence recorded" stays distinguishable from "evidence
+ * recorded, and it was empty".
+ */
+export function buildCommandEvidence(parts: CommandEvidence): CommandEvidence | undefined {
+  const evidence: CommandEvidence = {};
+  if (parts.tier !== undefined) evidence.tier = parts.tier;
+  if (parts.observedDeviceId !== undefined) evidence.observedDeviceId = parts.observedDeviceId;
+  if (parts.condition !== undefined) evidence.condition = parts.condition;
+  if (parts.timeoutMs !== undefined) evidence.timeoutMs = parts.timeoutMs;
+  if (parts.reason !== undefined && parts.reason !== "") evidence.reason = parts.reason;
+  return Object.keys(evidence).length > 0 ? evidence : undefined;
+}
+
+/**
+ * The standing account of what each terminal rung means, in operator language.
+ *
+ * Kept next to the transition table so a new lifecycle state cannot be added
+ * without deciding what it tells an operator.
+ */
+const RUNG_REASONS: Record<CommandLifecycleState, string> = {
+  REQUESTED: "Command accepted into the pipeline; nothing has been dispatched yet",
+  DISPATCHED: "The connector accepted the dispatch",
+  ACKNOWLEDGED: "The device acknowledged receiving the command",
+  OBSERVED: "Observed device state satisfied the required condition",
+  FAILED: "The command failed",
+  TIMED_OUT: "No satisfying reply arrived within the confirmation window",
+  STATE_MISMATCH: "The device reported a state that contradicts the command",
+};
+
+/**
+ * Describe a rung for an operator. `error` wins when present, because a device's
+ * own account of a failure is better evidence than a generic label.
+ */
+export function describeRung(state: CommandLifecycleState, error?: string): string {
+  return error && error.length > 0 ? error : RUNG_REASONS[state];
+}
+
+/**
  * Return true when a command may advance from `from` to `to`.
  *
  * Rejecting a disallowed transition (returning false) lets the caller treat it

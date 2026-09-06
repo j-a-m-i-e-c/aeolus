@@ -20,14 +20,11 @@ import {
 
 // ─── Command result type ─────────────────────────────────────────────────────
 
-/** Structured outcome of a device command, as returned by the backend REST route. */
-export interface CommandResult {
-  success: boolean;
-  data?: Record<string, unknown>;
-  error?: string;
-  lifecycleState?: string;
-  correlationId?: string;
-}
+// The `control` op's result is part of the RPC contract, so it lives with the
+// protocol and is re-exported here for the host-side consumers that already
+// import it from the broker.
+export type { CommandResult } from "./rpc-types";
+import type { CommandResult } from "./rpc-types";
 
 // ─── Public interfaces ───────────────────────────────────────────────────────
 

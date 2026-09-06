@@ -27,7 +27,7 @@ function makeMockSdk(overrides?: Partial<PropsPayload>): AeolusUiSdk {
     save: vi.fn(async (key: string, value: unknown) => { stateMirror.set(key, value); }),
     saveAndFire: vi.fn(async () => {}),
     fire: vi.fn(async () => {}),
-    control: vi.fn(async () => {}),
+    control: vi.fn(async () => ({ success: true, lifecycleState: "OBSERVED" })),
     publish: vi.fn(async () => {}),
     subscribeState: (listener) => { stateListeners.add(listener); return () => stateListeners.delete(listener); },
     subscribeProps: (listener) => { propsListeners.add(listener); return () => propsListeners.delete(listener); },

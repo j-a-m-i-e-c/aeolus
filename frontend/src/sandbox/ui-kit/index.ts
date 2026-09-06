@@ -320,3 +320,218 @@ export function kilowatts(value: unknown, decimals = 2): string {
   const formatted = formatNumber(value, decimals);
   return formatted === NO_VALUE ? formatted : `${formatted} kW`;
 }
+
+// ── Command evidence ─────────────────────────────────────────────────────────
+//
+// Aeolus records a durable rung for every step a physical command takes, plus the
+// evidence for that step. These helpers turn that record into something an
+// operator can read. They derive nothing: a rung appears here only if it appears
+// in the record, because a ladder with invented steps would be worse than no
+// ladder at all.
+//
+// The input is exactly what `devices.commandEvidence()` hands back, so Logic can
+// project it with no reshaping and nothing can be lost in a flatten.
+
+/** What a single rung of the ladder is currently saying. */
+export type CommandRungStatus = "reached" | "failed" | "pending";
+
+/** One step of a command's evidence ladder, ready to render. */
+export interface CommandRung {
+  /** The lifecycle state, e.g. `OBSERVED`. */
+  state: string;
+  /** That state in operator language, e.g. "Effect observed". */
+  label: string;
+  status: CommandRungStatus;
+  /** When the rung was reached, or `null` for one still expected. */
+  at: number | null;
+  /** The evidence recorded for this rung; empty string when none was. */
+  detail: string;
+}
+
+/** The one-line verdict for a command, honest about which tier it was held to. */
+export interface CommandVerdict {
+  /** The tier the command had to reach to count as proven. */
+  tier: string;
+  /** True once the command has stopped waiting, either way. */
+  settled: boolean;
+  /** True only when it satisfied its required tier. */
+  proven: boolean;
+  /**
+   * A short status word scaled to the tier: a dispatch-only command that
+   * succeeded was SENT, not OBSERVED. Overstating the tier is the failure this
+   * whole surface exists to prevent.
+   */
+  headline: string;
+  /** What the evidence amounts to, in a sentence. */
+  detail: string;
+  /** True when the author asked for a tier the device could not prove. */
+  clamped: boolean;
+  /** The clamp explained, or an empty string when nothing was clamped. */
+  clampNote: string;
+}
+
+const RUNG_LABELS: Record<string, string> = {
+  REQUESTED: "Requested",
+  DISPATCHED: "Sent to the device",
+  ACKNOWLEDGED: "Device acknowledged",
+  OBSERVED: "Effect observed",
+  FAILED: "Failed",
+  TIMED_OUT: "Timed out",
+  STATE_MISMATCH: "Contradicted by the device",
+};
+
+/** How each tier reads when describing what a command was held to. */
+const TIER_LABELS: Record<string, string> = {
+  dispatch: "sent to the device",
+  acknowledged: "acknowledged by the device",
+  observed: "confirmed by an independent reading",
+};
+
+/** The status word for a command that satisfied its tier. */
+const TIER_HEADLINES: Record<string, string> = {
+  dispatch: "SENT",
+  acknowledged: "ACKNOWLEDGED",
+  observed: "OBSERVED",
+};
+
+const FAILURE_STATES: ReadonlySet<string> = new Set(["FAILED", "TIMED_OUT", "STATE_MISMATCH"]);
+
+const CONDITION_OPS: Record<string, string> = {
+  eq: "=",
+  ne: "≠",
+  gt: ">",
+  gte: "≥",
+  lt: "<",
+  lte: "≤",
+};
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+/**
+ * Render an observed-state condition the way it would be read aloud.
+ *
+ * The condition is the most explanatory part of a verified command: "waited for
+ * measuredRpm ≥ 2000" says what a bare "verified" never can.
+ */
+export function describeCondition(condition: unknown): string {
+  const spec = asRecord(condition);
+  if (!spec) return "";
+
+  for (const [key, joiner] of [["all", " and "], ["any", " or "]] as const) {
+    const branch = spec[key];
+    if (Array.isArray(branch)) {
+      const parts = branch.map((entry) => describeCondition(entry)).filter((part) => part.length > 0);
+      return parts.length > 0 ? parts.join(joiner) : "";
+    }
+  }
+
+  const field = typeof spec.field === "string" ? spec.field : "";
+  const op = typeof spec.op === "string" ? CONDITION_OPS[spec.op] : undefined;
+  if (field === "" || op === undefined || spec.value === undefined) return "";
+  return `${field} ${op} ${String(spec.value)}`;
+}
+
+/** The evidence text for one rung, preferring the recorded reason. */
+function rungDetail(details: Record<string, unknown> | null): string {
+  if (!details) return "";
+  const reason = typeof details.reason === "string" ? details.reason : "";
+  const condition = describeCondition(details.condition);
+  if (condition === "") return reason;
+  const waited = `waiting for ${condition}`;
+  return reason === "" ? waited : `${reason} · ${waited}`;
+}
+
+/**
+ * Build the evidence ladder for a command.
+ *
+ * Every rung is one that actually happened. When the command is still in flight, a
+ * single trailing `pending` rung names the tier it is working towards — which is
+ * itself recorded on the command, not guessed.
+ */
+export function commandLadder(evidence: unknown): CommandRung[] {
+  const record = asRecord(evidence);
+  if (!record) return [];
+
+  const transitions = Array.isArray(record.transitions) ? record.transitions : [];
+  const rungs: CommandRung[] = [];
+  for (const entry of transitions) {
+    const transition = asRecord(entry);
+    if (!transition) continue;
+    const state = typeof transition.toState === "string" ? transition.toState : "";
+    if (state === "") continue;
+    const at = toFiniteNumber(transition.timestamp);
+    rungs.push({
+      state,
+      label: RUNG_LABELS[state] ?? state,
+      status: FAILURE_STATES.has(state) ? "failed" : "reached",
+      at,
+      detail: rungDetail(asRecord(transition.details)),
+    });
+  }
+
+  // A pending rung is only meaningful next to a rung that happened. Emitting one
+  // on its own would assert a command that may not exist at all.
+  if (rungs.length === 0) return [];
+
+  // Still waiting: name the target so the gap is legible as "not yet" rather than
+  // as a ladder that simply stops.
+  const settled = toFiniteNumber(record.terminalAt) !== null;
+  const tier = typeof record.effectiveTier === "string" ? record.effectiveTier : "dispatch";
+  const target = tier === "observed" ? "OBSERVED" : tier === "acknowledged" ? "ACKNOWLEDGED" : "DISPATCHED";
+  if (!settled && !rungs.some((rung) => rung.state === target)) {
+    rungs.push({
+      state: target,
+      label: RUNG_LABELS[target] ?? target,
+      status: "pending",
+      at: null,
+      detail: "",
+    });
+  }
+
+  return rungs;
+}
+
+/**
+ * Summarise a command's evidence.
+ *
+ * Returns `null` when there is no command to describe, so a pane can render
+ * nothing rather than an empty verdict. `headline` is deliberately scaled to the
+ * tier: a dispatch-only command that succeeded reads SENT, never OBSERVED.
+ */
+export function commandVerdict(evidence: unknown): CommandVerdict | null {
+  const record = asRecord(evidence);
+  if (!record) return null;
+  const state = typeof record.lifecycleState === "string" ? record.lifecycleState : "";
+  if (state === "") return null;
+
+  const tier = typeof record.effectiveTier === "string" ? record.effectiveTier : "dispatch";
+  const requested = typeof record.requestedTier === "string" ? record.requestedTier : "";
+  const settled = toFiniteNumber(record.terminalAt) !== null;
+  const proven = settled && record.success === true;
+  const clamped = requested !== "" && requested !== tier;
+
+  const error = typeof record.error === "string" && record.error.length > 0 ? record.error : "";
+  const detail = !settled
+    ? `Waiting to be ${TIER_LABELS[tier] ?? tier}`
+    : proven
+      ? `Held to being ${TIER_LABELS[tier] ?? tier}, and was`
+      : error !== ""
+        ? error
+        : `Never ${TIER_LABELS[tier] ?? tier}`;
+
+  return {
+    tier,
+    settled,
+    proven,
+    headline: !settled ? "IN FLIGHT" : proven ? (TIER_HEADLINES[tier] ?? "PROVEN") : "NOT PROVEN",
+    detail,
+    clamped,
+    clampNote: clamped
+      ? `Asked for ${requested}; this device can only prove ${tier}`
+      : "",
+  };
+}

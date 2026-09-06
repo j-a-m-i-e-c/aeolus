@@ -22,7 +22,7 @@ function makeMockSdk(props: PropsPayload): AeolusUiSdk & { saveCalls: Array<{ ke
       stateMirror.set(key, value);
     }),
     fire: vi.fn(async () => {}),
-    control: vi.fn(async () => {}),
+    control: vi.fn(async () => ({ success: true, lifecycleState: "OBSERVED" })),
     publish: vi.fn(async () => {}),
     subscribeState: vi.fn(() => () => {}),
     subscribeProps: vi.fn(() => () => {}),

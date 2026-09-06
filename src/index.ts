@@ -25,6 +25,7 @@ import { ExecutionRecorder } from "./automations/execution-recorder.js";
 import { CommandResultCollector } from "./automations/command-result-collector.js";
 import { PendingCommandTracker } from "./automations/pending-command-tracker.js";
 import { CommandHistoryStore } from "./automations/command-history-store.js";
+import { buildCommandEvidence, describeRung } from "./automations/command-lifecycle.js";
 import { currentExecutionContext } from "./automations/execution-context.js";
 import { AutomationEventService } from "./automations/automation-event-service.js";
 import { Sandbox } from "./automations/sandbox.js";
@@ -144,6 +145,9 @@ async function main(): Promise<void> {
             toState: "DISPATCHED",
             timestamp: ev.timestamp,
             terminal: false,
+            details: buildCommandEvidence({
+              reason: "Inferred from the device's reply, which arrived before the dispatch was recorded",
+            }),
           });
         }
         commandHistoryStore.transition({
@@ -151,6 +155,7 @@ async function main(): Promise<void> {
           toState: ev.toState,
           timestamp: ev.timestamp,
           terminal: false,
+          details: buildCommandEvidence({ reason: describeRung(ev.toState) }),
         });
       } catch (err) {
         logger.error(
@@ -295,7 +300,7 @@ async function main(): Promise<void> {
   // Verified Command.
   const automationEventService = new AutomationEventService({ mqttService, logger });
 
-  const sandbox = new Sandbox({ commandService, deviceRegistry: registry, stateStore, dataStore, collector, scopeResolver: automationScopeResolver, automationEventService, onStateChange: (ruleId, key, value) => {
+  const sandbox = new Sandbox({ commandService, deviceRegistry: registry, stateStore, dataStore, collector, scopeResolver: automationScopeResolver, automationEventService, commandHistoryStore, onStateChange: (ruleId, key, value) => {
     eventBus.emit(AUTOMATION_STATE_CHANGE, { ruleId, key, value });
   } });
 

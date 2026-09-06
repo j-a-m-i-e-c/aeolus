@@ -197,6 +197,16 @@ export interface ConfirmOptions {
   condition: (state: Record<string, unknown>) => boolean;
   /** Timeout in ms before TIMED_OUT. Defaults to DEFAULT_CONFIRM_TIMEOUT_MS. */
   timeoutMs?: number;
+  /**
+   * Plain-data form of {@link condition}, when the caller built the predicate
+   * from a declarative spec.
+   *
+   * Recorded as command evidence so an operator can be told what was waited for
+   * rather than only that a wait occurred. Never evaluated: the predicate above
+   * remains the single decision path, so evidence can never disagree with the
+   * check that was actually applied.
+   */
+  conditionSpec?: Record<string, unknown>;
 }
 
 /** Default confirmation timeout applied when ConfirmOptions omit timeoutMs (Req 5.7). */

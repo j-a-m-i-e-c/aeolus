@@ -81,6 +81,64 @@ type DeviceCondition =
   | { all: DeviceCondition[] }
   | { any: DeviceCondition[] };
 
+/**
+ * The evidence recorded for one rung of a command's lifecycle.
+ *
+ * Every field is optional because the rungs genuinely differ: the opening rung
+ * states the contract the command must satisfy, a timeout restates it because that
+ * is exactly what went unmet, and a dispatch has little to add beyond having
+ * happened.
+ */
+interface CommandRungEvidence {
+  /** The completion tier this command must reach to count as proven. */
+  tier?: "dispatch" | "acknowledged" | "observed";
+  /** Device whose observed state settles the question, when not the target. */
+  observedDeviceId?: string;
+  /** The condition that was waited for, as plain data. */
+  condition?: Record<string, unknown>;
+  /** Bound on the confirmation wait, in ms. */
+  timeoutMs?: number;
+  /** Short operator-facing account of why this rung was reached. */
+  reason?: string;
+}
+
+/** One recorded lifecycle transition of a command. */
+interface CommandRungRecord {
+  fromState?: CommandLifecycleState;
+  toState: CommandLifecycleState;
+  /** Epoch ms the rung was reached. */
+  timestamp: number;
+  details?: CommandRungEvidence;
+}
+
+/**
+ * A command and every rung it reached, as returned by
+ * {@link devices.commandEvidence}.
+ *
+ * `terminalAt` marks that the command stopped waiting — either way. Do not read
+ * `success` without it: an in-flight command has no verdict yet.
+ */
+interface CommandEvidenceRecord {
+  commandId: string;
+  /** What was asked of the device. */
+  actionType: string;
+  /** The tier the command was actually held to. */
+  effectiveTier: "dispatch" | "acknowledged" | "observed";
+  /** The tier the author asked for, when one was requested explicitly. */
+  requestedTier?: "dispatch" | "acknowledged" | "observed";
+  lifecycleState: CommandLifecycleState;
+  success?: boolean;
+  failureKind?: CommandFailureKind;
+  error?: string;
+  targetDeviceId: string;
+  correlationId?: string;
+  requestedAt: number;
+  /** Set once the command stopped waiting. Absent while still in flight. */
+  terminalAt?: number;
+  /** The rungs, oldest first. */
+  transitions: CommandRungRecord[];
+}
+
 interface DeviceActionOptions {
   /** Device to observe (defaults to target device). */
   deviceId?: string;
@@ -141,6 +199,32 @@ declare const devices: {
     params?: Record<string, unknown>,
     confirm?: DeviceActionOptions,
   ): Promise<ActionResult>;
+
+  /**
+   * Read back what physically happened to a command THIS automation issued.
+   *
+   * Pass the `commandId` from an {@link ActionResult}. Returns the durable record
+   * plus every lifecycle rung it reached, each with the evidence recorded for it —
+   * the tier being aimed for, the condition waited on, the timeout applied, the
+   * reason it ended.
+   *
+   * Synchronous: the rungs are already durable by the time `devices.action()`
+   * resolves, so there is nothing to wait for.
+   *
+   * Returns `undefined` for a command this automation did not issue, an unknown
+   * id, or an action that was never a verified physical command. Project the value
+   * into state and render it with `commandLadder()` / `commandVerdict()` from
+   * `@aeolus/ui`.
+   *
+   * ```ts
+   * const result = await devices.action(pump.id, "command", { on: true }, {
+   *   tier: "observed",
+   *   condition: { field: "litresPerMinute", op: "gt", value: 0 },
+   * });
+   * state.set("lastCommand", devices.commandEvidence(result.commandId));
+   * ```
+   */
+  commandEvidence(commandId?: string): CommandEvidenceRecord | undefined;
 
   /**
    * Execute an action against every scoped device matching `predicate`. The
