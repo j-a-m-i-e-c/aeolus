@@ -56,6 +56,8 @@ export function projectPowerAndSupplies() {
     state.set("waterDays", Number(supplyState.waterDays ?? 80));
     state.set("meds", Number(supplyState.meds ?? 45));
     state.set("beans", Number(supplyState.beans ?? 312));
+    state.set("occupants", Number(supplyState.occupants ?? 4));
+    state.set("bunks", Number(supplyState.bunks ?? 6));
     events.emit("bunker/summary/power", {
         battery,
         solar,
@@ -64,6 +66,10 @@ export function projectPowerAndSupplies() {
         generatorOn: Boolean(state.get("generatorOn")),
         foodDays: Number(supplyState.foodDays ?? 64),
         waterDays: Number(supplyState.waterDays ?? 80),
+        // Who the days of food are actually for. The overview draws the habitat, so
+        // it needs the count rather than a hard-coded pair of figures.
+        occupants: Number(supplyState.occupants ?? 4),
+        bunks: Number(supplyState.bunks ?? 6),
     });
     return { battery, generatorOn };
 }

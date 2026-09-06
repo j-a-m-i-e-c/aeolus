@@ -43,5 +43,10 @@ export function projectRadioState() {
     state.set("contactsToday", contactsToday);
     if (signal !== "quiet")
         setAction("Weak VHF contact received");
-    events.emit("bunker/summary/comms", { frequency, signal, contactsToday });
+    // The transmitter is a separate device from the receiver, so TX is read from it
+    // rather than inferred from a countdown this automation kept for itself.
+    const transmitter = byTopic("switch/bunker/radio/state");
+    const transmitting = Boolean(transmitter && transmitter.state && transmitter.state.tx);
+    state.set("transmitting", transmitting);
+    events.emit("bunker/summary/comms", { frequency, signal, contactsToday, transmitting });
 }

@@ -11,11 +11,15 @@ export function projectAirState() {
     const sealed = Boolean(observed.sealed);
     const overpressure = Number(observed.overpressure ?? 8);
     const filterLife = Number(observed.filterLife ?? 78);
+    // The air system is the thing that knows how warm it is inside, because it is
+    // the thing moving the air.
+    const tempC = Number(observed.tempC ?? 19.4);
     state.set("sealed", sealed);
     state.set("overpressure", overpressure);
     state.set("filterLife", filterLife);
+    state.set("tempC", tempC);
     state.set("on", observed.on !== false);
-    events.emit("bunker/summary/air", { sealed, overpressure, filterLife });
+    events.emit("bunker/summary/air", { sealed, overpressure, filterLife, tempC });
 }
 export async function setBunkerSeal(sealed: boolean) {
     const controller = filterController();

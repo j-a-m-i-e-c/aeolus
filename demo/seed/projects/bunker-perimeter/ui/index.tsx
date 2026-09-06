@@ -9,6 +9,13 @@ export default function PerimeterSecurity(aeolus: CustomComponentProps) {
   const model = {
     contacts: aeolus.read("contacts"),
     sector: aeolus.read("sector"),
+    rangeM: aeolus.read("rangeM"),
+    movement: aeolus.read("movement"),
+    ambientContacts: aeolus.read("ambientContacts"),
+    trackRangeM: aeolus.read("trackRangeM"),
+    detectRangeM: aeolus.read("detectRangeM"),
+    fenceRangeM: aeolus.read("fenceRangeM"),
+    floodlightPct: aeolus.read("floodlightPct"),
     lightsOn: aeolus.read("lightsOn"),
     autoLights: aeolus.read("autoLights"),
     pending: aeolus.read("pending"),

@@ -25,18 +25,18 @@ export default async function run(context: EventContext) {
     return;
   }
 
-  const { contacts, sector } = projectPerimeterTelemetry();
+  const { contacts, sector, movement } = projectPerimeterTelemetry();
   const desiredLights = contacts > 0;
 
   if (Boolean(state.get("autoLights")) && lightsOn !== desiredLights) {
     await setFloodlights(
       desiredLights,
       desiredLights
-        ? "AUTO · perimeter contact enabled floodlights"
-        : "AUTO · all clear, floodlights off",
+        ? "AUTO · contact inside the alert ring enabled floodlights"
+        : "AUTO · approach cleared, floodlights off",
     );
   } else {
-    describePerimeter(contacts, sector);
+    describePerimeter(contacts, sector, movement);
   }
 
   publishPerimeterSummary();

@@ -1,5 +1,5 @@
 // Power & Supplies — UI composition entry point.
-// At a glance: solar + battery reserves, continuity supplies and verified backup-generator control.
+// At a glance: solar + battery reserves, shelter supplies and verified backup-generator control.
 
 import PowerSuppliesPanel from "./PowerSuppliesPanel";
 

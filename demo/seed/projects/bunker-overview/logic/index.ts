@@ -1,4 +1,4 @@
-// Continuity Overview — read-only aggregation entry point.
+// Off-grid Bunker overview — read-only aggregation entry point.
 // Each subsystem owns its hardware; this project only composes their summaries.
 
 import {
@@ -6,7 +6,7 @@ import {
   projectCommsSummary,
   projectPerimeterSummary,
   projectPowerSummary,
-} from "./continuity-summary";
+} from "./bunker-summary";
 
 export default async function run(context: EventContext) {
   const topic = String(context.topic || "");
