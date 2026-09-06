@@ -12,12 +12,17 @@ export default function RovOperations(aeolus: CustomComponentProps) {
     battery: aeolus.read("battery"),
     tetherTension: aeolus.read("tetherTension"),
     altitude: aeolus.read("altitude"),
+    seabedDepth: aeolus.read("seabedDepth"),
+    crossCurrentKt: aeolus.read("crossCurrentKt"),
+    verticalSpeed: aeolus.read("verticalSpeed"),
     visibility: aeolus.read("visibility"),
     thrusterPct: aeolus.read("thrusterPct"),
+    transectLegs: aeolus.read("transectLegs"),
     mode: aeolus.read("mode"),
     lightsOn: aeolus.read("lightsOn"),
     commandPending: aeolus.read("commandPending"),
     tetherProtectionActive: aeolus.read("tetherProtectionActive"),
+    protectionAt: aeolus.read("protectionAt"),
     lastAction: aeolus.read("lastAction"),
   };
 

@@ -79,6 +79,72 @@ const CTD_TENSION_SNAG = 760;
  */
 type CtdPhase = "on-deck" | "deploying" | "at-depth" | "recovering" | "holding";
 
+/** Transition group for the ROV changing depth or flying a transect. */
+const ROV_MOVE_GROUP = "rov-move";
+/**
+ * Depth of the seabed under the survey box, in metres.
+ *
+ * Everything vertical about the ROV is measured against this one number. The pane
+ * used to place the vehicle from its altitude alone, which put it a few pixels off
+ * the bottom no matter how shallow it actually was.
+ */
+const ROV_SEABED_DEPTH = 385;
+/** Depth the vehicle is launched and recovered to, in metres. */
+const ROV_LAUNCH_DEPTH = 60;
+/** Depth the survey box is flown at, in metres. */
+const ROV_SURVEY_DEPTH = 355;
+/** Deepest the vehicle may be commanded, keeping it clear of the bottom. */
+const ROV_MAX_DEPTH = 370;
+/** Vertical speed of the vehicle, in metres per second. */
+const ROV_SPEED_MPS = 0.5;
+/** How much faster than reality the ROV demo runs. */
+const ROV_TIME_SCALE = 60;
+/** Tether load with the vehicle just below the surface and no current, in newtons. */
+const ROV_TETHER_BASE = 210;
+/** Added tether load per metre of depth, in newtons. */
+const ROV_TETHER_PER_METRE = 0.28;
+/** Added tether load per knot of cross-current while the vehicle is under way. */
+const ROV_TETHER_PER_KNOT_UNDERWAY = 300;
+/** Added tether load per knot once the vehicle stops fighting the current. */
+const ROV_TETHER_PER_KNOT_HOLDING = 120;
+/** Background cross-current in the survey box, in knots. */
+const ROV_CURRENT_CALM = 0.2;
+/** Cross-current the demo injects, in knots. */
+const ROV_CURRENT_INJECTED = 1.4;
+
+/**
+ * Where the ROV is in its mission, as a phase.
+ *
+ * `at-surface` and `on-station` are both stationary, and `approaching-seabed` is a
+ * descent that has run out of water beneath it — states an operator needs told
+ * apart, which one "holding" cannot do.
+ */
+type RovPhase = "at-surface" | "diving" | "approaching-seabed" | "on-station" | "surveying" | "holding" | "recovering";
+
+/**
+ * Everything the water column implies at one vehicle depth.
+ *
+ * Depth is the only input. Altitude, tether load and visibility all fall out of it,
+ * so no two of them can be animated into contradicting each other.
+ */
+function rovWater(depth: number, crossCurrentKt: number, stationKeeping: boolean): Record<string, number> {
+  const safe = Math.max(0, Math.min(ROV_SEABED_DEPTH, depth));
+  // A vehicle holding station is not dragging the tether across the current, so
+  // the load genuinely comes off — that relief is what makes a protective hold
+  // verifiable rather than cosmetic.
+  const perKnot = stationKeeping ? ROV_TETHER_PER_KNOT_HOLDING : ROV_TETHER_PER_KNOT_UNDERWAY;
+  // Altitude is derived from the *published* depth, not the raw one, so the two
+  // readings agree exactly rather than to within a rounding step.
+  const published = Math.round(safe * 10) / 10;
+  return {
+    depth: published,
+    altitude: Math.round((ROV_SEABED_DEPTH - published) * 10) / 10,
+    tetherTension: Math.round(ROV_TETHER_BASE + published * ROV_TETHER_PER_METRE + crossCurrentKt * perKnot),
+    // Daylight runs out with depth and stirred sediment cuts it further.
+    visibility: Math.round(Math.max(4, 18 - published / 60 - crossCurrentKt * 4) * 10) / 10,
+  };
+}
+
 function ctdWater(depth: number): Record<string, number> {
   const safe = Math.max(0, Math.min(500, depth));
   const temperature = 18.5 - 14.3 / (1 + Math.exp(-(safe - 90) / 18));
@@ -98,8 +164,10 @@ const INITIAL = {
   // Chemistry is never authored separately from depth: the sonde reads whatever
   // the water column holds where it is, including sitting on deck.
   ctdSonde: { ...ctdWater(CTD_DECK_DEPTH), verticalSpeed: 0 },
-  rovVehicle: { on: true, mode: "holding", targetDepth: 310, lights: true, thrusterPct: 18 },
-  rovTelemetry: { depth: 310, heading: 88, battery: 78, tetherTension: 310, altitude: 8.2, visibility: 14, mode: "holding" },
+  rovVehicle: { on: true, mode: "at-surface" as RovPhase, targetDepth: ROV_SURVEY_DEPTH, lights: true, thrusterPct: 12, transectLegs: 0 },
+  // Altitude is not authored here: it is derived from the seabed depth and the
+  // vehicle's depth, so the two readings can never disagree.
+  rovTelemetry: { ...rovWater(ROV_LAUNCH_DEPTH, ROV_CURRENT_CALM, false), heading: 88, battery: 78, verticalSpeed: 0, mode: "at-surface" as RovPhase, seabedDepth: ROV_SEABED_DEPTH, crossCurrentKt: ROV_CURRENT_CALM },
   tsgPump: { on: true },
   tsg: { sst: 18.4, salinity: 35.2, flow: 2.1, chlorophyll: 0.8, turbidity: 0.5 },
 };
@@ -201,37 +269,130 @@ class VesselEnvironment {
   }
 
   resetRov(): void {
+    this.controller(RESEARCH_VESSEL_DEVICE_KEYS.rovVehicle)?.cancelTransitions(ROV_MOVE_GROUP);
     this.controller(RESEARCH_VESSEL_DEVICE_KEYS.rovVehicle)?.update({ ...INITIAL.rovVehicle }, { forcePublish: true });
     this.controller(RESEARCH_VESSEL_DEVICE_KEYS.rovTelemetry)?.update({ ...INITIAL.rovTelemetry }, { forcePublish: true });
   }
 
+  /** Battery falls with work done; it never climbs back on its own. */
+  private drainRovBattery(telemetry: SimulatedStateController, amount: number): number {
+    return Math.round(Math.max(8, Number(telemetry.read().battery ?? 78) - amount) * 10) / 10;
+  }
+
+  /** The phase the vehicle rests in once it stops at `depth`. */
+  private rovRestingPhase(depth: number): RovPhase {
+    return depth <= ROV_LAUNCH_DEPTH + 20 ? "at-surface" : "on-station";
+  }
+
+  private rovCurrent(telemetry: SimulatedStateController): number {
+    const value = Number(telemetry.read().crossCurrentKt);
+    return Number.isFinite(value) ? value : ROV_CURRENT_CALM;
+  }
+
   moveRov(vehicle: SimulatedStateController, mode: "dive" | "recover", targetDepth: number): void {
-    const telemetry = this.controller(RESEARCH_VESSEL_DEVICE_KEYS.rovTelemetry); if (!telemetry) return;
-    const start = Number(telemetry.read().depth ?? 310); const target = Math.max(20, Math.min(430, targetDepth)); const name = mode === "dive" ? "diving" : "recovering";
-    vehicle.update({ on: true, mode: name, targetDepth: target, thrusterPct: 42 });
-    [0.3, 0.62, 1].forEach((fraction, index) => {
-      const depth = start + (target - start) * fraction; const delayMs = [550, 1300, 2300][index];
-      telemetry.update({ depth: Math.round(depth), mode: index === 2 ? "holding" : name, battery: Math.max(10, Number(telemetry.read().battery ?? 78) - (index + 1) * 0.4), altitude: Math.max(5.5, 10 - depth / 100), tetherTension: 320 + Math.round(depth * 0.28) }, { delayMs });
-      if (index === 2) vehicle.update({ mode: "holding", targetDepth: target, thrusterPct: 20 }, { delayMs: delayMs + 40 });
+    const telemetry = this.controller(RESEARCH_VESSEL_DEVICE_KEYS.rovTelemetry);
+    if (!telemetry) return;
+    const start = Number(telemetry.read().depth ?? ROV_LAUNCH_DEPTH);
+    const target = mode === "recover"
+      ? ROV_LAUNCH_DEPTH
+      : Math.max(ROV_LAUNCH_DEPTH, Math.min(ROV_MAX_DEPTH, targetDepth));
+    const direction = target >= start ? 1 : -1;
+    const durationMs = Math.max(700, Math.round(Math.abs(target - start) / ROV_SPEED_MPS * 1000 / ROV_TIME_SCALE));
+    const underway: RovPhase = mode === "dive" ? "diving" : "recovering";
+    const current = this.rovCurrent(telemetry);
+    vehicle.update({ on: true, mode: underway, targetDepth: target, thrusterPct: 44 }, { forcePublish: true });
+
+    vehicle.transition({
+      durationMs,
+      steps: 16,
+      group: ROV_MOVE_GROUP,
+      frame: (progress) => {
+        const depth = start + (target - start) * progress;
+        const arrived = progress >= 1;
+        // Running out of water beneath you is worth saying out loud, and it is a
+        // fact about depth rather than a separate flag someone has to maintain.
+        const phase: RovPhase = arrived
+          ? this.rovRestingPhase(depth)
+          : underway === "diving" && ROV_SEABED_DEPTH - depth <= 60
+            ? "approaching-seabed"
+            : underway;
+        telemetry.update({
+          ...rovWater(depth, current, false),
+          mode: phase,
+          verticalSpeed: arrived ? 0 : Math.round(direction * ROV_SPEED_MPS * 10) / 10,
+          battery: this.drainRovBattery(telemetry, 0.3),
+        }, { forcePublish: true });
+        return arrived ? { mode: phase, thrusterPct: 16 } : {};
+      },
     });
   }
 
+  /**
+   * Fly one transect leg.
+   *
+   * A leg is bounded rather than an open-ended mode, so the vehicle ends back on
+   * station with a completed leg behind it instead of a survey that never finishes
+   * and a timer that never stops.
+   */
   surveyRov(vehicle: SimulatedStateController): void {
-    const telemetry = this.controller(RESEARCH_VESSEL_DEVICE_KEYS.rovTelemetry); if (!telemetry) return;
-    vehicle.update({ mode: "survey", thrusterPct: 36, lights: true });
-    telemetry.update({ mode: "surveying", heading: 96, altitude: 6.4, tetherTension: 390, battery: Math.max(10, Number(telemetry.read().battery ?? 78) - 0.5) });
-    telemetry.update({ heading: 104, altitude: 6.1, battery: Math.max(10, Number(telemetry.read().battery ?? 78) - 1.2) }, { delayMs: 1600 });
+    const telemetry = this.controller(RESEARCH_VESSEL_DEVICE_KEYS.rovTelemetry);
+    if (!telemetry) return;
+    const startHeading = Number(telemetry.read().heading ?? 88);
+    const depth = Number(telemetry.read().depth ?? ROV_SURVEY_DEPTH);
+    const current = this.rovCurrent(telemetry);
+    vehicle.update({ mode: "surveying", thrusterPct: 34, lights: true }, { forcePublish: true });
+    telemetry.update({ mode: "surveying", verticalSpeed: 0 }, { forcePublish: true });
+
+    vehicle.transition({
+      durationMs: 6400,
+      steps: 16,
+      group: ROV_MOVE_GROUP,
+      frame: (progress) => {
+        const done = progress >= 1;
+        telemetry.update({
+          // The vehicle flies a line at constant altitude; only its heading and
+          // battery move, so depth and altitude stay coherent throughout.
+          ...rovWater(depth, current, false),
+          heading: Math.round((startHeading + 34 * progress) % 360),
+          mode: done ? this.rovRestingPhase(depth) : "surveying",
+          verticalSpeed: 0,
+          battery: this.drainRovBattery(telemetry, 0.5),
+        }, { forcePublish: true });
+        return done
+          ? { mode: this.rovRestingPhase(depth), thrusterPct: 16, transectLegs: Number(vehicle.read().transectLegs ?? 0) + 1 }
+          : {};
+      },
+    });
   }
 
   holdRov(vehicle: SimulatedStateController): void {
-    const telemetry = this.controller(RESEARCH_VESSEL_DEVICE_KEYS.rovTelemetry); if (!telemetry) return;
-    vehicle.update({ mode: "holding", targetDepth: Number(telemetry.read().depth ?? 310), thrusterPct: 26 });
-    telemetry.update({ mode: "holding", tetherTension: 420, heading: 92 });
+    const telemetry = this.controller(RESEARCH_VESSEL_DEVICE_KEYS.rovTelemetry);
+    if (!telemetry) return;
+    vehicle.cancelTransitions(ROV_MOVE_GROUP);
+    const depth = Number(telemetry.read().depth ?? ROV_LAUNCH_DEPTH);
+    const current = this.rovCurrent(telemetry);
+    vehicle.update({ mode: "holding", targetDepth: Math.round(depth * 10) / 10, thrusterPct: 26 }, { forcePublish: true });
+    telemetry.update({
+      // Station keeping takes the drag off the tether, so the load measurably
+      // falls. That relief is the observation a protective hold is verified by.
+      ...rovWater(depth, current, true),
+      mode: "holding",
+      verticalSpeed: 0,
+    }, { forcePublish: true });
   }
 
   rovCrossCurrent(): void {
-    const telemetry = this.controller(RESEARCH_VESSEL_DEVICE_KEYS.rovTelemetry); if (!telemetry) return;
-    telemetry.update({ tetherTension: 735, heading: Number(telemetry.read().heading ?? 88) + 28, visibility: 9, mode: String(telemetry.read().mode || "holding") }, { forcePublish: true });
+    const telemetry = this.controller(RESEARCH_VESSEL_DEVICE_KEYS.rovTelemetry);
+    if (!telemetry) return;
+    const depth = Number(telemetry.read().depth ?? ROV_LAUNCH_DEPTH);
+    const holding = String(telemetry.read().mode || "at-surface") === "holding";
+    // The current is the physical cause; the tether load, the heading offset and the
+    // lost visibility all follow from it rather than being written independently.
+    telemetry.update({
+      crossCurrentKt: ROV_CURRENT_INJECTED,
+      ...rovWater(depth, ROV_CURRENT_INJECTED, holding),
+      heading: Math.round((Number(telemetry.read().heading ?? 88) + 28) % 360),
+    }, { forcePublish: true });
   }
 
   resetUnderway(): void {
@@ -290,9 +451,15 @@ export function createResearchVesselScenario(): SimulatorScenario {
 
   const rovVehicle = commandDefinition(RESEARCH_VESSEL_DEVICE_KEYS.rovVehicle, "ROV Vehicle Controller", RESEARCH_VESSEL_STATE_TOPICS.rovVehicle, RESEARCH_VESSEL_COMMAND_TOPICS.rovVehicle, { ...INITIAL.rovVehicle }, env, (ctx, command) => {
     const mode = String(command.params.mode || ""); const target = Number(command.params.targetDepth);
-    if (mode === "dive" || mode === "recover") { env.moveRov(ctx.state, mode, Number.isFinite(target) ? target : mode === "dive" ? 360 : 25); return { accepted: true, state: { patch: { on: true, mode: mode === "dive" ? "diving" : "recovering", targetDepth: target } } }; }
-    if (mode === "survey") { env.surveyRov(ctx.state); return { accepted: true, state: { patch: { mode: "survey", thrusterPct: 36 } } }; }
-    if (mode === "hold") { env.holdRov(ctx.state); return { accepted: true, state: { patch: { mode: "holding", thrusterPct: 26 } } }; }
+    // As with the winch, the resulting-state patch is left unused: every phase and
+    // reading is written by the movement itself, so nothing is reported that has not
+    // physically happened.
+    if (mode === "dive" || mode === "recover") {
+      env.moveRov(ctx.state, mode, Number.isFinite(target) ? target : mode === "dive" ? ROV_SURVEY_DEPTH : ROV_LAUNCH_DEPTH);
+      return { accepted: true };
+    }
+    if (mode === "survey") { env.surveyRov(ctx.state); return { accepted: true }; }
+    if (mode === "hold") { env.holdRov(ctx.state); return { accepted: true }; }
     return { accepted: false, error: "rov mode must be dive|survey|hold|recover" };
   });
 

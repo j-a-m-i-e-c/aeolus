@@ -168,11 +168,145 @@ describe("research-vessel simulator scenario", () => {
     expect(Number(sondeState().depth)).toBeLessThanOrEqual(5);
   });
 
-  it("models a deep ROV cross-current and protective vehicle hold", async () => {
-    const { registry, fire, command, last } = setup(); await fire(RESEARCH_VESSEL_STIMULUS.rovCrossCurrent);
-    expect(last(RESEARCH_VESSEL_STATE_TOPICS.rovTelemetry)).toMatchObject({ tetherTension: 735 });
-    await registry.get(RESEARCH_VESSEL_DEVICE_KEYS.rovVehicle)!.model.onCommand!(command(RESEARCH_VESSEL_COMMAND_TOPICS.rovVehicle, { mode: "hold", targetDepth: 310 }));
-    expect(last(RESEARCH_VESSEL_STATE_TOPICS.rovTelemetry)).toMatchObject({ mode: "holding", tetherTension: 420 });
+  it("starts the ROV well clear of the seabed, not almost on it", () => {
+    const { state } = setup();
+    const rov = state(RESEARCH_VESSEL_DEVICE_KEYS.rovTelemetry);
+    expect(rov.mode).toBe("at-surface");
+    expect(Number(rov.depth)).toBe(60);
+    // Altitude is the seabed depth minus the vehicle depth, so it can never
+    // contradict where the vehicle actually is.
+    expect(Number(rov.altitude)).toBe(Number(rov.seabedDepth) - Number(rov.depth));
+    expect(Number(rov.altitude)).toBeGreaterThan(300);
+  });
+
+  it("keeps depth and altitude coherent at every point of a dive", async () => {
+    const { send, state } = setup(400);
+    await send(RESEARCH_VESSEL_COMMAND_TOPICS.rovVehicle, { mode: "dive", targetDepth: 355 });
+    const seabed = Number(state(RESEARCH_VESSEL_DEVICE_KEYS.rovTelemetry).seabedDepth);
+
+    let lastDepth = 0;
+    for (let step = 0; step < 8; step += 1) {
+      vi.advanceTimersByTime(700);
+      const rov = state(RESEARCH_VESSEL_DEVICE_KEYS.rovTelemetry);
+      const depth = Number(rov.depth);
+      expect(Number(rov.altitude)).toBeCloseTo(seabed - depth, 1);
+      // Descending means the number only ever goes one way.
+      expect(depth).toBeGreaterThanOrEqual(lastDepth);
+      lastDepth = depth;
+    }
+
+    vi.advanceTimersByTime(12000);
+    const settled = state(RESEARCH_VESSEL_DEVICE_KEYS.rovTelemetry);
+    expect(Number(settled.depth)).toBe(355);
+    expect(settled.mode).toBe("on-station");
+    expect(Number(settled.verticalSpeed)).toBe(0);
+    // On station is above the bottom, not on it.
+    expect(Number(settled.altitude)).toBeGreaterThan(20);
+  });
+
+  it("reports approaching the seabed before it arrives there", async () => {
+    const { send, state } = setup(400);
+    await send(RESEARCH_VESSEL_COMMAND_TOPICS.rovVehicle, { mode: "dive", targetDepth: 355 });
+    const seen = new Set<string>();
+    for (let step = 0; step < 24; step += 1) {
+      vi.advanceTimersByTime(400);
+      seen.add(String(state(RESEARCH_VESSEL_DEVICE_KEYS.rovTelemetry).mode));
+    }
+    expect([...seen]).toContain("diving");
+    expect([...seen]).toContain("approaching-seabed");
+    expect([...seen]).toContain("on-station");
+  });
+
+  it("refuses to fly the vehicle into the bottom", async () => {
+    const { send, state } = setup();
+    await send(RESEARCH_VESSEL_COMMAND_TOPICS.rovVehicle, { mode: "dive", targetDepth: 900 });
+    vi.advanceTimersByTime(20000);
+    const rov = state(RESEARCH_VESSEL_DEVICE_KEYS.rovTelemetry);
+    expect(Number(rov.depth)).toBeLessThan(Number(rov.seabedDepth));
+    expect(Number(rov.altitude)).toBeGreaterThan(0);
+  });
+
+  it("aborts a descent straight into a recovery without a hold in between", async () => {
+    const { send, state } = setup(400);
+    await send(RESEARCH_VESSEL_COMMAND_TOPICS.rovVehicle, { mode: "dive", targetDepth: 355 });
+    vi.advanceTimersByTime(1500);
+    const partway = Number(state(RESEARCH_VESSEL_DEVICE_KEYS.rovTelemetry).depth);
+    expect(partway).toBeGreaterThan(60);
+    expect(partway).toBeLessThan(355);
+
+    await send(RESEARCH_VESSEL_COMMAND_TOPICS.rovVehicle, { mode: "recover", targetDepth: 60 });
+    vi.advanceTimersByTime(20000);
+    const rov = state(RESEARCH_VESSEL_DEVICE_KEYS.rovTelemetry);
+    expect(Number(rov.depth)).toBe(60);
+    expect(rov.mode).toBe("at-surface");
+  });
+
+  it("flies a bounded transect leg and returns to station", async () => {
+    const { send, state } = setup();
+    await send(RESEARCH_VESSEL_COMMAND_TOPICS.rovVehicle, { mode: "dive", targetDepth: 355 });
+    vi.advanceTimersByTime(12000);
+    const before = state(RESEARCH_VESSEL_DEVICE_KEYS.rovTelemetry);
+
+    await send(RESEARCH_VESSEL_COMMAND_TOPICS.rovVehicle, { mode: "survey" });
+    expect(state(RESEARCH_VESSEL_DEVICE_KEYS.rovTelemetry).mode).toBe("surveying");
+
+    vi.advanceTimersByTime(9000);
+    const after = state(RESEARCH_VESSEL_DEVICE_KEYS.rovTelemetry);
+    // A transect changes heading and spends battery; it must not quietly change depth.
+    expect(after.mode).toBe("on-station");
+    expect(Number(after.heading)).not.toBe(Number(before.heading));
+    expect(Number(after.depth)).toBe(Number(before.depth));
+    expect(Number(after.altitude)).toBe(Number(before.altitude));
+    expect(Number(after.battery)).toBeLessThan(Number(before.battery));
+    expect(Number(state(RESEARCH_VESSEL_DEVICE_KEYS.rovVehicle).transectLegs)).toBe(1);
+  });
+
+  it("models a deep cross-current whose load a station hold measurably relieves", async () => {
+    const { send, fire, state } = setup();
+    await send(RESEARCH_VESSEL_COMMAND_TOPICS.rovVehicle, { mode: "dive", targetDepth: 355 });
+    vi.advanceTimersByTime(12000);
+    const calm = Number(state(RESEARCH_VESSEL_DEVICE_KEYS.rovTelemetry).tetherTension);
+
+    await fire(RESEARCH_VESSEL_STIMULUS.rovCrossCurrent);
+    const loaded = state(RESEARCH_VESSEL_DEVICE_KEYS.rovTelemetry);
+    expect(Number(loaded.crossCurrentKt)).toBeGreaterThan(1);
+    expect(Number(loaded.tetherTension)).toBeGreaterThan(650);
+    expect(Number(loaded.tetherTension)).toBeGreaterThan(calm);
+    // Visibility drops with the stirred sediment, from the same cause.
+    expect(Number(loaded.visibility)).toBeLessThan(14);
+
+    await send(RESEARCH_VESSEL_COMMAND_TOPICS.rovVehicle, { mode: "hold" });
+    const held = state(RESEARCH_VESSEL_DEVICE_KEYS.rovTelemetry);
+    // The load genuinely comes off, so the protective hold is verifiable rather
+    // than cosmetic — and the current is still there.
+    expect(held.mode).toBe("holding");
+    expect(Number(held.verticalSpeed)).toBe(0);
+    expect(Number(held.tetherTension)).toBeLessThan(650);
+    expect(Number(held.crossCurrentKt)).toBeGreaterThan(1);
+  });
+
+  it("stops the vehicle where it is on a hold, and cancels movement on reset", async () => {
+    const { send, fire, state } = setup(400);
+    await send(RESEARCH_VESSEL_COMMAND_TOPICS.rovVehicle, { mode: "dive", targetDepth: 355 });
+    vi.advanceTimersByTime(1500);
+    await send(RESEARCH_VESSEL_COMMAND_TOPICS.rovVehicle, { mode: "hold" });
+    const heldAt = Number(state(RESEARCH_VESSEL_DEVICE_KEYS.rovTelemetry).depth);
+
+    vi.advanceTimersByTime(20000);
+    expect(Number(state(RESEARCH_VESSEL_DEVICE_KEYS.rovTelemetry).depth)).toBeCloseTo(heldAt, 5);
+    expect(state(RESEARCH_VESSEL_DEVICE_KEYS.rovTelemetry).mode).toBe("holding");
+
+    await send(RESEARCH_VESSEL_COMMAND_TOPICS.rovVehicle, { mode: "dive", targetDepth: 355 });
+    await fire(RESEARCH_VESSEL_STIMULUS.rovReset);
+    expect(Number(state(RESEARCH_VESSEL_DEVICE_KEYS.rovTelemetry).depth)).toBe(60);
+    vi.advanceTimersByTime(20000);
+    expect(Number(state(RESEARCH_VESSEL_DEVICE_KEYS.rovTelemetry).depth)).toBe(60);
+    expect(state(RESEARCH_VESSEL_DEVICE_KEYS.rovTelemetry).mode).toBe("at-surface");
+  });
+
+  it("rejects an unknown ROV mode rather than guessing", async () => {
+    const { send } = setup();
+    expect(await send(RESEARCH_VESSEL_COMMAND_TOPICS.rovVehicle, { mode: "wander" })).toMatchObject({ accepted: false });
   });
 
   it("gives underway science a real pump and hydrographic-front progression", async () => {

@@ -72,6 +72,41 @@ describe("Research Vessel demo architecture", () => {
     expect(ctdAutomation.uiSource).toMatch(/Aeolus arrested the winch/);
   });
 
+  // The ROV pane used to place the vehicle from its altitude alone, which pinned it
+  // a few pixels off the bottom however shallow it actually was. Position must come
+  // from depth measured against the whole water column.
+  it("draws the ROV against a real water column instead of from its altitude", () => {
+    expect(rovAutomation.scriptSource).toContain('state.set("seabedDepth"');
+    expect(rovAutomation.uiSource).toContain('aeolus.read("seabedDepth")');
+    // Altitude is annotated, never the input the picture is built from.
+    expect(rovAutomation.uiSource).toMatch(/yOf\(/);
+    expect(rovAutomation.uiSource).not.toMatch(/Math\.min\(30,\s*altitude/);
+  });
+
+  it("treats the ROV mission as a phase, not a boolean", () => {
+    for (const phase of ["at-surface", "diving", "approaching-seabed", "on-station", "surveying", "holding", "recovering"]) {
+      expect(rovAutomation.uiSource, `UI never distinguishes the ${phase} phase`).toContain(phase);
+    }
+  });
+
+  it("never makes an operator hold the ROV before issuing another valid command", () => {
+    expect(rovAutomation.scriptSource).not.toContain("hold before new command");
+    expect(rovAutomation.scriptSource).toContain('field: "verticalSpeed"');
+  });
+
+  it("verifies tether protection by the load coming off, not by the vehicle agreeing", () => {
+    expect(rovAutomation.scriptSource).toContain('field: "tetherTension"');
+    expect(rovAutomation.scriptSource).toContain('state.set("protectionAt"');
+    expect(rovAutomation.uiSource).toMatch(/Aeolus held station/);
+  });
+
+  // "ROV 25m · 73.89999999999999%" was real output. Every reading a pane renders
+  // goes through the shared formatters so a float artefact cannot reach an operator.
+  it.each(allAutomations.map((a) => [a.name, a] as const))("%s renders no raw telemetry floats", (_name, automation) => {
+    expect(automation.uiSource).toContain('from "@aeolus/ui"');
+    expect(automation.uiSource).not.toMatch(/\{\s*(?:model|aeolus\.read\([^)]*\))[^}]*\}\s*%/);
+  });
+
   it("the hero receives summaries only over Automation Events", () => {
     for (const automation of commandAutomations) expect(automation.scriptSource).toContain('events.emit("vessel/summary/');
     expect(missionOverviewAutomation.triggerTopic).toBe("aeolus/events/+/vessel/summary/#");

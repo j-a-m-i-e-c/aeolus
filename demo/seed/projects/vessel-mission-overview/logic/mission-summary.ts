@@ -16,12 +16,14 @@ export function initialiseMissionOverview() {
     init("ctdSalinity", 35.0);
     init("ctdOxygen", 6.3);
     init("ctdTension", 220);
-    init("rovDepth", 310);
-    init("rovMode", "holding");
+    // The ROV rests at launch depth well clear of a 385 m seabed, so altitude here
+    // is the same derived figure the ROV pane shows rather than an independent one.
+    init("rovDepth", 60);
+    init("rovMode", "at-surface");
     init("rovBattery", 78);
-    init("rovTether", 310);
+    init("rovTether", 287);
     init("rovHeading", 88);
-    init("rovAltitude", 8.2);
+    init("rovAltitude", 325);
     init("tsgPumpOn", true);
     init("tsgFlow", 2.1);
     init("sst", 18.4);

@@ -9,6 +9,16 @@ const CTD_PHASE_LABEL: Record<string, string> = {
     recovering: "ASCENDING",
     holding: "HOLDING",
 };
+/** The ROV's mission phase, likewise. */
+const ROV_PHASE_LABEL: Record<string, string> = {
+    "at-surface": "AT SURFACE",
+    diving: "DESCENDING",
+    "approaching-seabed": "NEAR SEABED",
+    "on-station": "ON STATION",
+    surveying: "SURVEYING",
+    holding: "HOLDING",
+    recovering: "RECOVERING",
+};
 export default function MissionOverviewDashboard({ model }: {
     model: Record<string, any>;
 }) {
@@ -18,8 +28,8 @@ export default function MissionOverviewDashboard({ model }: {
     const ctdTemp = Number(model.ctdTemperature ?? 12.1);
     const ctdSalinity = Number(model.ctdSalinity ?? 35.1);
     const ctdTension = Number(model.ctdTension ?? 220);
-    const rovDepth = Number(model.rovDepth ?? 310);
-    const rovMode = String(model.rovMode || "holding");
+    const rovDepth = Number(model.rovDepth ?? 60);
+    const rovMode = String(model.rovMode || "at-surface");
     const rovBattery = Number(model.rovBattery ?? 78);
     const rovTether = Number(model.rovTether ?? 310);
     const flow = Number(model.tsgFlow ?? 2.1);
@@ -83,7 +93,7 @@ export default function MissionOverviewDashboard({ model }: {
           <text x="14" y="21" fill="#7894A4" fontSize="10" letterSpacing="1.1">SCIENCE SYSTEMS</text>
           <text x="14" y="50" fill="#F0C36D" fontSize="11" fontWeight="800">CTD {CTD_PHASE_LABEL[ctdStatus] || ctdStatus.toUpperCase()}</text><text x="176" y="50" textAnchor="end" fill="#B8C4CA" fontSize="10">{ctdTemp.toFixed(1)}°C · {Math.round(ctdTension)}N</text>
           <line x1="14" y1="61" x2="176" y2="61" stroke="#18303C"/>
-          <text x="14" y="85" fill="#68D7EC" fontSize="11" fontWeight="800">ROV {rovMode.toUpperCase()}</text><text x="176" y="85" textAnchor="end" fill="#B8C4CA" fontSize="10">tether {Math.round(rovTether)}N</text>
+          <text x="14" y="85" fill="#68D7EC" fontSize="11" fontWeight="800">ROV {ROV_PHASE_LABEL[rovMode] || rovMode.toUpperCase()}</text><text x="176" y="85" textAnchor="end" fill="#B8C4CA" fontSize="10">tether {Math.round(rovTether)}N</text>
           <line x1="14" y1="96" x2="176" y2="96" stroke="#18303C"/>
           <text x="14" y="120" fill={front ? "#A7E6A0" : "#72AFC6"} fontSize="11" fontWeight="800">UNDERWAY {front ? "FRONT" : "STREAM"}</text><text x="176" y="120" textAnchor="end" fill="#B8C4CA" fontSize="10">{sst.toFixed(1)}°C · {flow.toFixed(1)}L/m</text>
           <text x="14" y="143" fill="#6D8795" fontSize="10">SSS {surfaceSalinity.toFixed(2)} · Chl {chlorophyll.toFixed(1)} mg/m³</text>
