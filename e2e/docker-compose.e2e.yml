@@ -1,0 +1,112 @@
+# e2e/docker-compose.e2e.yml — disposable stack for the Playwright suite.
+#
+# Why this exists. The base docker-compose.yml runs the backend with
+# `network_mode: host` so it can do Kasa UDP discovery and reach a Hue bridge on
+# the LAN. On Linux that also puts the API on the developer's own localhost, which
+# is what e2e/constants.ts and the CI job assume — so `make e2e` works there. On
+# Docker Desktop (Windows/macOS) "host" is the Linux VM's network namespace, not
+# the developer's machine, so http://localhost:3001 is refused and every spec
+# dies in globalSetup. This file gives those developers the same suite.
+#
+# It is a STANDALONE stack, not an overlay, for the same reason
+# demo/compose/hosted-runtime.yml is: `network_mode` and `networks` are mutually
+# exclusive in Compose, so host networking cannot be layered away by an override.
+#
+# It runs under its own project name with its own volume, so it never touches a
+# working stack's database. That matters twice over: the suite needs a FRESH
+# backend to exercise the first-run setup journey (e2e/constants.ts creates
+# e2e-admin), and a developer's real stack must not be wiped to run tests.
+#
+#   docker compose --project-directory . -f e2e/docker-compose.e2e.yml up -d --build
+#   $env:E2E_BASE_URL="http://localhost:3100"; $env:E2E_API_URL="http://localhost:3011"
+#   npx playwright test
+#   docker compose --project-directory . -f e2e/docker-compose.e2e.yml down -v
+#
+# Ports. Everything is offset so an ordinary stack keeps running alongside: SPA on
+# 3100, API on 3011. Note that a base stack's host-mode backend still occupies
+# 3001 *inside the Docker VM* even on Docker Desktop where it is unreachable from
+# the developer's machine, so binding 3001 here fails with "address already in
+# use". The SPA would default to http://<hostname>:3001, so VITE_API_URL and
+# VITE_WS_URL are baked in to point at 3011 (frontend/src/lib/env.ts). CORS
+# already allows localhost on any port (api/middleware/cors-config.ts).
+#
+# AEOLUS_PUBLIC_DEMO is deliberately NOT set, so automation-project-demo.spec.ts
+# skips itself exactly as it does in CI.
+
+name: aeolus-e2e
+
+services:
+  # Anonymous, ephemeral broker on the internal network only. Reuses the demo
+  # broker config rather than the root ./mosquitto one, which carries a
+  # password_file and expects the backend's managed provisioning wiring.
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: aeolus-e2e-mosquitto
+    volumes:
+      - ./demo/config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    networks:
+      - e2e
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: aeolus-e2e-app:local
+    container_name: aeolus-e2e-backend
+    networks:
+      - e2e
+    ports:
+      - "3011:3001"
+    environment:
+      NODE_ENV: production
+      PORT: "3001"
+      # Service name, not localhost: this stack is on a bridge network.
+      MQTT_BROKER_URL: mqtt://mosquitto:1883
+      MQTT_TOPICS: "#"
+      DB_PATH: /app/data/aeolus.db
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    depends_on:
+      mosquitto:
+        condition: service_started
+    volumes:
+      - e2e_data:/app/data
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3001/api/health"]
+      interval: 5s
+      timeout: 5s
+      start_period: 10s
+      retries: 10
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # The API is on 3011 here, not the default 3001, so bake the origin in.
+        VITE_API_URL: http://localhost:3011
+        VITE_WS_URL: ws://localhost:3011/ws
+    image: aeolus-e2e-frontend:local
+    container_name: aeolus-e2e-frontend
+    networks:
+      - e2e
+    ports:
+      # nginx-unprivileged serves on 8080 inside the image.
+      - "3100:8080"
+    depends_on:
+      - backend
+    healthcheck:
+      # 127.0.0.1, not localhost: nginx listens IPv4-only and BusyBox wget does
+      # not fall back from ::1.
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "-O", "/dev/null", "http://127.0.0.1:8080/"]
+      interval: 5s
+      timeout: 5s
+      start_period: 5s
+      retries: 10
+
+volumes:
+  # Isolated from the base stack's backend_data, so `down -v` here is always safe.
+  e2e_data:
+
+networks:
+  e2e:
+    driver: bridge

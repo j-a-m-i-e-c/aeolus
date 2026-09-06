@@ -25,11 +25,13 @@ test.describe("authentication", () => {
 
     await createAdmin(page);
 
-    // With no devices yet, the WelcomeScreen is the landing content, and the
-    // sidebar reflects the signed-in admin. Allow extra time on first load —
-    // the backend has just initialised and the frontend is hydrating cold.
+    // /dashboard renders SystemPage unconditionally, even with no devices yet, and
+    // the sidebar reflects the signed-in admin. This used to expect the onboarding
+    // WelcomeScreen, which 86624c8 ("always show SystemPage on /dashboard") removed
+    // — the assertion had been unsatisfiable ever since. Allow extra time on first
+    // load: the backend has just initialised and the frontend is hydrating cold.
     await expect(
-      page.getByRole("heading", { name: "Welcome to Aeolus" }),
+      page.getByRole("heading", { name: "System" }),
     ).toBeVisible({ timeout: 20000 });
     await expect(page.getByText("(admin)")).toBeVisible();
   });

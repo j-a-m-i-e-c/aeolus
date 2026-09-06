@@ -1,7 +1,38 @@
 // e2e/helpers.ts — Shared actions for the e2e specs.
 
-import { expect, type Page } from "@playwright/test";
+import { expect, type APIRequestContext, type Page } from "@playwright/test";
 import { ADMIN, API_URL } from "./constants";
+
+/**
+ * A cached admin bearer token for API-level setup.
+ *
+ * POST /api/auth/login is rate limited to 5 requests per minute per IP
+ * (auth.routes.ts loginRateLimiter) — a deliberate security control, not a test
+ * obstacle. Specs used to open a fresh API login for every seeding step, which on
+ * a fast machine pushed the run over that cap and produced 429s that surface as
+ * unrelated-looking UI failures several tests later. One token per run keeps the
+ * control intact and stops the suite lying about what broke.
+ *
+ * Safe to cache: workers is 1 (playwright.config.ts) and the access token
+ * outlives a suite run.
+ */
+let cachedAdminToken: string | undefined;
+
+/** Bearer token for the admin, authenticating at most once per run. */
+export async function adminToken(request: APIRequestContext): Promise<string> {
+  if (cachedAdminToken) return cachedAdminToken;
+  const res = await request.post(`${API_URL}/api/auth/login`, {
+    data: { username: ADMIN.username, password: ADMIN.password },
+  });
+  expect(res.ok(), `admin login failed: ${res.status()} ${await res.text()}`).toBeTruthy();
+  cachedAdminToken = (await res.json()).accessToken as string;
+  return cachedAdminToken;
+}
+
+/** Authorization header for the admin, reusing the cached token. */
+export async function adminAuth(request: APIRequestContext): Promise<{ Authorization: string }> {
+  return { Authorization: `Bearer ${await adminToken(request)}` };
+}
 
 /** True when the backend has no admin yet (first-run). */
 export async function isFreshBackend(page: Page): Promise<boolean> {

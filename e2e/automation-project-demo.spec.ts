@@ -25,7 +25,8 @@
 // automation-project.spec.ts covers the editor itself in a real browser.
 
 import { test, expect, type APIRequestContext } from "@playwright/test";
-import { ADMIN, API_URL } from "./constants";
+import { API_URL } from "./constants";
+import { adminAuth } from "./helpers";
 
 const TAB_ID = "tab-e2e-demo-project";
 const TAB_NAME = "E2E Demo Project";
@@ -48,14 +49,6 @@ const PROJECT = {
     { path: "ui/index.tsx", content: `export default function View() {\n  return <div>demo project ui</div>;\n}` },
   ],
 };
-
-async function adminAuth(request: APIRequestContext) {
-  const res = await request.post(`${API_URL}/api/auth/login`, {
-    data: { username: ADMIN.username, password: ADMIN.password },
-  });
-  expect(res.ok(), `admin login failed: ${res.status()}`).toBeTruthy();
-  return { Authorization: `Bearer ${(await res.json()).accessToken}` };
-}
 
 /** Seed a project automation, a demo-readable tab/pane, and the demo identity. */
 async function provisionDemo(request: APIRequestContext): Promise<string> {

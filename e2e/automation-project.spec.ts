@@ -13,8 +13,8 @@
 // run in any order and be re-run against a dirty database.
 
 import { test, expect, type Page, type APIRequestContext } from "@playwright/test";
-import { ADMIN, API_URL } from "./constants";
-import { ensureAdmin } from "./helpers";
+import { API_URL } from "./constants";
+import { adminAuth, ensureAdmin } from "./helpers";
 
 const TAB_ID = "tab-e2e-project";
 const TAB_NAME = "E2E Project";
@@ -41,14 +41,6 @@ const INITIAL_PROJECT = {
   ],
 };
 
-async function apiToken(request: APIRequestContext): Promise<string> {
-  const res = await request.post(`${API_URL}/api/auth/login`, {
-    data: { username: ADMIN.username, password: ADMIN.password },
-  });
-  expect(res.ok(), `login failed: ${res.status()}`).toBeTruthy();
-  return (await res.json()).accessToken as string;
-}
-
 interface Seeded {
   ruleId: string;
   auth: { Authorization: string };
@@ -59,7 +51,7 @@ interface Seeded {
  * the baseline. Returns the rule id and an auth header for assertions.
  */
 async function seedBaseline(request: APIRequestContext): Promise<Seeded> {
-  const auth = { Authorization: `Bearer ${await apiToken(request)}` };
+  const auth = await adminAuth(request);
 
   const existing = await (await request.get(`${API_URL}/api/automations`, { headers: auth })).json() as
     Array<{ id: string; name: string }>;
@@ -116,8 +108,12 @@ async function openProjectEditor(page: Page): Promise<void> {
   // Monaco is lazy-loaded behind Suspense.
   await expect(page.locator(".monaco-editor").first()).toBeVisible({ timeout: 30_000 });
   // Multi-file structure is progressive disclosure rather than the default surface.
-  const projectFiles = page.getByRole("button", { name: "Project files", exact: true });
+  // The toggle is labelled "Files"; "Project files" is the heading inside the panel
+  // it opens (3ca7ad8 reworked this toolbar), so matching the old name silently
+  // matched nothing and left the tree closed for every assertion below.
+  const projectFiles = page.getByRole("button", { name: "Files", exact: true });
   if (await projectFiles.isVisible()) await projectFiles.click();
+  await expect(page.getByText("Project files", { exact: true })).toBeVisible();
 }
 
 const tree = (page: Page) => page.locator("aside");
@@ -159,8 +155,12 @@ test.describe("Automation Project editor", () => {
     for (const path of ["logic/index.ts", "logic/constants.ts", "ui/index.tsx"]) {
       await expect(tree(page).getByTitle(path, { exact: true })).toBeVisible();
     }
-    // Entry files are labelled so an author can tell what actually runs.
-    await expect(page.getByText("Entry", { exact: true })).toBeVisible();
+    // The Logic and UI entry points are the toolbar's primary surface. They used to
+    // also carry an "Entry" text badge in the tree; that is now conveyed by icon
+    // colour alone, so assert the entry buttons rather than a label that no longer
+    // exists.
+    await expect(page.getByRole("button", { name: "Logic", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "UI", exact: true })).toBeVisible();
 
     // ── Navigate between files ──
     await selectFile(page, "logic/constants.ts");
@@ -175,7 +175,7 @@ test.describe("Automation Project editor", () => {
 
     // ── Create a new module, then import it from the logic entry ──
     page.once("dialog", (dialog) => dialog.accept("logic/extra.ts"));
-    await page.getByTitle("Add file").click();
+    await page.getByTitle("Add project file").click();
     await expect(tree(page).getByTitle("logic/extra.ts", { exact: true })).toBeVisible();
     await replaceActiveContent(page, `export const EXTRA = "extra-value";`);
 

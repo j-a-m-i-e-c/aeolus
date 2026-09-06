@@ -27,7 +27,9 @@ test("admin can create a custom tab and it renders", async ({ page }) => {
   await expect(
     page.getByRole("button", { name: "Browse Panes" }),
   ).toBeVisible();
+  // "New Automation", not "New Automation Pane" — ed8aa23 shortened the label when
+  // panes and automations were unified for the public-demo admin surfaces.
   await expect(
-    page.getByRole("button", { name: "New Automation Pane" }),
+    page.getByRole("button", { name: "New Automation" }),
   ).toBeVisible();
 });
