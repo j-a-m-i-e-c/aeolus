@@ -30,12 +30,20 @@ What exists today, verified rather than assumed:
   each define the same `byTopic()` helper over `devices.list()`. There is no role,
   alias or binding indirection anywhere, which is precisely why these projects are
   not portable.
-- **Capability requirements are half-expressible.** `CapabilityDescriptor` +
-  `ActionRouter.resolveActionCatalog` already make "this device supports action T with
-  params P" machine-checkable, and the router pre-validates actions against it.
-  "This device reports field Y" has **no** representation: device `state` is an
-  untyped `Record<string, unknown>` and `capabilities` is frequently `[]` for MQTT and
-  simulated devices.
+- **Capability requirements are expressible from two different materials.**
+  `CapabilityDescriptor` + `ActionRouter.resolveActionCatalog` already make "this
+  device supports action T with params P" machine-checkable, and the router
+  pre-validates actions against it. There is no *declarative schema* for device state —
+  it is an untyped `Record<string, unknown>` and `capabilities` is frequently `[]` for
+  MQTT and simulated devices — but there is **observation**: `StateHistory`
+  (`src/core/state-history.ts`) records state snapshots per device into
+  `device_history(device_id, state, timestamp)`, capped at `STATE_HISTORY_MAX` (100)
+  entries per device and throttled to one write per `HISTORY_RECORD_INTERVAL` (5 s).
+  So "does this device report field Y" is answerable from evidence even though it is
+  not answerable from a schema.
+- **`AuthorizationScope` is already set-shaped.** `resolve()` returns
+  `{ deviceIds, collections }` as sets, which means an additional narrowing filter
+  composes with it without touching how it is derived.
 - **Permissions are derived, not declared.** `AutomationScopeResolver` recomputes
   authority on every dispatch from `(authored_unrestricted, owner_tab_id, whatever
   the owning tab's panes currently expose)`. Nothing per-automation is stored that a
@@ -95,14 +103,20 @@ tree and the trigger suggestion.
     }
   },
   "permissions": {
-    "dataStore": { "write": ["tank-history"] },
-    "events":    { "emit": ["farm/water/#"] }
+    "dataStore": { "write": ["tank-history"] }
   }
 }
 ```
 
 `trigger` is a **suggestion** shown at install, not a grant: a package that could
 silently bind itself to a topic would be choosing its own activation condition.
+
+`permissions` declares only the dimensions `AuthorizationScope` actually carries —
+devices (through the roles in `requires`) and Data Store collections. Both are sets of
+ids, which is what makes the intersection in §5a total. A field that could not be
+enforced would be a field that looks load-bearing and is not, so there deliberately isn't
+one: no raw-MQTT topic patterns, no event namespaces. Adding either means giving scope a
+new dimension first, which §"Revisit when" treats as its own decision.
 
 ### 3. Logical device binding — the seam that makes a project portable
 
@@ -121,15 +135,30 @@ automation's authorization scope resolves to `undefined`, exactly as
 `devices.get()` on an unexposed device already does. A binding therefore narrows
 within authority and can never widen it.
 
-Requirements are checked at bind time as far as the platform can actually check them,
-and are honest about the rest:
+Both kinds of requirement are checked at bind time, each against the material that can
+actually settle it:
 
-- `actions` are **verified** against the device's resolved action catalogue, which is
-  the same catalogue the action router pre-validates dispatches against.
-- `reads` are **advisory**. Device state is untyped and a field may legitimately be
-  absent until first telemetry, so the binding UI reports "field not currently
-  reported" as information, not as a rejection. Claiming verification here would be a
-  fabricated guarantee.
+- `actions` are verified against the device's resolved action catalogue — the same
+  catalogue the action router pre-validates dispatches against, so a passing check
+  means the dispatch will not be rejected for an unknown action.
+- `reads` are verified against **observed telemetry**: the union of keys in the
+  device's current state and in its retained `device_history` snapshots. This is the
+  same principle as the rest of the platform — the answer comes from what the device
+  was seen to do, not from what something claimed about it.
+
+`reads` therefore has three outcomes, and the binding UI distinguishes them because
+they mean different things:
+
+| Outcome | Meaning |
+|---|---|
+| `reported` | The field has been seen in this device's state or history. |
+| `not-yet-observed` | The device exists and has published, but never this field. |
+| `no-history` | Nothing retained for this device yet, so there is no evidence either way. |
+
+`not-yet-observed` is a warning an operator may knowingly override — a flow meter
+that has never run has never reported a flow rate, and that is a legitimate install.
+`no-history` is explicitly *absence of evidence* rather than evidence of absence, and
+is worded that way rather than being folded in with the case above it.
 
 Roles are additive. Topic-matching stays valid for site-local projects, and the
 existing showcase projects are not required to migrate.
@@ -173,11 +202,41 @@ Two invariants hold regardless of what a package claims:
 
 - **A package cannot grant itself authority.** `authored_unrestricted` and
   `owner_tab_id` are set from the installing user's role and chosen tab, exactly as
-  `POST /api/automations` does today. The manifest's `permissions` block is a
-  declaration to *display* and, later, to *narrow* — never to widen.
+  `POST /api/automations` does today.
 - **Scope stays derived.** `AutomationScopeResolver` continues to recompute authority
-  per dispatch. A declared permission that exceeds current scope is simply not
-  available at runtime; the install UI should say so rather than appearing to grant it.
+  per dispatch from the live tab exposure.
+
+### 5a. Declared permissions constrain, by intersection
+
+A declaration that can only ever *shrink* authority needs no change to how authority is
+derived. `AuthorizationScope` already returns `deviceIds` and `collections` as sets, so
+the declaration composes as one extra filter at the end of `resolve()`:
+
+```
+effective = derived ∩ declared          (when a declaration exists)
+effective = derived                     (when none does)
+```
+
+Intersection is the whole safety argument. There is no ordering, precedence or merge
+rule to get wrong, and no input a package can supply that makes the result larger than
+`derived`. A declared device role bound to something the owning tab does not expose
+simply is not in the intersection, so it resolves to `undefined` at runtime exactly as
+an unexposed device already does.
+
+Three consequences worth stating plainly:
+
+- A packaged automation is confined to the roles it declared. Today a scoped automation
+  may touch **every** device its tab exposes, declared or not, so this is a genuine
+  tightening rather than paperwork.
+- It tightens admin-installed packages too. `unrestricted ∩ declared` is `declared`, so
+  an admin installing a package no longer hands it system-wide authority by virtue of
+  being an admin.
+- Projects with no manifest are unaffected. The showcase and any site-local project keep
+  today's derived scope, so this cannot break existing automations.
+
+The declaration is stored at install from the manifest, not read back out of the package
+at dispatch time — a package file that could still be edited after approval would put
+the enforcement input outside the approved boundary.
 
 ### 6. Versioning
 
@@ -248,9 +307,37 @@ human can answer it.
 
 Rejected. `CapabilityDescriptor` + the action catalogue already express "supports
 action T", and the action router already validates against it. A parallel system would
-drift from the one the runtime actually enforces. The genuine gap is state-field
-requirements, and this ADR marks those advisory rather than inventing a schema for
-untyped device state.
+drift from the one the runtime actually enforces.
+
+### A declarative state schema, so `reads` can be checked against a contract
+
+The tidy answer: have devices declare their telemetry fields and check requirements
+against that. Rejected because nothing declares it today, so the schema would have to be
+authored by hand per device and would then be a second claim to keep true — and a stale
+schema is worse than none, because it reads as authoritative. Observed telemetry is
+already collected, is evidence rather than assertion, and degrades into a statement about
+evidence (`no-history`) instead of a false negative.
+
+### Leave `reads` advisory
+
+The first draft of this ADR did exactly that, on the grounds that untyped state cannot be
+verified. That conflated "no schema" with "no evidence". `StateHistory` has been recording
+per-device snapshots all along, so the check was available and the caveat was unnecessary.
+
+### Make declared permissions a grant rather than a narrowing
+
+This is what a package manifest usually means elsewhere, and it would let a package
+request access a tab has not been given. Rejected outright: it would make an imported
+file an input to an authority decision. Narrowing gets the useful half — an automation
+confined to what it said it needed — with none of that risk.
+
+### Defer declared-permission enforcement to a later decision
+
+Also what the first draft did, reasoning that a stored declaration should not join an
+enforcement path that is otherwise entirely derived. That was over-cautious. Framed as an
+intersection the safety property is immediate and total, and deferring it would have
+shipped a manifest field that looked load-bearing and was not — which is its own kind of
+dishonesty.
 
 ## Consequences
 
@@ -261,10 +348,13 @@ untyped device state.
 - Imported code cannot execute before an explicit install.
 - The binding seam removes hard-coded topics from shareable projects without breaking
   site-local ones.
-- Requirements are checked with the mechanism the runtime already enforces, so a
-  passing check means something.
-- Authority remains derived, so no package can talk its way into more than the
-  installing user had.
+- Both kinds of requirement are checked against something real — the catalogue the
+  runtime enforces, and telemetry the platform observed — so a passing check means
+  something and a failing one says which of the two it is.
+- Declared permissions actually confine the automation, and by intersection, so no
+  package can talk its way into more than the installing user's tab already exposes.
+  Packaged automations end up more tightly bound than hand-authored ones, including
+  when an admin installs them.
 
 ### Negative / accepted trade-offs
 
@@ -272,12 +362,18 @@ untyped device state.
   one place, and a library update does not reach installed instances. That is the
   intended safety property, but it does mean "update all instances" becomes a feature
   someone will ask for.
-- `reads` requirements are advisory. An operator can bind a device that never reports
-  the field, and the automation will simply find nothing. Better than a check that
-  claims more than it can know, but it is a real rough edge.
-- Declared permissions are display-and-narrow only at first, so a manifest can look
-  more load-bearing than it is. The install UI has to be explicit that scope is derived
-  from the tab.
+- `reads` verification inherits `StateHistory`'s retention. With 100 snapshots per
+  device throttled to one per 5 s, a field a device publishes rarely can fall out of
+  history and read as `not-yet-observed`. The outcome is a warning rather than a
+  refusal, so the failure mode is a confusing warning, not a blocked install — but the
+  check is bounded by retention and the wording must not imply otherwise.
+- Intersection means an install can be *narrower* than the operator expects: bind a role
+  to a device the owning tab does not expose and the automation will find nothing there.
+  That is the correct outcome, and the binding UI has to make the reason obvious rather
+  than leaving a silent `undefined` to be debugged at runtime.
+- Enforcing a declaration adds a second reason a scoped automation may fail to see a
+  device. "Not exposed by the tab" and "not declared by the package" need distinct
+  diagnostics or they will be indistinguishable in the field.
 - `devices.role()` adds a second device-resolution path beside topic matching. Two
   idioms in the showcase is a documentation cost.
 - The extension allowlist means no `README.md` inside a package, so description lives
@@ -287,9 +383,13 @@ untyped device state.
 
 - Packages need to carry non-source assets or a README — that is the trigger for
   reconsidering the archive format.
-- Declared permissions need to actually constrain rather than describe. That is a
-  change to `AutomationScopeResolver`, and it should be its own decision: it would make
-  a stored declaration part of an enforcement path that is currently entirely derived.
+- A declaration needs to cover something `AuthorizationScope` does not carry — an event
+  namespace, or a raw-MQTT topic pattern. Intersection is total because devices and
+  collections are sets of ids; a pattern is not, so that needs both a new scope dimension
+  and a matching rule, and it is a separate decision from this one.
+- `reads` verification needs to survive retention — either a longer-lived per-device
+  observed-field index, or a declared schema after all. Reach for the index first; it
+  keeps the answer grounded in observation.
 - Third-party or untrusted package authors become possible. Signing, provenance and
   the per-project capability manifest ADR-0005 anticipates all belong to that step, not
   this one.
@@ -301,7 +401,8 @@ untyped device state.
 - `src/automations/automation-project.ts` (compiler, bounds, path normalisation)
 - `src/db/migrations/015-automation-projects.ts`
 - `src/api/routes/automation.routes.ts` (authoring scope, `registerUiRule`)
-- `src/automations/automation-scope-resolver.ts`
+- `src/automations/automation-scope-resolver.ts` (the intersection point)
+- `src/core/state-history.ts` (observed-field verification)
 - `src/connectors/action-router.ts`, `src/connectors/connector.interface.ts`
 - `frontend/src/lib/pane-registry.ts`, `frontend/src/components/PanePicker.tsx`
 - `docs/adr/0007-automation-projects-esbuild.md`
