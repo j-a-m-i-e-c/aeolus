@@ -11,6 +11,7 @@
 // so nothing here is collected as a unit test or counted toward coverage.
 
 import { defineConfig, devices } from "@playwright/test";
+import { STORAGE_STATE } from "./e2e/constants";
 
 /** Where the SPA is served. Override with E2E_BASE_URL in CI if the port moves. */
 const BASE_URL = process.env.E2E_BASE_URL || "http://localhost:3000";
@@ -37,9 +38,19 @@ export default defineConfig({
     video: "retain-on-failure",
   },
   projects: [
+    // Signs in once and saves the state the specs reuse, so the suite does not
+    // spend the login rate-limit budget re-authenticating per test. It also owns
+    // the first-run setup journey, which must reach a pristine DB before anything
+    // else creates the admin — a dependency, rather than alphabetical luck.
+    {
+      name: "setup",
+      testMatch: /.*\.setup\.ts/,
+      use: { ...devices["Desktop Chrome"] },
+    },
     {
       name: "chromium",
-      use: { ...devices["Desktop Chrome"] },
+      use: { ...devices["Desktop Chrome"], storageState: STORAGE_STATE },
+      dependencies: ["setup"],
     },
   ],
 });

@@ -10,17 +10,28 @@ import { ADMIN, API_URL } from "./constants";
  * (auth.routes.ts loginRateLimiter) — a deliberate security control, not a test
  * obstacle. Specs used to open a fresh API login for every seeding step, which on
  * a fast machine pushed the run over that cap and produced 429s that surface as
- * unrelated-looking UI failures several tests later. One token per run keeps the
- * control intact and stops the suite lying about what broke.
+ * unrelated-looking UI failures several tests later.
  *
- * Safe to cache: workers is 1 (playwright.config.ts) and the access token
- * outlives a suite run.
+ * So this mints a token the way the SPA does: POST /api/auth/refresh, carrying the
+ * httpOnly cookie that auth.setup.ts saved. The `request` fixture inherits the
+ * project's storageState, so the cookie is already there, and /refresh has no rate
+ * limiter. Falling back to /login keeps the helper usable in contexts without saved
+ * state.
+ *
+ * Safe to cache: workers is 1 (playwright.config.ts) and the token outlives a run.
  */
 let cachedAdminToken: string | undefined;
 
-/** Bearer token for the admin, authenticating at most once per run. */
+/** Bearer token for the admin, spending no login budget when a session exists. */
 export async function adminToken(request: APIRequestContext): Promise<string> {
   if (cachedAdminToken) return cachedAdminToken;
+
+  const refreshed = await request.post(`${API_URL}/api/auth/refresh`);
+  if (refreshed.ok()) {
+    cachedAdminToken = (await refreshed.json()).accessToken as string;
+    return cachedAdminToken;
+  }
+
   const res = await request.post(`${API_URL}/api/auth/login`, {
     data: { username: ADMIN.username, password: ADMIN.password },
   });

@@ -1,49 +1,35 @@
 // e2e/auth.spec.ts — Authentication journeys against the live backend.
 //
-// Exercises the real auth wiring end-to-end — the public /api/auth/status gate,
-// admin creation, the httpOnly refresh cookie, bearer token, and the sidebar
-// logout — none of which the jsdom unit tests can cover.
+// Exercises the real auth wiring end-to-end — the login form, the httpOnly refresh
+// cookie, the bearer token and the sidebar logout — none of which the jsdom unit
+// tests can cover.
 //
-// State handling: every test is self-sufficient (each gets its own browser
-// context, and `ensureAdmin` sets up or logs in as needed), so they don't rely
-// on each other's ordering. The one exception is the first-run test below,
-// which is the suite's ONLY hard dependency on a fresh DB — it skips cleanly
-// when an admin already exists. On a fresh CI DB it runs first (Playwright
-// orders spec files alphabetically, and "auth" precedes "custom-tab"), so it
-// genuinely exercises setup before anything else creates the admin.
+// State handling: this file deliberately opts OUT of the shared signed-in state that
+// auth.setup.ts saves and the rest of the suite reuses. Logging out revokes the
+// presented refresh token, and every reused context carries the same token, so a
+// test that signs out would invalidate the saved state for everything that ran after
+// it. Signing in and out is this file's actual subject, so it owns its own sessions.
+//
+// That costs two logins against the 5-per-minute limit, which is the point: the rest
+// of the suite spends none, so the budget is there for the tests that need it.
+//
+// The first-run setup journey lives in auth.setup.ts, which owns it because it has
+// to reach a pristine DB before anything else creates the admin.
 
 import { test, expect } from "@playwright/test";
 import { ADMIN } from "./constants";
-import { createAdmin, ensureAdmin, isFreshBackend } from "./helpers";
+import { login } from "./helpers";
+
+// A genuinely unauthenticated context, not the saved admin state.
+test.use({ storageState: { cookies: [], origins: [] } });
 
 test.describe("authentication", () => {
-  test("first-run setup creates the admin and lands on the dashboard", async ({ page }) => {
-    test.skip(
-      !(await isFreshBackend(page)),
-      "Backend already set up — the first-run path only runs against a fresh DB",
-    );
-
-    await createAdmin(page);
-
-    // /dashboard renders SystemPage unconditionally, even with no devices yet, and
-    // the sidebar reflects the signed-in admin. This used to expect the onboarding
-    // WelcomeScreen, which 86624c8 ("always show SystemPage on /dashboard") removed
-    // — the assertion had been unsatisfiable ever since. Allow extra time on first
-    // load: the backend has just initialised and the frontend is hydrating cold.
-    await expect(
-      page.getByRole("heading", { name: "System" }),
-    ).toBeVisible({ timeout: 20000 });
-    await expect(page.getByText("(admin)")).toBeVisible();
-  });
-
   test("admin reaches the dashboard and can log out", async ({ page }) => {
-    await ensureAdmin(page);
+    await login(page);
 
-    // Dashboard shows either WelcomeScreen or SystemPage depending on device state
-    const hasContent = await page.getByRole("heading", { name: "Welcome to Aeolus" }).or(
-      page.getByRole("heading", { name: "System" }),
-    ).isVisible({ timeout: 10000 });
-    expect(hasContent).toBe(true);
+    // /dashboard renders SystemPage unconditionally (86624c8 removed the
+    // WelcomeScreen this assertion also used to allow for).
+    await expect(page.getByRole("heading", { name: "System" })).toBeVisible({ timeout: 10_000 });
 
     // Log out via the sidebar control (title="Sign out") → back to login.
     await page.getByTitle("Sign out").click();
@@ -51,9 +37,9 @@ test.describe("authentication", () => {
   });
 
   test("wrong password is rejected", async ({ page }) => {
-    // Guarantee an admin exists, then get to a clean login screen.
-    await ensureAdmin(page);
-    await page.getByTitle("Sign out").click();
+    // No session to shed: this context starts unauthenticated, so the login card is
+    // the landing surface.
+    await page.goto("/");
     await expect(page.getByText("Sign in to your dashboard")).toBeVisible();
 
     await page.locator("#login-username").fill(ADMIN.username);
