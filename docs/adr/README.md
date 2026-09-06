@@ -29,6 +29,7 @@ This is especially useful for decisions that are easy to misunderstand from code
 | [0010](0010-node-24-runtime.md) | Pinned runtime moves to Node 24 | Accepted |
 | [0011](0011-command-evidence-surface.md) | Command evidence read by the automation that issued the command | Accepted |
 | [0012](0012-automation-project-portability.md) | Automation Project packages, library projects and logical device binding | Proposed |
+| [0013](0013-simulated-physical-transitions.md) | Timed physical transitions as a simulator primitive | Accepted |
 
 ## Writing a new ADR
 
