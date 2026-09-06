@@ -39,3 +39,40 @@ export function createScenario(key: string): SimulatorScenario | undefined {
 export function knownScenarioKeys(): string[] {
   return Object.keys(SCENARIO_FACTORIES);
 }
+
+/**
+ * The scenarios that make up the public showcase, in tab order.
+ *
+ * This is the list the simulator runs when AEOLUS_SIMULATOR_SCENARIOS is not set,
+ * and it is the ONE place it is written down. It used to be copy-pasted into the
+ * Makefile's `sim` target and both compose files, three copies that had to be kept
+ * in step by hand whenever a world was added.
+ *
+ * Deliberately not `knownScenarioKeys()`: that also includes `reference-water`, the
+ * minimal fixture the integration harness drives. Loading it alongside the showcase
+ * would publish devices no demo tab accounts for.
+ */
+export const SHOWCASE_SCENARIO_KEYS: readonly string[] = [
+  AGRICULTURE_SCENARIO_KEY,
+  RESEARCH_VESSEL_SCENARIO_KEY,
+  UNDERGROUND_MINING_SCENARIO_KEY,
+  WILDLIFE_SCENARIO_KEY,
+  STAGE_SHOW_SCENARIO_KEY,
+  ESCAPE_ROOM_SCENARIO_KEY,
+  BUNKER_SCENARIO_KEY,
+];
+
+/**
+ * Which scenarios to run: an explicit list if one was given, else the showcase.
+ *
+ * Naming none used to start a simulator that connected and published nothing, which
+ * is never the intent behind switching on a process that is off by default.
+ *
+ * Used by the simulator entry point only. The runtime deliberately does not apply
+ * this, because the integration harness constructs a runtime with no configured
+ * scenarios and calls loadScenario() itself — a default any deeper would load the
+ * whole showcase on top of the single fixture those tests want.
+ */
+export function resolveScenarios(configured: readonly string[]): string[] {
+  return configured.length > 0 ? [...configured] : [...SHOWCASE_SCENARIO_KEYS];
+}

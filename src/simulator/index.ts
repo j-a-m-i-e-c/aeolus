@@ -14,9 +14,17 @@ import { pathToFileURL } from "node:url";
 import { loadSimulatorConfig, describeSimulatorConfig } from "./config.js";
 import { createSimulatorLogger } from "./logger.js";
 import { SimulatorRuntime } from "./runtime.js";
+import { resolveScenarios } from "./scenarios/index.js";
 
 export async function main(): Promise<void> {
-  const config = loadSimulatorConfig(process.env);
+  const parsed = loadSimulatorConfig(process.env);
+
+  // An unset AEOLUS_SIMULATOR_SCENARIOS means the showcase set, which lives once as
+  // SHOWCASE_SCENARIO_KEYS — the Makefile and both compose files used to carry their
+  // own copy of that list. See resolveScenarios for why the default is applied at the
+  // entry point rather than in the config loader or the runtime.
+  const config = { ...parsed, scenarios: resolveScenarios(parsed.scenarios) };
+
   const logger = createSimulatorLogger(config.logLevel);
 
   if (!config.enabled) {

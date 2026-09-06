@@ -41,13 +41,7 @@ import {
   createBootstrapClient,
   configureSimulatedCommandProfiles,
 } from "./simulator-bootstrap.mjs";
-import { AGRICULTURE_ACTUATOR_SPECS } from "./agriculture-simulator-bootstrap.mjs";
-import { RESEARCH_VESSEL_ACTUATOR_SPECS } from "./research-vessel-simulator-bootstrap.mjs";
-import { UNDERGROUND_MINING_ACTUATOR_SPECS } from "./underground-mining-simulator-bootstrap.mjs";
-import { WILDLIFE_ACTUATOR_SPECS } from "./wildlife-simulator-bootstrap.mjs";
-import { STAGE_SHOW_ACTUATOR_SPECS } from "./stage-show-simulator-bootstrap.mjs";
-import { ESCAPE_ROOM_ACTUATOR_SPECS } from "./escape-room-simulator-bootstrap.mjs";
-import { OFF_GRID_BUNKER_ACTUATOR_SPECS } from "./off-grid-bunker-simulator-bootstrap.mjs";
+import { ALL_ACTUATOR_SPECS } from "./actuator-specs.mjs";
 
 const API = process.argv[2] || "http://localhost:3001";
 const USER = process.argv[3] || "admin";
@@ -179,7 +173,7 @@ if (WANT_SIMULATOR) {
     const bootstrapClient = createBootstrapClient(api);
     const { configured, skipped } = await configureSimulatedCommandProfiles(
       bootstrapClient,
-      [...AGRICULTURE_ACTUATOR_SPECS, ...RESEARCH_VESSEL_ACTUATOR_SPECS, ...UNDERGROUND_MINING_ACTUATOR_SPECS, ...WILDLIFE_ACTUATOR_SPECS, ...STAGE_SHOW_ACTUATOR_SPECS, ...ESCAPE_ROOM_ACTUATOR_SPECS, ...OFF_GRID_BUNKER_ACTUATOR_SPECS],
+      ALL_ACTUATOR_SPECS,
       { timeoutMs: 30000, pollMs: 1000 },
     );
     console.log(`  ✓ Simulated actuators — configured: ${configured.length}, already-current: ${skipped.length}`);

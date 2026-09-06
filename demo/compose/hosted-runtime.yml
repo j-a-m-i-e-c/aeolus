@@ -148,7 +148,9 @@ services:
       - demo
     environment:
       AEOLUS_SIMULATOR_ENABLED: "true"
-      AEOLUS_SIMULATOR_SCENARIOS: ${AEOLUS_SIMULATOR_SCENARIOS:-agriculture,research-vessel,underground-mining,wildlife,stage-show,escape-room,off-grid-bunker}
+      # Unset means the showcase set, defined once as SHOWCASE_SCENARIO_KEYS in
+      # src/simulator/scenarios/index.ts. Set it to a comma-separated list to trim.
+      AEOLUS_SIMULATOR_SCENARIOS: ${AEOLUS_SIMULATOR_SCENARIOS:-}
       MQTT_BROKER_URL: mqtt://mosquitto:1883
       AEOLUS_SIMULATOR_LOG_LEVEL: ${AEOLUS_SIMULATOR_LOG_LEVEL:-info}
       # Keep the public showcase visibly alive without high-volume synthetic chatter.

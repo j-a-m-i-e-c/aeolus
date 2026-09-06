@@ -10,6 +10,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { loadSimulatorConfig } from "./config.js";
+import { SHOWCASE_SCENARIO_KEYS } from "./scenarios/index.js";
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "..", "..");
 const baseCompose = readFileSync(path.join(REPO_ROOT, "docker-compose.yml"), "utf8");
@@ -48,7 +49,23 @@ describe("simulator deployment guardrails", () => {
     const block = serviceBlock(demoCompose, "simulator");
     expect(block).toBeDefined();
     expect(block).toContain('AEOLUS_SIMULATOR_ENABLED: "true"');
-    expect(block).toContain("agriculture");
+    // Scenarios are passed through as an override hook, empty by default.
+    expect(block).toContain("AEOLUS_SIMULATOR_SCENARIOS: ${AEOLUS_SIMULATOR_SCENARIOS:-}");
+  });
+
+  it("does not restate the scenario list in either compose file", () => {
+    // The list lives once in SHOWCASE_SCENARIO_KEYS and the simulator entry point
+    // applies it when nothing is named. It used to be copy-pasted here, into the
+    // hosted runtime and into the Makefile — three copies to keep in step by hand,
+    // where a typo only failed when a container started.
+    for (const [name, contents] of [
+      ["local-showcase.yml", demoCompose],
+      ["hosted-runtime.yml", publicDemoCompose],
+    ] as const) {
+      for (const key of SHOWCASE_SCENARIO_KEYS) {
+        expect(contents, `${name} still hardcodes "${key}"`).not.toContain(`${key},`);
+      }
+    }
   });
 
   it("never publishes a port for the simulator (no public exposure)", () => {

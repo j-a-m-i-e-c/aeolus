@@ -61,7 +61,9 @@ services:
     network_mode: host
     environment:
       AEOLUS_SIMULATOR_ENABLED: "true"
-      AEOLUS_SIMULATOR_SCENARIOS: "agriculture,research-vessel,underground-mining,wildlife,stage-show,escape-room,off-grid-bunker"
+      # Unset means the showcase set, defined once as SHOWCASE_SCENARIO_KEYS in
+      # src/simulator/scenarios/index.ts. Set it to a comma-separated list to trim.
+      AEOLUS_SIMULATOR_SCENARIOS: ${AEOLUS_SIMULATOR_SCENARIOS:-}
       MQTT_BROKER_URL: mqtt://localhost:1883
       AEOLUS_SIMULATOR_LOG_LEVEL: ${AEOLUS_SIMULATOR_LOG_LEVEL:-info}
     command: ["node", "dist/simulator/index.js"]

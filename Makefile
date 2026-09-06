@@ -87,7 +87,9 @@ dev: ## Start backend in dev mode (hot reload)
 	npm run dev
 
 sim: ## Start the demo MQTT simulator process (separate from the backend; off by default)
-	AEOLUS_SIMULATOR_ENABLED=true AEOLUS_SIMULATOR_SCENARIOS=agriculture,research-vessel,underground-mining,wildlife,stage-show,escape-room,off-grid-bunker npm run sim
+	@# Scenarios default to the showcase set (SHOWCASE_SCENARIO_KEYS in
+	@# src/simulator/scenarios/index.ts). Override with AEOLUS_SIMULATOR_SCENARIOS=a,b.
+	AEOLUS_SIMULATOR_ENABLED=true npm run sim
 
 seed-image: ## Ensure the Node image the seeder runs in is present locally
 	@if ! docker image inspect node:24.20.0-slim >/dev/null 2>&1; then \
