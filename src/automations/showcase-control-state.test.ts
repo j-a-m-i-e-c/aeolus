@@ -46,6 +46,8 @@ interface PaneButton {
   declaresDisabled: boolean;
   spreadsVisual: boolean;
   tag: string;
+  /** Everything between the opening tag and `</button>`, including the label expression. */
+  label: string;
 }
 
 interface Pane {
@@ -67,11 +69,13 @@ function readPanes(): Pane[] {
       let at = 0;
       while ((at = source.indexOf("<button", at)) >= 0) {
         const tag = openingTag(source, at);
+        const closeAt = source.indexOf("</button>", at);
         buttons.push({
           inDemoBlock: demoAt >= 0 && at > demoAt,
           declaresDisabled: /\bdisabled[=}]/.test(tag),
           spreadsVisual: tag.includes("{..."),
           tag,
+          label: closeAt < 0 ? "" : source.slice(at + tag.length, closeAt),
         });
         at += "<button".length;
       }
@@ -124,6 +128,21 @@ describe("showcase control state", () => {
       .filter((pane) => !pane.source.includes('from "@aeolus/ui"'))
       .map((pane) => pane.id);
     expect(offenders).toEqual([]);
+  });
+
+  it("says what a pending control is waiting for", () => {
+    // The showcase rule is "Stopping pump…" over "Please wait". A lone gerund is the
+    // same failure in shorter form: "Verifying…" tells an operator a wait exists but
+    // not what is being waited on, which is the only part they cannot already see.
+    // Panes that got this right name the thing — "Verifying floodlight command…",
+    // "Waiting for collars to confirm…", "Starting pump…".
+    const vague = operatorButtons.flatMap((button) => {
+      const literals = button.label.match(/"[^"]*"/g) ?? [];
+      return literals
+        .filter((literal) => /^"[A-Za-z]+(ing|ING)…"$/.test(literal) || /please wait/i.test(literal))
+        .map((literal) => `${button.pane}: ${literal}`);
+    });
+    expect(vague).toEqual([]);
   });
 
   it.each(MINING_PANES)("%s derives its operator controls from the kit", (paneId) => {

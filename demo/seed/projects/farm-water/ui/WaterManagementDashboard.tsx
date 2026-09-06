@@ -74,7 +74,7 @@ export default function WaterManagementDashboard({ model, actions }: {
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 5 }}>
           <button {...batchVisual} style={{ ...batchVisual.style, padding: "7px 4px" }} onClick={() => actions.transfer500()}>Transfer 500 L</button>
           <button {...batchVisual} style={{ ...batchVisual.style, padding: "7px 4px" }} onClick={() => actions.transfer1000()}>Transfer 1000 L</button>
-          <button {...stopVisual} style={{ ...stopVisual.style, padding: "7px 4px" }} onClick={() => actions.pumpStop()}>{transferStopping ? "Stopping…" : "Stop transfer"}</button>
+          <button {...stopVisual} style={{ ...stopVisual.style, padding: "7px 4px" }} onClick={() => actions.pumpStop()}>{transferStopping ? "Stopping pump…" : "Stop transfer"}</button>
         </div>
       </div>
 
