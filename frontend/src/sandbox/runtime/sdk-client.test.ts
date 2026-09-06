@@ -85,7 +85,7 @@ describe("createSdkClient", () => {
   });
 
   describe("control (async, resolves after response)", () => {
-    it("resolves when host sends a success response", async () => {
+    it("resolves with the command outcome the host reported", async () => {
       const promise = sdk.control("light-1", "toggle");
 
       // Extract the request id from the posted message
@@ -94,8 +94,29 @@ describe("createSdkClient", () => {
       expect(msg.params.deviceId).toBe("light-1");
       expect(msg.params.actionType).toBe("toggle");
 
+      // The result must reach the frame intact. This client used to await the
+      // response and discard it, which is why a custom UI could not tell an accepted
+      // command from a proven one — the whole point of the evidence ladder.
+      const result = {
+        success: true,
+        commandId: "cmd-1",
+        effectiveTier: "observed",
+      };
+      sendResponse(port, msg.id, true, result);
+      await expect(promise).resolves.toEqual(result);
+    });
+
+    it("fails closed when the host reports success but sends no result", async () => {
+      // A success response with no payload is a protocol violation. Resolving with
+      // undefined would let a pane treat an unproven command as proven, so the client
+      // reports a failure the UI can render instead.
+      const promise = sdk.control("light-1", "toggle");
+      const msg = port.postMessage.mock.calls[0][0];
       sendResponse(port, msg.id, true);
-      await expect(promise).resolves.toBeUndefined();
+      await expect(promise).resolves.toEqual({
+        success: false,
+        error: "No result returned for control",
+      });
     });
 
     it("rejects when host sends an error response", async () => {
