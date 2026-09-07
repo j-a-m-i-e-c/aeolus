@@ -112,8 +112,28 @@ function niceScale(min: number, max: number, targetTicks: number = 5): number[] 
   return ticks;
 }
 
-/** Format timestamp for x-axis */
-function formatTime(ts: number, now: number): string {
+const DAY_MS = 86_400_000;
+
+/**
+ * Format an x-axis tick.
+ *
+ * Keyed off the span the axis actually covers rather than the selected range,
+ * because that is what the labels have to disambiguate: a 30-day selection over a
+ * collection holding three hours of data draws a three-hour axis, and clock times
+ * are the right labels for it.
+ *
+ * Beyond a day the label has to carry the date. A time-only fallback on a week-long
+ * axis renders as "8:00 AM" four times over with nothing to say which day each one
+ * is — harmless while the graph only ever drew the newest few hours, misleading now
+ * that the range is honoured.
+ */
+function formatTime(ts: number, now: number, spanMs: number): string {
+  if (spanMs >= 8 * DAY_MS) {
+    return new Date(ts).toLocaleDateString([], { day: "numeric", month: "short" });
+  }
+  if (spanMs >= DAY_MS) {
+    return new Date(ts).toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" });
+  }
   const diffMs = now - ts;
   const diffMin = Math.round(diffMs / 60_000);
   if (diffMin < 1) return "now";
@@ -123,8 +143,21 @@ function formatTime(ts: number, now: number): string {
   return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-/** Format timestamp for tooltip */
-function formatTooltipTime(ts: number): string {
+/**
+ * Format the tooltip's timestamp. Carries the date whenever the axis spans more
+ * than a day, so hovering two points cannot report the same reading time without
+ * saying they are different days. Seconds are dropped at that zoom: they are noise
+ * next to a multi-day axis.
+ */
+function formatTooltipTime(ts: number, spanMs: number): string {
+  if (spanMs >= DAY_MS) {
+    return new Date(ts).toLocaleString([], {
+      day: "numeric",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  }
   return new Date(ts).toLocaleTimeString([], {
     hour: "2-digit",
     minute: "2-digit",
@@ -267,11 +300,12 @@ export function TimeSeriesChart({ records, total, sampling, loading }: TimeSerie
   // X-axis labels
   const xLabels = useMemo(() => {
     const now = Date.now();
+    const spanMs = xMax - xMin;
     const count = Math.max(2, Math.min(6, Math.floor(chartW / 100)));
     const labels: { x: number; label: string }[] = [];
     for (let i = 0; i < count; i++) {
       const ts = xMin + (i / (count - 1)) * (xMax - xMin);
-      labels.push({ x: mapX(ts), label: formatTime(ts, now) });
+      labels.push({ x: mapX(ts), label: formatTime(ts, now, spanMs) });
     }
     return labels;
   }, [xMin, xMax, chartW, mapX]);
@@ -577,7 +611,7 @@ export function TimeSeriesChart({ records, total, sampling, loading }: TimeSerie
               className="text-[10px] mb-1"
               style={{ color: TEXT_MUTED, fontFamily: "JetBrains Mono, monospace" }}
             >
-              {formatTooltipTime(tooltip.timestamp)}
+              {formatTooltipTime(tooltip.timestamp, xMax - xMin)}
             </div>
             {tooltip.values.map((v) => (
               <div key={v.field} className="flex items-center gap-2 text-xs">

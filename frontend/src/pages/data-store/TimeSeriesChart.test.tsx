@@ -54,4 +54,38 @@ describe("TimeSeriesChart", () => {
     expect(screen.getByRole("button", { name: /shedCatchment/i })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^timestamp$/i })).not.toBeInTheDocument();
   });
+
+  /** Two readings `days` apart, at the same clock time each day. */
+  function spanningRecords(days: number) {
+    const start = Date.UTC(2026, 7, 12, 8, 0, 0); // 12 Aug 2026, 08:00
+    return [
+      { id: 1, collection: "c", timestamp: start, tags: {}, payload: { header: 58 } },
+      { id: 2, collection: "c", timestamp: start + days * 86_400_000, tags: {}, payload: { header: 60 } },
+    ];
+  }
+
+  // A time-only axis label on a multi-day range renders as "8:00 AM" repeated with
+  // nothing to say which day each tick is. Harmless while the chart only drew the
+  // newest few hours; misleading once the range is actually honoured.
+  it("labels the axis with dates once the span exceeds a day", () => {
+    const { container } = render(<TimeSeriesChart records={spanningRecords(30)} />);
+    const labels = Array.from(container.querySelectorAll("text")).map((n) => n.textContent ?? "");
+
+    expect(labels.some((l) => /\b(Aug|Sep)\b/.test(l))).toBe(true);
+    // No tick may be a bare clock time, which is what lost the date.
+    expect(labels.some((l) => /^\d{1,2}:\d{2}(\s?[AP]M)?$/.test(l.trim()))).toBe(false);
+  });
+
+  it("keeps relative labels for a span inside a day", () => {
+    const now = Date.now();
+    const records = [
+      { id: 1, collection: "c", timestamp: now - 6 * 3_600_000, tags: {}, payload: { header: 58 } },
+      { id: 2, collection: "c", timestamp: now, tags: {}, payload: { header: 60 } },
+    ];
+    const { container } = render(<TimeSeriesChart records={records} />);
+    const labels = Array.from(container.querySelectorAll("text")).map((n) => n.textContent ?? "");
+
+    expect(labels.some((l) => /ago|now/.test(l))).toBe(true);
+    expect(labels.some((l) => /\b(Aug|Sep|Jan)\b/.test(l))).toBe(false);
+  });
 });
