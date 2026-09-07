@@ -162,6 +162,123 @@ describe("DataStore — Query Operations", () => {
     });
   });
 
+  describe("range sampling", () => {
+    /** One record every 5 minutes across `days`, newest at `now`. */
+    function writeDense(collection: string, days: number, now: number): number {
+      const stepMs = 5 * 60 * 1000;
+      const count = Math.floor((days * 24 * 60 * 60 * 1000) / stepMs);
+      for (let i = 0; i < count; i += 1) {
+        store.write(collection, { v: i }, { timestamp: now - i * stepMs });
+      }
+      return count;
+    }
+
+    it("spreads points across the whole requested range instead of its newest edge", () => {
+      // The defect this closes: a newest-first LIMIT over a 30-day range returned
+      // only the most recent ~3.5 days while the axis still claimed 30 days.
+      const now = 1_800_000_000_000;
+      const total = writeDense("dense", 30, now);
+      const from = now - 30 * 24 * 60 * 60 * 1000;
+
+      const sampled = store.query("dense", { from, to: now, maxPoints: 500 });
+      const paged = store.query("dense", { from, to: now, limit: 500 });
+      if (!("records" in sampled) || !("records" in paged)) throw new Error("expected records");
+
+      expect(sampled.total).toBe(total);
+      expect(sampled.records.length).toBeLessThanOrEqual(500);
+      expect(sampled.records.length).toBeGreaterThan(400);
+
+      const spanOf = (records: typeof sampled.records) =>
+        records[0].timestamp - records[records.length - 1].timestamp;
+      const requestedSpan = now - from;
+      // The sample reaches back across nearly the whole window; the page does not.
+      expect(spanOf(sampled.records)).toBeGreaterThan(requestedSpan * 0.98);
+      expect(spanOf(paged.records)).toBeLessThan(requestedSpan * 0.2);
+    });
+
+    it("reports the bucket width it used so a caller can describe the series", () => {
+      const now = 1_800_000_000_000;
+      writeDense("dense", 30, now);
+      const from = now - 30 * 24 * 60 * 60 * 1000;
+
+      const result = store.query("dense", { from, to: now, maxPoints: 500 });
+      if (!("records" in result) || !result.sampling) throw new Error("expected sampling");
+
+      expect(result.sampling.from).toBe(from);
+      expect(result.sampling.to).toBe(now);
+      // 30 days over 500 buckets is ~86.4 minutes each.
+      expect(result.sampling.bucketMs).toBe(Math.ceil((now - from + 1) / 500));
+    });
+
+    it("returns real stored records rather than synthesised bucket averages", () => {
+      const now = 1_800_000_000_000;
+      writeDense("dense", 30, now);
+
+      const result = store.query("dense", { from: now - 30 * 86_400_000, to: now, maxPoints: 200 });
+      if (!("records" in result)) throw new Error("expected records");
+
+      for (const record of result.records.slice(0, 20)) {
+        const stored = store.query("dense", { from: record.timestamp, to: record.timestamp });
+        if (!("records" in stored)) throw new Error("expected records");
+        // Every point is an observation the site actually recorded, id and all.
+        expect(stored.records.some((r) => r.id === record.id && r.payload.v === record.payload.v)).toBe(true);
+      }
+    });
+
+    it("keeps the sample newest-first like every other record query", () => {
+      const now = 1_800_000_000_000;
+      writeDense("dense", 7, now);
+
+      const result = store.query("dense", { from: now - 7 * 86_400_000, to: now, maxPoints: 50 });
+      if (!("records" in result)) throw new Error("expected records");
+
+      const timestamps = result.records.map((r) => r.timestamp);
+      expect([...timestamps].sort((a, b) => b - a)).toEqual(timestamps);
+    });
+
+    it("does not sample when everything in the range already fits", () => {
+      for (let i = 1; i <= 10; i += 1) store.write("small", { v: i }, { timestamp: i * 1000 });
+
+      const result = store.query("small", { maxPoints: 500 });
+      if (!("records" in result)) throw new Error("expected records");
+
+      // Bucketing here would drop records that would have fitted, which is strictly
+      // less faithful than returning the lot.
+      expect(result.records).toHaveLength(10);
+      expect(result.total).toBe(10);
+      expect(result.sampling).toBeUndefined();
+    });
+
+    it("buckets the observed span when the caller does not pin a start", () => {
+      const now = Date.now();
+      const oldest = now - 20 * 60 * 60 * 1000;
+      for (let i = 0; i < 400; i += 1) {
+        store.write("unpinned", { v: i }, { timestamp: oldest + i * 180_000 });
+      }
+
+      const result = store.query("unpinned", { maxPoints: 40 });
+      if (!("records" in result) || !result.sampling) throw new Error("expected sampling");
+
+      expect(result.sampling.from).toBe(oldest);
+      expect(result.records.length).toBeLessThanOrEqual(40);
+      expect(result.records.length).toBeGreaterThan(30);
+    });
+
+    it("still honours tag filtering while sampling", () => {
+      const now = 1_800_000_000_000;
+      for (let i = 0; i < 300; i += 1) {
+        store.write("mixed", { v: i }, { tags: { zone: i % 2 === 0 ? "a" : "b" }, timestamp: now - i * 60_000 });
+      }
+
+      const result = store.query("mixed", { from: now - 300 * 60_000, to: now, maxPoints: 20, tags: { zone: "a" } });
+      if (!("records" in result)) throw new Error("expected records");
+
+      expect(result.total).toBe(150);
+      expect(result.records.length).toBeLessThanOrEqual(20);
+      for (const record of result.records) expect(record.tags.zone).toBe("a");
+    });
+  });
+
   describe("tag filtering", () => {
     beforeEach(() => {
       store.write("tagged", { v: 1 }, { tags: { zone: "a", type: "temp" }, timestamp: 1000 });

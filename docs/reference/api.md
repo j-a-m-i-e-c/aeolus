@@ -139,13 +139,27 @@ clamped to a maximum of 200.
 | `POST` | `/api/data-store/disable` | Disable the store |
 
 A record query accepts `from` (duration string such as `24h`, or epoch ms), `to`,
-`limit`, `offset`, `tags`, and `aggregate` with `field`.
+`limit`, `offset`, `maxPoints`, `tags`, and `aggregate` with `field`.
 
 Record queries are always bounded. `limit` defaults to 100 and is clamped to a
 maximum of 5000; a `limit` below 1 or a negative `offset` is rejected. The
 response `total` still reports how many records matched the range, so a caller
 can tell it received a bounded window. The export route is the deliberate
 exception and returns the whole collection.
+
+`limit` and `offset` page a newest-first list, which is what a table needs.
+`maxPoints` instead returns up to that many records spread across the whole
+matching range, which is what a chart over a time range needs: a dense 30-day
+collection under `limit=1000` answers with only its most recent few days. It is
+clamped to the same maximum of 5000 and cannot be combined with `limit`, `offset`
+or `aggregate`.
+
+When a range has to be sampled, the response carries `sampling` with the
+`bucketMs` width used and the `from`/`to` it bucketed, so a caller can state the
+spacing it received. The records are real stored observations — one per bucket,
+keeping its own id, payload and timestamp — not synthesised bucket averages.
+`sampling` is absent when everything matching the range fitted inside
+`maxPoints`, in which case every matching record is returned.
 
 ## Platform and layout
 

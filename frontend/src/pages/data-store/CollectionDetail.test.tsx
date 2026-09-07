@@ -68,6 +68,7 @@ function resetState() {
     setRecordsPage: vi.fn(),
     chartRecords: [],
     chartTotal: 0,
+    chartSampling: null,
     chartLoading: false,
     timeRange: "24h",
     setTimeRange: vi.fn(),
@@ -106,10 +107,13 @@ describe("CollectionDetail", () => {
     render(<CollectionDetail />);
     expect(mockState.fetchChartRecords).toHaveBeenCalledWith("energy-daily", {
       from: "24h",
-      limit: CHART_MAX_POINTS,
+      maxPoints: CHART_MAX_POINTS,
     });
     // An offset would tie the graph to a table page — the bug this separation fixes.
     expect(mockState.fetchChartRecords.mock.calls[0][1]).not.toHaveProperty("offset");
+    // A limit would cluster the points at the newest edge of the range instead of
+    // spreading them across it.
+    expect(mockState.fetchChartRecords.mock.calls[0][1]).not.toHaveProperty("limit");
   });
 
   it("does not re-query the chart when the table changes page", () => {
@@ -137,7 +141,7 @@ describe("CollectionDetail", () => {
 
     expect(mockState.fetchChartRecords).toHaveBeenLastCalledWith("energy-daily", {
       from: "30d",
-      limit: CHART_MAX_POINTS,
+      maxPoints: CHART_MAX_POINTS,
     });
     expect(mockState.fetchRecords).toHaveBeenLastCalledWith("energy-daily", {
       from: "30d",
@@ -167,6 +171,22 @@ describe("CollectionDetail", () => {
     render(<CollectionDetail />);
     expect(
       screen.getByText("Showing 2 of 8,421 observations over 24 hours"),
+    ).toBeInTheDocument();
+  });
+
+  // "Showing 1,000 of 8,640 observations over 30 days" read as though the 1,000 points
+  // represented the 30 days, when they were the most recent 1,000 of them. A sampled
+  // series has to say that it is sampled, and at what spacing.
+  it("says a sampled series is sampled, and at what spacing", () => {
+    mockState.chartRecords = [record(2, { header: 10 }), record(3, { header: 12 })];
+    mockState.chartTotal = 8640;
+    mockState.timeRange = "30d";
+    mockState.chartSampling = { bucketMs: 2_592_000, from: 1, to: 2 };
+    render(<CollectionDetail />);
+    expect(
+      screen.getByText(
+        "Showing 2 points sampled across 30 days · one per 43.2 min of 8,640 observations",
+      ),
     ).toBeInTheDocument();
   });
 

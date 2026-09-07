@@ -372,6 +372,56 @@ describe("data-store.routes", () => {
       expect(res.status).toBe(400);
     });
 
+    // `maxPoints` asks for a sample of the whole range rather than a page of its
+    // newest rows, which is what a graph over a time range actually needs.
+    it("passes maxPoints through without also applying the default limit", async () => {
+      await request(app, "GET", "/api/data-store/collections/sensors/records?from=30d&maxPoints=500");
+      expect(mockDataStore.query).toHaveBeenCalledWith("sensors", {
+        from: "30d",
+        maxPoints: 500,
+      });
+    });
+
+    it("forwards the sampling the store reports", async () => {
+      mockDataStore.query.mockReturnValue({
+        records: [{ id: 1, payload: { temp: 22 }, tags: {}, timestamp: 1000 }],
+        total: 8640,
+        sampling: { bucketMs: 2_592_000, from: 500, to: 1000 },
+      });
+      const res = await request(app, "GET", "/api/data-store/collections/sensors/records?maxPoints=500");
+      expect(res.status).toBe(200);
+      expect((res.body as any).sampling).toEqual({ bucketMs: 2_592_000, from: 500, to: 1000 });
+    });
+
+    it("clamps an over-large maxPoints to the maximum", async () => {
+      await request(
+        app,
+        "GET",
+        `/api/data-store/collections/sensors/records?maxPoints=${MAX_RECORD_QUERY_LIMIT * 10}`,
+      );
+      expect(mockDataStore.query).toHaveBeenCalledWith("sensors", expect.objectContaining({
+        maxPoints: MAX_RECORD_QUERY_LIMIT,
+      }));
+    });
+
+    it("should return 400 for an invalid or non-positive maxPoints", async () => {
+      for (const value of ["abc", "0", "-5"]) {
+        const res = await request(app, "GET", `/api/data-store/collections/sensors/records?maxPoints=${value}`);
+        expect(res.status, `maxPoints=${value}`).toBe(400);
+      }
+      expect(mockDataStore.query).not.toHaveBeenCalled();
+    });
+
+    // Accepting both would leave the caller unable to tell which one shaped the
+    // answer, and an offset into a sampled interval means nothing.
+    it("should return 400 when maxPoints is combined with pagination or aggregation", async () => {
+      for (const query of ["maxPoints=500&limit=100", "maxPoints=500&offset=10", "maxPoints=500&aggregate=avg&field=temp"]) {
+        const res = await request(app, "GET", `/api/data-store/collections/sensors/records?${query}`);
+        expect(res.status, query).toBe(400);
+      }
+      expect(mockDataStore.query).not.toHaveBeenCalled();
+    });
+
     it("should handle invalid duration error from dataStore", async () => {
       mockDataStore.query.mockImplementation(() => {
         throw new Error("Invalid duration format: 'abc'");

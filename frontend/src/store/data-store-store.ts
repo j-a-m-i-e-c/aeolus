@@ -59,6 +59,15 @@ export interface QueryOptions {
   tags?: Record<string, string>;
   aggregate?: "sum" | "avg" | "min" | "max" | "count";
   field?: string;
+  /** Sample the whole range down to this many points instead of paging it. */
+  maxPoints?: number;
+}
+
+/** How the server bucketed a `maxPoints` query. Absent when nothing was sampled. */
+export interface RangeSampling {
+  bucketMs: number;
+  from: number;
+  to: number;
 }
 
 // ---- Query bounds ----
@@ -67,13 +76,14 @@ export interface QueryOptions {
 export const RECORDS_PAGE_SIZE = 50;
 
 /**
- * Upper bound on observations fetched for the chart.
+ * Upper bound on points drawn by the chart.
  *
- * The chart visualises a time range, not a table page, so it needs its own
- * bounded query: a 30-day range holds far more than one page. This ceiling keeps
- * a large collection from being pulled into the browser wholesale — the server
- * reports the matching `total` alongside, so the chart can say how much of the
- * range it is actually drawing.
+ * The chart visualises a time range, not a table page, so it needs its own bounded
+ * query: a 30-day range holds far more than one page. This is sent as `maxPoints`
+ * rather than `limit`, which is the difference between "1,000 points spread across
+ * the 30 days" and "the most recent 1,000 observations" — the latter drew about
+ * three and a half days under a 30-day axis. The server reports the matching `total`
+ * and how it bucketed the range alongside, so the chart can say what it is drawing.
  */
 export const CHART_MAX_POINTS = 1000;
 
@@ -96,20 +106,43 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 async function queryRecords(
   collection: string,
   options?: QueryOptions,
-): Promise<{ records: DataRecord[]; total: number }> {
+): Promise<{ records: DataRecord[]; total: number; sampling?: RangeSampling }> {
   const params = new URLSearchParams();
   if (options?.from != null) params.set("from", String(options.from));
   if (options?.to != null) params.set("to", String(options.to));
   if (options?.limit != null) params.set("limit", String(options.limit));
   if (options?.offset != null) params.set("offset", String(options.offset));
+  if (options?.maxPoints != null) params.set("maxPoints", String(options.maxPoints));
   if (options?.tags) params.set("tags", JSON.stringify(options.tags));
   if (options?.aggregate) params.set("aggregate", options.aggregate);
   if (options?.field) params.set("field", options.field);
 
   const query = params.toString() ? `?${params.toString()}` : "";
-  return request<{ records: DataRecord[]; total: number }>(
+  return request<{ records: DataRecord[]; total: number; sampling?: RangeSampling }>(
     `/api/data-store/collections/${encodeURIComponent(collection)}/records${query}`,
   );
+}
+
+/**
+ * Add a live observation to the chart's series without misrepresenting it.
+ *
+ * A complete series is a plain newest-first list, so a new record goes on the front
+ * and the oldest falls off the bound. A *sampled* series is one representative per
+ * bucket over a fixed range, and a live record is a raw observation past its right
+ * edge — so only one such point is kept. Prepending them without limit would grow
+ * unbounded, and dropping buckets off the left to make room would silently shrink the
+ * range the axis still claims to show.
+ */
+function appendLivePoint(
+  record: DataRecord,
+  series: DataRecord[],
+  sampling: RangeSampling | null,
+): DataRecord[] {
+  if (!sampling) return [record, ...series].slice(0, CHART_MAX_POINTS);
+  const newest = series[0];
+  return newest && newest.timestamp > sampling.to
+    ? [record, ...series.slice(1)]
+    : [record, ...series];
 }
 
 // ---- State interface ----
@@ -137,6 +170,8 @@ interface DataStoreState {
   chartRecords: DataRecord[];
   chartTotal: number;
   chartLoading: boolean;
+  /** How the server bucketed the range, when it had to sample it. */
+  chartSampling: RangeSampling | null;
 
   // Latest realtime record per collection, so independent panes (each showing a
   // different collection) can receive live updates without sharing the single
@@ -184,6 +219,7 @@ export const useDataStoreStore = create<DataStoreState>((set, get) => ({
   chartRecords: [],
   chartTotal: 0,
   chartLoading: false,
+  chartSampling: null,
   latestRecordByCollection: {},
   buckets: [],
   selectedBucket: null,
@@ -231,13 +267,18 @@ export const useDataStoreStore = create<DataStoreState>((set, get) => ({
     set({ chartLoading: true });
     try {
       const result = await queryRecords(collection, {
-        limit: CHART_MAX_POINTS,
+        maxPoints: CHART_MAX_POINTS,
         ...options,
       });
-      set({ chartRecords: result.records, chartTotal: result.total, chartLoading: false });
+      set({
+        chartRecords: result.records,
+        chartTotal: result.total,
+        chartSampling: result.sampling ?? null,
+        chartLoading: false,
+      });
     } catch (err) {
       console.warn("[data-store-store] Failed to fetch chart records:", err);
-      set({ chartRecords: [], chartTotal: 0, chartLoading: false });
+      set({ chartRecords: [], chartTotal: 0, chartSampling: null, chartLoading: false });
     }
   },
 
@@ -279,6 +320,7 @@ export const useDataStoreStore = create<DataStoreState>((set, get) => ({
       recordsPage: 0,
       chartRecords: [],
       chartTotal: 0,
+      chartSampling: null,
     });
   },
 
@@ -312,9 +354,8 @@ export const useDataStoreStore = create<DataStoreState>((set, get) => ({
           ? [record, ...state.records].slice(0, RECORDS_PAGE_SIZE)
           : state.records,
         recordsTotal: state.recordsTotal + 1,
-        // The chart tracks the live edge of the range regardless of table paging,
-        // staying within its own bound by dropping the oldest point it holds.
-        chartRecords: [record, ...state.chartRecords].slice(0, CHART_MAX_POINTS),
+        // The chart tracks the live edge of the range regardless of table paging.
+        chartRecords: appendLivePoint(record, state.chartRecords, state.chartSampling),
         chartTotal: state.chartTotal + 1,
       });
     }
@@ -346,6 +387,7 @@ export const useDataStoreStore = create<DataStoreState>((set, get) => ({
         updates.recordsPage = 0;
         updates.chartRecords = [];
         updates.chartTotal = 0;
+        updates.chartSampling = null;
       }
       return updates;
     });

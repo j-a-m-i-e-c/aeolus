@@ -496,10 +496,21 @@ interface DataStoreQueryOptions {
   from?: string | number;
   /** End of time range — epoch ms. Defaults to now. */
   to?: number;
-  /** Maximum number of records to return. */
+  /** Maximum number of records to return, newest first. */
   limit?: number;
   /** Number of records to skip (for pagination). */
   offset?: number;
+  /**
+   * Return up to this many records spread across the whole matching range,
+   * instead of the newest `limit`.
+   *
+   * `limit` answers "the most recent N observations", so on a dense collection a
+   * 30-day range comes back holding only its most recent few days. `maxPoints`
+   * divides the range into equal buckets and returns one stored record from each,
+   * which is what a series over an interval needs. Takes precedence over `limit`
+   * and `offset`.
+   */
+  maxPoints?: number;
   /** Filter by tag key-value pairs (AND logic). */
   tags?: Record<string, string>;
   /** Aggregation function to apply. */
@@ -508,12 +519,28 @@ interface DataStoreQueryOptions {
   field?: string;
 }
 
+/** How a `maxPoints` query divided the range. */
+interface DataStoreRangeSampling {
+  /** Width of each bucket, in ms. */
+  bucketMs: number;
+  /** Inclusive start of the bucketed range. */
+  from: number;
+  /** Inclusive end of the bucketed range. */
+  to: number;
+}
+
 /** Result of a normal (non-aggregation) query. */
 interface DataStoreQueryResult {
   /** Matching records ordered by timestamp descending. */
   records: DataStoreRecord[];
   /** Total matching records (before limit/offset). */
   total: number;
+  /**
+   * Present only when a `maxPoints` query had to sample the range. Absent means
+   * every matching record was returned, which is the difference between "one point
+   * per 43 minutes" and "every observation".
+   */
+  sampling?: DataStoreRangeSampling;
 }
 
 /** Result of an aggregation query. */

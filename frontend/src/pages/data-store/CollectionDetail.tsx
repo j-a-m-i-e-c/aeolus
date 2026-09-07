@@ -38,6 +38,7 @@ export function CollectionDetail() {
   const setPage = useDataStoreStore((s) => s.setRecordsPage);
   const chartRecords = useDataStoreStore((s) => s.chartRecords);
   const chartTotal = useDataStoreStore((s) => s.chartTotal);
+  const chartSampling = useDataStoreStore((s) => s.chartSampling);
   const chartLoading = useDataStoreStore((s) => s.chartLoading);
   const timeRange = useDataStoreStore((s) => s.timeRange);
 
@@ -63,13 +64,15 @@ export function CollectionDetail() {
     }
   }, [selectedCollection, timeRange, page, pageSize, fetchRecords]);
 
-  // The chart visualises the whole selected range. It deliberately does not
-  // depend on `page`: the graph's dataset is the time range, not a table page.
+  // The chart visualises the whole selected range. It deliberately does not depend
+  // on `page`: the graph's dataset is the time range, not a table page. `maxPoints`
+  // rather than `limit` is what makes the points span the range instead of clustering
+  // at its newest edge.
   useEffect(() => {
     if (selectedCollection) {
       fetchChartRecords(selectedCollection, {
         from: timeRange,
-        limit: CHART_MAX_POINTS,
+        maxPoints: CHART_MAX_POINTS,
       });
     }
   }, [selectedCollection, timeRange, fetchChartRecords]);
@@ -280,6 +283,7 @@ export function CollectionDetail() {
       <TimeSeriesChart
         records={chartRecords}
         total={chartTotal}
+        sampling={chartSampling}
         loading={chartLoading}
       />
 

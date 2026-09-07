@@ -39,7 +39,7 @@ describe("data-store-store", () => {
       config: null, enabled: false, stats: null,
       collections: [], selectedCollection: null,
       records: [], recordsTotal: 0, recordsLoading: false, recordsPage: 0,
-      chartRecords: [], chartTotal: 0, chartLoading: false,
+      chartRecords: [], chartTotal: 0, chartLoading: false, chartSampling: null,
       buckets: [], selectedBucket: null, bucketEntries: [],
       timeRange: "24h", queryTags: {},
     });
@@ -175,6 +175,28 @@ describe("data-store-store", () => {
       expect(s().chartRecords).toHaveLength(CHART_MAX_POINTS);
       expect(s().chartRecords[0].id).toBe(9999);
     });
+
+    // A sampled series is one representative per bucket over a fixed range. Dropping
+    // buckets off the left to make room for live points would silently shrink the
+    // range the axis still claims, and keeping every live point would grow unbounded.
+    it("keeps only one live point on a sampled series, without dropping buckets", () => {
+      const buckets = [record(3, "sensors"), record(2, "sensors"), record(1, "sensors")];
+      useDataStoreStore.setState({
+        selectedCollection: "sensors",
+        chartRecords: buckets,
+        chartTotal: 8421,
+        chartSampling: { bucketMs: 60_000, from: 1, to: 3 },
+        collections: [collection("sensors", 8421)],
+      });
+
+      s().addRealtimeRecord("sensors", record(10, "sensors"));
+      expect(s().chartRecords.map((r) => r.id)).toEqual([10, 3, 2, 1]);
+
+      // The next live record replaces the previous one rather than accumulating.
+      s().addRealtimeRecord("sensors", record(11, "sensors"));
+      expect(s().chartRecords.map((r) => r.id)).toEqual([11, 3, 2, 1]);
+      expect(s().chartTotal).toBe(8423);
+    });
   });
 
   describe("removeCollection", () => {
@@ -236,18 +258,35 @@ describe("data-store-store", () => {
       expect(s().recordsLoading).toBe(false);
     });
 
-    it("fetchChartRecords bounds its query and never sends a table offset", async () => {
-      mockAuthFetch.mockResolvedValue(jsonOk({ records: [record(1, "sensors")], total: 8421 }));
+    it("fetchChartRecords samples the whole range rather than paging its newest edge", async () => {
+      mockAuthFetch.mockResolvedValue(jsonOk({
+        records: [record(1, "sensors")],
+        total: 8421,
+        sampling: { bucketMs: 2_592_000, from: 1000, to: 2000 },
+      }));
 
       await s().fetchChartRecords("sensors", { from: "30d" });
 
       const url = String(mockAuthFetch.mock.calls[0][0]);
       expect(url).toContain("from=30d");
-      expect(url).toContain(`limit=${CHART_MAX_POINTS}`);
+      // `maxPoints`, not `limit`: a limit returns the most recent N observations,
+      // which drew about three and a half days under a 30-day axis.
+      expect(url).toContain(`maxPoints=${CHART_MAX_POINTS}`);
+      expect(url).not.toContain("limit=");
       expect(url).not.toContain("offset=");
       expect(s().chartRecords).toHaveLength(1);
       expect(s().chartTotal).toBe(8421);
+      expect(s().chartSampling).toEqual({ bucketMs: 2_592_000, from: 1000, to: 2000 });
       expect(s().chartLoading).toBe(false);
+    });
+
+    it("fetchChartRecords clears prior sampling when the server returns none", async () => {
+      useDataStoreStore.setState({ chartSampling: { bucketMs: 60_000, from: 1, to: 2 } });
+      mockAuthFetch.mockResolvedValue(jsonOk({ records: [record(1, "sensors")], total: 1 }));
+
+      await s().fetchChartRecords("sensors", { from: "1h" });
+
+      expect(s().chartSampling).toBeNull();
     });
 
     it("fetchChartRecords writes only the chart dataset, leaving the table untouched", async () => {
@@ -276,6 +315,7 @@ describe("data-store-store", () => {
       await s().fetchChartRecords("sensors");
       expect(s().chartRecords).toEqual([]);
       expect(s().chartTotal).toBe(0);
+      expect(s().chartSampling).toBeNull();
       expect(s().chartLoading).toBe(false);
     });
   });

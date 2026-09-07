@@ -100,6 +100,14 @@ and browsing raw records are separate queries, and the Data Explorer issues one
 of each rather than charting the table's current page. Export is the deliberate
 exception and reads the whole collection.
 
+The two queries are also bounded differently, because they answer different
+questions. A table page wants the newest rows, so it uses `limit` and `offset`. A
+chart wants the shape of an interval, so it asks for `maxPoints` and the store
+returns one stored record from each equal-width slice of the range — spread across
+the whole window rather than clustered at its newest edge, and reporting the bucket
+width it used so the chart can state the spacing it is drawing. The points remain
+real observations; nothing is averaged into a value the site never recorded.
+
 ### Buckets
 
 Persistent key-value storage for application data that is not naturally a time series.

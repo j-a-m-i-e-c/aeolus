@@ -1,7 +1,7 @@
 // frontend/src/pages/data-store/TimeSeriesChart.tsx — SVG time-series chart with time range picker and legend
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useDataStoreStore, type DataRecord } from "../../store/data-store-store";
+import { useDataStoreStore, type DataRecord, type RangeSampling } from "../../store/data-store-store";
 import { detectNumericFields } from "../../lib/series";
 
 // ── Palette ──
@@ -30,6 +30,8 @@ interface TimeSeriesChartProps {
   records: DataRecord[];
   /** Observations matching the selected range, when known. May exceed `records`. */
   total?: number;
+  /** How the server bucketed the range, when it had to sample it. */
+  sampling?: RangeSampling | null;
   loading?: boolean;
 }
 
@@ -40,13 +42,44 @@ interface TooltipData {
   timestamp: number;
 }
 
+/** Render a bucket width in the coarsest unit that still reads exactly. */
+function describeInterval(ms: number): string {
+  const round = (value: number) => (Math.round(value * 10) / 10).toLocaleString();
+  if (ms >= 86_400_000) {
+    const days = ms / 86_400_000;
+    return `${round(days)} day${days === 1 ? "" : "s"}`;
+  }
+  if (ms >= 3_600_000) {
+    const hours = ms / 3_600_000;
+    return `${round(hours)} hour${hours === 1 ? "" : "s"}`;
+  }
+  if (ms >= 60_000) return `${round(ms / 60_000)} min`;
+  if (ms >= 1_000) return `${round(ms / 1_000)} sec`;
+  return `${Math.round(ms)} ms`;
+}
+
 /**
  * Describe what the chart is actually drawing, so a visible window over a large
  * range is never mistaken for the whole range.
+ *
+ * The distinction the wording has to carry is between "these are all the
+ * observations" and "these are representatives spread across the range". The old
+ * label said "Showing 1,000 of 8,640 observations over 30 days" for a series that
+ * only covered the most recent few days, which read as though the 1,000 points
+ * represented the 30 days.
  */
-function describeCoverage(shown: number, total: number | undefined, range: string): string {
+function describeCoverage(
+  shown: number,
+  total: number | undefined,
+  range: string,
+  sampling?: RangeSampling | null,
+): string {
   const rangeLabel = TIME_RANGES.find((tr) => tr.value === range)?.description ?? range;
   const noun = shown === 1 ? "observation" : "observations";
+  if (sampling && total !== undefined && total > shown) {
+    return `Showing ${shown.toLocaleString()} points sampled across ${rangeLabel}`
+      + ` · one per ${describeInterval(sampling.bucketMs)} of ${total.toLocaleString()} observations`;
+  }
   if (total !== undefined && total > shown) {
     return `Showing ${shown.toLocaleString()} of ${total.toLocaleString()} observations over ${rangeLabel}`;
   }
@@ -126,7 +159,7 @@ function smoothPath(points: { x: number; y: number }[], tension: number = 0.3): 
   return d;
 }
 
-export function TimeSeriesChart({ records, total, loading }: TimeSeriesChartProps) {
+export function TimeSeriesChart({ records, total, sampling, loading }: TimeSeriesChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(600);
   const [tooltip, setTooltip] = useState<TooltipData | null>(null);
@@ -165,8 +198,8 @@ export function TimeSeriesChart({ records, total, loading }: TimeSeriesChartProp
   );
 
   const coverage = useMemo(
-    () => describeCoverage(records.length, total, timeRange),
-    [records.length, total, timeRange],
+    () => describeCoverage(records.length, total, timeRange, sampling),
+    [records.length, total, timeRange, sampling],
   );
 
   // Visible fields (excluding hidden)

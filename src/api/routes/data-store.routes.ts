@@ -60,7 +60,7 @@ export const MAX_RECORD_QUERY_LIMIT = 5000;
  * inline so the handler stays small.
  */
 function parseRecordQueryOptions(query: Request["query"]): QueryOptions {
-  const { from, to, limit, offset, tags, aggregate, field } = query;
+  const { from, to, limit, offset, tags, aggregate, field, maxPoints } = query;
   const options: QueryOptions = {};
 
   // 'from' — duration string (e.g. "1h") or epoch ms (numeric)
@@ -79,10 +79,29 @@ function parseRecordQueryOptions(query: Request["query"]): QueryOptions {
     options.to = toNum;
   }
 
-  // A record query is always bounded. An omitted limit takes the default rather
-  // than meaning "no limit", and a non-positive limit is refused instead of
-  // reaching SQLite as `LIMIT -1`, which means unbounded.
-  if (limit === undefined) {
+  // 'maxPoints' — sample the whole range instead of paging the newest rows. It is
+  // its own bound, so it replaces limit/offset rather than combining with them:
+  // accepting both would leave the caller unable to tell which one shaped the
+  // answer, and an offset into a sampled interval means nothing at all.
+  if (maxPoints !== undefined) {
+    if (limit !== undefined || offset !== undefined) {
+      throw new BadRequestError("'maxPoints' cannot be combined with 'limit' or 'offset': it samples the whole range rather than returning a page");
+    }
+    if (aggregate !== undefined) {
+      throw new BadRequestError("'maxPoints' cannot be combined with 'aggregate': an aggregate reduces the range to a single value");
+    }
+    const maxPointsNum = parseInt(maxPoints as string, 10);
+    if (isNaN(maxPointsNum)) {
+      throw new BadRequestError(`Invalid 'maxPoints' parameter: must be a number, got "${maxPoints}"`);
+    }
+    if (maxPointsNum < 1) {
+      throw new BadRequestError(`Invalid 'maxPoints' parameter: must be at least 1, got "${maxPoints}"`);
+    }
+    options.maxPoints = Math.min(maxPointsNum, MAX_RECORD_QUERY_LIMIT);
+  } else if (limit === undefined) {
+    // A record query is always bounded. An omitted limit takes the default rather
+    // than meaning "no limit", and a non-positive limit is refused instead of
+    // reaching SQLite as `LIMIT -1`, which means unbounded.
     options.limit = DEFAULT_RECORD_QUERY_LIMIT;
   } else {
     const limitNum = parseInt(limit as string, 10);

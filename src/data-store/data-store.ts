@@ -28,10 +28,36 @@ export interface QueryOptions {
   tags?: Record<string, string>;
   aggregate?: "sum" | "avg" | "min" | "max" | "count";
   field?: string;
+  /**
+   * Return at most this many records, spread across the whole matching range,
+   * rather than the newest `limit`.
+   *
+   * `limit` answers "the most recent N observations", which is the right query for
+   * a table page and the wrong one for a graph over a time range. Takes precedence
+   * over `limit` and `offset`, which are meaningless once the result is a sample of
+   * an interval rather than a page of a list.
+   */
+  maxPoints?: number;
+}
+
+/**
+ * How a `maxPoints` query divided the requested range.
+ *
+ * Reported so a caller can say what it is drawing. Absent when everything in the
+ * range was returned, which is the difference between "one point per 43 minutes"
+ * and "every observation".
+ */
+export interface RangeSampling {
+  /** Width of each bucket, in ms. */
+  bucketMs: number;
+  /** Inclusive start of the bucketed range. */
+  from: number;
+  /** Inclusive end of the bucketed range. */
+  to: number;
 }
 
 export type QueryResult =
-  | { records: DataRecord[]; total: number }
+  | { records: DataRecord[]; total: number; sampling?: RangeSampling }
   | { value: number };
 
 export interface DataRecord {
@@ -70,6 +96,18 @@ const DEFAULT_CONFIG: DataStoreConfig = {
   maxRecordsPerCollection: 100_000,
   maxCollections: 50,
 };
+
+/**
+ * Width of one bucket when a range is sampled down to `maxPoints`.
+ *
+ * Rounded up so the bucket count can never exceed the ceiling: the caller asked for
+ * at most that many points, and a range that divides unevenly must lose a fraction
+ * of a bucket rather than gain a whole extra one.
+ */
+function bucketWidthMs(rangeFrom: number, rangeTo: number, maxPoints: number): number {
+  const span = Math.max(1, rangeTo - rangeFrom + 1);
+  return Math.max(1, Math.ceil(span / Math.max(1, maxPoints)));
+}
 
 // ─── DataStore Class ─────────────────────────────────────────────────────────
 
@@ -422,26 +460,53 @@ export class DataStore {
 
     const whereStr = whereClauses.join(" AND ");
 
-    // Get total count (before limit/offset)
-    const countSql = `SELECT COUNT(*) as cnt FROM ds_records WHERE ${whereStr}`;
-    const countRow = this.db.prepare(countSql).get(...params) as { cnt: number };
+    // Count plus the observed span in one scan. The span is what a `maxPoints` query
+    // buckets across when the caller did not pin `from`.
+    const countRow = this.db.prepare(
+      `SELECT COUNT(*) as cnt, MIN(timestamp) as min_ts, MAX(timestamp) as max_ts FROM ds_records WHERE ${whereStr}`,
+    ).get(...params) as { cnt: number; min_ts: number | null; max_ts: number | null };
     const total = countRow.cnt;
+
+    // Sample the range rather than page it, when asked and when it is needed. If
+    // everything matching already fits inside the ceiling there is nothing to
+    // sample, and returning the lot is strictly more faithful than bucketing it.
+    if (options?.maxPoints !== undefined && total > options.maxPoints) {
+      const rangeFrom = fromTs ?? countRow.min_ts ?? 0;
+      const rangeTo = Math.max(rangeFrom, toTs);
+      const records = this.sampleRange(whereStr, params, rangeFrom, rangeTo, options.maxPoints);
+      const durationMs = Date.now() - start;
+      this.eventBus.emit(DATA_STORE_QUERY, { collection, durationMs });
+      return {
+        records,
+        total,
+        sampling: {
+          bucketMs: bucketWidthMs(rangeFrom, rangeTo, options.maxPoints),
+          from: rangeFrom,
+          to: rangeTo,
+        },
+      };
+    }
 
     // Build the main query with ordering and pagination
     let sql = `SELECT id, collection, payload, tags, timestamp FROM ds_records WHERE ${whereStr} ORDER BY timestamp DESC`;
     const queryParams = [...params];
 
-    if (options?.limit !== undefined) {
+    // `maxPoints` bounds the result on its own, and pagination has no meaning for a
+    // sample of an interval, so it replaces limit/offset rather than combining.
+    const limit = options?.maxPoints ?? options?.limit;
+    const offset = options?.maxPoints !== undefined ? undefined : options?.offset;
+
+    if (limit !== undefined) {
       sql += " LIMIT ?";
-      queryParams.push(options.limit);
+      queryParams.push(limit);
     }
-    if (options?.offset !== undefined) {
-      if (options?.limit === undefined) {
+    if (offset !== undefined) {
+      if (limit === undefined) {
         // SQLite requires LIMIT before OFFSET
         sql += " LIMIT -1";
       }
       sql += " OFFSET ?";
-      queryParams.push(options.offset);
+      queryParams.push(offset);
     }
 
     const rows = this.db.prepare(sql).all(...queryParams) as Array<{
@@ -463,6 +528,63 @@ export class DataStore {
     const durationMs = Date.now() - start;
     this.eventBus.emit(DATA_STORE_QUERY, { collection, durationMs });
     return { records, total };
+  }
+
+  /**
+   * Pick one stored record from each equal-width slice of a time range.
+   *
+   * A newest-first `LIMIT` answers "the most recent N observations". Used for a
+   * graph over a range that is the wrong question: at a five-minute sample interval
+   * a 30-day range holds ~8,640 observations, so a 1,000-row ceiling returned only
+   * the most recent 3.5 days while the axis still claimed 30. Bucketing the range
+   * and taking one record per bucket keeps the points spread across the interval the
+   * caller actually asked for.
+   *
+   * The representatives are real stored rows, not synthesised bucket averages: each
+   * keeps its own id, payload and timestamp, so nothing in the response is a value
+   * the site never recorded. `MAX(timestamp)` is the only aggregate in the statement,
+   * which is what makes SQLite take the remaining bare columns from the very row that
+   * supplied the maximum.
+   *
+   * Cost is one indexed scan of the matching rows with grouping in SQLite; only the
+   * survivors are serialised, so a dense collection is bounded by `maxPoints` in
+   * memory and JSON regardless of how much it holds.
+   */
+  private sampleRange(
+    whereStr: string,
+    whereParams: unknown[],
+    rangeFrom: number,
+    rangeTo: number,
+    maxPoints: number,
+  ): DataRecord[] {
+    const bucketMs = bucketWidthMs(rangeFrom, rangeTo, maxPoints);
+    // The CAST is load-bearing. better-sqlite3 binds a JS number as REAL, so
+    // `(timestamp - ?) / ?` is floating-point division and every row lands in its own
+    // group — the grouping silently degrades into no grouping at all. Truncating to an
+    // integer is the bucket index; the offset is never negative because the range
+    // start is either the caller's `from` (which the WHERE clause enforces) or the
+    // smallest matching timestamp.
+    const sql = `SELECT id, collection, payload, tags, MAX(timestamp) as ts
+       FROM ds_records
+       WHERE ${whereStr}
+       GROUP BY CAST((timestamp - ?) / ? AS INTEGER)
+       ORDER BY ts DESC`;
+
+    const rows = this.db.prepare(sql).all(...whereParams, rangeFrom, bucketMs) as Array<{
+      id: number;
+      collection: string;
+      payload: string;
+      tags: string;
+      ts: number;
+    }>;
+
+    return rows.map((row) => ({
+      id: row.id,
+      collection: row.collection,
+      payload: JSON.parse(row.payload) as Record<string, unknown>,
+      tags: JSON.parse(row.tags) as Record<string, string>,
+      timestamp: row.ts,
+    }));
   }
 
   // ─── Key-Value Bucket Operations ─────────────────────────────────────────
