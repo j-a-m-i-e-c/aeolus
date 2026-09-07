@@ -103,8 +103,9 @@ export class DeviceStateController<TState extends SimulatedState = SimulatedStat
    *
    * Only one timer is outstanding per transition, so a long movement costs a
    * single budget slot rather than one per step. That is also why `durationMs` may
-   * exceed `maxDelayMs`: each step's wait is clamped individually, and the total
-   * is reached by chaining them.
+   * exceed `maxDelayMs`: a step whose share of the duration is longer than the
+   * clamp allows is waited out in several shorter timers, so the requested total
+   * survives the clamp and `steps` still means the number of frames published.
    */
   transition(options: StateTransitionOptions<TState>): StateTransition {
     const steps = Math.max(1, Math.floor(options.steps));
@@ -168,12 +169,37 @@ export class DeviceStateController<TState extends SimulatedState = SimulatedStat
 
     this.transitions.add(running);
 
-    const interval = this.clampDelay(options.durationMs / steps);
+    // One step's share of the requested duration. A non-finite or non-positive
+    // duration means "no delay" rather than being fed into the arithmetic below,
+    // where it would divide out to a NaN interval and re-arm forever.
+    const stepMs = Number.isFinite(options.durationMs) && options.durationMs > 0
+      ? options.durationMs / steps
+      : 0;
+    // When a step's share is longer than the clamp allows, wait it out in several
+    // shorter timers instead of shortening the step. The clamp exists to bound how
+    // long the runtime can be made to wait for any one publish; letting it truncate
+    // the step would make physical speed depend on a timer safety setting, so a
+    // 9s movement silently became a 3s one wherever `durationMs / steps` exceeded
+    // `maxDelayMs`. Still one outstanding timer, so the budget cost is unchanged.
+    const waitsPerStep = this.options.maxDelayMs > 0 && stepMs > this.options.maxDelayMs
+      ? Math.ceil(stepMs / this.options.maxDelayMs)
+      : 1;
+    const interval = this.clampDelay(stepMs / waitsPerStep);
+
     let index = 0;
+    let waitsElapsed = 0;
 
     const step = (): void => {
       running.timer = null;
       if (this.disposed || running.settled) return;
+
+      waitsElapsed += 1;
+      if (waitsElapsed < waitsPerStep) {
+        // Still waiting out this step's share of the duration; no frame is due yet.
+        schedule();
+        return;
+      }
+      waitsElapsed = 0;
 
       index += 1;
       const patch = options.frame(index / steps, index);

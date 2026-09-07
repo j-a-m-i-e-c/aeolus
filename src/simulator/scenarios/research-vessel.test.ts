@@ -207,8 +207,11 @@ describe("research-vessel simulator scenario", () => {
   it("reports approaching the seabed before it arrives there", async () => {
     const { send, state } = setup(400);
     await send(RESEARCH_VESSEL_COMMAND_TOPICS.rovVehicle, { mode: "dive", targetDepth: 355 });
+    // 60 m to 355 m at 0.5 m/s is ~9.8 s at the ROV time scale. The clamp decides
+    // how many timers each step costs, not how long the descent takes, so the dive
+    // has to be watched for its whole duration to see it reach station.
     const seen = new Set<string>();
-    for (let step = 0; step < 24; step += 1) {
+    for (let step = 0; step < 28; step += 1) {
       vi.advanceTimersByTime(400);
       seen.add(String(state(RESEARCH_VESSEL_DEVICE_KEYS.rovTelemetry).mode));
     }

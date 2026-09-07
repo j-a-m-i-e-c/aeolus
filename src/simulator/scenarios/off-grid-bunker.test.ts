@@ -71,9 +71,13 @@ describe("bunker simulator", () => {
     expect(Number(perimeter().contacts)).toBe(0);
     expect(perimeter().movement).toBe("approaching");
 
+    // 122 m at a 0.6 m/s shamble is ~17 s at the scenario's time scale, so the
+    // approach is watched over that long. The clamp only decides how many timers a
+    // step costs; it does not shorten the walk, which is why advancing less than the
+    // real duration leaves the contacts still out past the detect ring.
     let closest = Number(perimeter().rangeM);
-    for (let step = 0; step < 6; step += 1) {
-      vi.advanceTimersByTime(400);
+    for (let step = 0; step < 12; step += 1) {
+      vi.advanceTimersByTime(1500);
       const range = Number(perimeter().rangeM);
       expect(range).toBeLessThanOrEqual(closest);
       closest = range;

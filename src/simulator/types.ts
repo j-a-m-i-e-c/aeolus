@@ -117,12 +117,23 @@ export interface StateTransition {
  * to clear them on dispose. A transition is the supported form: one outstanding
  * timer at a time, charged to the shared budget, cancelled automatically on
  * dispose, and free to run longer than a single delay may — because its duration
- * is composed of short steps rather than one long wait.
+ * is composed of short waits rather than one long one.
  */
 export interface StateTransitionOptions<TState extends SimulatedState = SimulatedState> {
-  /** Total wall-clock duration across every step. */
+  /**
+   * Total wall-clock duration across every step.
+   *
+   * Independent of the runtime's delay clamp: a step whose share of the duration
+   * exceeds the clamp is waited out in several shorter timers, so the requested
+   * total is what elapses. A non-finite or non-positive value means no delay.
+   */
   durationMs: number;
-  /** How many patches are published, including the final one. At least 1. */
+  /**
+   * How many patches are published, including the final one. At least 1.
+   *
+   * Unaffected by the clamp — the clamp changes how many timers a step costs, not
+   * how many frames a movement has.
+   */
   steps: number;
   /**
    * Produces the patch for one step. `progress` runs from just above 0 to

@@ -3,6 +3,17 @@
 - **Status:** Accepted
 - **Date:** 2026-09-06
 
+> Amended 2026-09-07. The duration contract below was originally described as "each
+> step's interval is clamped individually and the total is reached by chaining them",
+> which the implementation did not honour: a step whose share of the duration exceeded
+> the clamp was shortened to the clamp, so `durationMs: 9000, steps: 3` with a 1000 ms
+> clamp took 3000 ms. Because the primitive now expresses physical speed, that made a
+> movement's speed depend on a timer safety setting. A step longer than the clamp is now
+> waited out in several shorter timers, so the requested total elapses and `steps` still
+> means the number of frames published. Production was unaffected — the default 15 s
+> clamp exceeds every scenario's per-step share — but two scenario tests were passing
+> because their harness clamp was truncating the movement they measured.
+
 ## Context
 
 The simulator's job is to behave enough like real hardware that the distinctions
@@ -55,10 +66,14 @@ controller.transition({
 
 - **One outstanding timer per transition, not per step.** A long movement costs a single
   `TimerBudget` slot regardless of how many steps it has.
-- **`durationMs` may exceed `maxDelayMs`.** Each step's interval is clamped
-  individually and the total is reached by chaining them, so the clamp still bounds how
-  long the runtime can be made to wait for any one publish while a movement remains
-  free to take as long as the physics needs.
+- **`durationMs` may exceed `maxDelayMs`, and survives it.** A step's share of the
+  duration is `durationMs / steps`; when that is longer than the clamp allows, the step
+  is waited out in several shorter timers rather than being shortened. The clamp still
+  bounds how long the runtime can be made to wait for any one publish, but it does not
+  change how long a movement takes or how many frames it has — otherwise physical speed
+  would be a function of a runtime safety setting. A non-finite or non-positive
+  `durationMs` means no delay, since feeding it into that arithmetic yields a NaN
+  interval that would re-arm a zero-delay timer forever.
 - **`group` gives a movement identity.** Starting a transition in a group cancels any
   running transition on that device in the same group, so a repeated interaction
   replaces its animation instead of fighting it. `cancelTransitions(group?)` scopes a
@@ -150,10 +165,14 @@ exactly that class of fiction.
 - **`maxDelayMs: 0` collapses every transition into a single tick.** Test harnesses use
   that setting, so any `advanceTimersByTime` runs a whole movement to completion and
   there is no mid-movement state to observe. Tests that need to interrupt a movement
-  must pass a real clamp instead. This is the sharpest edge in practice and cost real
-  time during the scenario work before it was understood.
-- Two moving parts now bound a movement — `durationMs`/`steps` and the clamp — so a
-  scenario author has to think about step granularity rather than just an end state.
+  must pass a real clamp instead — and then advance the movement's actual duration,
+  because a non-zero clamp no longer shortens it. This is the sharpest edge in practice
+  and cost real time during the scenario work before it was understood.
+- A movement's duration is now derived from physics rather than chosen, so a scenario
+  author has to think about step granularity — how many frames the movement publishes —
+  as a separate question from how long it takes. Coarse steps over a long duration mean
+  a step is waited out in several timers, which is correct but not obvious from the
+  call site.
 
 ## Revisit when
 

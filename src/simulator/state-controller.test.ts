@@ -191,6 +191,94 @@ describe("DeviceStateController transitions", () => {
     expect(controller.read().level).toBe(60);
   });
 
+  it("preserves the requested duration when a step is longer than the clamp allows", () => {
+    // The clamp used to truncate each step instead of being waited out, so this
+    // 9s movement finished in 3s: physical speed silently depended on a timer
+    // safety setting, and a coarse-stepped movement was the case that hit it.
+    vi.useFakeTimers();
+    const { controller, published } = makeController({ maxDelayMs: 1000 });
+
+    controller.transition({
+      durationMs: 9000,
+      steps: 3,
+      frame: (progress) => ({ level: progress * 100 }),
+    });
+
+    // A step's share is 3000ms, so it is waited out as three 1000ms timers and no
+    // frame is due until the whole step has elapsed.
+    vi.advanceTimersByTime(2999);
+    expect(published).toHaveLength(0);
+    vi.advanceTimersByTime(1);
+    expect(published).toHaveLength(1);
+
+    // Not finished early: the movement still has its remaining two steps to run.
+    vi.advanceTimersByTime(5999);
+    expect(controller.read().level).toBeLessThan(100);
+    vi.advanceTimersByTime(1);
+    expect(published).toHaveLength(3);
+    expect(controller.read().level).toBe(100);
+  });
+
+  it("keeps the step count the clamp forced it to subdivide", () => {
+    // Waiting a step out in several timers must not turn into extra frames: `steps`
+    // is what a frame's `progress` and `index` are derived from.
+    vi.useFakeTimers();
+    const { controller, published } = makeController({ maxDelayMs: 100 });
+    const indexes: number[] = [];
+
+    controller.transition({
+      durationMs: 4000,
+      steps: 4,
+      frame: (_progress, index) => {
+        indexes.push(index);
+        return { level: index };
+      },
+    });
+    vi.advanceTimersByTime(4000);
+
+    expect(indexes).toEqual([1, 2, 3, 4]);
+    expect(published).toHaveLength(4);
+  });
+
+  it("still costs one budget slot when the clamp subdivides every step", () => {
+    vi.useFakeTimers();
+    const { controller, budget } = makeBudgetController(4);
+
+    // maxDelayMs is 15s here, so each 30s step is waited out as two timers.
+    controller.transition({
+      durationMs: 60_000,
+      steps: 2,
+      frame: (progress) => ({ level: progress }),
+    });
+
+    expect(budget.activeCount).toBe(1);
+    vi.advanceTimersByTime(40_000);
+    expect(budget.activeCount).toBe(1);
+    vi.advanceTimersByTime(20_000);
+    expect(budget.activeCount).toBe(0);
+    expect(controller.activeTransitionCount).toBe(0);
+  });
+
+  it("completes immediately when asked for a non-finite duration", () => {
+    // A duration of Infinity divides out to a NaN interval, which re-arms a
+    // zero-delay timer forever. Treating it as no delay keeps a caller bug from
+    // becoming a busy loop in the runtime.
+    vi.useFakeTimers();
+    const { controller, published } = makeController({ maxDelayMs: 1000 });
+
+    controller.transition({
+      durationMs: Number.POSITIVE_INFINITY,
+      steps: 3,
+      frame: (progress) => ({ level: progress * 10 }),
+    });
+    // runAllTimers throws rather than hanging if the transition re-arms forever,
+    // which is what a NaN interval would do.
+    vi.runAllTimers();
+
+    expect(published).toHaveLength(3);
+    expect(controller.read().level).toBe(10);
+  });
+
   it("releases its budget slot when it completes", () => {
     vi.useFakeTimers();
     const { controller, budget } = makeBudgetController(2);
