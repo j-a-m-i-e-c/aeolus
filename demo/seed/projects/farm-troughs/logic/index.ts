@@ -6,6 +6,7 @@ import {
   initialiseTroughState,
   projectTroughTelemetry,
   publishTroughThresholdTransitions,
+  publishVisitPhaseTransitions,
   reconcileAutomaticRefill,
 } from "./trough-control";
 
@@ -23,6 +24,9 @@ export default async function run(context: EventContext) {
   if (topic !== "sensor/farm/troughs") return;
 
   const troughs = projectTroughTelemetry(context);
+  // Visit stages first, then thresholds: a level crossing is the newer news and
+  // should be what the operator is left reading.
+  publishVisitPhaseTransitions(troughs);
   publishTroughThresholdTransitions(troughs);
   await reconcileAutomaticRefill(troughs);
 }

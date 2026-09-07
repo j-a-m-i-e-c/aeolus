@@ -58,6 +58,38 @@ export default function TroughWateringDashboard({ model, actions }: {
                 ? "No troughs below threshold"
                 : "Refill " + low + " low trough" + (low === 1 ? "" : "s");
     const autoVisual = toggleProps(auto, { pending: refillCommandActive });
+    // Where the cattle are drawn. The paddock, the head count and the stage are all
+    // telemetry; only the position along the row is illustrative, and it is derived
+    // from the stage rather than invented per-frame, so two viewers see the same mob
+    // in the same place.
+    const paddockRowY = [52, 99, 146, 193];
+    const herdRow = Math.max(0, Math.min(3, (visitPaddock.charCodeAt(0) || 65) - 65));
+    const drinkingXs = drinkingIds
+        .map((id) => Number(String(id).slice(1)) - 1)
+        .filter((index) => Number.isFinite(index) && index >= 0 && index < 20)
+        .map((index) => 82 + (index % 5) * 88);
+    const clusterX = drinkingXs.length
+        ? drinkingXs.reduce((sum, x) => sum + x, 0) / drinkingXs.length
+        : 258;
+    const herdX = visitPhase === "approaching" ? 52 : visitPhase === "clearing" ? 462 : clusterX;
+    // The bottom row has the caption beneath it, so its mob stands above the line.
+    const herdY = herdRow === 3 ? paddockRowY[herdRow] - 30 : paddockRowY[herdRow] + 25;
+    function Beast(props: {
+        dx: number;
+        dy: number;
+        flip: boolean;
+        seed: number;
+    }) {
+        const bob = Math.sin(phase * .18 + props.seed) * .7;
+        return <g transform={"translate(" + props.dx + " " + (props.dy + bob) + ") scale(" + (props.flip ? -1 : 1) + " 1)"} fill="#CDB484" stroke="#8A754A" strokeWidth=".6">
+      <ellipse cx="0" cy="0" rx="7" ry="4.2"/>
+      <rect x="-5.2" y="3.4" width="1.7" height="4.4" rx=".6"/>
+      <rect x="3" y="3.4" width="1.7" height="4.4" rx=".6"/>
+      <path d="M6.2 -1.8 L11.4 -2.8 L11.9 1.4 L6.6 1.2 Z"/>
+      <path d="M10.6 -3 L12.2 -5.4" stroke="#8A754A" strokeWidth="1" fill="none"/>
+      <path d="M-6.9 -2.2 L-9.2 -5.2" stroke="#8A754A" strokeWidth="1" fill="none"/>
+    </g>;
+    }
     function Trough(props: {
         index: number;
         x: number;
@@ -76,12 +108,13 @@ export default function TroughWateringDashboard({ model, actions }: {
       <rect x="-10" y="1" width={waterWidth} height="4" rx="2" fill={isLow ? "#B27638" : "#43C7EA"} opacity=".85"/>
       <text x="3" y="-13" textAnchor="middle" fill="#6C828A" fontSize="10">{id}</text>
       <text x="3" y="20" textAnchor="middle" fill={isLow ? "#E4A767" : "#7E949A"} fontSize="10">{Math.round(level)}%</text>
-      {isDrinking && <g transform="translate(25 -2)">
-        <ellipse rx="6" ry="3.4" fill="#C9B27E"/>
-        <circle cx="5" cy="-1" r="2.3" fill="#C9B27E"/>
-        <line x1="7" y1="0" x2="11" y2="5" stroke="#C9B27E" strokeWidth="1.2"/>
-        <circle cx="12" cy={7 + Math.sin(phase * .3 + props.index) * 2} r="1.5" fill="#72DCF5" opacity=".8"/>
-      </g>}
+      {/* A trough being drunk from is marked on the trough itself. The herd is drawn
+          once, as a cluster on the paddock row, rather than as a tiny beast beside
+          each trough — four 6px glyphs read as specks rather than as cattle. */}
+      {isDrinking && <>
+        <rect x="-16" y="-11" width="38" height="22" rx="7" fill="none" stroke="#D8BC72" strokeWidth="1.4" opacity={.5 + (Math.sin(phase * .16 + props.index) + 1) * .2}/>
+        <circle cx="3" cy={-16 - Math.sin(phase * .3 + props.index) * 1.5} r="1.6" fill="#72DCF5" opacity=".85"/>
+      </>}
     </g>;
     }
     return (<div style={{ padding: 12, minHeight: "100%", background: "linear-gradient(180deg,#091116,#080D10)", color: "#E8EEF2" }}>
@@ -106,6 +139,13 @@ export default function TroughWateringDashboard({ model, actions }: {
             <text x="34" y={y - 9} fill="#536971" fontSize="10">PADDOCK {String.fromCharCode(65 + row)}</text>
           </g>)}
           {positions.map((pos, i) => <Trough key={i} index={i} x={pos.x} y={pos.y}/>)}
+          {herdPresent && <g transform={"translate(" + herdX + " " + herdY + ")"}>
+            <Beast dx={-15} dy={0} flip={false} seed={0}/>
+            <Beast dx={-2} dy={-4} flip={false} seed={1.3}/>
+            <Beast dx={11} dy={1} flip={false} seed={2.1}/>
+            <Beast dx={-9} dy={6} flip={true} seed={3.4}/>
+            <Beast dx={5} dy={7} flip={true} seed={4.2}/>
+          </g>}
           <g transform="translate(372 13)">
             <rect width="132" height="30" rx="7" fill="#0A171B" stroke="#28444D"/>
             <text x="9" y="12" fill="#677B82" fontSize="10">HERD WATER USE TODAY</text>

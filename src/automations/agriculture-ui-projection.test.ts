@@ -127,6 +127,28 @@ describe("Agriculture demo UI projection contract", () => {
     expect(troughAutomation.scriptSource).toContain('Automatic refill enabled · acts after cattle leave');
   });
 
+  it("Trough Watering names the troughs the herd is actually at, never a fixed set", () => {
+    // The demo button used to announce "herd arriving at T4, T5, T12 and T17", which
+    // stopped being true once visits rotated around the paddock's cluster. Which
+    // troughs empty is decided by the simulated world and arrives as telemetry, so
+    // the automation cannot know it at the moment the button is pressed.
+    // No operator-facing string may carry a hardcoded list of trough ids.
+    expect(troughAutomation.scriptSource).not.toMatch(/(["'])[^"'\n]*\bT\d+\b[^"'\n]*,\s*T\d+/);
+    expect(troughAutomation.scriptSource).not.toContain("herd arriving at");
+    // The narration is derived from the reported visit instead.
+    expect(troughAutomation.scriptSource).toMatch(/drinkingIds/);
+    expect(troughAutomation.scriptSource).toMatch(/visitPaddock/);
+  });
+
+  it("Trough Watering draws one herd rather than a beast beside every trough", () => {
+    // Four 6px glyphs, one per drinking trough, read as specks rather than cattle —
+    // and showed nothing at all while the herd was walking in or moving off, because
+    // the network only reports `drinkingIds` while cattle are drinking. The mob is
+    // drawn once, from `herdPresent`, on the paddock row the troughs report.
+    expect(troughAutomation.uiSource).toMatch(/herdPresent\s*&&/);
+    expect(troughAutomation.uiSource).toContain("visitPaddock");
+  });
+
   it("Site Energy explicitly gives water transfer priority over opportunity charging", () => {
     expect(energyAutomation.scriptSource).toContain("water transfer given priority");
     expect(energyAutomation.uiSource).toContain("essential loads → water transfer → opportunity charging");
