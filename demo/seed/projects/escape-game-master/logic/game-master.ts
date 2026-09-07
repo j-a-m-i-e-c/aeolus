@@ -43,6 +43,28 @@ export function projectRoomLook() {
     state.set("appliedLook", applied || "puzzle");
     state.set("roomHaze", Boolean(fx && fx.state && fx.state.smoke));
 }
+/**
+ * Reconcile a look request that Room Systems has finished acting on.
+ *
+ * Publishing the request and reading the controller in the same execution could
+ * only ever see the room as it was *before* Room Systems commanded it, and nothing
+ * ran this automation again afterwards — so a request stayed PENDING until an
+ * unrelated puzzle event happened to re-run it. The observed-completion event is
+ * what closes that loop.
+ *
+ * The event is treated as a trigger, not as truth: the scene still comes from the
+ * controller's own telemetry, so a command that failed verification leaves the
+ * console showing the request outstanding instead of adopting a look the room never
+ * reached.
+ */
+export function projectRoomLookOutcome(payload: Record<string, unknown>) {
+    projectRoomLook();
+    state.set("lookSettledAt", Date.now());
+    const requested = String(payload.requested || state.get("requestedLook") || "puzzle");
+    setAction(Boolean(payload.verified)
+        ? "Room systems applied the " + requested + " look"
+        : "Room did not reach the " + requested + " look · request still outstanding");
+}
 const HINTS: Record<string, string[]> = {
     Library: [
         "The book spines are not ordered randomly.",

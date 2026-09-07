@@ -38,6 +38,33 @@ describe("Escape Room showcase",()=>{
     expect(roomFxAutomation.triggerTopic).toBe("aeolus/events/+/escape/game/#");
   });
 
+  // Game Master published its request and read the controller in the same execution,
+  // which could only see the room as it was before Room Systems commanded it — and
+  // nothing triggered Game Master again afterwards. A requested look therefore sat at
+  // PENDING until an unrelated puzzle event happened to re-run the automation.
+  it("re-runs Game Master when the room reports the look it actually applied",()=>{
+    expect(roomFxAutomation.scriptSource).toContain('events.emit("escape/observed/room-look"');
+    expect(gameMasterAutomation.triggerTopic).toBe("aeolus/events/+/escape/observed/#");
+    expect(gameMasterAutomation.scriptSource).toContain("/escape/observed/room-look");
+  });
+
+  // Observed physical facts and operator requests travel in separate namespaces, so
+  // widening Game Master's subscription to hear Room Systems does not also subscribe
+  // it to its own look requests.
+  it("never triggers an automation on the events it emits itself",()=>{
+    const emitted=(source: string)=>[...String(source).matchAll(/events\.emit\("([^"]+)"/g)].map((m)=>m[1]);
+    // An MQTT `+` matches one level and `#` the rest, so a trigger claims an event
+    // exactly when it shares the trigger's fixed prefix.
+    const prefixOf=(trigger: string)=>trigger.replace(/^aeolus\/events\/\+\//,"").replace(/\/?#$/,"");
+    for(const rule of rules){
+      if(!String(rule.triggerTopic).startsWith("aeolus/events/"))continue;
+      const prefix=prefixOf(String(rule.triggerTopic));
+      for(const name of emitted(rule.scriptSource)){
+        expect(name.startsWith(prefix+"/"),`${rule.name} is triggered by its own ${name}`).toBe(false);
+      }
+    }
+  });
+
   it("keeps the physical room controller owned by Room Systems alone",()=>{
     const fxCommands=(source: string)=>[...String(source).matchAll(/switch\/escape\/fx\/set/g)].length;
     expect(fxCommands(roomFxAutomation.scriptSource)).toBeGreaterThanOrEqual(0);

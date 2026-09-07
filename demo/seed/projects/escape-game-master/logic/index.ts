@@ -6,6 +6,7 @@ import {
   initialiseGameSession,
   projectPuzzleStatus,
   projectRoomLook,
+  projectRoomLookOutcome,
   reconcileExitForCompletion,
 } from "./game-master";
 
@@ -28,7 +29,13 @@ export default async function run(context: EventContext) {
     return;
   }
 
-  if (!topic.includes("/escape/puzzles/status")) return;
+  // Room Systems has finished with the controller, so the console can stop waiting.
+  if (topic.includes("/escape/observed/room-look")) {
+    projectRoomLookOutcome(payload);
+    return;
+  }
+
+  if (!topic.includes("/escape/observed/puzzles")) return;
 
   const complete = projectPuzzleStatus(payload);
   await reconcileExitForCompletion(complete);

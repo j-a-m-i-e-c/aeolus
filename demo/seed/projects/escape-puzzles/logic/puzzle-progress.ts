@@ -51,7 +51,11 @@ export function publishPuzzleProgress(progress: ReturnType<typeof projectPuzzleN
     else {
         state.set("publishedInitial", true);
     }
-    events.emit("escape/puzzles/status", {
+    // `escape/observed/...` is the namespace for physical facts reported by whoever
+    // owns the hardware. Game Master subscribes to it and publishes its requests
+    // under `escape/game/...`, so the two directions never cross and no automation
+    // is triggered by its own event.
+    events.emit("escape/observed/puzzles", {
         p1: progress.values[0],
         p2: progress.values[1],
         p3: progress.values[2],

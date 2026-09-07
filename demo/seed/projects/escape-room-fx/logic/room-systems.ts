@@ -54,6 +54,20 @@ export async function setRoomScene(scene: string, smoke: boolean, label: string)
     else {
         setAction("Room systems command not verified");
     }
+    // Report that the observed command has settled.
+    //
+    // Whoever asked for a look has no other way to learn the request finished: this
+    // automation owns the controller, and the requester only reads its telemetry.
+    // Without this event a request sat unresolved until something unrelated happened
+    // to run the requesting automation again. The payload deliberately carries the
+    // scene the controller is *now* in rather than the one that was asked for, so a
+    // command that was never verified reports the room it left behind.
+    events.emit("escape/observed/room-look", {
+        scene: String(state.get("scene") || "puzzle"),
+        smoke: Boolean(state.get("smoke")),
+        requested: scene,
+        verified: Boolean(result.success),
+    });
 }
 export async function toggleHaze() {
     const smoke = Boolean(state.get("smoke"));

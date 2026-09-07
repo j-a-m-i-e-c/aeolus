@@ -2,7 +2,7 @@
 export const gameMasterAutomation = {
   "key": "escape-game-master",
   "name": "Game Master",
-  "triggerTopic": "aeolus/events/+/escape/puzzles/#",
+  "triggerTopic": "aeolus/events/+/escape/observed/#",
   "demoAccess": {
     "fireEvents": [
       "add-time",
