@@ -3,6 +3,23 @@
 - **Status:** Proposed
 - **Date:** 2026-09-06
 
+> Amended 2026-09-07, before acceptance, on two points that review found under-specified.
+>
+> 1. **Declared permissions describe less than imported code can do.** §2 justified
+>    covering only devices and Data Store collections on the grounds that those are the
+>    dimensions `AuthorizationScope` can enforce. That is a sound reason to omit them
+>    from *enforcement* and a bad reason to omit them from the *install screen*: an
+>    Automation Project also gets `http.get`/`http.post` and `events.emit`, so a package
+>    granted nothing but a temperature sensor can still read it and post it off-site.
+>    §9 now states network egress and event emission as capabilities that must be
+>    declarable and enforced before untrusted package authors are possible, and the
+>    trade-offs record that today's declaration is honest about devices and data and
+>    silent about egress.
+> 2. **`version` was not sufficient provenance.** §6 allowed re-importing a version to
+>    replace the library copy, so two installs could both claim `1.2.0` while holding
+>    different code. §6 now records a SHA-256 content digest on the library revision and
+>    on each installed instance.
+
 ## Context
 
 ADR-0007 made an Automation Project a bounded multi-file tree compiled in memory
@@ -117,6 +134,11 @@ ids, which is what makes the intersection in §5a total. A field that could not 
 enforced would be a field that looks load-bearing and is not, so there deliberately isn't
 one: no raw-MQTT topic patterns, no event namespaces. Adding either means giving scope a
 new dimension first, which §"Revisit when" treats as its own decision.
+
+That reasoning bounds what may be *enforced*. It does not license an install screen that
+implies more confinement than exists: an Automation Project's authority over devices and
+collections is not the whole of what its code can do. §9 covers the difference, and it is
+the gate on sharing packages between parties.
 
 ### 3. Logical device binding — the seam that makes a project portable
 
@@ -246,6 +268,28 @@ describes the project's own content. A library row is identified by `(id, versio
 revision history is out of scope, and re-importing the same version replaces the
 library copy without touching installed instances.
 
+Replacing in place is convenient during authoring and makes `version` alone useless as
+provenance: import `1.2.0`, install it, re-import a different `1.2.0`, install it again,
+and two rules now claim the same origin while running different code. So the identity of
+the content is recorded separately from the label the author chose for it:
+
+- **`content_digest`** — SHA-256 over the canonical package content: the manifest and the
+  file tree, files ordered by path, with the digest field itself excluded. Computed at
+  import, stored on the library revision, and copied onto the installed instance beside
+  `installed_from_library_id` and `installed_from_version`.
+
+The digest is what makes the provenance recorded at install actually answerable. "Did
+these two installs come from the same code" and "has the library copy this instance came
+from been replaced since" become comparisons rather than assumptions, and a diff has
+something to anchor to. It is the minimum: it does not prevent a version being replaced,
+it makes the replacement detectable.
+
+Making a released `(project, version)` immutable — a new version required for any content
+change — is the stronger rule and the intended destination. It is deferred because it
+needs a mutable pre-release state to stay usable while authoring, which is a decision
+about the authoring flow rather than about the package format. The digest is correct
+either way and is a prerequisite for both.
+
 ### 7. State and data migrations are never part of a package
 
 Packages carry code and requirements. They do not carry, and cannot execute, state or
@@ -263,6 +307,60 @@ Nothing about saving, reusing, sharing or importing an automation requires Git. 
 Git integration arrives it operates over this same package format, adding source
 history, external collaboration and CI on top. Making Git the base abstraction would
 put a version-control dependency in front of "reuse this on my own site".
+
+### 9. Egress is a capability, and it gates untrusted authors
+
+Everything above concerns what an Automation Project may *reach inside* the site: which
+devices, which collections. That is not the whole of its authority. The sandbox also gives
+every project:
+
+- `http.get()` / `http.post()` — outbound HTTP(S), restricted to public addresses by
+  `validatePublicHttpUrl` (`src/security/outbound-http.ts`), which refuses loopback,
+  link-local and reserved ranges both as literals and after DNS resolution. That boundary
+  is about not turning an automation into an SSRF pivot into the site's own network. It is
+  not a restriction on *whom* the automation may talk to on the internet.
+- `events.emit()` — automation events on the reserved `aeolus/events` namespace, bounded
+  by name validation, a 64 KB envelope and a causal depth of 16. Any automation whose
+  trigger matches will run. Emission is therefore a way to cause work in automations the
+  emitting project knows nothing about.
+
+For locally authored Logic this is exactly right: the author is the operator, and the
+constraint that matters is that the platform cannot be used to attack itself.
+
+For imported code it leaves the install screen incomplete. An install that says
+
+```text
+Devices:     temperature sensor
+Data Store:  climate-history
+```
+
+is a true statement about site authority and an easily misread one about behaviour,
+because the same package may read those values and `http.post` them anywhere public, or
+emit an event that trips a pump automation it never declared. Declaring less than the code
+can do is the same class of problem as a UI claiming a command succeeded before it was
+observed — the display is accurate about the thing it measured and wrong about the thing
+the reader will take from it.
+
+So this ADR states the requirement rather than leaving it to be discovered later:
+
+- **The manifest must be able to declare egress.** `permissions.network` as either `none`
+  or a list of allowed hosts, and `permissions.events` as the namespaces the project may
+  emit into.
+- **Both must be enforced, not merely displayed.** `http.*` checks the request host
+  against the declared list after the existing public-address validation; `events.emit`
+  checks the event name against the declared namespaces. A project with no declaration
+  keeps today's behaviour, exactly as §5a leaves unmanifested projects on derived scope.
+- **Enforcement is a precondition for untrusted authors, not for this ADR's own steps.**
+  Library projects, packages, export/import and role binding are all about moving an
+  operator's own code between their own sites, where the author and the installer are the
+  same party. Accepting a package from someone else is the step that requires §9 to be
+  implemented first.
+
+Unlike devices and collections, a host list and a namespace list are not sets of ids the
+existing scope model can intersect — they are patterns, matched per call. That is the same
+obstacle "Revisit when" already records for raw-MQTT topic patterns, and it is why this is
+stated as a required follow-on with a named shape rather than folded into §5a's
+intersection.
 
 ### Browse Panes
 
@@ -339,6 +437,40 @@ intersection the safety property is immediate and total, and deferring it would 
 shipped a manifest field that looked load-bearing and was not — which is its own kind of
 dishonesty.
 
+### Treat the SSRF guard as the network boundary and say nothing about egress
+
+`validatePublicHttpUrl` already refuses loopback, link-local and reserved ranges, so an
+automation cannot reach the site's own network. Tempting to call that the answer.
+Rejected because the two boundaries protect different things: the SSRF guard stops an
+automation attacking the installation it runs on, and says nothing about which third party
+it may send the installation's data to. For an operator's own code that gap does not
+matter. For imported code it is the whole question, which is why §9 names it instead of
+letting the existing guard imply coverage it does not have.
+
+### Add `permissions.network` and `permissions.events` to §5a's intersection now
+
+The obvious symmetry: one enforcement point, one safety argument. Rejected because it is
+not the same shape. §5a is total precisely because `deviceIds` and `collections` are sets
+of ids, so intersection cannot produce anything larger than `derived`. A host list is a
+pattern matched per request and an event namespace is a prefix matched per emission —
+neither composes into `AuthorizationScope.resolve()`, and both need their own check at
+their own call site. Pretending otherwise would put a pattern matcher inside a set
+intersection and quietly weaken the property that makes §5a safe.
+
+### Record only `version` and treat a re-import as the author's business
+
+Simplest, and true while the author and the installer are the same person. Rejected
+because provenance that cannot distinguish two different bodies of code is not provenance:
+`installed_from_version` would read as authoritative while being unfalsifiable. A digest
+costs one column and one hash at import.
+
+### Make a released `(project, version)` immutable instead of hashing
+
+The stronger guarantee, and the intended end state. Deferred rather than rejected: it
+needs a mutable pre-release state or it makes iterating on a project painful enough that
+authors will work around it, and designing that belongs to the authoring flow. The digest
+is required either way, so it is not wasted work.
+
 ## Consequences
 
 ### Positive
@@ -355,6 +487,12 @@ dishonesty.
   package can talk its way into more than the installing user's tab already exposes.
   Packaged automations end up more tightly bound than hand-authored ones, including
   when an admin installs them.
+- Provenance is answerable rather than asserted. A content digest on both the library
+  revision and the installed instance turns "same origin" and "the source has since been
+  replaced" into comparisons.
+- The limit of what a declaration confines is written down (§9) rather than implied by
+  what the manifest happens to list, so the gap is a known precondition on sharing instead
+  of something a reviewer has to notice.
 
 ### Negative / accepted trade-offs
 
@@ -378,6 +516,17 @@ dishonesty.
   idioms in the showcase is a documentation cost.
 - The extension allowlist means no `README.md` inside a package, so description lives
   in the manifest until the format carries assets.
+- Until §9 is implemented, the install screen is complete about site authority and silent
+  about egress. Every step this ADR does deliver is safe under that gap because the author
+  and the installer are the same party; the gap becomes a defect the moment they are not,
+  which is why §9 is written as a precondition rather than an enhancement.
+- §9 introduces a third and fourth enforcement point, both per-call rather than in
+  `resolve()`. Two dimensions confined by set intersection and two by pattern matching at
+  the call site is more surface than one uniform mechanism, and the reason for the split
+  has to stay documented or someone will try to unify them.
+- A digest makes replacement detectable, not impossible. Two installs claiming `1.2.0`
+  with different digests is a question the UI now has to answer for the operator, so
+  "which of these is current" becomes a thing to show rather than a thing to ignore.
 
 ## Revisit when
 
@@ -390,9 +539,13 @@ dishonesty.
 - `reads` verification needs to survive retention — either a longer-lived per-device
   observed-field index, or a declared schema after all. Reach for the index first; it
   keeps the answer grounded in observation.
-- Third-party or untrusted package authors become possible. Signing, provenance and
-  the per-project capability manifest ADR-0005 anticipates all belong to that step, not
-  this one.
+- Third-party or untrusted package authors become possible. That step **requires §9
+  implemented first** — declarable and enforced network egress and event namespaces —
+  because until then an install screen understates what imported code can do. Signing and
+  the per-project capability manifest ADR-0005 anticipates belong to the same step.
+- Released versions need to be immutable, at which point the digest becomes the check
+  rather than the evidence, and a mutable pre-release state has to be designed alongside
+  it.
 - "Update every installed instance of this library project" is requested, which needs a
   diff and conflict story for locally edited installs.
 
@@ -403,6 +556,8 @@ dishonesty.
 - `src/api/routes/automation.routes.ts` (authoring scope, `registerUiRule`)
 - `src/automations/automation-scope-resolver.ts` (the intersection point)
 - `src/core/state-history.ts` (observed-field verification)
+- `src/security/outbound-http.ts` (the existing public-address boundary §9 builds on)
+- `src/automations/automation-event-service.ts` (event-name validation and depth bound)
 - `src/connectors/action-router.ts`, `src/connectors/connector.interface.ts`
 - `frontend/src/lib/pane-registry.ts`, `frontend/src/components/PanePicker.tsx`
 - `docs/adr/0007-automation-projects-esbuild.md`
