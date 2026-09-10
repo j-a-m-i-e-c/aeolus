@@ -27,9 +27,10 @@ This is especially useful for decisions that are easy to misunderstand from code
 | [0008](0008-modular-monolith-process-boundaries.md) | Modular monolith with a small number of explicit process boundaries | Accepted |
 | [0009](0009-pinned-node-22-runtime.md) | One exact pinned Node 22 runtime across dev, CI and Docker | Superseded by [0010](0010-node-24-runtime.md) |
 | [0010](0010-node-24-runtime.md) | Pinned runtime moves to Node 24 | Accepted |
-| [0011](0011-command-evidence-surface.md) | Command evidence read by the automation that issued the command | Accepted |
+| [0011](0011-command-evidence-surface.md) | Command evidence read by the automation that issued the command | Accepted, extended by [0014](0014-fixed-command-proof-scaffold.md) |
 | [0012](0012-automation-project-portability.md) | Automation Project packages, library projects and logical device binding | Proposed |
 | [0013](0013-simulated-physical-transitions.md) | Timed physical transitions as a simulator primitive | Accepted |
+| [0014](0014-fixed-command-proof-scaffold.md) | A fixed four-stage command proof, explained from a snapshot | Accepted |
 
 ## Writing a new ADR
 

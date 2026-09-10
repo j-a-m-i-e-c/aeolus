@@ -60,7 +60,10 @@ projection path carry it to the UI.
 4. **Derive the ladder in `@aeolus/ui`** as pure functions over a record and its
    transitions — rung labels, reached/pending/failed status, per-rung evidence text.
    Rendering stays in each project, so the module keeps its "no I/O, nothing
-   privileged" guarantee.
+   privileged" guarantee. *(The purity guarantee stands.
+   [ADR-0014](0014-fixed-command-proof-scaffold.md) replaced the variable-length
+   `commandLadder()` with the fixed `commandProof()` and moved rendering into shared
+   components, still pure.)*
 5. **Type `aeolus.control` honestly.** It already resolves with a `CommandResult` at
    runtime, but both declarations say `Promise<void>` and the broker's
    `CommandResult` drops `commandId` and `failureKind`. Pass the whole body through
@@ -147,8 +150,11 @@ load-bearing parts of ADR-0005.
 - Six files change together across the store, the event payload, the Logic binding,
   the ui-kit and the declarations. A partial landing leaves a binding with no
   consumer.
-- The `dispatch` tier has only two rungs (`REQUESTED` → `DISPATCHED`). The ladder
-  must render an honestly short ladder rather than implying missing evidence.
+- ~~The `dispatch` tier has only two rungs (`REQUESTED` → `DISPATCHED`). The ladder
+  must render an honestly short ladder rather than implying missing evidence.~~
+  **Superseded by [ADR-0014](0014-fixed-command-proof-scaffold.md).** A short ladder
+  is honest and useless: it hides the capability gap that makes the model worth
+  showing. The scaffold is now fixed at four stages and an unreached stage states why.
 
 ## Revisit when
 

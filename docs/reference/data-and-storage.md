@@ -31,6 +31,15 @@ see [Automations](automations.md) and [Microcontrollers](../MICROCONTROLLERS.md)
 `command_id`, with `terminal_at` authoritative for completeness) and
 `command_transitions` is an append-only lifecycle timeline.
 
+`command_records` also carries write-once snapshot columns, frozen at acceptance, that
+let a command explain the evidence stages it never reached and name what triggered it:
+the capability ceiling, acknowledgement availability, whether the command carried an
+observation contract, the observing device and condition, the transport, both device
+display names, the author's intent labels, and the trigger's kind, id and topic. All
+are nullable with no backfill, so an absent value means *not recorded* rather than
+`false`. See [Automations](automations.md) and
+[ADR-0014](../adr/0014-fixed-command-proof-scaffold.md).
+
 The Data Store creates its own configuration, collection, record and bucket tables when initialised.
 
 ## Migrations

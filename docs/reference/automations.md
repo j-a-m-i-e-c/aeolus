@@ -175,6 +175,57 @@ holds no reference to the SDK or the host page, so it widens what a custom UI ca
 express without widening what it can do. Any other bare import is still refused at
 compile time.
 
+### Showing what a command proved
+
+Logic reads back the evidence for commands it issued and projects it into automation
+state; the pane renders it with a shared component. Two shapes, matching the two
+shapes an operation takes:
+
+```ts
+// One physical command per execution.
+const result = await devices.action(pump.id, "command", { payload: { on: true } }, {
+  tier: "observed",
+  deviceId: flow.id,
+  condition: { field: "litresPerMinute", op: "gt", value: 0 },
+  evidence: { intent: "Transfer 500 L", observedLabel: "Flow detected" },
+});
+state.set("lastCommand", devices.commandEvidence(result.commandId));
+
+// Several physical commands per execution, grouped under the trigger that caused them.
+state.set("lastExecution", devices.executionEvidence());
+```
+
+```tsx
+import { CommandExecutionCard, CommandProofCard } from "@aeolus/ui";
+
+<CommandProofCard evidence={aeolus.read("lastCommand")} />
+<CommandExecutionCard evidence={aeolus.read("lastExecution")} label="Last cue" />
+```
+
+Both reads are scoped to the calling rule: an automation sees commands it issued and
+nothing else. `executionEvidence()` resolves the running execution on the host, so it
+normally takes no argument.
+
+`CommandProofCard` renders all four canonical stages whatever the command proved, and
+an unreached stage states why it was not reached. `CommandExecutionCard` groups an
+execution's commands, names its trigger from the record, and lets each command keep
+its own tier — a group is summarised by how many commands proved what was asked, never
+by a single tier, because commands that reached different tiers have none between them.
+
+Use the grouped card wherever one trigger issues more than one physical command.
+Keeping a single `lastCommand` in that case reports whichever command settled last and
+looks complete doing it.
+
+`evidence: { intent, observedLabel }` is the only author-supplied part of a receipt,
+and both labels are trimmed, stripped of control characters and capped. Everything
+that decides whether a command was *proven* is platform-owned, so a caption cannot
+overstate a tier.
+
+Stages arrive together rather than progressively: `devices.action()` resolves at its
+completion tier and Logic projects afterwards, so a pane shows a pending control while
+it waits and then the finished receipt. Do not add client-side staggered timers to
+simulate progression — that is fabricated timing.
+
 ## Actions
 
 Built-in action handlers include:
@@ -207,6 +258,44 @@ A command only uses the tiers supported by its path:
 - dispatch confirms that Aeolus handed the request to the transport;
 - acknowledgement requires a device or connector capable of correlating a response;
 - observation uses a specified device-state condition, which may be on another device such as a flow sensor.
+
+### What each stage proves, and what it does not
+
+The tiers are a capability ladder, not a promise that every command traverses it. A
+command whose highest honest tier is `ACKNOWLEDGED` or `DISPATCHED` is correct, not
+deficient. Aeolus never manufactures an acknowledgement or an observation, and never
+labels a lower-tier result as a higher one.
+
+| Stage | Proves | Does not prove |
+|---|---|---|
+| `REQUESTED` | The command passed pre-acceptance validation and entered the physical-command pipeline. | Nothing about the device. A click refused by scope or handler resolution never becomes a `REQUESTED` record and has no `commandId`. |
+| `DISPATCHED` | Aeolus handed the command to the configured transport or integration. | That the device received it, or accepted it. |
+| `ACKNOWLEDGED` | A command-correlated acknowledgement came back from a capable device or integration. | That the physical effect occurred. Not all hardware supports this at all. |
+| `OBSERVED` | A configured telemetry condition representing the desired effect was satisfied within the confirmation window. | That the effect is complete or durable. Not every command has a meaningful observable effect, and not every installation has a suitable sensor. |
+
+An observation may come from a separate sensor or from a genuinely measured channel on
+the target device — a tachometer, a brightness reading, a measured position. Reading
+back the device's own echoed command flag is not an observation; it proves the device
+stored the request.
+
+Failure states say where proof stopped: `FAILED`, `TIMED_OUT` and `STATE_MISMATCH`.
+
+Prefer naming the tier over a bare "verified" — *dispatch proven*, *acknowledgement
+proven*, *effect observed* — or show the canonical lifecycle state. "Verified" alone
+invites the reader to assume the strongest tier.
+
+### Capability and trigger snapshots
+
+Each command record freezes, at acceptance, the context needed to explain the stages
+it did not reach: the capability ceiling, whether acknowledgement was available,
+whether *this command* carried an observation contract, the observing device, the
+condition, the transport, both device display names, and what triggered the execution.
+
+These are snapshots rather than lookups on purpose. Deriving them later from the
+device's current profile would let a profile edit rewrite what an old command could
+have proven. Every column is nullable and nothing is backfilled: an absent value means
+*not recorded*, never `false`. See
+[ADR-0014](../adr/0014-fixed-command-proof-scaffold.md).
 
 The required tier is chosen per command, not per automation: `devices.action(id, type, params, { tier })`. Omitting it is the normal case and means each device independently resolves to the strongest tier it can prove, which is what an automation commanding a mixed fleet wants. A tier the target device cannot prove is clamped down at dispatch, so a reported lifecycle state is always one that was actually reached. Device capability comes from the device itself — `mqtt_command_profile.acknowledgement` for generic MQTT devices, or the owning connector — and is readable via `GET /api/devices/:id/completion-tiers`.
 
