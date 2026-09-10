@@ -300,9 +300,12 @@ These can ship as documented early-alpha limitations:
 
 ## Optional enhancements (not from review)
 
-- Live lifecycle progress streaming: per-transition WebSocket events so the UI
+- ~~Live lifecycle progress streaming: per-transition WebSocket events so the UI
   can animate REQUESTED → DISPATCHED → ACKNOWLEDGED → OBSERVED in real time
-  (cosmetic, not blocking).
+  (cosmetic, not blocking).~~ **Done** — the `command-lifecycle` broadcast is scoped
+  to the automation's exposing tabs and reaches custom UIs as `aeolus.commands`. Not
+  animation: stages appear as the runtime records them. See
+  [ADR-0014](adr/0014-fixed-command-proof-scaffold.md).
 
 ---
 

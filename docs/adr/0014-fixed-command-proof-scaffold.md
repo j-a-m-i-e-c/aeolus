@@ -175,21 +175,64 @@ strongest. A count is a true statement about a group.
 - Adopting the grouped card is a per-project decision. A project that issues several
   commands per execution and keeps `CommandProofCard` still loses commands; the
   adoption test pins which projects are which, but the platform cannot detect it.
+- `command-lifecycle` is no longer admin-only. The scope is the automation's own
+  exposing tabs and the payload adds nothing readable at that scope, but it is a
+  widening, and an automation placed on a tab now discloses its command timing there.
+- The live feed is bounded per automation and starts empty on mount, so a pane cannot
+  show a command that settled before it loaded. That is a real limitation, accepted
+  because the alternative is a backfill read surface this ADR does not need.
+- Two sources now describe the same command: the live feed and the projected receipt.
+  They agree, being built from the same durable transitions, but a pane must choose
+  which to render, and choosing the live one for a settled command would show
+  `not-recorded` where the snapshot has the answer.
 
-### Still open
+## Live progression
 
-- Stages arrive together. `devices.action()` resolves at the completion tier and
-  Logic projects afterwards, so a pane renders the finished receipt rather than
-  lighting stages up as they happen. ADR-0011 declined to build a frame-side
-  subscription speculatively and that reasoning still holds; the deliberate
-  non-decision is to keep the pending control state and the completed receipt, and to
-  add **no** client-side staggered timers, which would be fabricated timing.
+Decision 1 fixes the shape of a receipt. It does not by itself let a pane show a
+command *becoming* proven, because `devices.action()` resolves at the completion tier
+and Logic projects afterwards — so the projected receipt is always complete by the time
+it exists. A pane could therefore only ever report that a transfer was verified, never
+that it is being verified.
+
+8. **Push the real transitions to the frame.** The durable store already emits a
+   transition event after each write commits. Scope that broadcast to the tabs
+   exposing the issuing automation — the same resolver as that automation's state and
+   execution history — accumulate it per rule on the client, and expose it to the frame
+   as `aeolus.commands` through the existing MessagePort: a new read op on the
+   allowlist, a new event kind, no token in the frame, no new HTTP surface.
+
+9. **Same shape, one renderer.** The accumulated live record is the shape
+   `commandEvidence()` returns, so `commandProof()` reads it unchanged and a pane needs
+   one rendering path for live and settled commands.
+
+10. **No fabricated timing.** Stages appear when the runtime records them. No
+    client-side staggered timers, and no interpolation between recorded stages.
+
+The live feed carries **no capability snapshot**, because a transition does not report
+one. An unreached stage on an in-flight command therefore reads `not-recorded` rather
+than claiming the device cannot acknowledge — the honest degradation, and the reason a
+pane should prefer the projected receipt once a command settles.
+
+Scoping the broadcast is the decision ADR-0011 deferred as "speculative work on a
+security-sensitive path" while nothing rendered it. That reasoning was right then and
+is spent now: there is a consumer. It discloses nothing new at that scope — the payload
+carries a device id, an action type and a lifecycle state, and a client who can reach
+the exposing tab already reads the automation's state, its execution history with
+per-action targets, and the exposed devices. A command with no `ruleId` belongs to no
+pane and stays admin-only.
+
+The read-only neutralisation was rewritten from a denylist of mutating ops to an
+allowlist of reads while adding this. With a denylist a future op is permitted by
+omission and the failure is silent; with an allowlist omission denies.
 
 ## Revisit when
 
-- A pane needs live stage progression. That is the frame-side subscription model
-  ADR-0011 deferred, and it needs the `command-lifecycle` WebSocket scoping decided
-  deliberately rather than as a side effect.
+- A pane needs a command's capability context while it is still in flight. That means
+  carrying the snapshot on the transition event, which widens what the broadcast
+  discloses and should be decided on its own terms rather than added for convenience.
+- A pane needs command history it did not observe live. The live feed is bounded and
+  starts empty on mount, deliberately: a backfill is a rule-scoped read surface, which
+  is the tab-scoped HTTP route ADR-0011 declined to build speculatively.
 - Retention becomes a question. Wider rows make `command_records` growth a product
   concern sooner.
 - A third proof shape appears — a receipt spanning several executions, say. Two
@@ -204,6 +247,9 @@ strongest. A count is a true statement about a group.
 - `src/automations/sandbox.ts` (Logic host bindings)
 - `frontend/src/sandbox/ui-kit/command-proof.ts`
 - `frontend/src/sandbox/ui-kit/command-execution.ts`
+- `frontend/src/store/command-activity-store.ts`
+- `frontend/src/sandbox/sdk-broker.ts` (the read-only allowlist)
+- `src/index.ts` (the `command-lifecycle` visibility scope)
 - `docs/adr/0011-command-evidence-surface.md`
 - `docs/adr/0006-truthful-command-lifecycle.md`
 - `docs/reference/automations.md`

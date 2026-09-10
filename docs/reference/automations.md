@@ -221,10 +221,47 @@ and both labels are trimmed, stripped of control characters and capped. Everythi
 that decides whether a command was *proven* is platform-owned, so a caption cannot
 overstate a tier.
 
-Stages arrive together rather than progressively: `devices.action()` resolves at its
-completion tier and Logic projects afterwards, so a pane shows a pending control while
-it waits and then the finished receipt. Do not add client-side staggered timers to
-simulate progression — that is fabricated timing.
+### Watching a command be proven
+
+A projected receipt is always complete by the time it exists: `devices.action()` resolves
+at its completion tier and Logic projects afterwards. So a pane using only the projection
+can report that a command was proven, never that it is being proven.
+
+`aeolus.commands` is the live feed for that. It is this automation's recent commands,
+newest first, each growing as its lifecycle transitions are durably recorded:
+
+```tsx
+// The one still climbing, if any.
+const inFlight = (aeolus.commands ?? []).find(
+  (command) => (command as { terminalAt?: number }).terminalAt === undefined,
+);
+
+<CommandProofCard
+  evidence={inFlight ?? aeolus.read("lastCommand")}
+  label={inFlight ? "Command in flight" : "Last command"}
+/>
+```
+
+Each entry is shaped like a `commandEvidence` record, so `commandProof()` and
+`CommandProofCard` read it with no reshaping and a pane needs one rendering path.
+
+Three properties worth knowing:
+
+- **Stages appear when the runtime records them.** Each transition is broadcast only
+  after its durable write commits. Never add client-side staggered timers or
+  interpolate between recorded stages — that is fabricated timing, and it defeats the
+  point of recording real ones.
+- **The feed carries no capability snapshot.** A transition does not report one, so an
+  unreached stage on an in-flight command reads `not-recorded` rather than claiming a
+  device cannot acknowledge. Prefer the projected receipt once a command settles: it
+  has the snapshot and can explain the stages the command did not reach.
+- **It is bounded and starts empty.** A pane sees commands that transition while it is
+  mounted, not history from before it loaded.
+
+The host mediates the feed; the frame holds no token and cannot ask for another
+automation's activity. The broadcast is scoped to the tabs exposing the automation that
+issued the command, the same scope as that automation's state, and a command issued
+outside any automation stays admin-only.
 
 ## Actions
 
