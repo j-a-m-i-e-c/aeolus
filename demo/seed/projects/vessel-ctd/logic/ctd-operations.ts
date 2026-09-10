@@ -66,12 +66,15 @@ export async function commandCtdWinch(mode: string, targetDepth: number) {
     // mid-cast is a normal — sometimes urgent — operator action, and requiring a
     // Hold first is what made Hold look like a mandatory intermediate step.
     const options = mode === "deploy"
-        ? { tier: "observed", deviceId: sonde.id, condition: { field: "depth", op: "gte", value: targetDepth - 5 }, timeoutMs: 9000 }
+        ? { tier: "observed", deviceId: sonde.id, condition: { field: "depth", op: "gte", value: targetDepth - 5 }, timeoutMs: 9000,
+            evidence: { intent: "Deploy CTD to " + targetDepth + " m", observedLabel: "sonde reached the target depth" } }
         : mode === "recover"
-            ? { tier: "observed", deviceId: sonde.id, condition: { field: "depth", op: "lte", value: targetDepth + 5 }, timeoutMs: 9000 }
+            ? { tier: "observed", deviceId: sonde.id, condition: { field: "depth", op: "lte", value: targetDepth + 5 }, timeoutMs: 9000,
+                evidence: { intent: "Recover CTD to deck", observedLabel: "sonde back at the surface" } }
             // A hold is proven by the package stopping, read off the sonde, not by
             // the winch reporting its own mode back.
-            : { tier: "observed", deviceId: sonde.id, condition: { field: "verticalSpeed", op: "eq", value: 0 }, timeoutMs: 5000 };
+            : { tier: "observed", deviceId: sonde.id, condition: { field: "verticalSpeed", op: "eq", value: 0 }, timeoutMs: 5000,
+                evidence: { intent: "Hold CTD at depth", observedLabel: "package stopped moving" } };
     state.set("commandPending", true);
     const reversing = String(winch.state && winch.state.mode || "on-deck");
     setAction(mode === "deploy"
@@ -113,6 +116,12 @@ export async function protectCtdTension() {
         deviceId: sonde.id,
         condition: { field: "verticalSpeed", op: "eq", value: 0 },
         timeoutMs: 5000,
+        evidence: {
+            // Named as Aeolus's own action, not the operator's, so the receipt makes
+            // the automatic interlock accountable.
+            intent: "Tension interlock · arrest winch",
+            observedLabel: "package stopped moving",
+        },
     });
     state.set("tensionProtectionActive", false);
     if (result.success) {

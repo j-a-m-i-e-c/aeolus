@@ -1,12 +1,12 @@
-// Every showcase tab that commands something must show its evidence.
+// Every showcase tab that commands something must show its proof.
 //
-// The evidence ladder is the thing that distinguishes Aeolus from a dashboard that
+// The four-stage proof is the thing that distinguishes Aeolus from a dashboard that
 // fires and hopes, so it belongs on the platform rather than on one favoured pane.
 // This test pins the coverage: if a tab's chosen automation stops projecting its
 // command evidence, or a new tab arrives with none, this fails.
 //
 // Space is deliberately absent. It renders real ISS telemetry and issues no
-// commands at all, so it has no ladder to show — an empty one there would be a
+// commands at all, so it has no proof to show — an empty one there would be a
 // fabrication, not a gap.
 
 import { describe, expect, it } from "vitest";
@@ -33,6 +33,8 @@ const adopters = [
 
 attachSeedProjectSource(...adopters.map(([, automation]) => automation));
 
+const eachAdopter = adopters.map(([tab, automation]) => [tab, automation] as const);
+
 describe("command evidence adoption across the showcase", () => {
   it("covers every tab that issues a physical command", () => {
     // Seven tabs command something; mining contributes two automations.
@@ -40,7 +42,7 @@ describe("command evidence adoption across the showcase", () => {
     expect(tabs.size).toBe(7);
   });
 
-  it.each(adopters.map(([tab, automation]) => [tab, automation] as const))(
+  it.each(eachAdopter)(
     "%s reads back the evidence for the command it issued",
     (_tab, automation) => {
       const script = String(automation.scriptSource);
@@ -51,25 +53,41 @@ describe("command evidence adoption across the showcase", () => {
     },
   );
 
-  it.each(adopters.map(([tab, automation]) => [tab, automation] as const))(
-    "%s renders the ladder from the projection rather than inventing one",
+  it.each(eachAdopter)(
+    "%s renders the proof from the projection rather than inventing one",
     (_tab, automation) => {
       const ui = String(automation.uiSource);
       expect(ui).toContain('aeolus.read("lastCommand")');
-      expect(ui).toContain("commandLadder(");
-      expect(ui).toContain("commandVerdict(");
-      // Rung and headline styling comes from the shared kit, so the three statuses
-      // cannot come to mean different things on different tabs.
-      expect(ui).toContain("rungProps(");
-      expect(ui).toContain("verdictProps(");
+      // One shared surface, so the stage statuses cannot come to mean different
+      // things on different tabs — which is exactly what eight hand-copied blocks
+      // had started to allow.
+      expect(ui).toContain("CommandProofCard");
       expect(ui).toContain('from "@aeolus/ui"');
     },
   );
 
-  it.each(adopters.map(([tab, automation]) => [tab, automation] as const))(
-    "%s states the evidence is a record rather than a guess",
+  it.each(eachAdopter)(
+    "%s no longer hand-rolls its own evidence block",
     (_tab, automation) => {
-      expect(String(automation.uiSource)).toContain("COMMAND EVIDENCE");
+      const ui = String(automation.uiSource);
+      // The superseded API. A pane still calling it would be rendering a
+      // variable-length ladder that silently omits the stages a device cannot reach.
+      for (const removed of ["commandLadder(", "commandVerdict(", "rungProps(", "verdictProps("]) {
+        expect(ui).not.toContain(removed);
+      }
+      // The old anonymous heading. Proof is now titled by the operation it belongs
+      // to, so a pane with several controls says which one it is reporting on.
+      expect(ui).not.toContain("COMMAND EVIDENCE");
+    },
+  );
+
+  it.each(eachAdopter)(
+    "%s names the operation its command performed",
+    (_tab, automation) => {
+      // Without an intent label the receipt falls back to `device_action`, which
+      // names the mechanism rather than the operation and tells an operator nothing
+      // about which button they pressed.
+      expect(String(automation.scriptSource)).toContain("evidence:");
     },
   );
 });

@@ -36,6 +36,10 @@ export async function setRoomScene(scene: string, smoke: boolean, label: string)
         deviceId: fx.id,
         condition: { field: "scene", op: "eq", value: scene },
         timeoutMs: 5000,
+        evidence: {
+            intent: "Apply " + scene + " room look",
+            observedLabel: "controller reports the " + scene + " scene",
+        },
     });
     state.set("pending", false);
     state.set("transitioning", false);

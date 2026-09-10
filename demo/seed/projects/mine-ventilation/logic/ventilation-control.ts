@@ -43,6 +43,10 @@ export async function commandVentilation(mode: string, reason: string) {
         deviceId: fan.id,
         condition: { field: "mode", op: "eq", value: mode },
         timeoutMs: 5000,
+        evidence: {
+            intent: "Set ventilation to " + mode,
+            observedLabel: "running in " + mode,
+        },
     });
     state.set("commandPending", false);
     // Keep the proof, not just the verdict: every rung this command reached, with

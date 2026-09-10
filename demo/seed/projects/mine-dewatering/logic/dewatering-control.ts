@@ -53,6 +53,10 @@ export async function commandSumpPump(on: boolean, reason: string) {
         deviceId: pump.id,
         condition: { field: "on", op: "eq", value: on },
         timeoutMs: 5000,
+        evidence: {
+            intent: on ? "Start sump pump" : "Stop sump pump",
+            observedLabel: on ? "pump reports running" : "pump reports stopped",
+        },
     });
     state.set("commandPending", false);
     // Keep the proof, not just the verdict: every rung this command reached, with

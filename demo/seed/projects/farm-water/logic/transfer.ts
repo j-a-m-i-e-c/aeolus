@@ -9,11 +9,19 @@ export async function stopPump(reason: string) {
         return;
     }
     state.set("transferStopping", true);
+    // A stop is proven by an INDEPENDENT flow meter reading zero, never by the pump
+    // agreeing it was switched off. A pump that has been told to stop and a pump that
+    // has actually stopped moving water are different facts, and only the second one
+    // is worth reporting.
     const result = await devices.action(pump.id, "command", { payload: { on: false } }, {
         tier: "observed",
         deviceId: flow.id,
         condition: { field: "litresPerMinute", op: "eq", value: 0 },
         timeoutMs: 5000,
+        evidence: {
+            intent: "Stop water transfer",
+            observedLabel: "flow stopped",
+        },
     });
     state.set("transferStopping", false);
     // Keep the proof, not just the verdict: every rung this command reached, with
@@ -95,6 +103,12 @@ export async function startTransfer(requestedLitres: number, source: string) {
         deviceId: flow.id,
         condition: { field: "litresPerMinute", op: "gt", value: 0 },
         timeoutMs: 5000,
+        evidence: {
+            // Names the operation the operator actually asked for, so the receipt is
+            // legible next to three buttons. "device_action" would not be.
+            intent: "Transfer " + litres + " L",
+            observedLabel: "flow detected",
+        },
     });
     state.set("lastCommand", devices.commandEvidence(result.commandId));
     if (result.success) {

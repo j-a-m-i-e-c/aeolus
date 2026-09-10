@@ -1,6 +1,6 @@
 // farm-water — visual implementation behind ui/index.tsx
 import { useEffect, useState } from "react";
-import { commandLadder, commandVerdict, control, rungProps, verdictProps } from "@aeolus/ui";
+import { CommandProofCard, control } from "@aeolus/ui";
 import { clamp, useSmooth } from "./hooks";
 import { WaterSchematic } from "./WaterSchematic";
 export default function WaterManagementDashboard({ model, actions }: {
@@ -31,8 +31,6 @@ export default function WaterManagementDashboard({ model, actions }: {
     const lastTransfer = Math.max(0, Number(model.lastTransferLitres ?? 0));
     const demoScenarioPending = String(model.demoScenarioPending ?? "");
     const lastAction = model.lastAction as any;
-    const verdict = commandVerdict(model.lastCommand);
-    const rungs = commandLadder(model.lastCommand);
     const [phase, setPhase] = useState(0);
     useEffect(() => {
         const id = setInterval(() => setPhase((value) => (value + 1) % 100000), 90);
@@ -76,21 +74,13 @@ export default function WaterManagementDashboard({ model, actions }: {
           <button {...batchVisual} style={{ ...batchVisual.style, padding: "7px 4px" }} onClick={() => actions.transfer1000()}>Transfer 1000 L</button>
           <button {...stopVisual} style={{ ...stopVisual.style, padding: "7px 4px" }} onClick={() => actions.pumpStop()}>{transferStopping ? "Stopping pump…" : "Stop transfer"}</button>
         </div>
-      </div>
 
-      {/* What the last pump command actually proved. Every rung is a durable record
-          the runtime wrote, not a step this pane inferred from the outcome. */}
-      {verdict && <div style={{ marginTop: 9, padding: 9, border: "1px solid #2B515C", borderRadius: 10, background: "#0A171B" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginBottom: 5 }}>
-          <div style={{ color: "#6E858B", fontSize: 11, fontWeight: 800, letterSpacing: 1 }}>COMMAND EVIDENCE</div>
-          <div style={verdictProps(verdict)}>{verdict.headline}</div>
-        </div>
-        {rungs.map((rung) => { const visual = rungProps(rung); return <div key={rung.state} style={visual.style}>
-          <span>{visual.mark}</span><span>{rung.label}</span>
-          {rung.detail && <span style={{ color: "#607478" }}>{rung.detail}</span>}
-        </div>; })}
-        <div style={{ color: "#607478", fontSize: 11, marginTop: 5 }}>{verdict.clampNote || verdict.detail}</div>
-      </div>}
+        {/* Directly under the controls that caused it, so the proof names an action the
+            operator recognises rather than sitting anonymously at the foot of the pane.
+            Every stage is a durable record the runtime wrote; nothing here is inferred
+            from the outcome. */}
+        <CommandProofCard evidence={model.lastCommand}/>
+      </div>
 
       <div style={{ marginTop: 18, padding: 10, border: "1px dashed #6A5935", borderRadius: 10, background: "#17150D" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>

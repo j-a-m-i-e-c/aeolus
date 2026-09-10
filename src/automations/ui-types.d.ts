@@ -244,51 +244,88 @@ declare module "@aeolus/ui" {
   /** Power in kilowatts, two decimals (`"2.10 kW"`). */
   export function kilowatts(value: unknown, decimals?: number): string;
 
-  // ── Command evidence ──
+  // ── Command Proof ──
+  //
+  // The scaffold is FIXED at four stages, whatever the command proved. An unreached
+  // stage is still rendered and still says why, because a variable-length ladder
+  // hides the capability gap that makes the model worth showing: a visitor can only
+  // learn that OBSERVED exists, and that this device cannot reach it, if the stage
+  // appears.
 
-  /** What a single rung of a command's evidence ladder is saying. */
-  export type CommandRungStatus = "reached" | "failed" | "pending";
+  /** The four canonical stages, in lifecycle order. */
+  export const PROOF_STAGES: readonly ["REQUESTED", "DISPATCHED", "ACKNOWLEDGED", "OBSERVED"];
 
-  /** One step of a command's evidence ladder, ready to render. */
-  export interface CommandRung {
-    /** The lifecycle state, e.g. `OBSERVED`. */
-    state: string;
-    /** That state in operator language, e.g. "Effect observed". */
+  export type ProofStage = "REQUESTED" | "DISPATCHED" | "ACKNOWLEDGED" | "OBSERVED";
+
+  /**
+   * What a stage is saying. The distinctions are load-bearing:
+   *
+   * - `reached`        — a transition recorded it.
+   * - `pending`        — still expected; the command has not settled.
+   * - `failed`         — this is where proof stopped.
+   * - `unavailable`    — the hardware cannot do this (no ack capability).
+   * - `not-required`   — it could have, but this command did not ask.
+   * - `not-configured` — no observation contract was attached to this command.
+   * - `not-reached`    — an earlier stage failed, so this never came up.
+   * - `not-recorded`   — the command predates the capability snapshot.
+   */
+  export type ProofStageStatus =
+    | "reached"
+    | "pending"
+    | "failed"
+    | "unavailable"
+    | "not-required"
+    | "not-configured"
+    | "not-reached"
+    | "not-recorded";
+
+  /** One stage of the fixed scaffold, ready to render. */
+  export interface CommandProofStage {
+    /** Canonical Aeolus term. Render verbatim, in brackets, to teach the model. */
+    state: ProofStage;
+    /** Bespoke line, e.g. "Flow meter reports litresPerMinute > 0". */
     label: string;
-    status: CommandRungStatus;
-    /** When the rung was reached, or `null` for one still expected. */
+    status: ProofStageStatus;
+    /** When the stage was reached, or `null`. */
     at: number | null;
-    /** The evidence recorded for this rung; empty when none was. */
+    /** Supporting evidence, or `""`. */
     detail: string;
   }
 
-  /** The one-line verdict for a command, honest about the tier it was held to. */
-  export interface CommandVerdict {
-    tier: string;
+  /** A command's proof, as one object a pane can render compactly or in full. */
+  export interface CommandProof {
+    /** What the operation was: the author's `evidence.intent`, else a fallback. */
+    intent: string;
+    /** The tier actually proven, or the failure. Never a bare "verified". */
+    headline: string;
+    /** Single-character status glyph. */
+    mark: string;
     settled: boolean;
     proven: boolean;
-    /** Scaled to the tier: a dispatch-only success reads SENT, never OBSERVED. */
-    headline: string;
-    detail: string;
+    /** "Transfer Pump → Transfer Flow Meter", or just the actuator. */
+    chain: string;
+    /** Exactly four stages, REQUESTED first. */
+    stages: CommandProofStage[];
+    tier: string;
+    /** The highest tier the command could have proven, or `""` when not recorded. */
+    ceiling: string;
     clamped: boolean;
     clampNote: string;
+    targetDeviceName: string;
+    observedDeviceName: string;
+    /** The observation contract read aloud, e.g. "litresPerMinute > 0", or `""`. */
+    conditionText: string;
+    commandId: string;
+    executionId: string;
   }
 
   /**
-   * Build the evidence ladder for a command, from the value
-   * `devices.commandEvidence()` produced and Logic projected.
-   *
-   * Every rung is one that actually happened. A single trailing `pending` rung
-   * names the tier still being worked towards, which is recorded on the command
-   * rather than guessed.
+   * Build the fixed four-stage proof from the value `devices.commandEvidence()`
+   * produced and Logic projected. `null` when there is no command to describe, so a
+   * pane renders nothing rather than a scaffold asserting a command that may not
+   * exist.
    */
-  export function commandLadder(evidence: unknown): CommandRung[];
-
-  /**
-   * Summarise a command's evidence, or `null` when there is no command to
-   * describe so a pane can render nothing rather than an empty verdict.
-   */
-  export function commandVerdict(evidence: unknown): CommandVerdict | null;
+  export function commandProof(evidence: unknown): CommandProof | null;
 
   /**
    * Render an observed-state condition as it would be read aloud, e.g.
@@ -296,20 +333,52 @@ declare module "@aeolus/ui" {
    */
   export function describeCondition(condition: unknown): string;
 
-  /** Presentation for one rung: a glyph plus the style matching its status. */
-  export interface RungVisual {
+  /** Presentation for one stage: a glyph plus the styles matching its status. */
+  export interface ProofStageVisual {
     mark: string;
     style: Record<string, string | number>;
+    /** Style for the canonical `(REQUESTED)` term rendered alongside the label. */
+    termStyle: Record<string, string | number>;
   }
 
   /**
-   * Resolve how a rung should look, so the three statuses cannot come to mean
-   * different things on different tabs.
+   * Resolve how a stage should look, so the statuses cannot come to mean different
+   * things on different tabs. An inapplicable stage is muted, never an error cross:
+   * a capability gap is information, not a fault.
    */
-  export function rungProps(rung: CommandRung): RungVisual;
+  export function proofStageProps(stage: CommandProofStage): ProofStageVisual;
 
-  /** Style for a verdict headline, matching the rung colours. */
-  export function verdictProps(verdict: CommandVerdict): Record<string, string | number>;
+  /** Style for a proof headline, matching the stage colours. */
+  export function proofHeadlineProps(proof: CommandProof): Record<string, string | number>;
+
+  export interface CommandProofCardProps {
+    /**
+     * The projected evidence record, straight from `aeolus.read(...)`. Passed raw so
+     * a pane needs one line and cannot forget the null case. A prebuilt
+     * {@link CommandProof} is accepted too.
+     */
+    evidence: unknown;
+    /** Section heading. "Last command" suits a pane with several controls. */
+    label?: string;
+    /** Start expanded. Useful where the proof IS the pane's subject. */
+    defaultExpanded?: boolean;
+  }
+
+  /**
+   * Render what a command actually proved: the operation's name, the tier it
+   * reached, the actuator → sensor chain, and the four-stage ladder behind a
+   * toggle.
+   *
+   * The one component in the kit. It exists because eight panes were each carrying
+   * a copy of the same proof block under a heading that named no action, which is
+   * how the presentation drifted per tab. Renders `null` when there is no command,
+   * so it can be mounted unconditionally.
+   *
+   * ```tsx
+   * <CommandProofCard evidence={aeolus.read("lastCommand")} />
+   * ```
+   */
+  export function CommandProofCard(props: CommandProofCardProps): JSX.Element | null;
 }
 
 // ── Minimal React type declarations for IntelliSense ──

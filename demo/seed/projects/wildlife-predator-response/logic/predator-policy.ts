@@ -65,6 +65,10 @@ export async function stopDeterrent() {
         deviceId: deterrent.id,
         condition: { field: "measuredRpm", op: "lte", value: 100 },
         timeoutMs: 5000,
+        evidence: {
+            intent: "Stop predator deterrent",
+            observedLabel: "tachometer wound down",
+        },
     });
     if (result.success) {
         state.set("activeUntil", 0);
@@ -139,6 +143,10 @@ export async function applyPredatorPolicy(classification: {
         deviceId: deterrent.id,
         condition: { field: "measuredRpm", op: "gte", value: 2000 },
         timeoutMs: 5000,
+        evidence: {
+            intent: "Activate deterrent · " + classification.label,
+            observedLabel: "tachometer reached the requested speed",
+        },
     });
     state.set("commandPending", false);
     // Keep the proof, not just the verdict: every rung this command reached, with

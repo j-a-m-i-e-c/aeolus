@@ -50,11 +50,21 @@ export async function setFloodlights(on: boolean, reason: string) {
         return false;
     }
     state.set("pending", true);
+    // AUDIT NOTE (showcase cleanup spec §9.4): this observes the controller's own
+    // `on` flag, which is a command echo rather than a measurement — the weak pattern
+    // the spec calls out. The simulator already ramps `brightness` and only turns the
+    // contacts back once it crosses the deterrence threshold, so the honest proof is
+    // `brightness >= 70`. Changing it belongs with the Phase 6 bunker work, because
+    // the floodlight telemetry and the withdrawal trigger have to move together.
     const result = await devices.action(controller.id, "command", { payload: { on } }, {
         tier: "observed",
         deviceId: controller.id,
         condition: { field: "on", op: "eq", value: on },
         timeoutMs: 5000,
+        evidence: {
+            intent: on ? "Turn floodlights on" : "Turn floodlights off",
+            observedLabel: on ? "controller reports lit" : "controller reports dark",
+        },
     });
     state.set("pending", false);
     // Keep the proof, not just the verdict: every rung this command reached, with

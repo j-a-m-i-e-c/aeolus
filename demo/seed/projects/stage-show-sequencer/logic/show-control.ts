@@ -71,6 +71,10 @@ export async function runLightingCue(scene: string, master: number, transitionMs
         deviceId: controller.id,
         condition: { field: "transitioning", op: "eq", value: false },
         timeoutMs: 7000,
+        evidence: {
+            intent: "Lighting cue · " + scene,
+            observedLabel: "desk finished the transition",
+        },
     });
     state.set("pending", false);
     // Keep the proof, not just the verdict: every rung this command reached, with
@@ -109,6 +113,10 @@ export async function runPhysicalEffect(effect: string, pulseMs: number, label: 
         deviceId: rack.id,
         condition: { field: "active", op: "eq", value: true },
         timeoutMs: 5000,
+        evidence: {
+            intent: "Fire stage effect · " + effect,
+            observedLabel: "rack reports the effect running",
+        },
     });
     state.set("pendingFx", false);
     if (result.success) {
@@ -129,6 +137,10 @@ export async function stopPhysicalEffects() {
         deviceId: rack.id,
         condition: { field: "active", op: "eq", value: false },
         timeoutMs: 5000,
+        evidence: {
+            intent: "Stop stage effects",
+            observedLabel: "rack reports the effect stopped",
+        },
     });
     projectStageState();
     setAction(result.success
