@@ -35,10 +35,20 @@ export {
   type ProofStageVisual,
 } from "./command-proof";
 
-// The one component in the kit. It exists because eight panes were each carrying a
+// Grouping by execution, for the case where one trigger causes several physical
+// commands. Separate module because the unit of proof is different: a group has a
+// cause and an elapsed time, and deliberately has no tier of its own.
+export {
+  commandExecutionProof,
+  describeTrigger,
+  type CommandExecutionProof,
+} from "./command-execution";
+
+// The components in the kit. They exist because eight panes were each carrying a
 // copy of the same proof block, which is how the presentation drifted per tab in the
 // first place.
 export { CommandProofCard, type CommandProofCardProps } from "./CommandProofCard";
+export { CommandExecutionCard, type CommandExecutionCardProps } from "./CommandExecutionCard";
 
 // ── Control state ────────────────────────────────────────────────────────────
 

@@ -87,3 +87,81 @@ describe("CommandService execution-context stamping (Req 5.6, 5.7)", () => {
     expect(rec?.causationId).toBeUndefined();
   });
 });
+
+describe("CommandService trigger provenance (showcase-cleanup §2.7)", () => {
+  it("stamps the trigger topic, which every execution has", async () => {
+    const svc = buildService();
+    const result = await runInExecutionContext(
+      { executionId: "X1", automationId: "rule-A", triggerTopic: "sensor/mine/gas" },
+      () => svc.execute({ type: "device_action", target: "dev-1", params: {} }, automationSource("rule-A")),
+    );
+    expect(store.get(result.commandId!)?.triggerTopic).toBe("sensor/mine/gas");
+  });
+
+  it("stamps the originator's kind and id when the trigger carried metadata", async () => {
+    const svc = buildService();
+    const result = await runInExecutionContext(
+      {
+        executionId: "X1",
+        automationId: "rule-A",
+        triggerTopic: "sensor/mine/gas",
+        triggerMeta: {
+          eventId: "evt-1",
+          timestamp: 1,
+          source: { kind: "mqtt-device", id: "gas-sensor-3" },
+          traceId: "evt-1",
+          depth: 0,
+        },
+      },
+      () => svc.execute({ type: "device_action", target: "dev-1", params: {} }, automationSource("rule-A")),
+    );
+
+    const rec = store.get(result.commandId!);
+    expect(rec?.triggerKind).toBe("mqtt-device");
+    expect(rec?.triggerId).toBe("gas-sensor-3");
+  });
+
+  it("records the topic alone for an operator fire, which carries no metadata", async () => {
+    // The manual/operator fire path builds its context without event metadata, so an
+    // absent kind is the normal case for exactly the executions a visitor is most
+    // likely to be looking at. Claiming a kind here would mean inventing one.
+    const svc = buildService();
+    const result = await runInExecutionContext(
+      { executionId: "X1", automationId: "rule-A", triggerTopic: "ui/rule-A/run-cue" },
+      () => svc.execute({ type: "device_action", target: "dev-1", params: {} }, automationSource("rule-A")),
+    );
+
+    const rec = store.get(result.commandId!);
+    expect(rec?.triggerTopic).toBe("ui/rule-A/run-cue");
+    expect(rec?.triggerKind).toBeUndefined();
+    expect(rec?.triggerId).toBeUndefined();
+  });
+
+  it("stamps every command of one execution with the same trigger", async () => {
+    // What makes a group able to name its cause from any member.
+    const svc = buildService();
+    const [a, b] = await runInExecutionContext(
+      { executionId: "X1", automationId: "rule-A", triggerTopic: "ui/rule-A/run-cue" },
+      async () => [
+        await svc.execute({ type: "device_action", target: "dmx-1", params: {} }, automationSource("rule-A")),
+        await svc.execute({ type: "device_action", target: "fx-1", params: {} }, automationSource("rule-A")),
+      ],
+    );
+
+    expect(store.get(a!.commandId!)?.triggerTopic).toBe("ui/rule-A/run-cue");
+    expect(store.get(b!.commandId!)?.triggerTopic).toBe("ui/rule-A/run-cue");
+    expect(store.listForExecution("X1", "rule-A")).toHaveLength(2);
+  });
+
+  it("records no trigger for a command issued outside any execution", async () => {
+    const svc = buildService();
+    const result = await svc.execute(
+      { type: "device_action", target: "dev-1", params: {} },
+      automationSource("rule-A"),
+    );
+
+    const rec = store.get(result.commandId!);
+    expect(rec?.triggerTopic).toBeUndefined();
+    expect(rec?.triggerKind).toBeUndefined();
+  });
+});

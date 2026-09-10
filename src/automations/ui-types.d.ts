@@ -379,6 +379,84 @@ declare module "@aeolus/ui" {
    * ```
    */
   export function CommandProofCard(props: CommandProofCardProps): JSX.Element | null;
+
+  // ── Command Proof, grouped by execution ──
+  //
+  // The unit of proof for an operation that took more than one physical command.
+  // Grouped on the executionId the platform already stamps, so the relationship is
+  // projected rather than invented.
+
+  /** Everything one automation execution proved. */
+  export interface CommandExecutionProof {
+    executionId: string;
+    /**
+     * What caused the execution, in human terms — `operator "start-cue"`,
+     * `sensor/mine/gas` — or `""` when the records carry no trigger.
+     */
+    trigger: string;
+    /** One proof per command, in the order they were issued. */
+    commands: CommandProof[];
+    count: number;
+    /** True once every command in the group has stopped waiting. */
+    settled: boolean;
+    /** True only when every command settled AND proved the tier asked of it. */
+    proven: boolean;
+    /** How many proved their tier. */
+    provenCount: number;
+    /**
+     * The group's standing, e.g. `"3 OF 3 PROVEN"`. Never a tier: commands that
+     * reached different tiers have no single tier between them, and picking one
+     * would misreport the others.
+     */
+    headline: string;
+    mark: string;
+    /** First request to last settlement, or `null` while unsettled. */
+    durationMs: number | null;
+    /** `"3 commands · 2.1 s"`, or `"3 commands"` when it has not settled. */
+    summary: string;
+  }
+
+  /**
+   * Build the grouped proof from the value `devices.executionEvidence()` produced.
+   * A bare array of evidence records is accepted too. `null` when there is no
+   * execution to describe.
+   */
+  export function commandExecutionProof(evidence: unknown): CommandExecutionProof | null;
+
+  /**
+   * Read the trigger off a command record or execution group, e.g.
+   * `operator "start-cue"` or `sensor/mine/gas`. Empty string when nothing was
+   * recorded — which is a real answer for commands predating trigger provenance.
+   */
+  export function describeTrigger(evidence: unknown): string;
+
+  export interface CommandExecutionCardProps {
+    /**
+     * The projected group, straight from `aeolus.read(...)` of a
+     * `devices.executionEvidence()` value. A prebuilt {@link CommandExecutionProof}
+     * is accepted too.
+     */
+    evidence: unknown;
+    /** Section heading. Defaults to "Execution". */
+    label?: string;
+    /** Expand every command's stages on mount. */
+    defaultExpanded?: boolean;
+  }
+
+  /**
+   * Render everything one operator action or one trigger actually proved: the cause,
+   * the elapsed time, and each command with its own tier and hardware chain.
+   *
+   * Use this in place of {@link CommandProofCard} wherever one execution issues more
+   * than one physical command. Keeping a single `lastCommand` in that case means the
+   * last command overwrites the others and the pane reports half the operation while
+   * looking complete.
+   *
+   * ```tsx
+   * <CommandExecutionCard evidence={aeolus.read("lastExecution")} />
+   * ```
+   */
+  export function CommandExecutionCard(props: CommandExecutionCardProps): JSX.Element | null;
 }
 
 // ── Minimal React type declarations for IntelliSense ──

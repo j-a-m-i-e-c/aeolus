@@ -24,6 +24,16 @@ export interface ActiveExecutionContext {
    * Automation Events (phase-1 Req 6.15).
    */
   triggerMeta?: EventMetadata;
+  /**
+   * The subject this execution fired on, from `EventContext.topic`.
+   *
+   * Carried separately from {@link triggerMeta} because it is available for every
+   * execution, where metadata is not: the manual/operator fire path builds a
+   * context without one. It is therefore the only trigger fact a command can rely
+   * on having, which is why command provenance records it rather than deriving a
+   * trigger from `triggerMeta` alone (showcase-cleanup §2.7).
+   */
+  triggerTopic?: string;
 }
 
 const store = new AsyncLocalStorage<ActiveExecutionContext>();

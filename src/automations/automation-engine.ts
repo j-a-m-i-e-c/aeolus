@@ -368,6 +368,7 @@ export class AutomationEngine {
         ...(context.meta?.eventId ? { causationId: context.meta.eventId } : {}),
         automationId: rule.id,
         ...(context.meta ? { triggerMeta: context.meta } : {}),
+        ...(context.topic ? { triggerTopic: context.topic } : {}),
       },
       () =>
         this.collector.context.run(executionId, () =>
@@ -423,6 +424,7 @@ export class AutomationEngine {
           ...(context.meta?.eventId ? { causationId: context.meta.eventId } : {}),
           automationId: rule.id,
           ...(context.meta ? { triggerMeta: context.meta } : {}),
+          ...(context.topic ? { triggerTopic: context.topic } : {}),
         },
         () =>
           this.collector.context.run(

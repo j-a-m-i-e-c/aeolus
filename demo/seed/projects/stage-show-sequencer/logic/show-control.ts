@@ -22,6 +22,25 @@ function byTopic(wanted: string) {
 function setAction(label: string) {
     state.set("lastAction", { label, at: Date.now() });
 }
+// One receipt per execution, not per command.
+//
+// A cue drives the lighting desk and THEN the effects rack: two physical commands,
+// one thing the operator did. Keeping a single `lastCommand` meant the second command
+// overwrote the first, so the pane reported the lighting transition and silently
+// dropped the effect — while still looking like a complete receipt.
+//
+// Grouping also lets the two commands keep their different tiers side by side, which
+// is the more instructive reading: the desk can prove its transition completed, the
+// effects rack can only prove acknowledgement, and the contrast within one cue is
+// exactly what the showcase is for.
+//
+// Called once per entry point, after the commands have resolved, since the evidence
+// is read from durable records rather than accumulated by this script.
+function publishExecutionProof() {
+    const group = devices.executionEvidence();
+    if (group)
+        state.set("lastExecution", group);
+}
 export function projectStageState() {
     const dmx = byTopic("switch/stage/dmx/state");
     const fx = byTopic("switch/stage/fx/state");
@@ -77,9 +96,6 @@ export async function runLightingCue(scene: string, master: number, transitionMs
         },
     });
     state.set("pending", false);
-    // Keep the proof, not just the verdict: every rung this command reached, with
-    // the evidence the runtime recorded for it.
-    state.set("lastCommand", devices.commandEvidence(result.commandId));
     if (!result.success) {
         setAction("Lighting cue not verified: " + String(result.error || result.lifecycleState || "unknown"));
         return false;
@@ -145,8 +161,9 @@ export async function stopPhysicalEffects() {
     });
     projectStageState();
     setAction(result.success
-        ? "Physical effects stopped · observed state verified"
+        ? "Physical effects stopped · acknowledged by the rack"
         : "Physical effects stop not verified: " + String(result.error || result.lifecycleState || "unknown"));
+    publishExecutionProof();
 }
 function parseCue(payload: Record<string, unknown>): CuePayload | null {
     const scene = String(payload.scene || "wash");
@@ -173,12 +190,16 @@ export async function executeCue(payload: Record<string, unknown>) {
     if (lightingVerified && cue.effect !== "none") {
         await runPhysicalEffect(cue.effect, cue.pulseMs, cue.label + " / " + cue.effect);
     }
+    // Published regardless of the outcome: a cue whose lighting failed still issued a
+    // command, and where it stopped is the most useful thing the pane can show.
+    publishExecutionProof();
 }
 export async function fireOperatorEffect(payload: Record<string, unknown>) {
     const effect = String(payload.effect || "haze");
     if (!EFFECTS.includes(effect) || effect === "none")
         return;
     await runPhysicalEffect(effect, EFFECT_DURATIONS[effect] || 1200, effect.toUpperCase());
+    publishExecutionProof();
 }
 export function handleStageDemoEvent(event: string | undefined) {
     if (event === "simulate-trip") {

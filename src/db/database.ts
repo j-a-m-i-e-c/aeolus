@@ -168,11 +168,12 @@ export function initSchema(database: DatabaseType): void {
   // and 017) so legacy/test databases built via initSchema have it. `terminal_at`
   // is authoritative for lifecycle completeness, not the lifecycle_state name.
   //
-  // The migration-017 columns are declared inline here rather than as ALTERs: this
-  // CREATE only runs when the table is absent, so a fresh database gets them at
-  // once, while an existing one is left to migration 017. Both paths must end up
-  // with the same shape — a command that cannot record its capability ceiling
-  // cannot explain why a stage was skipped.
+  // The migration-017 and -018 columns are declared inline here rather than as
+  // ALTERs: this CREATE only runs when the table is absent, so a fresh database gets
+  // them at once, while an existing one is left to those migrations. Both paths must
+  // end up with the same shape — a command that cannot record its capability ceiling
+  // cannot explain why a stage was skipped, and one that cannot record its trigger
+  // cannot say what caused it.
   database.exec(`
     CREATE TABLE IF NOT EXISTS command_records (
       command_id TEXT PRIMARY KEY,
@@ -201,7 +202,10 @@ export function initSchema(database: DatabaseType): void {
       target_device_name TEXT DEFAULT NULL,
       observed_device_name TEXT DEFAULT NULL,
       intent_label TEXT DEFAULT NULL,
-      observed_label TEXT DEFAULT NULL
+      observed_label TEXT DEFAULT NULL,
+      trigger_kind TEXT DEFAULT NULL,
+      trigger_id TEXT DEFAULT NULL,
+      trigger_topic TEXT DEFAULT NULL
     );
   `);
   database.exec(`

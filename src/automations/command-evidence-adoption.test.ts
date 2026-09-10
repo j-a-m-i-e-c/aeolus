@@ -20,20 +20,29 @@ import { roomFxAutomation } from "../../demo/seed/tabs/escape-room/room-fx.mjs";
 import { bunkerPerimeterAutomation } from "../../demo/seed/tabs/off-grid-bunker/perimeter.mjs";
 import { attachSeedProjectSource } from "../__test-helpers__/seed-project-source.js";
 
+// Which proof surface a tab should be using.
+//
+// `command` — one physical command per execution, so a single receipt is complete.
+// `execution` — one trigger issues several commands, so a single receipt would report
+//   whichever command happened to be last and silently drop the rest (§2.7).
+type Surface = "command" | "execution";
+
 const adopters = [
-  ["Agriculture", waterAutomation],
-  ["Stage & Show", showSequencerAutomation],
-  ["Wildlife", predatorResponseAutomation],
-  ["Research Vessel", ctdAutomation],
-  ["Underground Mining · ventilation", ventilationAutomation],
-  ["Underground Mining · dewatering", dewateringAutomation],
-  ["Escape Room", roomFxAutomation],
-  ["Off-grid Bunker", bunkerPerimeterAutomation],
-] as const;
+  ["Agriculture", waterAutomation, "command"],
+  ["Stage & Show", showSequencerAutomation, "execution"],
+  ["Wildlife", predatorResponseAutomation, "command"],
+  ["Research Vessel", ctdAutomation, "command"],
+  ["Underground Mining · ventilation", ventilationAutomation, "command"],
+  ["Underground Mining · dewatering", dewateringAutomation, "command"],
+  ["Escape Room", roomFxAutomation, "command"],
+  ["Off-grid Bunker", bunkerPerimeterAutomation, "command"],
+] as const satisfies ReadonlyArray<readonly [string, unknown, Surface]>;
 
 attachSeedProjectSource(...adopters.map(([, automation]) => automation));
 
-const eachAdopter = adopters.map(([tab, automation]) => [tab, automation] as const);
+const eachAdopter = adopters.map(([tab, automation, surface]) => [tab, automation, surface] as const);
+const eachSingle = eachAdopter.filter(([, , surface]) => surface === "command");
+const eachGrouped = eachAdopter.filter(([, , surface]) => surface === "execution");
 
 describe("command evidence adoption across the showcase", () => {
   it("covers every tab that issues a physical command", () => {
@@ -42,7 +51,7 @@ describe("command evidence adoption across the showcase", () => {
     expect(tabs.size).toBe(7);
   });
 
-  it.each(eachAdopter)(
+  it.each(eachSingle)(
     "%s reads back the evidence for the command it issued",
     (_tab, automation) => {
       const script = String(automation.scriptSource);
@@ -53,7 +62,7 @@ describe("command evidence adoption across the showcase", () => {
     },
   );
 
-  it.each(eachAdopter)(
+  it.each(eachSingle)(
     "%s renders the proof from the projection rather than inventing one",
     (_tab, automation) => {
       const ui = String(automation.uiSource);
@@ -62,6 +71,30 @@ describe("command evidence adoption across the showcase", () => {
       // things on different tabs — which is exactly what eight hand-copied blocks
       // had started to allow.
       expect(ui).toContain("CommandProofCard");
+      expect(ui).toContain('from "@aeolus/ui"');
+    },
+  );
+
+  it.each(eachGrouped)(
+    "%s groups the commands of one execution instead of keeping only the last",
+    (_tab, automation) => {
+      const script = String(automation.scriptSource);
+      // The execution id is resolved by the host, so the group cannot be assembled
+      // from a different execution than the one running.
+      expect(script).toContain("devices.executionEvidence()");
+      expect(script).toContain('state.set("lastExecution"');
+      // The single-command key is what caused the loss: with several commands per
+      // execution it reports whichever settled last and looks complete doing it.
+      expect(script).not.toContain('state.set("lastCommand"');
+    },
+  );
+
+  it.each(eachGrouped)(
+    "%s renders the group, including the commands that proved less",
+    (_tab, automation) => {
+      const ui = String(automation.uiSource);
+      expect(ui).toContain('aeolus.read("lastExecution")');
+      expect(ui).toContain("CommandExecutionCard");
       expect(ui).toContain('from "@aeolus/ui"');
     },
   );

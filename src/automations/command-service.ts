@@ -45,7 +45,22 @@ import { requestPublicHttp } from "../security/outbound-http.js";
  * Commands issued outside an automation see `undefined` and carry no context.
  */
 export interface ExecutionContextProvider {
-  current(): { executionId?: string; causationId?: string; automationId?: string } | undefined;
+  current():
+    | {
+        executionId?: string;
+        causationId?: string;
+        automationId?: string;
+        /**
+         * Structural view of the triggering event's origin, when the trigger
+         * carried metadata. Deliberately not typed as `EventMetadata`: this
+         * boundary exists so CommandService stays ignorant of the automation
+         * runtime, and it only needs the two fields it stamps.
+         */
+        triggerMeta?: { source?: { kind?: string; id?: string } };
+        /** The subject the execution fired on. Available even when metadata is not. */
+        triggerTopic?: string;
+      }
+    | undefined;
 }
 
 // ── Explicit command source model (pre-promotion-release-gates Req 1) ────────
@@ -373,6 +388,14 @@ export class CommandService {
         ...(evidenceIntent?.observedLabel !== undefined
           ? { observedLabel: evidenceIntent.observedLabel }
           : {}),
+        // What caused this command, snapshotted alongside everything else about it.
+        // Recorded here rather than reconstructed at read time because the trigger
+        // is only knowable while the execution is on the stack — and because a
+        // grouped receipt that names its cause must get that name from the record,
+        // not from whichever pane happens to be rendering it (§2.7).
+        ...(ctx?.triggerMeta?.source?.kind ? { triggerKind: ctx.triggerMeta.source.kind } : {}),
+        ...(ctx?.triggerMeta?.source?.id ? { triggerId: ctx.triggerMeta.source.id } : {}),
+        ...(ctx?.triggerTopic ? { triggerTopic: ctx.triggerTopic } : {}),
       };
       // The opening rung states the contract: what this command must prove, on
       // which device, and within how long. Recorded before dispatch so the

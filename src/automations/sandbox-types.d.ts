@@ -120,6 +120,11 @@ interface CommandRungRecord {
  */
 interface CommandEvidenceRecord {
   commandId: string;
+  /**
+   * The automation execution that issued this command. Several commands sharing one
+   * value are one operation; see {@link devices.executionEvidence}.
+   */
+  executionId?: string;
   /** What was asked of the device. */
   actionType: string;
   /** The tier the command was actually held to. */
@@ -174,6 +179,42 @@ interface CommandEvidenceRecord {
   intentLabel?: string;
   /** The author's `evidence.observedLabel` for this command, sanitised. */
   observedLabel?: string;
+
+  // ── Trigger provenance, snapshotted when the command was accepted ──
+
+  /**
+   * Class of whatever triggered the execution, e.g. `"mqtt-device"`.
+   *
+   * Absent when the trigger carried no event metadata, which includes an operator
+   * fire — so absence says nothing about whether there was a cause.
+   */
+  triggerKind?: string;
+  /** The specific originator within that class, e.g. the triggering device's id. */
+  triggerId?: string;
+  /**
+   * The subject the execution fired on. Recorded for every execution, so this is
+   * the trigger field to rely on. An operator fire reads as `ui/<ruleId>/<eventName>`.
+   */
+  triggerTopic?: string;
+}
+
+/**
+ * Every command one execution issued, as returned by
+ * {@link devices.executionEvidence}.
+ *
+ * The unit of proof for an operation that took more than one physical command. A
+ * cue that drives a lighting desk and then an effects rack is one thing the operator
+ * did, and the commands reached different tiers for good reasons — render them as a
+ * group so that reads as one operation rather than as unrelated activity.
+ */
+interface CommandExecutionEvidence {
+  executionId: string;
+  /** Trigger provenance for the execution, copied from its commands. */
+  triggerKind?: string;
+  triggerId?: string;
+  triggerTopic?: string;
+  /** The commands, oldest first. The order they were issued in is part of the story. */
+  commands: CommandEvidenceRecord[];
 }
 
 /**
@@ -274,8 +315,7 @@ declare const devices: {
    *
    * Returns `undefined` for a command this automation did not issue, an unknown
    * id, or an action that was never a verified physical command. Project the value
-   * into state and render it with `commandLadder()` / `commandVerdict()` from
-   * `@aeolus/ui`.
+   * into state and render it with `<CommandProofCard>` from `@aeolus/ui`.
    *
    * ```ts
    * const result = await devices.action(pump.id, "command", { on: true }, {
@@ -286,6 +326,34 @@ declare const devices: {
    * ```
    */
   commandEvidence(commandId?: string): CommandEvidenceRecord | undefined;
+
+  /**
+   * Read back every physical command THIS execution issued, with what triggered it.
+   *
+   * Use this instead of {@link commandEvidence} when one trigger causes more than one
+   * physical action. Keeping a single `lastCommand` means the last command overwrites
+   * the others, so a cue that moved a lighting desk AND fired an effects rack reports
+   * only half of what it did.
+   *
+   * Takes no argument in the normal case: the running execution is resolved by the
+   * host. Pass an `executionId` to read back an earlier one. Either way you see only
+   * executions of your own automation.
+   *
+   * Synchronous, and like `commandEvidence` it reads what is already durable — so
+   * call it after the actions you want it to include have resolved.
+   *
+   * Returns `undefined` outside an execution, or when the execution issued no
+   * physical commands. Project it into state and render with
+   * `<CommandExecutionCard>` from `@aeolus/ui`.
+   *
+   * ```ts
+   * await runLightingCue(scene, master, transitionMs, label);
+   * await runPhysicalEffect(effect, pulseMs, label);
+   * // One receipt covering both, grouped under the cue that caused them.
+   * state.set("lastExecution", devices.executionEvidence());
+   * ```
+   */
+  executionEvidence(executionId?: string): CommandExecutionEvidence | undefined;
 
   /**
    * Execute an action against every scoped device matching `predicate`. The

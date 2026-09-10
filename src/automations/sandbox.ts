@@ -354,13 +354,15 @@ export interface SandboxDeps {
    */
   scopeResolver?: AutomationScopeResolver;
   /**
-   * Durable command history, backing `devices.commandEvidence()` (ADR-0011).
+   * Durable command history, backing `devices.commandEvidence()` and
+   * `devices.executionEvidence()` (ADR-0011).
    *
    * Read-only from the sandbox's point of view, and scoped by the store itself to
-   * commands the executing rule issued. When absent, `commandEvidence()` is not
-   * exposed rather than silently returning nothing.
+   * commands the executing rule issued. Narrowed to the two rule-scoped readers so
+   * the unscoped `get`/`list` cannot be reached from here even by mistake. When
+   * absent, neither accessor is exposed rather than silently returning nothing.
    */
-  commandHistoryStore?: Pick<CommandHistoryStore, "getForRule">;
+  commandHistoryStore?: Pick<CommandHistoryStore, "getForRule" | "listForExecution">;
 }
 
 /** Context describing the event that triggered the automation. */
@@ -493,6 +495,7 @@ const BOOTSTRAP_SCRIPT = `
   var dbCollectionsRef = typeof __dbCollectionsRef !== "undefined" ? __dbCollectionsRef : undefined;
   var eventsEmitRef = typeof __eventsEmitRef !== "undefined" ? __eventsEmitRef : undefined;
   var commandEvidenceRef = typeof __commandEvidenceRef !== "undefined" ? __commandEvidenceRef : undefined;
+  var executionEvidenceRef = typeof __executionEvidenceRef !== "undefined" ? __executionEvidenceRef : undefined;
   // Closure-local logical command failure state. User-authored code must not be
   // able to clear it between actions and bypass the automation fail-fast rule.
   var commandFailed = false;
@@ -576,6 +579,14 @@ const BOOTSTRAP_SCRIPT = `
       // devices.action() resolves, so there is nothing to wait for.
       if (!commandEvidenceRef || !commandId) return undefined;
       return commandEvidenceRef.applySync(undefined, [String(commandId)], { result: { copy: true } });
+    },
+    executionEvidence: function(executionId) {
+      // Every command THIS execution issued, in order, with what triggered it.
+      // Defaults to the running execution, so the usual call takes no arguments.
+      if (!executionEvidenceRef) return undefined;
+      return executionEvidenceRef.applySync(undefined,
+        [executionId === undefined ? undefined : String(executionId)],
+        { result: { copy: true } });
     }
   };
 
@@ -734,6 +745,7 @@ const BOOTSTRAP_SCRIPT = `
   delete globalThis.__dbCollectionsRef;
   delete globalThis.__eventsEmitRef;
   delete globalThis.__commandEvidenceRef;
+  delete globalThis.__executionEvidenceRef;
 })();
 `;
 
@@ -755,7 +767,7 @@ export class Sandbox {
   private onStateChange?: (ruleId: string, key: string, value: unknown) => void;
   private scopeResolver?: AutomationScopeResolver;
   private automationEventService?: AutomationEventService;
-  private commandHistoryStore?: Pick<CommandHistoryStore, "getForRule">;
+  private commandHistoryStore?: Pick<CommandHistoryStore, "getForRule" | "listForExecution">;
 
   constructor(deps: SandboxDeps) {
     this.commandService = deps.commandService;
@@ -855,7 +867,7 @@ export class Sandbox {
       await this.setLogRefs(jail, ruleId);
       await this.setContextData(jail, context);
       await this.setHttpRefs(jail, ruleId);
-      await this.setStateRefs(jail, ruleId);
+      await this.setStateRefs(jail, ruleId, executionContext);
       await this.setDataStoreRefs(jail, ruleId, scope);
 
       // Run bootstrap to wire up the clean API from the raw refs
@@ -1307,7 +1319,11 @@ export class Sandbox {
    * Set state store references on the jail for the bootstrap script.
    * Provides `state.get(key)`, `state.set(key, value)`, `state.getAll()`, and `state.delete(key)`.
    */
-  private async setStateRefs(jail: IvmGlobal, ruleId: string): Promise<void> {
+  private async setStateRefs(
+    jail: IvmGlobal,
+    ruleId: string,
+    executionContext?: ActiveExecutionContext,
+  ): Promise<void> {
     if (!ivm) return;
 
     const stateStore = this.stateStore;
@@ -1327,6 +1343,47 @@ export class Sandbox {
           const evidence = historyStore.getForRule(commandId, ruleId);
           if (!evidence) return undefined;
           return new ivm.ExternalCopy(toPlainJson(evidence)).copyInto();
+        }),
+      );
+
+      // Host-side callback for devices.executionEvidence(executionId?).
+      //
+      // The execution id is resolved HERE, on the host, rather than accepted from the
+      // isolate. Authored Logic has no way to learn its own execution id, so requiring
+      // one would make the common case unusable and push authors back to hand-rolled
+      // bookkeeping — which is the thing §2.7 exists to replace. An explicit id is
+      // still honoured for reading back an earlier execution, and is scoped by rule
+      // either way.
+      //
+      // It comes from the context captured on the host stack, NOT from
+      // currentExecutionContext(): this callback is invoked from inside the isolate,
+      // across a native boundary that async_hooks does not track, so the ALS store is
+      // empty here. Reading it live would make this silently answer nothing for every
+      // running execution — which is exactly what it did until a real-isolate test
+      // said so.
+      const active = executionContext?.executionId;
+      await jail.set(
+        "__executionEvidenceRef",
+        new ivm.Reference(function (executionId?: string) {
+          const wanted = executionId && executionId !== "" ? executionId : active;
+          if (!wanted) return undefined;
+
+          const commands = historyStore.listForExecution(wanted, ruleId);
+          if (commands.length === 0) return undefined;
+
+          // The group's trigger is read off the members rather than off the live
+          // context: every command in an execution was stamped from the same
+          // trigger, so the record is the same answer with the added property of
+          // still being true when this group is read back later.
+          const first = commands[0]!;
+          const group = {
+            executionId: wanted,
+            ...(first.triggerKind !== undefined ? { triggerKind: first.triggerKind } : {}),
+            ...(first.triggerId !== undefined ? { triggerId: first.triggerId } : {}),
+            ...(first.triggerTopic !== undefined ? { triggerTopic: first.triggerTopic } : {}),
+            commands,
+          };
+          return new ivm.ExternalCopy(toPlainJson(group)).copyInto();
         }),
       );
     }

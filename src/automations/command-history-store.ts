@@ -71,6 +71,19 @@ export interface CommandRecord {
   intentLabel?: string;
   /** What a satisfied observation means, e.g. "Flow detected". Sanitised at the boundary. */
   observedLabel?: string;
+
+  // ── Trigger provenance (migration 018) ──
+  //
+  // What caused the execution that issued this command, so a group of commands can
+  // name its cause from the record rather than from whatever the pane guessed.
+  // Absent means "not recorded", never "no trigger".
+
+  /** Class of the triggering originator, e.g. "mqtt-device". Absent when the trigger carried no metadata. */
+  triggerKind?: string;
+  /** The specific originator within that class, e.g. the device id. */
+  triggerId?: string;
+  /** Subject the rule fired on. An operator fire reads as `ui/<ruleId>/<eventName>`. */
+  triggerTopic?: string;
 }
 
 /** One immutable lifecycle transition for a command. */
@@ -177,6 +190,9 @@ interface CommandRow {
   observed_device_name: string | null;
   intent_label: string | null;
   observed_label: string | null;
+  trigger_kind: string | null;
+  trigger_id: string | null;
+  trigger_topic: string | null;
 }
 
 interface TransitionRow {
@@ -226,6 +242,12 @@ function rowToRecord(row: CommandRow): CommandRecord {
     ...(row.observed_device_name !== null ? { observedDeviceName: row.observed_device_name } : {}),
     ...(row.intent_label !== null ? { intentLabel: row.intent_label } : {}),
     ...(row.observed_label !== null ? { observedLabel: row.observed_label } : {}),
+    // Trigger provenance. Omitted when NULL for the same reason as the capability
+    // snapshot: a pre-018 command had a cause, but this schema did not record it,
+    // and an empty string would read as though it had none.
+    ...(row.trigger_kind !== null ? { triggerKind: row.trigger_kind } : {}),
+    ...(row.trigger_id !== null ? { triggerId: row.trigger_id } : {}),
+    ...(row.trigger_topic !== null ? { triggerTopic: row.trigger_topic } : {}),
   };
 }
 
@@ -313,8 +335,8 @@ export class CommandHistoryStore {
             lifecycle_state, success, failure_kind, error, requested_at, terminal_at,
             capability_ceiling, ack_available, observation_configured, observed_device_id,
             condition_spec, transport_kind, target_device_name, observed_device_name,
-            intent_label, observed_label
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            intent_label, observed_label, trigger_kind, trigger_id, trigger_topic
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           record.commandId,
@@ -344,6 +366,9 @@ export class CommandHistoryStore {
           record.observedDeviceName ?? null,
           record.intentLabel ?? null,
           record.observedLabel ?? null,
+          record.triggerKind ?? null,
+          record.triggerId ?? null,
+          record.triggerTopic ?? null,
         );
       this.db
         .prepare(
@@ -504,6 +529,70 @@ export class CommandHistoryStore {
     const record = this.get(commandId);
     if (!record || record.ruleId !== ruleId) return undefined;
     return record;
+  }
+
+  /**
+   * Return every command one automation issued during one execution, oldest first,
+   * each with its transition timeline.
+   *
+   * The counterpart to {@link getForRule} for the case where a single trigger caused
+   * several physical actions. Rendering those as unrelated commands misrepresents
+   * them: a cue that drives a lighting desk and then a effects rack is one operation
+   * that reached two different evidence tiers, and only the grouping says so
+   * (showcase-cleanup §2.7).
+   *
+   * Ordered ASC, unlike {@link list}, because a group is read as a sequence — the
+   * order the commands were issued in is part of what it explains.
+   *
+   * Scoped exactly as `getForRule` is, and for the same reason: the execution id is
+   * the caller's to supply, so without the `rule_id` predicate an automation could
+   * enumerate another rule's commands by guessing an execution. Both predicates are
+   * applied in SQL so neither can be skipped by a caller.
+   *
+   * @returns the group, or `[]` for an unknown execution, an execution belonging to
+   *   another rule, or one that issued no physical commands. An empty array rather
+   *   than `undefined`: "this execution proved nothing physical" is a real answer.
+   */
+  listForExecution(
+    executionId: string,
+    ruleId: string,
+    limit?: number,
+  ): CommandRecordWithTransitions[] {
+    if (!executionId || !ruleId) return [];
+
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM command_records
+           WHERE execution_id = ? AND rule_id = ?
+           ORDER BY requested_at ASC, rowid ASC
+           LIMIT ?`,
+      )
+      .all(executionId, ruleId, clampLimit(limit)) as CommandRow[];
+    if (rows.length === 0) return [];
+
+    // One query for every transition in the group rather than one per command: a
+    // group is small but unbounded in principle, and the per-command version turns
+    // a cue into N+1 round trips for no benefit.
+    const placeholders = rows.map(() => "?").join(", ");
+    const transitions = this.db
+      .prepare(
+        `SELECT * FROM command_transitions
+           WHERE command_id IN (${placeholders})
+           ORDER BY id ASC`,
+      )
+      .all(...rows.map((row) => row.command_id)) as TransitionRow[];
+
+    const byCommand = new Map<string, CommandTransition[]>();
+    for (const row of transitions) {
+      const list = byCommand.get(row.command_id);
+      if (list) list.push(rowToTransition(row));
+      else byCommand.set(row.command_id, [rowToTransition(row)]);
+    }
+
+    return rows.map((row) => ({
+      ...rowToRecord(row),
+      transitions: byCommand.get(row.command_id) ?? [],
+    }));
   }
 
   /** Return a command with its chronological transition timeline, or undefined. */

@@ -31,4 +31,29 @@ describe("automation sandbox authoring types", () => {
   it("exposes continueOnFailure when the runtime supports it", () => {
     expect(source).toContain("continueOnFailure?: boolean;");
   });
+
+  it("exposes execution-grouped evidence for multi-command operations", () => {
+    // §2.7. The authoring surface is where an author learns that keeping a single
+    // `lastCommand` loses commands, so the grouped accessor has to be discoverable
+    // here rather than only in the spec.
+    expect(source).toContain("interface CommandExecutionEvidence");
+    expect(source).toMatch(
+      /executionEvidence\(executionId\?: string\): CommandExecutionEvidence \| undefined;/,
+    );
+    // The execution id is optional because the host resolves the running one.
+    expect(source).not.toContain("executionEvidence(executionId: string)");
+  });
+
+  it("declares the executionId that grouping keys on", () => {
+    // It was reachable at runtime long before it was declared, which is why a pane
+    // could read it while an author could not see that it existed.
+    expect(source).toMatch(/interface CommandEvidenceRecord[\s\S]*?executionId\?: string;/);
+  });
+
+  it("does not point authors at the superseded ladder helpers", () => {
+    // A doc comment naming a removed API is a instruction to write broken code.
+    for (const removed of ["commandLadder()", "commandVerdict()"]) {
+      expect(source).not.toContain(removed);
+    }
+  });
 });
