@@ -136,6 +136,30 @@ interface CustomComponentProps {
   publish: (topic: string, payload: string) => void;
   /** The most recent execution log entries for this rule. */
   history: ExecutionEntry[];
+  /**
+   * This automation's live command activity, newest first.
+   *
+   * Each entry grows as the command's lifecycle transitions are durably recorded, so
+   * a pane can show a command climbing the evidence stages instead of only the
+   * finished receipt Logic projects afterwards. Entries appear as the runtime records
+   * them; nothing here is a client-side estimate of when a stage was reached.
+   *
+   * Shaped like the record `devices.commandEvidence()` returns, so it goes straight
+   * into `commandProof()` or `<CommandProofCard>`:
+   *
+   * ```tsx
+   * {aeolus.commands.map((command) => (
+   *   <CommandProofCard key={String(commandProof(command)?.commandId)} evidence={command} />
+   * ))}
+   * ```
+   *
+   * It carries no capability snapshot, because a transition does not report one. A
+   * command still in flight therefore shows its unreached stages as `not-recorded`
+   * rather than claiming a ceiling nobody stated; the projected receipt explains them
+   * once it settles. Prefer the projected receipt for the durable record of what was
+   * proven, and this for showing that it is happening.
+   */
+  commands: unknown[];
 }
 
 /**

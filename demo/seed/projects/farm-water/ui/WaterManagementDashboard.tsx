@@ -79,7 +79,16 @@ export default function WaterManagementDashboard({ model, actions }: {
             operator recognises rather than sitting anonymously at the foot of the pane.
             Every stage is a durable record the runtime wrote; nothing here is inferred
             from the outcome. */}
-        <CommandProofCard evidence={model.lastCommand}/>
+        {/* While a command is in flight, show the live one: its stages appear as the
+            runtime records them, so the operator watches the transfer being verified
+            rather than being told afterwards that it was. Once it settles the projected
+            receipt takes over, because that one carries the capability snapshot and can
+            explain any stage the command did not reach. One card either way — the live
+            feed and the receipt are the same shape. */}
+        <CommandProofCard
+          evidence={model.liveCommand ?? model.lastCommand}
+          label={model.liveCommand ? "Command in flight" : "Last command"}
+        />
       </div>
 
       <div style={{ marginTop: 18, padding: 10, border: "1px dashed #6A5935", borderRadius: 10, background: "#17150D" }}>

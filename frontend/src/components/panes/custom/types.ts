@@ -59,4 +59,12 @@ export interface CustomComponentProps {
   publish: (topic: string, payload: string) => void;
   /** The most recent execution log entries for this rule. */
   history: ExecutionEntry[];
+  /**
+   * This automation's live command activity, newest first.
+   *
+   * Each entry grows as the command's lifecycle transitions are durably recorded, so
+   * a pane can render stages being reached rather than only the settled receipt.
+   * Shaped like a `commandEvidence` record, so `commandProof()` reads it directly.
+   */
+  commands: unknown[];
 }

@@ -10,6 +10,7 @@ import {
   isRpcRequest,
   validateParams,
   RPC_CHANNEL,
+  READ_ONLY_SDK_OPS,
   type EntityType,
   type SdkOp,
   type RpcRequest,
@@ -65,6 +66,10 @@ export interface BrokerDeps {
   readState: (entityType: EntityType, entityId: string, key: string) => unknown;
   /** Subscribe to state changes for an entity; returns an unsubscribe function. */
   subscribeState: (entityType: EntityType, entityId: string, callback: (key: string, value: unknown) => void) => () => void;
+  /** Read this entity's live command activity, newest first. */
+  readCommands: (entityType: EntityType, entityId: string) => unknown[];
+  /** Subscribe to command activity for an entity; returns an unsubscribe function. */
+  subscribeCommands: (entityType: EntityType, entityId: string, callback: (commands: unknown[]) => void) => () => void;
 }
 
 // ─── Internal registration record ───────────────────────────────────────────
@@ -72,6 +77,7 @@ export interface BrokerDeps {
 interface FrameRegistration {
   grant: FrameGrant;
   unsubscribeState: () => void;
+  unsubscribeCommands: () => void;
   /** Handler reference for port.onmessage (needed for cleanup). */
   messageHandler: (event: MessageEvent) => void;
 }
@@ -108,9 +114,22 @@ export class SdkBroker {
       },
     );
 
+    // Subscribe to this entity's command activity and forward it. Wired here rather
+    // than on request so a pane sees stages reached while it was mounted but before
+    // it first asked — the live feed exists precisely for transitions the frame
+    // would otherwise miss.
+    const unsubscribeCommands = this.deps.subscribeCommands(
+      grant.entityType,
+      grant.entityId,
+      (commands: unknown[]) => {
+        this.emitCommands(grant.frameId, commands);
+      },
+    );
+
     this.registrations.set(grant.frameId, {
       grant,
       unsubscribeState,
+      unsubscribeCommands,
       messageHandler,
     });
   }
@@ -120,8 +139,10 @@ export class SdkBroker {
     const registration = this.registrations.get(frameId);
     if (!registration) return;
 
-    // Unsubscribe state listener
+    // Unsubscribe both store listeners before the port goes away, or a late store
+    // update would postMessage into a closed port.
     registration.unsubscribeState();
+    registration.unsubscribeCommands();
 
     // Close the port (detaches onmessage and releases resources)
     registration.grant.port.onmessage = null;
@@ -141,6 +162,26 @@ export class SdkBroker {
       kind: "event",
       event: "state",
       data: { key, value },
+    };
+
+    registration.grant.port.postMessage(event);
+  }
+
+  /**
+   * Push this entity's command activity into a frame (called by the store
+   * subscription). Sent whole rather than as a delta: the array is small and bounded,
+   * and a frame that reconnected mid-command would otherwise hold a partial ladder it
+   * has no way to repair.
+   */
+  private emitCommands(frameId: string, commands: unknown[]): void {
+    const registration = this.registrations.get(frameId);
+    if (!registration) return;
+
+    const event: RpcEvent = {
+      channel: RPC_CHANNEL,
+      kind: "event",
+      event: "commands",
+      data: { commands },
     };
 
     registration.grant.port.postMessage(event);
@@ -224,23 +265,27 @@ export class SdkBroker {
   ): Promise<unknown> {
     const { entityType, entityId } = grant;
 
-    // Read-only grant: neutralise mutating ops. Reads and subscriptions still
-    // work so the UI renders and animates from seeded/live state.
-    if (grant.readOnly) {
-      switch (op) {
-        case "save":
-        case "saveAndFire":
-        case "fire":
-        case "publish":
-          return undefined;
-        case "control":
-          return { success: false, error: "Read-only in the public demo" } satisfies CommandResult;
+    // Read-only grant: neutralise everything that is not a read. Reads and
+    // subscriptions still work so the UI renders and updates from seeded/live state.
+    //
+    // Gated on the READ_ONLY_SDK_OPS allowlist rather than a denylist of mutating
+    // ops: with a denylist, a new op added later is permitted by omission, and the
+    // failure is silent. Here omission denies.
+    if (grant.readOnly && !READ_ONLY_SDK_OPS.has(op)) {
+      if (op === "control") {
+        return { success: false, error: "Read-only in the public demo" } satisfies CommandResult;
       }
+      return undefined;
     }
 
     switch (op) {
       case "read":
         return this.deps.readState(entityType, entityId, params.key as string);
+
+      case "commands":
+        // Scoped to the grant's entity, like every other op. A frame cannot ask for
+        // another automation's activity because there is nowhere to put the request.
+        return this.deps.readCommands(entityType, entityId);
 
       case "save":
         this.deps.save(entityType, entityId, params.key as string, params.value);

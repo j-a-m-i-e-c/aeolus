@@ -14,6 +14,7 @@ export type EntityType = "automation" | "panel";
  */
 export type SdkOp =
   | "read"
+  | "commands"
   | "save"
   | "saveAndFire"
   | "fire"
@@ -24,11 +25,25 @@ export type SdkOp =
 /** The complete set of valid SDK operations for allowlist checking. */
 export const SDK_OPS: ReadonlySet<string> = new Set<SdkOp>([
   "read",
+  "commands",
   "save",
   "saveAndFire",
   "fire",
   "control",
   "publish",
+  "subscribe",
+]);
+
+/**
+ * Ops that only read. Neither mutates anything, so neither is neutralised for a
+ * read-only grant — a public-demo visitor still sees the pane render and update.
+ *
+ * Named as a set rather than left implicit in the broker's switch so that adding an
+ * op forces a decision about which side of the line it falls on.
+ */
+export const READ_ONLY_SDK_OPS: ReadonlySet<SdkOp> = new Set<SdkOp>([
+  "read",
+  "commands",
   "subscribe",
 ]);
 
@@ -61,12 +76,16 @@ export interface RpcResponse {
   error?: RpcError;
 }
 
-/** Direction: host → frame unsolicited event (state updates, prop updates). */
+/** Direction: host → frame unsolicited event (state, prop or command updates). */
 export interface RpcEvent {
   channel: typeof RPC_CHANNEL;
   kind: "event";
-  event: "state" | "props";
-  /** For "state": { key, value }. For "props": a partial PropsPayload patch. */
+  event: "state" | "props" | "commands";
+  /**
+   * For "state": `{ key, value }`. For "props": a partial PropsPayload patch.
+   * For "commands": `{ commands }` — this automation's live command activity,
+   * newest first, replaced wholesale rather than patched.
+   */
   data: Record<string, unknown>;
 }
 
@@ -235,6 +254,11 @@ export function validateParams(op: SdkOp, params: Record<string, unknown>): Para
   switch (op) {
     case "read":
       return requireNonEmptyString(params, "key");
+
+    case "commands":
+      // No required params. The automation is fixed by the grant, never by the
+      // frame, so there is nothing here to scope and nothing to validate.
+      return { valid: true };
 
     case "save":
     case "saveAndFire":

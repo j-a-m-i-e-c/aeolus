@@ -38,6 +38,15 @@ export interface AeolusUiSdk {
   subscribeState(listener: (key: string, value: unknown) => void): () => void;
   /** Subscribe to props patches. Returns an unsubscribe fn. */
   subscribeProps(listener: (patch: Partial<PropsPayload>) => void): () => void;
+  /**
+   * This automation's live command activity, newest first, from the local mirror.
+   *
+   * Synchronous like `read`: the host pushes the array as transitions are durably
+   * recorded, so what is mirrored here is what has actually happened.
+   */
+  recentCommands(): unknown[];
+  /** Subscribe to command activity updates. Returns an unsubscribe fn. */
+  subscribeCommands(listener: (commands: unknown[]) => void): () => void;
   /** The most recent full props payload (synchronously available after init). */
   getProps(): PropsPayload;
   /** Detach listeners and reject pending requests (called on teardown). */
@@ -68,6 +77,11 @@ export function createSdkClient(
 
   const stateListeners = new Set<(key: string, value: unknown) => void>();
   const propsListeners = new Set<(patch: Partial<PropsPayload>) => void>();
+
+  // Live command activity. Starts empty rather than seeded from init: nothing has
+  // been observed yet, and an empty feed is the truthful starting point.
+  let commandsMirror: unknown[] = [];
+  const commandListeners = new Set<(commands: unknown[]) => void>();
 
   let idCounter = 0;
   const generateId = (): string => {
@@ -109,6 +123,13 @@ export function createSdkClient(
           }
         }
         for (const listener of propsListeners) listener(patch);
+      } else if (message.event === "commands") {
+        const { commands } = message.data as { commands?: unknown };
+        // Replaced wholesale, and only by an array: a malformed push must not
+        // silently empty a feed the pane is already rendering.
+        if (!Array.isArray(commands)) return;
+        commandsMirror = commands;
+        for (const listener of commandListeners) listener(commands);
       }
     }
   }
@@ -182,6 +203,15 @@ export function createSdkClient(
       return () => propsListeners.delete(listener);
     },
 
+    recentCommands(): unknown[] {
+      return commandsMirror;
+    },
+
+    subscribeCommands(listener: (commands: unknown[]) => void): () => void {
+      commandListeners.add(listener);
+      return () => commandListeners.delete(listener);
+    },
+
     getProps(): PropsPayload {
       return propsSnapshot;
     },
@@ -190,6 +220,7 @@ export function createSdkClient(
       port.onmessage = null;
       stateListeners.clear();
       propsListeners.clear();
+      commandListeners.clear();
       for (const [, entry] of pending) {
         clearTimeout(entry.timer);
         entry.reject(new Error("SANDBOX_DESTROYED: SDK client disposed"));

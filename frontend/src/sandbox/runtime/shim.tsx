@@ -51,6 +51,9 @@ export function buildAutomationProps(sdk: AeolusUiSdk): CustomComponentProps {
     control: (deviceId: string, actionType: string, params?: Record<string, unknown>) =>
       sdk.control(deviceId, actionType, params),
     publish: (topic: string, payload: string) => void sdk.publish(topic, payload),
+    // Live command activity, so a pane can show stages being reached rather than
+    // only the settled receipt Logic projects afterwards.
+    commands: sdk.recentCommands(),
   };
 }
 
@@ -93,9 +96,13 @@ export function ShimHost({ sdk, entityType, Component }: ShimHostProps): ReactEl
     const bump = () => setVersion((v) => v + 1);
     const unsubscribeState = sdk.subscribeState(() => bump());
     const unsubscribeProps = sdk.subscribeProps(() => bump());
+    // Command activity re-renders too, otherwise a stage would be mirrored but not
+    // shown until some unrelated state change happened to bump the version.
+    const unsubscribeCommands = sdk.subscribeCommands(() => bump());
     return () => {
       unsubscribeState();
       unsubscribeProps();
+      unsubscribeCommands();
     };
   }, [sdk]);
 

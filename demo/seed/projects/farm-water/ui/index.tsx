@@ -28,6 +28,19 @@ export default function WaterManagement(aeolus: CustomComponentProps) {
     demoScenarioPending: aeolus.read("demoScenarioPending"),
     lastCommand: aeolus.read("lastCommand"),
     lastAction: aeolus.read("lastAction"),
+    // The command currently climbing the evidence stages, if there is one.
+    //
+    // Logic can only project a receipt once `devices.action()` has resolved, which is
+    // after every stage has been reached — so the projection alone can never show a
+    // transfer being verified, only that it was. This live feed comes from the same
+    // durable transitions as the receipt and arrives as each one is recorded.
+    //
+    // Only the unsettled one is taken. A settled command is better described by the
+    // projected receipt below, which carries the capability snapshot the live feed has
+    // no way to know.
+    liveCommand: (aeolus.commands ?? []).find(
+      (command) => (command as { terminalAt?: number }).terminalAt === undefined,
+    ),
   };
 
   const operatorActions = {

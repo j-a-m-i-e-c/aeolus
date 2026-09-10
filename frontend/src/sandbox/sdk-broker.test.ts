@@ -28,6 +28,8 @@ function createSpyDeps(): BrokerDeps {
     publish: vi.fn(),
     readState: vi.fn(() => "cached"),
     subscribeState: vi.fn(() => vi.fn()),
+    readCommands: vi.fn(() => [{ commandId: "cmd-1" }]),
+    subscribeCommands: vi.fn(() => vi.fn()),
   };
 }
 

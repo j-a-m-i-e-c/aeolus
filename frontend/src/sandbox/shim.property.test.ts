@@ -26,6 +26,8 @@ function makeMockSdk(props: PropsPayload): AeolusUiSdk & { saveCalls: Array<{ ke
     publish: vi.fn(async () => {}),
     subscribeState: vi.fn(() => () => {}),
     subscribeProps: vi.fn(() => () => {}),
+    recentCommands: () => [],
+    subscribeCommands: vi.fn(() => () => {}),
     getProps: () => props,
     dispose: vi.fn(),
   };

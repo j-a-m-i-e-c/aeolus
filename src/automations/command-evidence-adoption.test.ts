@@ -114,6 +114,20 @@ describe("command evidence adoption across the showcase", () => {
     },
   );
 
+  it("shows a command being proven, not only that it was (§2.8)", () => {
+    // Logic can only project a receipt after `devices.action()` resolves, which is
+    // after every stage has been reached — so a projection alone can never show a
+    // command climbing. Water Management is the reference example, so it is the one
+    // that has to demonstrate the live feed rather than just describe it.
+    const ui = String(waterAutomation.uiSource);
+    expect(ui).toContain("aeolus.commands");
+    // The live feed carries no capability snapshot, so a settled command is better
+    // described by the projected receipt. Taking only the unsettled one is what keeps
+    // the pane from showing `not-recorded` stages once the real answer exists.
+    expect(ui).toContain("terminalAt");
+    expect(ui).toContain("lastCommand");
+  });
+
   it.each(eachAdopter)(
     "%s names the operation its command performed",
     (_tab, automation) => {

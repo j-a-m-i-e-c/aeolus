@@ -514,10 +514,27 @@ async function main(): Promise<void> {
     // surface the collection; a collection no pane surfaces stays admin-only.
     { eventName: DATA_STORE_WRITE, messageType: "data-store-write", visibility: dataStoreVisibility },
     { eventName: DATA_STORE_COLLECTION_DELETED, messageType: "data-store-collection-deleted", visibility: dataStoreVisibility },
-    // Phase-1 backend observability for later UI. Command history can disclose
-    // device names/behaviour, so both stay admin-only (no visibility resolver ⇒
-    // fail-closed admin-only). No frontend rendering belongs in Phase 1.
-    { eventName: COMMAND_LIFECYCLE_TRANSITION, messageType: "command-lifecycle" },
+    // A command lifecycle transition is visible on the tabs that expose the
+    // automation which issued it — the same scope as that automation's state and
+    // execution history, resolved by the same resolver.
+    //
+    // This was admin-only while nothing rendered it, which was the right default
+    // for an unconsumed event. A pane now shows its own commands climbing the
+    // evidence stages as they happen (showcase-cleanup §2.8), so the scope has to
+    // be decided rather than left fail-closed.
+    //
+    // It discloses nothing new at that scope. The payload carries a device *id*,
+    // an action type and a lifecycle state; a client who can reach the exposing tab
+    // already reads that automation's projected state, its execution history with
+    // per-action targets, and the exposed devices themselves. What it does not carry
+    // is a device name, a payload, or a condition value.
+    //
+    // A command with no `ruleId` — REST or system origin — has no automation and
+    // therefore no exposing tab, so `automationVisibility` returns admin-only.
+    // That is the correct answer, not a gap: such a command belongs to no pane.
+    { eventName: COMMAND_LIFECYCLE_TRANSITION, messageType: "command-lifecycle", visibility: automationVisibility },
+    // Still admin-only: no consumer, so scoping it would be speculative work on a
+    // security-sensitive path.
     { eventName: AUTOMATION_EVENT, messageType: "automation-event" },
   ];
 

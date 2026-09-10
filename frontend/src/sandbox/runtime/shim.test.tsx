@@ -21,6 +21,8 @@ function makeMockSdk(overrides?: Partial<PropsPayload>): AeolusUiSdk {
   const stateMirror = new Map<string, unknown>(Object.entries(props.state));
   const stateListeners = new Set<(key: string, value: unknown) => void>();
   const propsListeners = new Set<(patch: Partial<PropsPayload>) => void>();
+  let commandsMirror: unknown[] = [];
+  const commandListeners = new Set<(commands: unknown[]) => void>();
 
   return {
     read: (key: string) => stateMirror.get(key),
@@ -31,12 +33,19 @@ function makeMockSdk(overrides?: Partial<PropsPayload>): AeolusUiSdk {
     publish: vi.fn(async () => {}),
     subscribeState: (listener) => { stateListeners.add(listener); return () => stateListeners.delete(listener); },
     subscribeProps: (listener) => { propsListeners.add(listener); return () => propsListeners.delete(listener); },
+    recentCommands: () => commandsMirror,
+    subscribeCommands: (listener) => { commandListeners.add(listener); return () => commandListeners.delete(listener); },
     getProps: () => props,
     dispose: vi.fn(),
     // Expose for test interaction:
     _emitState: (key: string, value: unknown) => { stateMirror.set(key, value); for (const l of stateListeners) l(key, value); },
     _emitProps: (patch: Partial<PropsPayload>) => { Object.assign(props, patch); for (const l of propsListeners) l(patch); },
-  } as AeolusUiSdk & { _emitState: (k: string, v: unknown) => void; _emitProps: (p: Partial<PropsPayload>) => void };
+    _emitCommands: (commands: unknown[]) => { commandsMirror = commands; for (const l of commandListeners) l(commands); },
+  } as AeolusUiSdk & {
+    _emitState: (k: string, v: unknown) => void;
+    _emitProps: (p: Partial<PropsPayload>) => void;
+    _emitCommands: (c: unknown[]) => void;
+  };
 }
 
 describe("ShimHost", () => {
@@ -74,6 +83,22 @@ describe("ShimHost", () => {
 
     act(() => sdk._emitProps({ enabled: false }));
     expect(screen.getByTestId("enabled")).toHaveTextContent("false");
+  });
+
+  it("re-renders when command activity arrives (§2.8)", () => {
+    // Without this subscription a stage would be mirrored but not shown until some
+    // unrelated state change happened to bump the version — which would look exactly
+    // like the stages arriving all at once that the live feed exists to fix.
+    const sdk = makeMockSdk() as AeolusUiSdk & { _emitCommands: (c: unknown[]) => void };
+    const TestComponent = (props: Record<string, unknown>) => (
+      <div data-testid="commands">{String((props.commands as unknown[]).length)}</div>
+    );
+
+    render(<ShimHost sdk={sdk} entityType="automation" Component={TestComponent} />);
+    expect(screen.getByTestId("commands")).toHaveTextContent("0");
+
+    act(() => sdk._emitCommands([{ commandId: "cmd-1" }, { commandId: "cmd-2" }]));
+    expect(screen.getByTestId("commands")).toHaveTextContent("2");
   });
 });
 

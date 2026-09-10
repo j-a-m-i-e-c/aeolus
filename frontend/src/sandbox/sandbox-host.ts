@@ -13,6 +13,7 @@ import {
   sendStateUpdate,
   sendStateUpdateAndFire,
 } from "../store/automation-state-store";
+import { useCommandActivityStore } from "../store/command-activity-store";
 import { SdkBroker, type BrokerDeps, type CommandResult } from "./sdk-broker";
 import type { EntityType } from "./rpc-types";
 
@@ -168,6 +169,69 @@ function subscribeState(
   };
 }
 
+/**
+ * Read an entity's live command activity, newest first.
+ *
+ * Sourced from the command-activity store, which the WebSocket client fills from
+ * durable lifecycle transitions — so this is the real lifecycle, not a projection the
+ * pane wrote for itself.
+ */
+function readCommands(entityType: EntityType, entityId: string): unknown[] {
+  if (entityType !== "automation") return [];
+  return useCommandActivityStore.getState().activityByRule[entityId] ?? [];
+}
+
+/**
+ * Subscribe to an entity's command activity, coalesced per animation frame.
+ *
+ * Same shape and the same reason as {@link subscribeState}: a command climbing four
+ * stages inside one frame would otherwise cost four postMessage round trips per
+ * command, which matters on the Pi this runs on. Unlike state there is no per-key
+ * diffing to do — the store replaces the whole array — so the coalescing keeps only
+ * the latest array.
+ */
+function subscribeCommands(
+  entityType: EntityType,
+  entityId: string,
+  callback: (commands: unknown[]) => void,
+): () => void {
+  if (entityType !== "automation") {
+    // Panels do not own automations, so they have no commands of their own.
+    return () => {};
+  }
+
+  let previous: unknown[] = useCommandActivityStore.getState().activityByRule[entityId] ?? [];
+  let pending: unknown[] | null = null;
+  let flushScheduled = false;
+  let disposed = false;
+
+  const flush = () => {
+    flushScheduled = false;
+    if (disposed || pending === null) return;
+    const commands = pending;
+    pending = null;
+    callback(commands);
+  };
+
+  const unsubscribe = useCommandActivityStore.subscribe((state) => {
+    const next = state.activityByRule[entityId] ?? [];
+    // Reference equality is the contract the store upholds by replacing the array.
+    if (next === previous) return;
+    previous = next;
+    pending = next;
+    if (!flushScheduled) {
+      flushScheduled = true;
+      scheduleFlush(flush);
+    }
+  });
+
+  return () => {
+    disposed = true;
+    pending = null;
+    unsubscribe();
+  };
+}
+
 const brokerDeps: BrokerDeps = {
   control,
   publish,
@@ -176,6 +240,8 @@ const brokerDeps: BrokerDeps = {
   fire,
   readState,
   subscribeState,
+  readCommands,
+  subscribeCommands,
 };
 
 /** The shared singleton broker for all sandbox frames. */

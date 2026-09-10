@@ -2,6 +2,7 @@
 
 import { useDeviceStore } from "../store/device-store";
 import { useAutomationStateStore } from "../store/automation-state-store";
+import { useCommandActivityStore } from "../store/command-activity-store";
 import { useDataStoreStore } from "../store/data-store-store";
 import { useAuthStore } from "../store/auth-store";
 import { WS_URL } from "./env";
@@ -52,6 +53,10 @@ export function connectWebSocket(): void {
       } else if (msg.type === "automation-state") {
         const { ruleId, key, value } = msg.data;
         useAutomationStateStore.getState().setRuleState(ruleId, key, value);
+      } else if (msg.type === "command-lifecycle") {
+        // Each transition is broadcast only after its durable write commits, so the
+        // live feed is the real lifecycle rather than a client-side guess at timing.
+        useCommandActivityStore.getState().recordTransition(msg.data);
       } else if (msg.type === "data-store-write") {
         const { collection, record } = msg.data;
         useDataStoreStore.getState().addRealtimeRecord(collection, record);

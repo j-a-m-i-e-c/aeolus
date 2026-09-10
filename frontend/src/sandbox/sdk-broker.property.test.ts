@@ -36,6 +36,8 @@ function createSpyDeps(): BrokerDeps & { calls: Array<{ op: string; args: unknow
     publish: vi.fn((...args: unknown[]) => { calls.push({ op: "publish", args }); }),
     readState: vi.fn((...args: unknown[]) => { calls.push({ op: "readState", args }); return "cached-value"; }),
     subscribeState: vi.fn(() => vi.fn()),
+    readCommands: vi.fn((...args: unknown[]) => { calls.push({ op: "readCommands", args }); return []; }),
+    subscribeCommands: vi.fn(() => vi.fn()),
   };
 }
 
@@ -43,6 +45,7 @@ function createSpyDeps(): BrokerDeps & { calls: Array<{ op: string; args: unknow
 function validParamsForOp(op: SdkOp): Record<string, unknown> {
   switch (op) {
     case "read": return { key: "temperature" };
+    case "commands": return {};
     case "save": return { key: "mode", value: "cool" };
     case "saveAndFire": return { key: "target", value: 22 };
     case "fire": return { eventName: "clicked", payload: { x: 1 } };
