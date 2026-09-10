@@ -48,14 +48,27 @@ export async function commandSumpPump(on: boolean, reason: string) {
     }
     state.set("commandPending", true);
     setAction(reason);
+    // Proven by water actually moving, read off the sump's own instrumentation.
+    //
+    // The pump republishes `on` and `flowLps` the moment it accepts, so observing
+    // either only repeats the command back. `dischargeLps` on the deep-sump level
+    // sensor is a separate device measuring the effect, which is what makes this an
+    // observation rather than an echo.
+    const sump = byTopic("sensor/mine/sump/deep");
+    if (!sump) {
+        setAction("Sump level sensor unavailable · cannot verify a pump command");
+        return;
+    }
     const result = await devices.action(pump.id, "command", { payload: { on } }, {
         tier: "observed",
-        deviceId: pump.id,
-        condition: { field: "on", op: "eq", value: on },
+        deviceId: sump.id,
+        condition: on
+            ? { field: "dischargeLps", op: "gt", value: 0 }
+            : { field: "dischargeLps", op: "eq", value: 0 },
         timeoutMs: 5000,
         evidence: {
             intent: on ? "Start sump pump" : "Stop sump pump",
-            observedLabel: on ? "pump reports running" : "pump reports stopped",
+            observedLabel: on ? "sump discharging" : "discharge stopped",
         },
     });
     state.set("commandPending", false);

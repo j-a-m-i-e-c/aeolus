@@ -1,4 +1,13 @@
 // Perimeter-security implementation. logic/index.ts keeps AUTO policy visible.
+
+/**
+ * Floodlight output, in percent, at which the approach is genuinely lit.
+ *
+ * The same threshold the contacts react to, which is the point: proving the command
+ * and proving the deterrent are then one claim rather than two hopeful ones.
+ */
+const FLOODLIGHT_DETER_PCT = 70;
+
 function byTopic(wanted: string) {
     return devices.list().find((device) => device.topic === wanted);
 }
@@ -50,20 +59,28 @@ export async function setFloodlights(on: boolean, reason: string) {
         return false;
     }
     state.set("pending", true);
-    // AUDIT NOTE (showcase cleanup spec §9.4): this observes the controller's own
-    // `on` flag, which is a command echo rather than a measurement — the weak pattern
-    // the spec calls out. The simulator already ramps `brightness` and only turns the
-    // contacts back once it crosses the deterrence threshold, so the honest proof is
-    // `brightness >= 70`. Changing it belongs with the Phase 6 bunker work, because
-    // the floodlight telemetry and the withdrawal trigger have to move together.
+    // Proven by light on the ground, not by the switch agreeing it was flipped.
+    //
+    // `on` is a command echo: the controller publishes it the instant it accepts, so
+    // observing it only restates what dispatch already told us. `brightness` is the
+    // measurement — it ramps over ~700 ms — and 70% is the same threshold the
+    // approaching contacts themselves react to. So a verified floodlight command and
+    // a floodlight that can actually turn something back are now the same claim.
     const result = await devices.action(controller.id, "command", { payload: { on } }, {
         tier: "observed",
         deviceId: controller.id,
-        condition: { field: "on", op: "eq", value: on },
+        condition: on
+            ? { field: "brightness", op: "gte", value: FLOODLIGHT_DETER_PCT }
+            // Dark is the absence of output. The ramp lands on exactly 0, but a
+            // threshold rather than equality keeps this honest if the fixture ever
+            // settles a little above it.
+            : { field: "brightness", op: "lte", value: 5 },
         timeoutMs: 5000,
         evidence: {
             intent: on ? "Turn floodlights on" : "Turn floodlights off",
-            observedLabel: on ? "controller reports lit" : "controller reports dark",
+            observedLabel: on
+                ? "output reached " + FLOODLIGHT_DETER_PCT + "% of deterrent brightness"
+                : "output fell dark",
         },
     });
     state.set("pending", false);

@@ -31,14 +31,19 @@ export async function setRoomScene(scene: string, smoke: boolean, label: string)
         return;
     state.set("pending", true);
     state.set("transitioning", true);
+    // Acknowledgement is the ceiling here, honestly.
+    //
+    // The room controller derives `scene`, `audio` and `lightPct` from the command and
+    // publishes them in the same tick, so `lightPct == 38` is no more a measurement
+    // than `scene == "tension"` — both are the command restated. Nothing in the room
+    // measures the light it actually produced. Rather than pick the most
+    // physical-sounding echo, this command claims only what the controller confirmed:
+    // that it received the cue.
     const result = await devices.action(fx.id, "command", { payload: { scene, smoke } }, {
-        tier: "observed",
-        deviceId: fx.id,
-        condition: { field: "scene", op: "eq", value: scene },
+        tier: "acknowledged",
         timeoutMs: 5000,
         evidence: {
             intent: "Apply " + scene + " room look",
-            observedLabel: "controller reports the " + scene + " scene",
         },
     });
     state.set("pending", false);

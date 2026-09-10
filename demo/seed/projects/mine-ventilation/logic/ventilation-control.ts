@@ -38,14 +38,21 @@ export async function commandVentilation(mode: string, reason: string) {
     }
     state.set("commandPending", true);
     setAction(reason);
+    // Acknowledgement is the highest tier this command can honestly reach, and that
+    // is the correct answer rather than a weaker one.
+    //
+    // The fan republishes `mode`, `demand`, `primaryRpm` and `airflow` in the same
+    // breath as accepting the command, so every one of them is the command read back
+    // rather than a measurement — observing any of them would dress a dispatch up as
+    // physical proof. The genuine downstream effect is methane falling on the Drift 7
+    // gas sensor, but that only moves when gas was already elevated and boost was the
+    // mode asked for, so it cannot be this command's observation contract. Aeolus
+    // therefore reports what it really knows: the controller confirmed receipt.
     const result = await devices.action(fan.id, "command", { payload: { mode } }, {
-        tier: "observed",
-        deviceId: fan.id,
-        condition: { field: "mode", op: "eq", value: mode },
+        tier: "acknowledged",
         timeoutMs: 5000,
         evidence: {
             intent: "Set ventilation to " + mode,
-            observedLabel: "running in " + mode,
         },
     });
     state.set("commandPending", false);

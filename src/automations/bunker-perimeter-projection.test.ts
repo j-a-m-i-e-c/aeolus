@@ -387,13 +387,23 @@ describe("Bunker Perimeter Security — floodlight projection", () => {
     expect(world.store.get("pending")).toBe(false);
   });
 
-  it("requests observed-tier confirmation against the commanded field", async () => {
-    // The pane's whole claim is "verified floodlighting", so the command must ask
-    // to observe `on` reaching the commanded value rather than fire and forget.
+  it("proves the floodlights by measured output, not by the switch echoing back", async () => {
+    // The pane's whole claim is "verified floodlighting", and `on` cannot support it:
+    // the controller publishes `on` the instant it accepts, so observing it restates
+    // what dispatch already said. `brightness` is the measurement, and 70% is the
+    // threshold the approaching contacts themselves react to — so a verified command
+    // and a floodlight that can actually turn something back are the same claim.
     const world = makeWorld();
     await run(world, "ui/rule/toggle-lights");
     expect(world.commands[0].tier).toBe("observed");
-    expect(world.commands[0].condition).toEqual({ field: "on", op: "eq", value: true });
+    expect(world.commands[0].condition).toEqual({ field: "brightness", op: "gte", value: 70 });
+  });
+
+  it("proves darkness by output falling, not by the switch reporting off", async () => {
+    const world = makeWorld({ lightsOn: true });
+    await run(world, LIGHTS_TOPIC);
+    await run(world, "ui/rule/toggle-lights");
+    expect(world.commands[0].condition).toEqual({ field: "brightness", op: "lte", value: 5 });
   });
 
   it("mirrors the projection into the overview summary event", async () => {
