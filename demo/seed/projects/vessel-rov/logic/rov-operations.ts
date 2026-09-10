@@ -73,8 +73,15 @@ export async function commandRov(mode: string, targetDepth: number) {
         ? { tier: "observed", deviceId: telemetry.id, condition: { field: "depth", op: "gte", value: targetDepth - 5 }, timeoutMs: 9000 }
         : mode === "recover"
             ? { tier: "observed", deviceId: telemetry.id, condition: { field: "depth", op: "lte", value: targetDepth + 8 }, timeoutMs: 9000 }
+            // Acknowledgement, and this is a correction rather than a downgrade. The
+            // condition here was `mode == "surveying"`, which was wrong twice over: it
+            // read back the mode the vehicle had just been told to adopt, and its value
+            // was a string, which the condition validator rejects — so the confirmation
+            // was silently dropped and the tier clamped. The command has only ever been
+            // acknowledged, and now says so. Proving a transect really means waiting for
+            // `transectLegs` to increment, which happens when the box has been flown.
             : mode === "survey"
-                ? { tier: "observed", deviceId: telemetry.id, condition: { field: "mode", op: "eq", value: "surveying" }, timeoutMs: 5000 }
+                ? { tier: "acknowledged", timeoutMs: 5000 }
                 // A hold is proven by the vehicle stopping, not by it reporting the
                 // mode it was asked for.
                 : { tier: "observed", deviceId: telemetry.id, condition: { field: "verticalSpeed", op: "eq", value: 0 }, timeoutMs: 5000 };

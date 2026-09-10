@@ -26,11 +26,20 @@ export async function setBunkerSeal(sealed: boolean) {
     if (!controller)
         return;
     state.set("pending", true);
+    // Acknowledgement is the honest ceiling here.
+    //
+    // A sealed bunker is a pressure claim, and `overpressure` is the reading that
+    // would settle it — but the filter controller publishes `sealed`, `overpressure`
+    // and `tempC` in one update as it accepts, so none of them measures anything the
+    // command did not already assert. Equating a requested `sealed` flag with an
+    // airtight shelter is exactly the overstatement worth avoiding, so this reports
+    // what it knows: the controller took the command.
     const result = await devices.action(controller.id, "command", { payload: { sealed } }, {
-        tier: "observed",
-        deviceId: controller.id,
-        condition: { field: "sealed", op: "eq", value: sealed },
+        tier: "acknowledged",
         timeoutMs: 5000,
+        evidence: {
+            intent: sealed ? "Seal bunker" : "Return to normal ventilation",
+        },
     });
     state.set("pending", false);
     if (result.success) {

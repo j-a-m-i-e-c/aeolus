@@ -108,14 +108,18 @@ export async function runPhysicalEffect(effect: string, pulseMs: number, label: 
     }
     state.set("pendingFx", true);
     const haze = effect === "haze" ? 62 : Number(state.get("haze") || 28);
+    // Acknowledgement is the honest ceiling for a transient effect.
+    //
+    // The rack sets `active` as it accepts and clears it on a timer once the pulse
+    // finishes, so observing `active` is the command read back rather than evidence a
+    // confetti burst happened. Nothing in this rig measures the effect itself — which
+    // is realistic, and worth showing: the lighting desk on the same tab CAN prove
+    // its transition completed, and the contrast is the point.
     const result = await devices.action(rack.id, "command", { payload: { active: true, effect, pulseMs, haze } }, {
-        tier: "observed",
-        deviceId: rack.id,
-        condition: { field: "active", op: "eq", value: true },
+        tier: "acknowledged",
         timeoutMs: 5000,
         evidence: {
             intent: "Fire stage effect · " + effect,
-            observedLabel: "rack reports the effect running",
         },
     });
     state.set("pendingFx", false);
@@ -133,13 +137,10 @@ export async function stopPhysicalEffects() {
     if (!rack)
         return;
     const result = await devices.action(rack.id, "command", { payload: { active: false } }, {
-        tier: "observed",
-        deviceId: rack.id,
-        condition: { field: "active", op: "eq", value: false },
+        tier: "acknowledged",
         timeoutMs: 5000,
         evidence: {
             intent: "Stop stage effects",
-            observedLabel: "rack reports the effect stopped",
         },
     });
     projectStageState();

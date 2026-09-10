@@ -1,4 +1,12 @@
 // Personnel tracking and verified muster control.
+/**
+ * Crew underground, and therefore the refuge occupancy a complete muster reaches.
+ *
+ * Named because it is the number the observation waits for: a muster is proven when
+ * everyone who was down there is accounted for, not when the alarm starts.
+ */
+const MUSTER_HEADCOUNT = 14;
+
 function byTopic(wanted: string) {
     return devices.list().find((device) => device.topic === wanted);
 }
@@ -40,11 +48,33 @@ export async function commandMuster(active: boolean) {
     setAction(active
         ? "Initiating underground personnel muster"
         : "Clearing muster and returning to normal operations");
+    // Proven by people actually reaching the refuge, not by the alarm agreeing it
+    // was armed.
+    //
+    // The muster controller republishes `active` the moment it accepts, so observing
+    // it proves only that the alarm sounded. What an operator needs to know is
+    // whether the underground crew got out, and that is the personnel tracking
+    // network's answer: refuge occupancy climbs 4 → 8 → 12 → 14 over about three
+    // seconds. A generous window, because the physical thing being waited on is
+    // people walking.
+    const tracking = byTopic("sensor/mine/personnel");
+    if (!tracking) {
+        setAction("Personnel tracking unavailable · a muster cannot be verified");
+        state.set("commandPending", false);
+        return;
+    }
     const result = await devices.action(controller.id, "command", { payload: { active } }, {
         tier: "observed",
-        deviceId: controller.id,
-        condition: { field: "active", op: "eq", value: active },
-        timeoutMs: 5000,
+        deviceId: tracking.id,
+        condition: active
+            ? { field: "refuge", op: "gte", value: MUSTER_HEADCOUNT }
+            // Clearing returns the crew to their working levels, so the refuge empties.
+            : { field: "refuge", op: "eq", value: 0 },
+        timeoutMs: active ? 9000 : 5000,
+        evidence: {
+            intent: active ? "Muster underground personnel" : "Clear muster",
+            observedLabel: active ? "all crew accounted for in the refuge" : "refuge cleared",
+        },
     });
     state.set("commandPending", false);
     if (!result.success) {

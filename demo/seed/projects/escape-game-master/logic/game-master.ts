@@ -95,11 +95,16 @@ async function setExit(unlocked: boolean) {
     const exit = byTopic("switch/escape/exit/state");
     if (!exit)
         return;
+    // Acknowledgement is the honest ceiling. A maglock that has accepted "release"
+    // republishes `locked` immediately; nothing measures whether the door actually
+    // let go. A real installation would use a door sensor or a reed switch, and that
+    // is the upgrade path — not a differently-worded read of the same flag.
     const result = await devices.action(exit.id, "command", { payload: { locked: !unlocked } }, {
-        tier: "observed",
-        deviceId: exit.id,
-        condition: { field: "locked", op: "eq", value: !unlocked },
+        tier: "acknowledged",
         timeoutMs: 5000,
+        evidence: {
+            intent: unlocked ? "Release exit maglock" : "Secure exit maglock",
+        },
     });
     if (result.success) {
         state.set("exitUnlocked", unlocked);
@@ -137,11 +142,14 @@ async function setIntercom(tx: boolean) {
         return;
     const room = String(state.get("currentRoom") || "Library");
     state.set("intercomPending", true);
+    // Acknowledgement is the ceiling: the intercom echoes `tx` on acceptance and
+    // nothing in the room measures whether the audio reached the players.
     const result = await devices.action(intercom.id, "command", { payload: { tx, room } }, {
-        tier: "observed",
-        deviceId: intercom.id,
-        condition: { field: "tx", op: "eq", value: tx },
+        tier: "acknowledged",
         timeoutMs: 5000,
+        evidence: {
+            intent: tx ? "Open intercom to " + room : "Release intercom",
+        },
     });
     state.set("intercomPending", false);
     if (result.success) {

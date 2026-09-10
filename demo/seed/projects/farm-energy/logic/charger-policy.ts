@@ -27,13 +27,18 @@ export async function setCharger(on: boolean, reason: string) {
         return;
     state.set("chargerCommandPending", true);
     setAction((on ? "Enabling" : "Shedding") + " shed charger bank · " + reason);
+    // Acknowledgement is the honest ceiling.
+    //
+    // `watts` looks like a measurement but the charger publishes it as `on ? 450 : 0`
+    // in the same breath as accepting the command — the command scaled to a number,
+    // not a meter reading. A real installation would prove this from the site's own
+    // energy metering, independent of what the charger claims about itself.
     const result = await devices.action(charger.id, "command", { payload: { on } }, {
-        tier: "observed",
-        deviceId: charger.id,
-        condition: on
-            ? { field: "watts", op: "gt", value: 0 }
-            : { field: "watts", op: "eq", value: 0 },
+        tier: "acknowledged",
         timeoutMs: 5000,
+        evidence: {
+            intent: on ? "Enable shed charger bank" : "Shed charger bank",
+        },
     });
     state.set("chargerCommandPending", false);
     if (result.success) {

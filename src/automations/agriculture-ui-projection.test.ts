@@ -199,6 +199,13 @@ describe("Agriculture demo UI projection contract", () => {
       // declarative data spec ({ field, op, value } / { all: [...] }) that the
       // host evaluates natively. Guard against a regression to a function literal.
       expect(automation.scriptSource).not.toMatch(/condition:\s*function/);
+
+      // Not every command carries a condition: where nothing measures the effect, the
+      // honest tier is `acknowledged` and there is no observation to express. See
+      // showcase-proof-tier.test.ts for which commands are held to which tier and why.
+      // This assertion is about the SHAPE of a condition that does exist.
+      if (!/condition:/.test(automation.scriptSource)) return;
+
       // The condition is supplied either directly as a spec object or chosen via
       // a ternary of specs (e.g. `condition: on ? {...} : {...}`).
       expect(automation.scriptSource).toMatch(/condition:\s*(?:\{|[\w$]+\s*\?)/);

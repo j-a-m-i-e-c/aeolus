@@ -10,11 +10,17 @@ export async function transmitCheckIn() {
     if (!radio)
         return;
     state.set("pending", true);
+    // Acknowledgement is the honest ceiling: nothing here hears the transmission.
+    //
+    // The radio sets `tx` as it accepts and drops it again on a timer, so observing
+    // `tx` is the command read back. Proving a transmission actually went out would
+    // need a remote station confirming receipt, which this site has no way to measure.
     const result = await devices.action(radio.id, "command", { payload: { tx: true } }, {
-        tier: "observed",
-        deviceId: radio.id,
-        condition: { field: "tx", op: "eq", value: true },
+        tier: "acknowledged",
         timeoutMs: 5000,
+        evidence: {
+            intent: "Transmit 146.52 MHz check-in",
+        },
     });
     state.set("pending", false);
     if (result.success) {

@@ -10,11 +10,20 @@ export async function setGenerator(on: boolean, reason: string) {
     if (!generator)
         return;
     state.set("pending", true);
+    // Acknowledgement is the honest ceiling until the generator is modelled properly.
+    //
+    // `outputW` would be the right proof — a generator producing 2.2 kW is a fact
+    // about the machine, where `on` is only the contactor agreeing it closed. But the
+    // fixture currently writes `on` and `outputW` in the same update, so observing
+    // `outputW` today would be the same echo wearing a better name. Raising this back
+    // to observed belongs with ramping generator output and integrating battery SOC,
+    // which is where the interesting behaviour lives anyway.
     const result = await devices.action(generator.id, "command", { payload: { on } }, {
-        tier: "observed",
-        deviceId: generator.id,
-        condition: { field: "on", op: "eq", value: on },
+        tier: "acknowledged",
         timeoutMs: 5000,
+        evidence: {
+            intent: on ? "Start backup generator" : "Stop backup generator",
+        },
     });
     state.set("pending", false);
     if (result.success) {
