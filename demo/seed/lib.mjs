@@ -26,7 +26,14 @@ export function createApi(baseUrl) {
     return Math.min(1000 * (2 ** attempt), 15_000);
   }
 
-  async function request(method, path, body, { authenticated = true, retries = 6 } = {}) {
+  /**
+   * @param {object} [opts]
+   * @param {number[]} [opts.tolerate] Status codes to report as `null` instead of
+   *   throwing. For expected, meaningful outcomes — a 404 from deleting something
+   *   that was already absent, a 409 from creating something that already exists —
+   *   where the caller has a real decision to make. Never for unexpected failures.
+   */
+  async function request(method, path, body, { authenticated = true, retries = 6, tolerate = [] } = {}) {
     for (let attempt = 0; ; attempt++) {
       const headers = { "Content-Type": "application/json" };
       if (authenticated && token) headers.Authorization = `Bearer ${token}`;
@@ -47,6 +54,11 @@ export function createApi(baseUrl) {
       const data = await res.json().catch(() => ({}));
       if (res.ok) return data;
 
+      // A tolerated status is an answer, not a failure. Returned as null so the
+      // caller can branch on it — distinguishable from a successful response,
+      // which is always an object.
+      if (tolerate.includes(res.status)) return null;
+
       if (res.status === 429 && attempt < retries) {
         const delay = retryDelayMs(res, attempt);
         console.warn(`  ↻ ${method} ${path} rate-limited; retrying in ${Math.ceil(delay / 1000)}s`);
@@ -61,8 +73,8 @@ export function createApi(baseUrl) {
     }
   }
 
-  async function api(method, path, body) {
-    return request(method, path, body, { authenticated: true });
+  async function api(method, path, body, { tolerate = [] } = {}) {
+    return request(method, path, body, { authenticated: true, tolerate });
   }
 
   /** Authenticate an admin, creating the first admin on a pristine database. */
@@ -232,46 +244,12 @@ export async function fireAutomations(api, ruleIds, times = 4) {
 // ─── Data Store ──────────────────────────────────────────────────────────────
 
 
-/**
- * Clear every Data Store collection and bucket entry.
- *
- * `seed-demo.mjs` is already a destructive whole-demo rebuild (it deletes all
- * automations and replaces the layout), so keeping the Data Store deterministic
- * is safer than accumulating records from previous demo revisions. This is a
- * seed/deployment concern — it is deliberately not exposed as a public-demo UI
- * button where one visitor could erase shared state for everyone else.
- */
-export async function clearDataStore(api) {
-  const collections = await api("GET", "/api/data-store/collections");
-  let deletedCollections = 0;
-  if (Array.isArray(collections)) {
-    for (const collection of collections) {
-      if (!collection || typeof collection.name !== "string") continue;
-      const result = await api("DELETE", `/api/data-store/collections/${encodeURIComponent(collection.name)}`);
-      if (result) deletedCollections += 1;
-    }
-  }
-
-  const buckets = await api("GET", "/api/data-store/buckets");
-  let deletedBucketEntries = 0;
-  if (Array.isArray(buckets)) {
-    for (const bucket of buckets) {
-      if (!bucket || typeof bucket.bucket !== "string") continue;
-      const entries = await api("GET", `/api/data-store/buckets/${encodeURIComponent(bucket.bucket)}`);
-      if (!Array.isArray(entries)) continue;
-      for (const entry of entries) {
-        if (!entry || typeof entry.key !== "string") continue;
-        const result = await api(
-          "DELETE",
-          `/api/data-store/buckets/${encodeURIComponent(bucket.bucket)}/${encodeURIComponent(entry.key)}`,
-        );
-        if (result) deletedBucketEntries += 1;
-      }
-    }
-  }
-
-  console.log(`  ✓ Data Store reset: ${deletedCollections} collections, ${deletedBucketEntries} bucket entries removed`);
-}
+// The unscoped `clearDataStore` that used to live here deleted EVERY collection and
+// EVERY bucket entry on the box, which on a real install meant a reseed of the
+// showcase silently destroyed the operator's own data (Req §12.1: do not delete
+// unrelated user-created collections). Each showcase collection and bucket now resets
+// only itself, in `seedCollection` / `seedBucket`, so the seeder's blast radius is
+// exactly the fixture set it declares.
 
 /** Enable the Data Store with generous demo limits (idempotent). */
 export async function enableDataStore(api) {
@@ -284,24 +262,63 @@ export async function enableDataStore(api) {
 }
 
 /**
- * Create a collection and bulk-write its records (with backdated timestamps).
+ * Seed one showcase collection to its declared shape, replacing whatever was there.
+ *
+ * Rerunnable by construction, and scoped to this one collection: it never touches a
+ * collection the showcase does not declare, so a user's own collections survive a
+ * reseed (Req §12.1).
+ *
+ * The delete comes first because a rerun must REPLACE the fixture set, not append to
+ * it. There is no record-level delete in the Data Store API, so removing the
+ * collection is the only way to reset its contents, and the record cascade is exactly
+ * what is wanted here.
+ *
+ * The 409 path is the interesting one. `db.write()` auto-creates a collection, and
+ * several seeded automations write to these very names — `space` on `* * * * *`,
+ * `wildlife-detection` and `stage-show-sequencer` whenever the simulator publishes.
+ * So a showcase automation can create the collection out from under this function
+ * between the delete and the create. Ordering the Data Store ahead of automation
+ * creation makes that rare rather than routine; tolerating it makes it survivable
+ * either way. Failing instead is what produced
+ * `POST /api/data-store/collections → 409: Collection already exists` on the Pi.
+ *
  * @param {{name: string, description?: string, retentionDays?: number|null,
  *          records: {payload: object, tags?: object, timestamp?: number}[]}} collection
  */
 export async function seedCollection(api, collection) {
-  await api("POST", "/api/data-store/collections", {
-    name: collection.name,
+  const name = encodeURIComponent(collection.name);
+  const shape = {
     description: collection.description,
     retentionDays: collection.retentionDays ?? null,
-  });
+  };
+
+  // Absent is the normal case on a first run, so 404 is an answer rather than a fault.
+  await api("DELETE", `/api/data-store/collections/${name}`, undefined, { tolerate: [404] });
+
+  const created = await api(
+    "POST",
+    "/api/data-store/collections",
+    { name: collection.name, ...shape },
+    { tolerate: [409] },
+  );
+
+  if (created === null) {
+    // An automation auto-created it in the gap. Bring the row up to the declared
+    // shape rather than leaving it with the auto-create defaults — the description
+    // and retention are part of what the showcase is demonstrating.
+    await api("PATCH", `/api/data-store/collections/${name}`, shape);
+  }
+
   for (const rec of collection.records) {
-    await api("POST", `/api/data-store/collections/${collection.name}/records`, {
+    await api("POST", `/api/data-store/collections/${name}/records`, {
       payload: rec.payload,
       tags: rec.tags,
       timestamp: rec.timestamp,
     });
   }
-  console.log(`  ✓ ${collection.name}: ${collection.records.length} records`);
+  console.log(
+    `  ✓ ${collection.name}: ${collection.records.length} records${created === null ? " (adopted an auto-created collection)" : ""}`,
+  );
 }
 
 /**
@@ -310,13 +327,28 @@ export async function seedCollection(api, collection) {
  * @param {{name:string, entries:Record<string, unknown>}} bucket
  */
 export async function seedBucket(api, bucket) {
+  const name = encodeURIComponent(bucket.name);
+
+  // Drop the keys this bucket already holds before writing the declared set.
+  // `PUT` upserts, so a rerun would otherwise leave behind keys from an older
+  // showcase revision — present, stale, and indistinguishable from current ones.
+  // Scoped to this bucket, so buckets the showcase does not declare are untouched.
+  const existing = await api("GET", `/api/data-store/buckets/${name}`, undefined, { tolerate: [404] });
+  if (Array.isArray(existing)) {
+    for (const entry of existing) {
+      if (!entry || typeof entry.key !== "string") continue;
+      await api(
+        "DELETE",
+        `/api/data-store/buckets/${name}/${encodeURIComponent(entry.key)}`,
+        undefined,
+        { tolerate: [404] },
+      );
+    }
+  }
+
   let count = 0;
   for (const [key, value] of Object.entries(bucket.entries || {})) {
-    const result = await api(
-      "PUT",
-      `/api/data-store/buckets/${encodeURIComponent(bucket.name)}/${encodeURIComponent(key)}`,
-      { value },
-    );
+    const result = await api("PUT", `/api/data-store/buckets/${name}/${encodeURIComponent(key)}`, { value });
     if (result) count += 1;
   }
   console.log(`  ✓ ${bucket.name}: ${count} bucket entries`);

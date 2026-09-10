@@ -23,7 +23,6 @@ import {
   createApi,
   cleanSlate,
   enableDataStore,
-  clearDataStore,
   publishDevices,
   createAutomations,
   seedCollection,
@@ -101,11 +100,34 @@ if (WANT_PUBLIC_DEMO) {
 console.log("\n1. Cleaning existing data...");
 await cleanSlate(api);
 
-// 2. Enable + reset Data Store. The seeder is a whole-demo rebuild, so stale
-// records from older showcase revisions should never accumulate invisibly.
+// 2. Enable the Data Store and seed its fixtures.
+//
+// This runs BEFORE automations are created, and the order is load-bearing. `db.write()`
+// auto-creates a collection, and several showcase automations write to the very names
+// seeded here — `space` on `* * * * *`, plus `wildlife-detection` and
+// `stage-show-sequencer` whenever the simulator publishes to their trigger topics.
+// Created first, they would race the collection seeding and win, which is what
+// produced `POST /api/data-store/collections → 409: Collection already exists` on the
+// Pi. With no automations registered yet, nothing can auto-create anything.
+//
+// Each collection and bucket resets only itself, so a reseed replaces the showcase
+// fixture set without touching collections an operator created.
 console.log("\n2. Preparing Data Store...");
 await enableDataStore(api);
-await clearDataStore(api);
+
+console.log("\n2b. Seeding Data Store collections...");
+for (const mod of tabModules) {
+  for (const collection of mod.dataStore || []) {
+    await seedCollection(api, collection);
+  }
+}
+
+// Buckets are intentionally global in the current Data Store model, so showcase
+// buckets are examples rather than tab-owned coordination state.
+console.log("\n2c. Seeding Data Store buckets...");
+for (const bucket of demoBuckets) {
+  await seedBucket(api, bucket);
+}
 
 // 3. Create automations (must exist before devices publish so state populates)
 console.log("\n3. Creating automations...");
@@ -120,21 +142,7 @@ console.log("\n4. Publishing devices...");
 const allDevices = tabModules.flatMap((m) => m.devices);
 await publishDevices(api, allDevices);
 
-// 5. Seed Data Store collections
-console.log("\n5. Seeding Data Store collections...");
-for (const mod of tabModules) {
-  for (const collection of mod.dataStore || []) {
-    await seedCollection(api, collection);
-  }
-}
-
-// 5b. Seed shared key/value buckets. Buckets are intentionally global in the
-// current Data Store model, so they are showcase examples rather than tab-owned
-// coordination state.
-console.log("\n5b. Seeding Data Store buckets...");
-for (const bucket of demoBuckets) {
-  await seedBucket(api, bucket);
-}
+// 5. (Data Store now seeded in step 2, ahead of automation creation — see there.)
 
 // 6. Build dashboard layout
 console.log("\n6. Building dashboard layout...");
