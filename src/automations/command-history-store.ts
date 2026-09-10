@@ -40,6 +40,37 @@ export interface CommandRecord {
   requestedAt: number;
   /** Historical column name: set when the configured command wait is complete. */
   terminalAt?: number;
+
+  // ── Capability snapshot (migration 017) ──
+  //
+  // Frozen at acceptance so presentation can explain WHY a stage was never reached
+  // without consulting the device's present-day profile. Every field is optional
+  // because records written before migration 017 genuinely do not know: absent means
+  // "not recorded", which must not be read as `false`.
+
+  /** The highest tier this command could have proven. */
+  capabilityCeiling?: ConfirmationTier;
+  /** Whether the target declared a correlated-acknowledgement capability. */
+  ackAvailable?: boolean;
+  /** Whether THIS command carried an observation contract. Not a claim about the site. */
+  observationConfigured?: boolean;
+  /** Device whose telemetry settles the question. May be the target itself. */
+  observedDeviceId?: string;
+  /** The observation contract as accepted. Never re-evaluated from here. */
+  conditionSpec?: Record<string, unknown>;
+  /** Integration the command was handed to, e.g. "mqtt". */
+  transportKind?: string;
+  /** Target device's display name at acceptance. */
+  targetDeviceName?: string;
+  /** Observing device's display name at acceptance. */
+  observedDeviceName?: string;
+
+  // ── Author-supplied semantic context ──
+
+  /** What this operation was, e.g. "Transfer 500 L". Sanitised at the boundary. */
+  intentLabel?: string;
+  /** What a satisfied observation means, e.g. "Flow detected". Sanitised at the boundary. */
+  observedLabel?: string;
 }
 
 /** One immutable lifecycle transition for a command. */
@@ -136,6 +167,16 @@ interface CommandRow {
   error: string | null;
   requested_at: number;
   terminal_at: number | null;
+  capability_ceiling: string | null;
+  ack_available: number | null;
+  observation_configured: number | null;
+  observed_device_id: string | null;
+  condition_spec: string | null;
+  transport_kind: string | null;
+  target_device_name: string | null;
+  observed_device_name: string | null;
+  intent_label: string | null;
+  observed_label: string | null;
 }
 
 interface TransitionRow {
@@ -166,7 +207,45 @@ function rowToRecord(row: CommandRow): CommandRecord {
     ...(row.error !== null ? { error: row.error } : {}),
     requestedAt: row.requested_at,
     ...(row.terminal_at !== null ? { terminalAt: row.terminal_at } : {}),
+    // Capability snapshot. Each field is omitted when NULL rather than defaulted,
+    // so a pre-017 record reads as "not recorded" instead of asserting that its
+    // device lacked capabilities it may well have had.
+    ...(row.capability_ceiling !== null
+      ? { capabilityCeiling: row.capability_ceiling as ConfirmationTier }
+      : {}),
+    ...(row.ack_available !== null ? { ackAvailable: row.ack_available === 1 } : {}),
+    ...(row.observation_configured !== null
+      ? { observationConfigured: row.observation_configured === 1 }
+      : {}),
+    ...(row.observed_device_id !== null ? { observedDeviceId: row.observed_device_id } : {}),
+    ...(parseConditionSpec(row.condition_spec) !== undefined
+      ? { conditionSpec: parseConditionSpec(row.condition_spec) as Record<string, unknown> }
+      : {}),
+    ...(row.transport_kind !== null ? { transportKind: row.transport_kind } : {}),
+    ...(row.target_device_name !== null ? { targetDeviceName: row.target_device_name } : {}),
+    ...(row.observed_device_name !== null ? { observedDeviceName: row.observed_device_name } : {}),
+    ...(row.intent_label !== null ? { intentLabel: row.intent_label } : {}),
+    ...(row.observed_label !== null ? { observedLabel: row.observed_label } : {}),
   };
+}
+
+/**
+ * Parse a stored condition snapshot, tolerating malformed JSON.
+ *
+ * Mirrors {@link safeParse}'s stance for per-rung details: a column that cannot be
+ * read costs the caller one explanatory field, and must never fail the whole
+ * command lookup. An array is rejected too — a condition is an object.
+ */
+function parseConditionSpec(json: string | null): Record<string, unknown> | undefined {
+  if (json === null) return undefined;
+  try {
+    const parsed = JSON.parse(json) as unknown;
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function rowToTransition(row: TransitionRow): CommandTransition {
@@ -231,8 +310,11 @@ export class CommandHistoryStore {
           `INSERT INTO command_records (
             command_id, correlation_id, source_kind, source_id, rule_id, execution_id,
             causation_id, target_device_id, action_type, requested_tier, effective_tier,
-            lifecycle_state, success, failure_kind, error, requested_at, terminal_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            lifecycle_state, success, failure_kind, error, requested_at, terminal_at,
+            capability_ceiling, ack_available, observation_configured, observed_device_id,
+            condition_spec, transport_kind, target_device_name, observed_device_name,
+            intent_label, observed_label
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           record.commandId,
@@ -252,6 +334,16 @@ export class CommandHistoryStore {
           record.error ?? null,
           record.requestedAt,
           record.terminalAt ?? null,
+          record.capabilityCeiling ?? null,
+          record.ackAvailable === undefined ? null : record.ackAvailable ? 1 : 0,
+          record.observationConfigured === undefined ? null : record.observationConfigured ? 1 : 0,
+          record.observedDeviceId ?? null,
+          record.conditionSpec !== undefined ? JSON.stringify(record.conditionSpec) : null,
+          record.transportKind ?? null,
+          record.targetDeviceName ?? null,
+          record.observedDeviceName ?? null,
+          record.intentLabel ?? null,
+          record.observedLabel ?? null,
         );
       this.db
         .prepare(

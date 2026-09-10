@@ -54,6 +54,7 @@ import { commandHistoryAndMqttProfile } from "./013-command-history-and-mqtt-pro
 import { automationRulesDropCompletionTier } from "./014-automation-rules-drop-completion-tier.js";
 import { automationProjects } from "./015-automation-projects.js";
 import { promoteLegacyAutomationProjects } from "./016-promote-legacy-automation-projects.js";
+import { commandCapabilitySnapshot } from "./017-command-capability-snapshot.js";
 
 export const migrations: Migration[] = [
   baseline,                      // id 1
@@ -72,4 +73,5 @@ export const migrations: Migration[] = [
   automationRulesDropCompletionTier, // id 14
   automationProjects,                // id 15
   promoteLegacyAutomationProjects,   // id 16
+  commandCapabilitySnapshot,         // id 17
 ];

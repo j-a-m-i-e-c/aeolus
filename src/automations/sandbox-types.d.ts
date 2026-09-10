@@ -137,6 +137,61 @@ interface CommandEvidenceRecord {
   terminalAt?: number;
   /** The rungs, oldest first. */
   transitions: CommandRungRecord[];
+
+  // ── Capability snapshot, frozen when the command was accepted ──
+  //
+  // What makes an unreached stage explainable. Without these, ACKNOWLEDGED simply
+  // being absent could mean the device cannot acknowledge, that this command did not
+  // require it, or that it was required and never came — three different stories.
+  // Snapshotted rather than looked up, so editing a device profile later cannot
+  // rewrite what an old command could have proven.
+  //
+  // All optional: a command recorded before this existed does not know, and absent
+  // means "not recorded" — never `false`.
+
+  /** The highest tier this command could have proven. */
+  capabilityCeiling?: "dispatch" | "acknowledged" | "observed";
+  /** Whether the target declared a correlated-acknowledgement capability. */
+  ackAvailable?: boolean;
+  /**
+   * Whether THIS command carried an observation contract.
+   *
+   * `false` says this command had no observation to satisfy. It does NOT say the
+   * effect is unobservable, nor that the site lacks a suitable sensor.
+   */
+  observationConfigured?: boolean;
+  /** Device whose telemetry settles the question. May be the target itself. */
+  observedDeviceId?: string;
+  /** The observation contract as accepted. */
+  conditionSpec?: Record<string, unknown>;
+  /** Integration the command was handed to, e.g. "mqtt". Names the transport, not the device. */
+  transportKind?: string;
+  /** Target device's display name at acceptance, so old evidence still reads in human terms. */
+  targetDeviceName?: string;
+  /** Observing device's display name at acceptance. */
+  observedDeviceName?: string;
+  /** The author's `evidence.intent` for this command, sanitised. */
+  intentLabel?: string;
+  /** The author's `evidence.observedLabel` for this command, sanitised. */
+  observedLabel?: string;
+}
+
+/**
+ * Author-supplied semantic context for a command.
+ *
+ * The narrow slice of a command record you get to write. Everything that decides
+ * whether the command was *proven* — the lifecycle state, the tier, the devices, the
+ * condition — is platform-owned and cannot be influenced from here, so a caption can
+ * never dress a dispatch up as an observation.
+ *
+ * Both labels are trimmed, stripped of control characters and capped at 120
+ * characters. They are captions, not narration.
+ */
+interface CommandEvidenceLabels {
+  /** What this operation was, e.g. "Transfer 500 L" or "Recall stray livestock". */
+  intent?: string;
+  /** What a satisfied observation means, e.g. "Flow detected". */
+  observedLabel?: string;
 }
 
 interface DeviceActionOptions {
@@ -148,6 +203,12 @@ interface DeviceActionOptions {
   timeoutMs?: number;
   /** Per-call completion tier; omit to use the highest tier the device can prove. */
   tier?: "dispatch" | "acknowledged" | "observed";
+  /**
+   * Human labels recorded alongside the command so a receipt can say WHICH
+   * operation it belongs to. Without this a pane with several buttons shows
+   * evidence that names no action.
+   */
+  evidence?: CommandEvidenceLabels;
 }
 
 interface BulkActionResult {

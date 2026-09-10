@@ -2,7 +2,7 @@
 
 import type { CommandService, ActionDescriptor } from "./command-service.js";
 import type { AutomationScopeResolver, AuthorizationScope } from "./automation-scope-resolver.js";
-import type { ConfirmationTier } from "./command-lifecycle.js";
+import type { CommandIntent, ConfirmationTier } from "./command-lifecycle.js";
 import { isConfirmationTier } from "./completion-tier.js";
 import type { CommandResultCollector } from "./command-result-collector.js";
 import type { AutomationEventService } from "./automation-event-service.js";
@@ -266,12 +266,13 @@ export async function dispatchScriptAction(
   ruleId: string,
   confirm: ConfirmOptions | undefined,
   perCallTier: unknown,
+  intent?: CommandIntent,
 ): Promise<ActionResult> {
   const tier = resolveScriptTier(perCallTier);
   if (!tier.ok) {
     return { success: false, error: tier.error, lifecycleState: "FAILED" };
   }
-  return commandService.execute(descriptor, ruleId, confirm, tier.chosen);
+  return commandService.execute(descriptor, ruleId, confirm, tier.chosen, intent);
 }
 
 /** The plan produced by {@link planAutomationBody}: which action indices the
@@ -511,10 +512,17 @@ const BOOTSTRAP_SCRIPT = `
       var condition = (opts && opts.condition != null) ? opts.condition : undefined;
       var confirmDeviceId = opts ? opts.deviceId : undefined;
       var confirmTimeoutMs = opts ? opts.timeoutMs : undefined;
+      // Semantic evidence labels travel as two plain strings rather than inside the
+      // JSON blob: they are primitives already, and keeping them out of the params
+      // payload stops author caption text from ever reaching the device handler.
+      var evidence = opts ? opts.evidence : undefined;
+      var intentLabel = evidence ? evidence.intent : undefined;
+      var observedLabel = evidence ? evidence.observedLabel : undefined;
       var paramsJson = params === undefined ? undefined : JSON.stringify(params);
       var conditionJson = condition === undefined ? undefined : JSON.stringify(condition);
       var p = actionRef.apply(undefined,
-        [deviceId, actionType, paramsJson, conditionJson, confirmDeviceId, confirmTimeoutMs, tier],
+        [deviceId, actionType, paramsJson, conditionJson, confirmDeviceId, confirmTimeoutMs, tier,
+         intentLabel, observedLabel],
         { result: { promise: true } });
       // Record a logical (non-throwing) command failure on an isolate-global flag
       // so automation() can fail-fast without depending on the user action
@@ -1002,6 +1010,8 @@ export class Sandbox {
         confirmDeviceId?: string,
         confirmTimeoutMs?: number,
         perCallTier?: unknown,
+        intentLabel?: unknown,
+        observedLabel?: unknown,
       ): Promise<ActionResult> {
         // Resolve with a TRANSFERABLE copy, exactly as http.get/state.get do.
         // Returning the bare ActionResult made the isolate receive a Reference to
@@ -1035,6 +1045,10 @@ export class Sandbox {
               ruleId,
               confirm,
               perCallTier,
+              // Passed through as-is; the boundary sanitises and bounds it. Anything
+              // that is not a usable string is dropped there rather than here, so
+              // there is one rule about author text instead of two.
+              { intent: intentLabel as string | undefined, observedLabel: observedLabel as string | undefined },
             ));
             // Push the UNCOPIED Command_Result into the collector for the running
             // executionId (Req 2.4, 4.3, 5.3). Host bookkeeping keeps the real

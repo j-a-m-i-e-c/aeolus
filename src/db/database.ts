@@ -164,9 +164,15 @@ export function initSchema(database: DatabaseType): void {
     ON device_history(device_id, timestamp DESC);
   `);
 
-  // Durable command history (phase-1-runtime-foundations, mirrors migration 013)
-  // so legacy/test databases built via initSchema have it. `terminal_at` is
-  // authoritative for lifecycle completeness, not the lifecycle_state name.
+  // Durable command history (phase-1-runtime-foundations, mirrors migrations 013
+  // and 017) so legacy/test databases built via initSchema have it. `terminal_at`
+  // is authoritative for lifecycle completeness, not the lifecycle_state name.
+  //
+  // The migration-017 columns are declared inline here rather than as ALTERs: this
+  // CREATE only runs when the table is absent, so a fresh database gets them at
+  // once, while an existing one is left to migration 017. Both paths must end up
+  // with the same shape — a command that cannot record its capability ceiling
+  // cannot explain why a stage was skipped.
   database.exec(`
     CREATE TABLE IF NOT EXISTS command_records (
       command_id TEXT PRIMARY KEY,
@@ -185,7 +191,17 @@ export function initSchema(database: DatabaseType): void {
       failure_kind TEXT,
       error TEXT,
       requested_at INTEGER NOT NULL,
-      terminal_at INTEGER
+      terminal_at INTEGER,
+      capability_ceiling TEXT DEFAULT NULL,
+      ack_available INTEGER DEFAULT NULL,
+      observation_configured INTEGER DEFAULT NULL,
+      observed_device_id TEXT DEFAULT NULL,
+      condition_spec TEXT DEFAULT NULL,
+      transport_kind TEXT DEFAULT NULL,
+      target_device_name TEXT DEFAULT NULL,
+      observed_device_name TEXT DEFAULT NULL,
+      intent_label TEXT DEFAULT NULL,
+      observed_label TEXT DEFAULT NULL
     );
   `);
   database.exec(`

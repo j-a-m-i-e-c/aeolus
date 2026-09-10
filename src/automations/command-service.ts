@@ -20,8 +20,10 @@ import { DEFAULT_CONFIRM_TIMEOUT_MS } from "../core/types.js";
 import {
   buildCommandEvidence,
   describeRung,
+  sanitiseCommandIntent,
   selectRequiredTier,
   type CommandEvidence,
+  type CommandIntent,
   type ConfirmationTier,
 } from "./command-lifecycle.js";
 import type { PendingCommandTracker } from "./pending-command-tracker.js";
@@ -219,6 +221,7 @@ export class CommandService {
     source: CommandSource | string,
     confirm?: ConfirmOptions,
     requiredTier?: ConfirmationTier,
+    intent?: CommandIntent,
   ): Promise<ActionResult> {
     // Coerce a bare string to an automation source so existing automation call
     // sites (sandbox host callbacks, form-rule closures, executeSequence) work
@@ -314,6 +317,10 @@ export class CommandService {
       targetDeviceId,
     );
 
+    // Author-supplied semantic context, normalised once here so nothing downstream
+    // has to trust it. Bounded, control characters stripped, empties dropped.
+    const evidenceIntent = sanitiseCommandIntent(intent);
+
     // Assign a correlation id for any command that will be tracked, and attach
     // an MQTT envelope only when the device is expected to reply on a response
     // topic (i.e. it declares an acknowledgement capability).
@@ -333,6 +340,12 @@ export class CommandService {
     // returning FAILED is safer than a physical action with no record (§8).
     if (store && commandId) {
       const ctx = this.deps.executionContext?.current();
+      // Snapshot the capability context now, while the device profile that decided
+      // it is still the one in force. Read back later, this is what lets the
+      // ACKNOWLEDGED stage say "this device cannot acknowledge" rather than leaving
+      // an unexplained gap — and what stops a profile edit next month from
+      // rewriting what this command could have proven.
+      const observedFor = hasConfirm ? (confirm?.deviceId ?? targetDeviceId) : undefined;
       const record: CommandRecord = {
         commandId,
         ...(correlationId ? { correlationId } : {}),
@@ -350,6 +363,16 @@ export class CommandService {
         effectiveTier: tier,
         lifecycleState: "REQUESTED",
         requestedAt: Date.now(),
+        capabilityCeiling: ceiling,
+        ackAvailable: hasAckCapability,
+        observationConfigured: hasConfirm,
+        ...(observedFor !== undefined ? { observedDeviceId: observedFor } : {}),
+        ...(confirm?.conditionSpec ? { conditionSpec: confirm.conditionSpec } : {}),
+        ...this.resolveEvidenceIdentity(targetDeviceId, observedFor),
+        ...(evidenceIntent?.intent !== undefined ? { intentLabel: evidenceIntent.intent } : {}),
+        ...(evidenceIntent?.observedLabel !== undefined
+          ? { observedLabel: evidenceIntent.observedLabel }
+          : {}),
       };
       // The opening rung states the contract: what this command must prove, on
       // which device, and within how long. Recorded before dispatch so the
@@ -658,6 +681,43 @@ export class CommandService {
   /** Resolve the acknowledgement capability declared for a device, if any. */
   private resolveAckCapability(deviceId: string) {
     return this.deps.connectorManager.getAcknowledgementCapability?.(deviceId);
+  }
+
+  /**
+   * Resolve the human-readable identity of the devices involved, for the record's
+   * capability snapshot.
+   *
+   * Names are copied rather than referenced because the record outlives the device:
+   * a renamed or deleted pump would otherwise turn last month's evidence into a bare
+   * UUID. The ids stay the durable identity; these are display only, and each is
+   * omitted when the registry cannot answer, so a missing name is visibly missing
+   * rather than a fabricated placeholder.
+   *
+   * `transportKind` names the integration the command was handed to — the honest
+   * subject of DISPATCHED. It is the target's integration, never the observer's:
+   * the observing sensor may well arrive over a different transport, and the
+   * dispatch was not made to it.
+   */
+  private resolveEvidenceIdentity(
+    targetDeviceId: string,
+    observedDeviceId?: string,
+  ): { transportKind?: string; targetDeviceName?: string; observedDeviceName?: string } {
+    const registry = this.deps.deviceRegistry;
+    if (!registry) return {};
+
+    const target = registry.getById(targetDeviceId);
+    const observed =
+      observedDeviceId !== undefined && observedDeviceId !== targetDeviceId
+        ? registry.getById(observedDeviceId)
+        : target;
+
+    return {
+      ...(target?.integration ? { transportKind: target.integration } : {}),
+      ...(target?.name ? { targetDeviceName: target.name } : {}),
+      ...(observedDeviceId !== undefined && observed?.name
+        ? { observedDeviceName: observed.name }
+        : {}),
+    };
   }
 
   /** Base response-topic space for command acknowledgements. */
