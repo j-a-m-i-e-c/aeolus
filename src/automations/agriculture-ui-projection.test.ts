@@ -135,8 +135,36 @@ describe("Agriculture demo UI projection contract", () => {
     // reported position is now projected and drawn too.
     expect(waterAutomation.scriptSource).toContain("switch/farm/shed-fill/state");
     expect(waterAutomation.scriptSource).toContain("switch/farm/house-fill/state");
-    expect(waterAutomation.scriptSource).toMatch(/state\.set\(\s*["']shedValveOn["']/);
+    expect(waterAutomation.scriptSource).toMatch(/state\.set\(\s*["']officeValveOn["']/);
     expect(waterAutomation.scriptSource).toMatch(/state\.set\(\s*["']houseValveOn["']/);
+  });
+
+  it("Water Management leaves a receipt for every command it issues", () => {
+    // showcase-cleanup §4.4 — Water is the reference Command Proof example, so no
+    // command it issues may be invisible. The automatic downstream refill used to
+    // project nothing, so the best-evidenced thing the automation did happened without
+    // a trace: an independent level sensor proving the tank came back up.
+    const source = waterAutomation.scriptSource;
+    const commands = [...source.matchAll(/devices\.action\(/g)].length;
+    const receipts = [...source.matchAll(/devices\.commandEvidence\(/g)].length;
+    expect(commands).toBeGreaterThan(0);
+    expect(receipts, "every devices.action() must project its evidence").toBe(commands);
+  });
+
+  it("Water Management names what each command was for, not what it was mechanically", () => {
+    // §2.4. "device_action" beside three buttons tells an operator nothing; the intent
+    // is what makes a receipt legible. Every command carries one.
+    const source = waterAutomation.scriptSource;
+    const commands = [...source.matchAll(/devices\.action\(/g)].length;
+    const intents = [...source.matchAll(/intent:/g)].length;
+    expect(intents, "every devices.action() must carry an evidence intent").toBe(commands);
+  });
+
+  it("Water Management proves a refill with the tank's level, not the valve's own flag", () => {
+    // §1.3. A valve reporting `on` is an echo of the command. The receiving tank's
+    // level is a separate physical measurement, and it is what the command observes.
+    expect(waterAutomation.scriptSource).toMatch(/deviceId:\s*tank\.id/);
+    expect(waterAutomation.scriptSource).toMatch(/condition:\s*\{\s*field:\s*["']value["']/);
   });
 
   it("Water Management keeps a transfer active until the observed stop verifies", () => {

@@ -4,17 +4,23 @@ import { reconcileDownstream } from "./distribution";
 import { byTopic, initialiseWaterState, setAction } from "./runtime";
 import { startTransfer, stopPump } from "./transfer";
 export { initialiseWaterState } from "./runtime";
+// Named after the physical system, which is not what the MQTT topics are named after.
+// `sensor/farm/dam` is the shed catchment and `sensor/farm/shed-tank` is the office
+// tank — historical addresses that stay put because a topic is a device's identity and
+// renaming one orphans its registered device row. Everything above the wire uses the
+// vocabulary the pane uses, so reading this file tells the same story as looking at it
+// (showcase-cleanup §4.3).
 type WaterSnapshot = {
-    damPct: number;
+    sourcePct: number;
     headerPct: number;
     soc: number;
     pumpOn: boolean;
-    shedPct: number;
+    officePct: number;
     housePct: number;
     flowLpm: number;
     flowTotal: number;
     physicalBatchActive: boolean;
-    shedValveOn: boolean;
+    officeValveOn: boolean;
     houseValveOn: boolean;
 };
 export async function handleWaterOperatorEvent(event: string | undefined) {
@@ -44,7 +50,7 @@ export async function handleWaterOperatorEvent(event: string | undefined) {
         state.set("recoveryHoldUntil", 0);
         state.set("distributionActive", false);
         state.set("houseRefillActive", false);
-        state.set("shedRefillActive", false);
+        state.set("officeRefillActive", false);
         state.set("transferActive", false);
         state.set("transferStopping", false);
         state.set("transferMode", "idle");
@@ -68,35 +74,35 @@ export function projectWaterTelemetry(topic: string): WaterSnapshot {
     const pump = byTopic("switch/farm/dam-pump/state");
     const flow = byTopic("sensor/farm/transfer-flow");
     const header = byTopic("sensor/farm/header-tank");
-    const dam = byTopic("sensor/farm/dam");
+    const source = byTopic("sensor/farm/dam");
     const battery = byTopic("sensor/farm/energy/battery");
-    const shed = byTopic("sensor/farm/shed-tank");
+    const office = byTopic("sensor/farm/shed-tank");
     const house = byTopic("sensor/farm/house-tank");
     // The two header-feed valves report their own position. Read opportunistically:
     // byTopic() returns each device's last published state regardless of which topic
     // woke this automation, and the valve topics are not in isWaterTelemetry() — a
     // valve moving does not trigger a policy pass, it is only drawn.
-    const shedValve = byTopic("switch/farm/shed-fill/state");
+    const officeValve = byTopic("switch/farm/shed-fill/state");
     const houseValve = byTopic("switch/farm/house-fill/state");
     const snapshot: WaterSnapshot = {
-        damPct: Number(dam && dam.state && dam.state.value),
+        sourcePct: Number(source && source.state && source.state.value),
         headerPct: Number(header && header.state && header.state.value),
         soc: Number(battery && battery.state && battery.state.soc),
         pumpOn: Boolean(pump && pump.state && pump.state.on),
-        shedPct: Number(shed && shed.state && shed.state.value),
+        officePct: Number(office && office.state && office.state.value),
         housePct: Number(house && house.state && house.state.value),
         flowLpm: Number(flow && flow.state && flow.state.litresPerMinute),
         flowTotal: Number(flow && flow.state && flow.state.totalLitres),
         physicalBatchActive: Boolean(flow && flow.state && flow.state.batchActive),
-        shedValveOn: Boolean(shedValve && shedValve.state && shedValve.state.on),
+        officeValveOn: Boolean(officeValve && officeValve.state && officeValve.state.on),
         houseValveOn: Boolean(houseValve && houseValve.state && houseValve.state.on),
     };
-    if (!isNaN(snapshot.damPct))
-        state.set("damPct", snapshot.damPct);
+    if (!isNaN(snapshot.sourcePct))
+        state.set("sourcePct", snapshot.sourcePct);
     if (!isNaN(snapshot.headerPct))
         state.set("headerPct", snapshot.headerPct);
-    if (!isNaN(snapshot.shedPct))
-        state.set("shedPct", snapshot.shedPct);
+    if (!isNaN(snapshot.officePct))
+        state.set("officePct", snapshot.officePct);
     if (!isNaN(snapshot.housePct))
         state.set("housePct", snapshot.housePct);
     if (!isNaN(snapshot.flowLpm))
@@ -107,7 +113,7 @@ export function projectWaterTelemetry(topic: string): WaterSnapshot {
     // The valve controller's own position. Corroboration, not proof: that a valve
     // says it is open is a different fact from water having arrived, and the refill
     // command already proves the second one against the receiving tank's level.
-    state.set("shedValveOn", snapshot.shedValveOn);
+    state.set("officeValveOn", snapshot.officeValveOn);
     state.set("houseValveOn", snapshot.houseValveOn);
     if (!isNaN(snapshot.soc))
         state.set("batterySoc", snapshot.soc);
@@ -118,7 +124,7 @@ export function projectWaterTelemetry(topic: string): WaterSnapshot {
     }
     else if (pending === "morning-demand"
         && ((topic === "sensor/farm/house-tank" && !isNaN(snapshot.housePct) && snapshot.housePct <= 50)
-            || (topic === "sensor/farm/shed-tank" && !isNaN(snapshot.shedPct) && snapshot.shedPct <= 60))) {
+            || (topic === "sensor/farm/shed-tank" && !isNaN(snapshot.officePct) && snapshot.officePct <= 60))) {
         state.set("demoScenarioPending", "");
     }
     return snapshot;
@@ -153,12 +159,12 @@ export async function reconcileBatchTransfer(snapshot: WaterSnapshot) {
 }
 export function publishSourceReserve(snapshot: WaterSnapshot) {
     const sourceLow = Boolean(state.get("sourceLowActive"));
-    if (!isNaN(snapshot.damPct) && snapshot.damPct <= 10 && !sourceLow) {
+    if (!isNaN(snapshot.sourcePct) && snapshot.sourcePct <= 10 && !sourceLow) {
         state.set("sourceLowActive", true);
         setAction("Source water reserve low");
-        events.emit("farm/water/source-low", { damPct: snapshot.damPct });
+        events.emit("farm/water/source-low", { sourcePct: snapshot.sourcePct });
     }
-    else if (!isNaN(snapshot.damPct) && snapshot.damPct > 12 && sourceLow) {
+    else if (!isNaN(snapshot.sourcePct) && snapshot.sourcePct > 12 && sourceLow) {
         state.set("sourceLowActive", false);
     }
 }
@@ -175,7 +181,7 @@ export async function reconcileWaterPolicy(snapshot: WaterSnapshot, pumpOn: bool
         state.set("headerLowActive", true);
         const targetLitres = Math.max(500, Math.round((72 - headerPct) * 50));
         setAction("Header reserve low · automatic recovery requested");
-        events.emit("farm/water/header-low", { headerPct, damPct: snapshot.damPct });
+        events.emit("farm/water/header-low", { headerPct, sourcePct: snapshot.sourcePct });
         await startTransfer(targetLitres, "automatic-header-recovery");
     }
     else if (!isNaN(headerPct) && headerPct > 35 && headerLow) {

@@ -56,7 +56,7 @@ import WaterManagementDashboard from "./WaterManagementDashboard";
 
 export default function WaterManagement(aeolus: CustomComponentProps) {
   const model = {
-    damPct: aeolus.read("damPct"),
+    sourcePct: aeolus.read("sourcePct"),
     headerPct: aeolus.read("headerPct"),
     pumpOn: aeolus.read("pumpOn"),
     batterySoc: aeolus.read("batterySoc"),

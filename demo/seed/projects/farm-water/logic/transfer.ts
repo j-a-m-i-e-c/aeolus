@@ -49,23 +49,29 @@ export async function stopPump(reason: string) {
         });
     }
 }
-export async function startTransfer(requestedLitres: number, source: string) {
+// `trigger` is what asked for the transfer — an operator button or the automatic
+// header recovery. It used to be called `source`, which collided with the water source
+// once that stopped being called the dam; the collision was the name admitting it was
+// doing two jobs.
+export async function startTransfer(requestedLitres: number, trigger: string) {
     const pump = byTopic("switch/farm/dam-pump/state");
     const flow = byTopic("sensor/farm/transfer-flow");
     const header = byTopic("sensor/farm/header-tank");
-    const dam = byTopic("sensor/farm/dam");
+    // `sensor/farm/dam` is the shed catchment. The topic is a legacy address kept
+    // because it is the device's identity; the name here is the physical thing.
+    const source = byTopic("sensor/farm/dam");
     const battery = byTopic("sensor/farm/energy/battery");
-    if (!pump || !flow || !header || !dam) {
+    if (!pump || !flow || !header || !source) {
         setAction("Transfer blocked: water hardware unavailable");
         return;
     }
-    const damPct = Number(dam.state && dam.state.value);
+    const sourcePct = Number(source.state && source.state.value);
     const headerPct = Number(header.state && header.state.value);
     const soc = Number(battery && battery.state && battery.state.soc);
     const energyAllowed = !battery || battery.state.available !== false;
-    if (!isNaN(damPct) && damPct <= 10) {
+    if (!isNaN(sourcePct) && sourcePct <= 10) {
         setAction("Transfer blocked: source reserve low");
-        events.emit("farm/water/transfer-blocked", { reason: "source reserve low", damPct });
+        events.emit("farm/water/transfer-blocked", { reason: "source reserve low", sourcePct });
         return;
     }
     if (!energyAllowed || (!isNaN(soc) && soc < 30)) {
@@ -83,9 +89,9 @@ export async function startTransfer(requestedLitres: number, source: string) {
     }
     const requested = Math.max(100, Math.min(3000, Number(requestedLitres) || 500));
     const headerLitres = Math.max(0, Number(header.state && header.state.litres) || (isNaN(headerPct) ? 0 : headerPct * 50));
-    const damLitres = Math.max(0, Number(dam.state && dam.state.litres) || (isNaN(damPct) ? 0 : damPct * 600));
+    const sourceLitres = Math.max(0, Number(source.state && source.state.litres) || (isNaN(sourcePct) ? 0 : sourcePct * 600));
     const headerHeadroom = Math.max(0, 5000 - headerLitres);
-    const sourceAboveReserve = Math.max(0, damLitres - 6000);
+    const sourceAboveReserve = Math.max(0, sourceLitres - 6000);
     const litres = Math.floor(Math.min(requested, headerHeadroom, sourceAboveReserve));
     if (litres < 100) {
         setAction("Transfer blocked: insufficient safe source/headroom for a batch");
@@ -93,11 +99,11 @@ export async function startTransfer(requestedLitres: number, source: string) {
     }
     const startTotal = Math.max(0, Number(flow.state && flow.state.totalLitres) || 0);
     state.set("transferActive", true);
-    state.set("transferMode", source === "automatic-header-recovery" ? "automatic" : "manual");
+    state.set("transferMode", trigger === "automatic-header-recovery" ? "automatic" : "manual");
     state.set("transferTargetLitres", litres);
     state.set("transferStartTotalLitres", startTotal);
     state.set("transferProgressLitres", 0);
-    setAction((source === "automatic-header-recovery" ? "Automatic recovery" : "Operator batch") + " · requesting " + litres + " L from shed catchment");
+    setAction((trigger === "automatic-header-recovery" ? "Automatic recovery" : "Operator batch") + " · requesting " + litres + " L from shed catchment");
     const result = await devices.action(pump.id, "command", { payload: { on: true, litres } }, {
         tier: "observed",
         deviceId: flow.id,
@@ -112,8 +118,8 @@ export async function startTransfer(requestedLitres: number, source: string) {
     });
     state.set("lastCommand", devices.commandEvidence(result.commandId));
     if (result.success) {
-        setAction((source === "automatic-header-recovery" ? "Automatic recovery" : litres + " L batch") + " running · flow verified");
-        events.emit("farm/water/transfer-started", { litres, source: source || "automation", lifecycleState: result.lifecycleState });
+        setAction((trigger === "automatic-header-recovery" ? "Automatic recovery" : litres + " L batch") + " running · flow verified");
+        events.emit("farm/water/transfer-started", { litres, source: trigger || "automation", lifecycleState: result.lifecycleState });
     }
     else {
         state.set("transferActive", false);

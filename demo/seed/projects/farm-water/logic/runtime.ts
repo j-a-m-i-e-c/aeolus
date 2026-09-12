@@ -12,8 +12,8 @@ function init(key: string, value: unknown) {
 export function initialiseWaterState() {
     init("distributionActive", false);
     init("houseRefillActive", false);
-    init("shedRefillActive", false);
-    init("shedValveOn", false);
+    init("officeRefillActive", false);
+    init("officeValveOn", false);
     init("houseValveOn", false);
     init("transferActive", false);
     init("transferStopping", false);

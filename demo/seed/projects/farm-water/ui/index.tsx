@@ -7,9 +7,9 @@ import { createWaterDemoActions } from "./demo-actions";
 
 export default function WaterManagement(aeolus: CustomComponentProps) {
   const water = {
-    sourcePct: aeolus.read("damPct"),
+    sourcePct: aeolus.read("sourcePct"),
     headerPct: aeolus.read("headerPct"),
-    officePct: aeolus.read("shedPct"),
+    officePct: aeolus.read("officePct"),
     housePct: aeolus.read("housePct"),
     pumpOn: aeolus.read("pumpOn"),
     flowLpm: aeolus.read("flowLpm"),
@@ -17,8 +17,8 @@ export default function WaterManagement(aeolus: CustomComponentProps) {
     energyAllowed: aeolus.read("energyAllowed"),
     distributionActive: aeolus.read("distributionActive"),
     houseRefillActive: aeolus.read("houseRefillActive"),
-    shedRefillActive: aeolus.read("shedRefillActive"),
-    shedValveOn: aeolus.read("shedValveOn"),
+    officeRefillActive: aeolus.read("officeRefillActive"),
+    officeValveOn: aeolus.read("officeValveOn"),
     houseValveOn: aeolus.read("houseValveOn"),
     transferActive: aeolus.read("transferActive"),
     transferStopping: aeolus.read("transferStopping"),

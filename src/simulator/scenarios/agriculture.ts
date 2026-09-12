@@ -902,7 +902,7 @@ export function createAgricultureScenario(): SimulatorScenario {
 
   const pump = commandDefinition(
     AGRICULTURE_DEVICE_KEYS.pump,
-    "Dam Transfer Pump",
+    "Transfer Pump",
     AGRICULTURE_STATE_TOPICS.pump,
     AGRICULTURE_COMMAND_TOPICS.pump,
     { ...INITIAL.pump },
@@ -923,7 +923,7 @@ export function createAgricultureScenario(): SimulatorScenario {
 
   const shedFill = commandDefinition(
     AGRICULTURE_DEVICE_KEYS.shedFill,
-    "Shed Tank Fill Valve",
+    "Office Tank Fill Valve",
     AGRICULTURE_STATE_TOPICS.shedFill,
     AGRICULTURE_COMMAND_TOPICS.shedFill,
     { ...INITIAL.shedFill },
@@ -1002,12 +1002,18 @@ export function createAgricultureScenario(): SimulatorScenario {
   );
 
   const devices: AnyDeviceDefinition[] = [
-    sensorDefinition(AGRICULTURE_DEVICE_KEYS.dam, "Farm Dam", AGRICULTURE_STATE_TOPICS.dam, { ...INITIAL.dam }, env),
+    // Display names describe the physical system. The keys and topics beside them are
+    // legacy addresses — `farm-dam` is the shed catchment and `farm-shed-tank` is the
+    // office tank — and they stay put because a key and a topic are device identity:
+    // renaming either registers a new device and orphans the old row. A display name is
+    // not identity, and it is what an operator reads in the device list and in a command
+    // receipt, so it is the one that has to be true (showcase-cleanup §4.3).
+    sensorDefinition(AGRICULTURE_DEVICE_KEYS.dam, "Shed Catchment Tank", AGRICULTURE_STATE_TOPICS.dam, { ...INITIAL.dam }, env),
     sensorDefinition(AGRICULTURE_DEVICE_KEYS.header, "Header Tank", AGRICULTURE_STATE_TOPICS.header, { ...INITIAL.header }, env),
-    sensorDefinition(AGRICULTURE_DEVICE_KEYS.shed, "Shed Tank", AGRICULTURE_STATE_TOPICS.shed, { ...INITIAL.shed }, env),
+    sensorDefinition(AGRICULTURE_DEVICE_KEYS.shed, "Office Tank", AGRICULTURE_STATE_TOPICS.shed, { ...INITIAL.shed }, env),
     sensorDefinition(AGRICULTURE_DEVICE_KEYS.house, "House Tank", AGRICULTURE_STATE_TOPICS.house, { ...INITIAL.house }, env),
     pump,
-    sensorDefinition(AGRICULTURE_DEVICE_KEYS.flow, "Transfer Flow", AGRICULTURE_STATE_TOPICS.flow, { ...INITIAL.flow }, env),
+    sensorDefinition(AGRICULTURE_DEVICE_KEYS.flow, "Transfer Flow Meter", AGRICULTURE_STATE_TOPICS.flow, { ...INITIAL.flow }, env),
     shedFill,
     houseFill,
     sensorDefinition(AGRICULTURE_DEVICE_KEYS.energiser, "Fence Energiser", AGRICULTURE_STATE_TOPICS.energiser, { ...INITIAL.energiser }, env),
