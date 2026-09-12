@@ -14,6 +14,8 @@ type WaterSnapshot = {
     flowLpm: number;
     flowTotal: number;
     physicalBatchActive: boolean;
+    shedValveOn: boolean;
+    houseValveOn: boolean;
 };
 export async function handleWaterOperatorEvent(event: string | undefined) {
     if (event === "transfer-500")
@@ -70,6 +72,12 @@ export function projectWaterTelemetry(topic: string): WaterSnapshot {
     const battery = byTopic("sensor/farm/energy/battery");
     const shed = byTopic("sensor/farm/shed-tank");
     const house = byTopic("sensor/farm/house-tank");
+    // The two header-feed valves report their own position. Read opportunistically:
+    // byTopic() returns each device's last published state regardless of which topic
+    // woke this automation, and the valve topics are not in isWaterTelemetry() — a
+    // valve moving does not trigger a policy pass, it is only drawn.
+    const shedValve = byTopic("switch/farm/shed-fill/state");
+    const houseValve = byTopic("switch/farm/house-fill/state");
     const snapshot: WaterSnapshot = {
         damPct: Number(dam && dam.state && dam.state.value),
         headerPct: Number(header && header.state && header.state.value),
@@ -80,6 +88,8 @@ export function projectWaterTelemetry(topic: string): WaterSnapshot {
         flowLpm: Number(flow && flow.state && flow.state.litresPerMinute),
         flowTotal: Number(flow && flow.state && flow.state.totalLitres),
         physicalBatchActive: Boolean(flow && flow.state && flow.state.batchActive),
+        shedValveOn: Boolean(shedValve && shedValve.state && shedValve.state.on),
+        houseValveOn: Boolean(houseValve && houseValve.state && houseValve.state.on),
     };
     if (!isNaN(snapshot.damPct))
         state.set("damPct", snapshot.damPct);
@@ -94,6 +104,11 @@ export function projectWaterTelemetry(topic: string): WaterSnapshot {
     if (!isNaN(snapshot.flowTotal))
         state.set("flowTotalLitres", snapshot.flowTotal);
     state.set("pumpOn", snapshot.pumpOn);
+    // The valve controller's own position. Corroboration, not proof: that a valve
+    // says it is open is a different fact from water having arrived, and the refill
+    // command already proves the second one against the receiving tank's level.
+    state.set("shedValveOn", snapshot.shedValveOn);
+    state.set("houseValveOn", snapshot.houseValveOn);
     if (!isNaN(snapshot.soc))
         state.set("batterySoc", snapshot.soc);
     state.set("energyAllowed", !battery || (battery.state && battery.state.available !== false && (isNaN(snapshot.soc) || snapshot.soc >= 30)));

@@ -22,6 +22,14 @@ export default function WaterManagementDashboard({ model, actions }: {
     const distributionActive = Boolean(model.distributionActive);
     const houseRefill = Boolean(model.houseRefillActive);
     const shedRefill = Boolean(model.shedRefillActive);
+    // Valve position from two sources that agree about position and say nothing about
+    // delivery. The controller's own `on` flag is the physical reading, but it is only
+    // true for about a second after the valve is commanded and a valve moving does not
+    // wake this automation, so it can be missed. The in-flight refill covers the whole
+    // window in which Aeolus holds an accepted open command. Proof that water actually
+    // moved is the receiving tank's level, which is what the command observes.
+    const officeValveOpen = shedRefill || Boolean(model.shedValveOn);
+    const houseValveOpen = houseRefill || Boolean(model.houseValveOn);
     const transferActive = Boolean(model.transferActive);
     const transferStopping = Boolean(model.transferStopping);
     const transferMode = String(model.transferMode ?? "idle");
@@ -57,7 +65,7 @@ export default function WaterManagementDashboard({ model, actions }: {
         </div>
       </div>
 
-      <WaterSchematic source={source} header={header} office={office} house={house} moving={moving} pumpOn={pumpOn} officeRefill={shedRefill} houseRefill={houseRefill} phase={phase}/>
+      <WaterSchematic source={source} header={header} office={office} house={house} moving={moving} pumpOn={pumpOn} officeRefill={shedRefill} houseRefill={houseRefill} officeValveOpen={officeValveOpen} houseValveOpen={houseValveOpen} phase={phase}/>
 
       {transferTarget > 0 && <div style={{ marginTop: 8, padding: "7px 9px", border: "1px solid #234651", borderRadius: 8, background: "#09191E" }}>
         <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#718B91", marginBottom: 5 }}>

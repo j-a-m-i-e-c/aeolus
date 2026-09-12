@@ -18,6 +18,8 @@ export default function WaterManagement(aeolus: CustomComponentProps) {
     distributionActive: aeolus.read("distributionActive"),
     houseRefillActive: aeolus.read("houseRefillActive"),
     shedRefillActive: aeolus.read("shedRefillActive"),
+    shedValveOn: aeolus.read("shedValveOn"),
+    houseValveOn: aeolus.read("houseValveOn"),
     transferActive: aeolus.read("transferActive"),
     transferStopping: aeolus.read("transferStopping"),
     transferMode: aeolus.read("transferMode"),

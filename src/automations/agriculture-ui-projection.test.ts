@@ -109,6 +109,36 @@ describe("Agriculture demo UI projection contract", () => {
     expect(waterAutomation.scriptSource).toContain("batch volume reached");
   });
 
+  it("Water Management puts each tank's level sensor at the level it reports", () => {
+    // showcase-cleanup §4.1. The float used to be pinned at a fixed fraction of tank
+    // height while the fill moved underneath it, so the sensor read as decoration
+    // rather than as the source of the number beside it. One computed waterline now
+    // places both, which is the §1.1 rule: a visual projects telemetry, it does not
+    // invent a position. A fixed-fraction vertical placement is the regression.
+    expect(waterAutomation.uiSource).toMatch(/const\s+waterlineY\s*=/);
+    expect(waterAutomation.uiSource).toMatch(/translate\(\$\{sensorX\}\s+\$\{waterlineY\}\)/);
+    expect(waterAutomation.uiSource).not.toMatch(/translate\(\$\{sensorX\}\s+\$\{props\.h\s*\*/);
+  });
+
+  it("Water Management labels its valves instead of drawing an unexplained letter", () => {
+    // showcase-cleanup §4.2 and §13.3: a visitor could not decode a small circle
+    // containing "V". The state is now spelled out, so the symbol needs no legend.
+    expect(waterAutomation.uiSource).toContain("VALVE OPEN");
+    expect(waterAutomation.uiSource).toContain("VALVE CLOSED");
+    // No bare single-letter glyph left anywhere in the pane.
+    expect(waterAutomation.uiSource).not.toMatch(/>\s*V\s*<\/text>/);
+  });
+
+  it("Water Management draws valve position from the valve, not from the pipe animation", () => {
+    // The valve graphic used to be driven solely by "a refill command is in flight",
+    // which is a fact about Aeolus rather than about the valve. The controller's own
+    // reported position is now projected and drawn too.
+    expect(waterAutomation.scriptSource).toContain("switch/farm/shed-fill/state");
+    expect(waterAutomation.scriptSource).toContain("switch/farm/house-fill/state");
+    expect(waterAutomation.scriptSource).toMatch(/state\.set\(\s*["']shedValveOn["']/);
+    expect(waterAutomation.scriptSource).toMatch(/state\.set\(\s*["']houseValveOn["']/);
+  });
+
   it("Water Management keeps a transfer active until the observed stop verifies", () => {
     // stopPump() owns transferActive=false after zero flow is observed. Clearing it
     // before awaiting stopPump() would suppress retry semantics after a failed stop.

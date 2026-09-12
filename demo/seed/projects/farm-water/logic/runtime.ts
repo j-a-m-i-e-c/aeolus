@@ -13,6 +13,8 @@ export function initialiseWaterState() {
     init("distributionActive", false);
     init("houseRefillActive", false);
     init("shedRefillActive", false);
+    init("shedValveOn", false);
+    init("houseValveOn", false);
     init("transferActive", false);
     init("transferStopping", false);
     init("transferMode", "idle");
