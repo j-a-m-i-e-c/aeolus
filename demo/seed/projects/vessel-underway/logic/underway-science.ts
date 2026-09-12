@@ -5,6 +5,29 @@ function byTopic(wanted: string) {
 function setAction(label: string) {
     state.set("lastAction", { label, at: Date.now() });
 }
+/**
+ * Report the surface-water stream to whoever is aggregating it.
+ *
+ * Emitted from this automation's own state rather than from a device read, so a caller
+ * that has just commanded the intake pump reports the pump it commanded. See
+ * setSamplingPump for why reading the devices there would report the opposite.
+ */
+export function publishUnderwaySummary() {
+    events.emit("vessel/summary/underway", {
+        tsgPumpOn: Boolean(state.get("pumpOn")),
+        tsgFlow: Number(state.get("flow") || 0),
+        sst: Number(state.get("sst") || 0),
+        surfaceSalinity: Number(state.get("salinity") || 0),
+        chlorophyll: Number(state.get("chlorophyll") || 0),
+        frontDetected: Boolean(state.get("frontDetected")),
+    });
+}
+/**
+ * Project the thermosalinograph and intake-pump readings.
+ *
+ * Correct wherever this path runs because a device published — the snapshot is then the
+ * state that woke the automation. Not correct straight after issuing a command.
+ */
 export function projectUnderwayState() {
     const tsg = byTopic("sensor/underway/tsg");
     const pump = byTopic("switch/vessel/tsg-pump/state");
@@ -37,14 +60,7 @@ export function projectUnderwayState() {
             }]).slice(-18);
         state.set("profile", profile);
     }
-    events.emit("vessel/summary/underway", {
-        tsgPumpOn: pumpOn,
-        tsgFlow: isNaN(flow) ? 0 : flow,
-        sst: isNaN(sst) ? 0 : sst,
-        surfaceSalinity: isNaN(salinity) ? 0 : salinity,
-        chlorophyll: isNaN(chlorophyll) ? 0 : chlorophyll,
-        frontDetected: Boolean(state.get("frontDetected")),
-    });
+    publishUnderwaySummary();
     return { sst, salinity, flow };
 }
 export async function setSamplingPump(on: boolean) {
@@ -74,12 +90,24 @@ export async function setSamplingPump(on: boolean) {
     // is the question behind all of them.
     state.set("lastCommand", devices.commandEvidence(result.commandId));
     if (result.success) {
+        // Record the pump we commanded. This used to call projectUnderwayState(), which
+        // re-reads devices.list() — and that list is a snapshot taken once at the start of
+        // the execution, so it still described the intake as it was BEFORE the command. A
+        // verified start therefore projected "NO SAMPLE FLOW" and emitted a stopped pump to
+        // the mission overview, contradicting the receipt beside it.
+        //
+        // Only the pump. The flow figure and the chemistry belong to the
+        // thermosalinograph, and the publish that satisfied the observation is the one
+        // that re-runs this automation with them.
+        state.set("pumpOn", on);
         setAction(on ? "Underway sampling verified · flow observed" : "Sampling stopped · zero flow observed");
     }
     else {
         setAction("Sampling command not verified: " + String(result.error || result.lifecycleState || "unknown"));
     }
-    projectUnderwayState();
+    // Reported either way, and from state. On failure that republishes the unchanged
+    // pump, so the overview cannot be left showing an intake that never started.
+    publishUnderwaySummary();
 }
 export function handleUnderwayDemoEvent(event: string | undefined) {
     if (event === "simulate-front") {
@@ -106,6 +134,8 @@ export function detectHydrographicFront(previousSst: number, previousSalinity: n
             salinity: current.salinity,
             gradient,
         });
-        projectUnderwayState();
+        // Republished so the overview learns about the front. A full re-projection here
+        // would only re-read the same snapshot this call was derived from.
+        publishUnderwaySummary();
     }
 }

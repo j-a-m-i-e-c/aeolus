@@ -1,4 +1,8 @@
 // Predator classification policy and verified deterrent control.
+/** Speed the deterrent fan is asked to hold during a pulse, in rpm. */
+const DETERRENT_TARGET_RPM = 2400;
+/** Tachometer reading that proves the fan is genuinely turning, in rpm. */
+const DETERRENT_VERIFIED_RPM = 2000;
 function byTopic(wanted: string) {
     return devices.list().find((device) => device.topic === wanted);
 }
@@ -21,10 +25,14 @@ export function initialisePredatorPolicy() {
 /**
  * Project the station's physical readings into this automation's own state.
  *
- * The pane cannot read devices, so the readings only reach the operator through
- * here. It is called at every point the policy runs — including immediately after
- * a command settles — so the commanded rpm and the tachometer that verified it are
- * both observed values rather than assumptions.
+ * The pane cannot read devices, so the readings only reach the operator through here.
+ *
+ * Correct wherever this path runs because a device published — the snapshot is then the
+ * state that woke the automation. Not correct straight after issuing a command: this used
+ * to be called there too, on the stated reasoning that it would pick up "the tachometer
+ * value the verification waited on". It cannot. devices.list() is a snapshot taken once
+ * at the start of the execution, so calling it after a command projected the station as
+ * it was BEFORE the pulse — a measured 0 rpm beside an outcome reading VERIFIED.
  */
 export function projectStationReadings() {
     const deterrent = byTopic("switch/wildlife/deterrent/state");
@@ -78,12 +86,15 @@ export async function stopDeterrent() {
     if (result.success) {
         state.set("activeUntil", 0);
         state.set("lastOutcome", "Deterrent physically stopped");
+        // What the command established, not a re-read. The tachometer figure is the
+        // station's to report and its next publish brings it.
+        state.set("deterrentActive", false);
+        state.set("commandRpm", 0);
     }
     else {
         state.set("lastOutcome", "Deterrent stop not verified");
         setAction("Deterrent stop not verified: " + String(result.error || result.lifecycleState || "unknown"));
     }
-    projectStationReadings();
     publishResponseStatus();
 }
 export async function handlePredatorOperatorEvent(event: string | undefined) {
@@ -141,12 +152,12 @@ export async function applyPredatorPolicy(classification: {
     state.set("lastOutcome", "Issuing verified deterrent command");
     setAction(classification.label + " detected · issuing humane light/sound pulse");
     // Verified against the tachometer, not the actuator's own `active` flag. A
-    // controller reporting "yes, I'm on" only proves it accepted the command; a
-    // measured 2000+ rpm proves the fan is actually turning.
-    const result = await devices.action(deterrent.id, "command", { payload: { active: true, target: classification.label, pulseMs, rpm: 2400 } }, {
+    // controller reporting "yes, I'm on" only proves it accepted the command; a measured
+    // speed near the requested one proves the fan is actually turning.
+    const result = await devices.action(deterrent.id, "command", { payload: { active: true, target: classification.label, pulseMs, rpm: DETERRENT_TARGET_RPM } }, {
         tier: "observed",
         deviceId: deterrent.id,
-        condition: { field: "measuredRpm", op: "gte", value: 2000 },
+        condition: { field: "measuredRpm", op: "gte", value: DETERRENT_VERIFIED_RPM },
         timeoutMs: 5000,
         evidence: {
             intent: "Activate deterrent · " + classification.label,
@@ -157,10 +168,12 @@ export async function applyPredatorPolicy(classification: {
     // Keep the proof, not just the verdict: every rung this command reached, with
     // the evidence the runtime recorded for it.
     state.set("lastCommand", devices.commandEvidence(result.commandId));
-    // Re-read the station now the command has settled: the tachometer value the
-    // verification waited on is the evidence the operator should see.
-    projectStationReadings();
     if (result.success) {
+        // What the command established. The measured rpm the verification waited on is not
+        // available here — the receipt names the condition it satisfied, and the station's
+        // own next publish brings the reading itself.
+        state.set("deterrentActive", true);
+        state.set("commandRpm", DETERRENT_TARGET_RPM);
         const at = Date.now();
         state.set("activeUntil", at + pulseMs);
         state.set("responsesToday", Number(state.get("responsesToday") || 3) + 1);

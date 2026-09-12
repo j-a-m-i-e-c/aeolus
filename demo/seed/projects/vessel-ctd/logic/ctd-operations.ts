@@ -5,6 +5,29 @@ function byTopic(wanted: string) {
 function setAction(label: string) {
     state.set("lastAction", { label, at: Date.now() });
 }
+/**
+ * Report the cast's state to whoever is aggregating it.
+ *
+ * Emitted from this automation's own state rather than from a device read, so a caller
+ * that has just commanded the winch reports the winch it commanded. See commandCtdWinch
+ * for why reading the devices there would report the previous phase of the cast.
+ */
+export function publishCtdSummary() {
+    events.emit("vessel/summary/ctd", {
+        ctdDepth: Number(state.get("depth") || 0),
+        ctdStatus: String(state.get("status") || "holding"),
+        ctdTemperature: Number(state.get("temperature") || 0),
+        ctdSalinity: Number(state.get("salinity") || 0),
+        ctdOxygen: Number(state.get("oxygen") || 0),
+        ctdTension: Number(state.get("tension") || 0),
+    });
+}
+/**
+ * Project the sonde and winch readings.
+ *
+ * Correct wherever this path runs because a device published — the snapshot is then the
+ * state that woke the automation. Not correct straight after issuing a command.
+ */
 export function projectCtdState() {
     const sonde = byTopic("sensor/ctd/sonde");
     const winch = byTopic("switch/vessel/ctd-winch/state");
@@ -37,14 +60,7 @@ export function projectCtdState() {
     state.set("winchOn", winchOn);
     if (state.get("interlockAt") === undefined)
         state.set("interlockAt", 0);
-    events.emit("vessel/summary/ctd", {
-        ctdDepth: isNaN(depth) ? 0 : depth,
-        ctdStatus: mode,
-        ctdTemperature: isNaN(temperature) ? 0 : temperature,
-        ctdSalinity: isNaN(salinity) ? 0 : salinity,
-        ctdOxygen: isNaN(oxygen) ? 0 : oxygen,
-        ctdTension: isNaN(tension) ? 0 : tension,
-    });
+    publishCtdSummary();
     return { depth, tension, winchOn };
 }
 
@@ -94,11 +110,23 @@ export async function commandCtdWinch(mode: string, targetDepth: number) {
                 ? "CTD recovered to surface"
                 : "Winch hold verified");
         events.emit("vessel/ctd/command-verified", { mode, targetDepth, lifecycleState: result.lifecycleState });
+        // Record the phase we commanded. This used to call projectCtdState(), which
+        // re-reads devices.list() — and that list is a snapshot taken once at the start of
+        // the execution, so it still described the cast as it was BEFORE the command. A
+        // verified deploy therefore projected the winch as on-deck and emitted that to the
+        // vessel overview, racing the correct summary produced a moment later by the
+        // sonde's own publish.
+        //
+        // Nothing is written in its place. Every field here belongs to a device — the
+        // phase to the winch, the profile to the sonde — and the sonde publish that
+        // satisfied the observation is the one that re-runs this automation with them.
     }
     else {
         setAction("CTD command not verified: " + String(result.error || result.lifecycleState || "unknown"));
     }
-    projectCtdState();
+    // Reported either way, and from state. On failure that republishes the unchanged
+    // phase, so the overview cannot be left showing a cast that never left the deck.
+    publishCtdSummary();
 }
 export async function protectCtdTension() {
     if (Boolean(state.get("tensionProtectionActive")))
@@ -139,7 +167,9 @@ export async function protectCtdTension() {
     else {
         setAction("High-tension stop not verified");
     }
-    projectCtdState();
+    // From state, not a re-read — see commandCtdWinch. The sonde publish that satisfied
+    // the observation is what brings the arrested winch's own readings.
+    publishCtdSummary();
 }
 export async function handleCtdOperatorEvent(event: string | undefined) {
     if (event === "deploy-420")

@@ -33,6 +33,10 @@ export function initialiseDenPolicy() {
  * Project the fan and power readings into this automation's own state. The pane
  * has no device access, so the commanded and measured speeds only reach the
  * operator through here — and the gap between them is the whole point.
+ *
+ * Correct wherever this path runs because a device published, which is the case for
+ * every caller: the snapshot is then the state that woke the automation. It is not
+ * correct straight after issuing a command — see startDenCooling.
  */
 export function projectFanReadings() {
     const fan = byTopic(DEN_FAN_TOPIC);
@@ -148,14 +152,24 @@ async function startDenCooling(temp: number) {
         },
     });
     state.set("commandPending", false);
-    projectFanReadings();
     // Keep the proof, not just the verdict: every rung this command reached, with the
     // evidence the runtime recorded for it.
     state.set("lastCommand", devices.commandEvidence(result.commandId));
     if (result.success) {
         state.set("coolingVerifiedAt", Date.now());
         state.set("coolingOutcome", "Cooling VERIFIED · fan measured at speed");
-        setAction("Den fan verified moving air at " + Number(state.get("fanMeasuredRpm") || 0) + " rpm");
+        // Record what was commanded, and quote the threshold the tachometer actually
+        // cleared rather than a reading.
+        //
+        // This used to call projectFanReadings() first and then quote fanMeasuredRpm,
+        // which re-reads devices.list() — and that list is a snapshot taken once at the
+        // start of the execution, so it still held the fan's speed from BEFORE the
+        // command. The line therefore read "Den fan verified moving air at 0 rpm", a
+        // sentence that disproves itself. The measured speed is the fan's to report and
+        // its next publish re-runs this automation with it.
+        state.set("fanActive", true);
+        state.set("fanCommandRpm", DEN_FAN_TARGET_RPM);
+        setAction("Den fan verified at or above " + DEN_FAN_VERIFIED_RPM + " rpm");
     }
     else {
         state.set("coolingOutcome", "Cooling not verified");
@@ -180,10 +194,13 @@ export async function stopDenCooling(reason: string) {
         },
     });
     state.set("commandPending", false);
-    projectFanReadings();
     state.set("lastCommand", devices.commandEvidence(result.commandId));
     if (result.success) {
         state.set("coolingOutcome", reason);
+        // Same reason as the start: the fan is off because that is what was commanded and
+        // verified, and the tachometer figure comes from the fan's own next publish.
+        state.set("fanActive", false);
+        state.set("fanCommandRpm", 0);
         setAction(reason);
     }
     else {

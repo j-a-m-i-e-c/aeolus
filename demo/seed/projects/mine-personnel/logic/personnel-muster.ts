@@ -13,6 +13,31 @@ function byTopic(wanted: string) {
 function setAction(label: string) {
     state.set("lastAction", { label, at: Date.now() });
 }
+/**
+ * Report the crew's distribution to whoever is aggregating it.
+ *
+ * Emitted from this automation's own state rather than from a device read, so a caller
+ * that has just commanded a muster reports the muster it commanded. See commandMuster
+ * for why reading the devices there would report the crew still at their working levels.
+ */
+export function publishPersonnelSummary() {
+    events.emit("mine/summary/personnel", {
+        underground: Number(state.get("underground") || 0),
+        l1: Number(state.get("l1") || 0),
+        l2: Number(state.get("l2") || 0),
+        l3: Number(state.get("l3") || 0),
+        refuge: Number(state.get("refuge") || 0),
+        unaccounted: Number(state.get("unaccounted") || 0),
+        musterState: String(state.get("musterState") || "normal"),
+        alarmActive: Boolean(state.get("alarmActive")),
+    });
+}
+/**
+ * Project the personnel tracking network and the muster controller.
+ *
+ * Correct wherever this path runs because a device published — the snapshot is then the
+ * state that woke the automation. Not correct straight after issuing a command.
+ */
 export function projectPersonnelState() {
     const people = byTopic("sensor/mine/personnel");
     const muster = byTopic("switch/mine/muster/state");
@@ -27,16 +52,7 @@ export function projectPersonnelState() {
     state.set("musterState", String(personnel.musterState || musterState.state || "normal"));
     state.set("alarmActive", Boolean(musterState.alarm));
     state.set("musterActive", Boolean(musterState.active));
-    events.emit("mine/summary/personnel", {
-        underground: Number(personnel.underground || 0),
-        l1: Number(personnel.l1 || 0),
-        l2: Number(personnel.l2 || 0),
-        l3: Number(personnel.l3 || 0),
-        refuge: Number(personnel.refuge || 0),
-        unaccounted: Number(personnel.unaccounted || 0),
-        musterState: String(personnel.musterState || musterState.state || "normal"),
-        alarmActive: Boolean(musterState.alarm),
-    });
+    publishPersonnelSummary();
 }
 export async function commandMuster(active: boolean) {
     const controller = byTopic("switch/mine/muster/state");
@@ -85,9 +101,25 @@ export async function commandMuster(active: boolean) {
         setAction("Muster command not verified: " + String(result.error || result.lifecycleState || "unknown"));
     }
     else {
+        // Record the muster we commanded. This used to call projectPersonnelState(), which
+        // re-reads devices.list() — and that list is a snapshot taken once at the start of
+        // the execution, so it still described the crew as they were BEFORE the muster. A
+        // verified muster therefore projected the refuge as it had been at the alarm,
+        // typically 4 of 14 with ten unaccounted, and emitted that to the mine overview.
+        // Ten missing people beside a receipt saying everyone was accounted for is the
+        // worst version of this bug on the showcase.
+        //
+        // Only the alarm, because the alarm is what this command asserted. The headcounts
+        // and the muster's own stage — mustering, then complete — are the tracking
+        // network's to report, and the publish that satisfied the observation is itself
+        // the one that re-runs this automation with them.
+        state.set("musterActive", active);
+        state.set("alarmActive", active);
         setAction(active ? "Muster alarm verified · tracking personnel to refuge" : "Muster cleared");
     }
-    projectPersonnelState();
+    // Reported either way, and from state. On failure that republishes the unchanged
+    // muster, so the overview cannot be left showing an evacuation that never started.
+    publishPersonnelSummary();
 }
 export function handlePersonnelDemoEvent(event: string | undefined) {
     if (event === "simulate-tag-dropout") {

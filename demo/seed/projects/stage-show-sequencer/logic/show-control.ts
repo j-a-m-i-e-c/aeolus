@@ -41,6 +41,13 @@ function publishExecutionProof() {
     if (group)
         state.set("lastExecution", group);
 }
+/**
+ * Project the desk, rack and safety-loop readings.
+ *
+ * Correct wherever this path runs because a device published — the snapshot is then the
+ * state that woke the automation. Not correct straight after issuing a command; see
+ * runLightingCue.
+ */
 export function projectStageState() {
     const dmx = byTopic("switch/stage/dmx/state");
     const fx = byTopic("switch/stage/fx/state");
@@ -100,7 +107,15 @@ export async function runLightingCue(scene: string, master: number, transitionMs
         setAction("Lighting cue not verified: " + String(result.error || result.lifecycleState || "unknown"));
         return false;
     }
-    projectStageState();
+    // Record what the cue established. This used to call projectStageState(), which
+    // re-reads devices.list() — and that list is a snapshot taken once at the start of the
+    // execution, so it still described the rig as it was BEFORE the cue. A verified
+    // transition therefore left the pane showing the previous scene and, worse, still
+    // mid-transition, so the desk looked stuck for as long as it took the next publish to
+    // arrive. The fixture count and cue number are the desk's own and are left to it.
+    state.set("scene", scene);
+    state.set("master", master);
+    state.set("transitioning", false);
     setAction(label + " · lighting transition verified");
     try {
         if (db)
@@ -140,7 +155,11 @@ export async function runPhysicalEffect(effect: string, pulseMs: number, label: 
     });
     state.set("pendingFx", false);
     if (result.success) {
-        projectStageState();
+        // What the rack accepted, not a re-read of the pre-command snapshot. Only the
+        // commanded fields, which is all an acknowledged tier entitles this to say.
+        state.set("fxActive", true);
+        state.set("effect", effect);
+        state.set("haze", haze);
         state.set("lastFxVerifiedAt", Date.now());
         setAction(label + " · physical effect verified");
         return true;
@@ -159,7 +178,12 @@ export async function stopPhysicalEffects() {
             intent: "Stop stage effects",
         },
     });
-    projectStageState();
+    if (result.success) {
+        // What the rack accepted, not a re-read. Without this the pane kept showing the
+        // effect running immediately after a stop it had just acknowledged.
+        state.set("fxActive", false);
+        state.set("effect", "none");
+    }
     setAction(result.success
         ? "Physical effects stopped · acknowledged by the rack"
         : "Physical effects stop not verified: " + String(result.error || result.lifecycleState || "unknown"));

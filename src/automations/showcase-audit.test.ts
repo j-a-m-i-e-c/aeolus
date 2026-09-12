@@ -167,6 +167,62 @@ describe("showcase audit — every seeded tab", () => {
     },
   );
 
+  // §9.1 — devices.list() is a per-execution snapshot, serialised once before the script
+  // runs. Re-reading it after a command therefore projects the world as it was BEFORE the
+  // command, which is not a subtle staleness: it flips booleans back, republishes the
+  // pre-command state to the domain overviews, and produced sentences that disproved
+  // themselves ("verified moving air at 0 rpm").
+  //
+  // A command's own commanded values are the only thing an automation may write on
+  // settlement. Anything a device owns waits for that device to publish.
+  it.each(COMMANDING.map((p) => [p.name, p] as const))(
+    "%s does not re-read the device snapshot after a command",
+    (_name, project) => {
+      // Comments mention these functions when explaining the trap, so the check runs on
+      // code with the comments stripped.
+      const code = project.logic
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/\/\/[^\n]*/g, "");
+
+      // Any function that reaches devices.list(), directly or through a helper.
+      const bodies = new Map<string, string>();
+      for (const m of code.matchAll(
+        /(?:export\s+)?(?:async\s+)?function\s+([A-Za-z0-9_$]+)\s*\([\s\S]*?\n\}/g,
+      )) {
+        bodies.set(m[1], m[0]);
+      }
+      const readers = new Set(
+        [...bodies].filter(([, body]) => body.includes("devices.list(")).map(([name]) => name),
+      );
+      for (let changed = true; changed; ) {
+        changed = false;
+        for (const [name, body] of bodies) {
+          if (readers.has(name)) continue;
+          if ([...readers].some((r) => new RegExp(`\\b${r}\\(`).test(body))) {
+            readers.add(name);
+            changed = true;
+          }
+        }
+      }
+
+      const offenders = new Set<string>();
+      for (const match of code.matchAll(/await devices\.action\(/g)) {
+        // The rest of the enclosing function: these files close top-level functions with
+        // a brace at column 0.
+        const rest = code.slice(match.index);
+        const end = rest.search(/\n\}/);
+        const tail = end === -1 ? rest : rest.slice(0, end);
+        for (const reader of readers) {
+          if (new RegExp(`\\b${reader}\\(`).test(tail)) offenders.add(reader);
+        }
+      }
+      expect(
+        [...offenders],
+        `called after devices.action(), which can only see pre-command state`,
+      ).toEqual([]);
+    },
+  );
+
   // §2.9 — DISPATCHED means Aeolus handed the command to the transport. It does not mean
   // the device received it, and no showcase pane may say otherwise.
   it.each(WITH_UI.map((p) => [p.name, p] as const))(

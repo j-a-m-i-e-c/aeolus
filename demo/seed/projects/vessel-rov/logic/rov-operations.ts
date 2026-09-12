@@ -5,6 +5,29 @@ function byTopic(wanted: string) {
 function setAction(label: string) {
     state.set("lastAction", { label, at: Date.now() });
 }
+/**
+ * Report the vehicle's state to whoever is aggregating it.
+ *
+ * Emitted from this automation's own state rather than from a device read, so a caller
+ * that has just commanded the ROV reports the ROV it commanded. See commandRov for why
+ * reading the devices there would report the previous phase of the dive.
+ */
+export function publishRovSummary() {
+    events.emit("vessel/summary/rov", {
+        rovDepth: Number(state.get("depth") || 0),
+        rovMode: String(state.get("mode") || "at-surface"),
+        rovBattery: Number(state.get("battery") || 0),
+        rovTether: Number(state.get("tetherTension") || 0),
+        rovHeading: Number(state.get("heading") || 0),
+        rovAltitude: Number(state.get("altitude") || 0),
+    });
+}
+/**
+ * Project the vehicle and telemetry readings.
+ *
+ * Correct wherever this path runs because a device published — the snapshot is then the
+ * state that woke the automation. Not correct straight after issuing a command.
+ */
 export function projectRovState() {
     const telemetry = byTopic("sensor/rov/telemetry");
     const vehicle = byTopic("switch/rov/vehicle/state");
@@ -47,14 +70,7 @@ export function projectRovState() {
     state.set("transectLegs", Number(vehicle && vehicle.state && vehicle.state.transectLegs || 0));
     if (state.get("protectionAt") === undefined)
         state.set("protectionAt", 0);
-    events.emit("vessel/summary/rov", {
-        rovDepth: isNaN(depth) ? 0 : depth,
-        rovMode: mode,
-        rovBattery: isNaN(battery) ? 0 : battery,
-        rovTether: isNaN(tether) ? 0 : tether,
-        rovHeading: isNaN(heading) ? 0 : heading,
-        rovAltitude: isNaN(altitude) ? 0 : altitude,
-    });
+    publishRovSummary();
     return { tether };
 }
 export async function commandRov(mode: string, targetDepth: number) {
@@ -107,10 +123,17 @@ export async function commandRov(mode: string, targetDepth: number) {
     // acknowledged, which the receipt shows rather than levelling them all to "verified".
     state.set("lastCommand", devices.commandEvidence(result.commandId));
     if (result.success) {
+        // The altitude used to be quoted here — "on station at 355 m · 12 m off the
+        // bottom" — read from state that had been projected before the command was
+        // issued. devices.list() is a snapshot taken once at the start of the execution,
+        // so that figure was the height off the bottom from before the dive, which for a
+        // launch at the surface meant the sentence reported the whole water column. The
+        // depth is quoted because the observation is what proved it; the altitude is a
+        // live reading and the pane already shows it as one.
         setAction(mode === "survey"
             ? "Transect underway · telemetry verified"
             : mode === "dive"
-                ? "On station at " + targetDepth + " m · " + Math.round(Number(state.get("altitude") || 0)) + " m off the bottom"
+                ? "On station at " + targetDepth + " m"
                 : mode === "recover"
                     ? "ROV recovered to launch depth"
                     : "ROV hold verified · vertical movement stopped");
@@ -119,7 +142,10 @@ export async function commandRov(mode: string, targetDepth: number) {
     else {
         setAction("ROV command not verified: " + String(result.error || result.lifecycleState || "unknown"));
     }
-    projectRovState();
+    // From state, not a re-read. Every field belongs to a device, and the telemetry
+    // publish that satisfied the observation is the one that re-runs this automation
+    // with the post-command values.
+    publishRovSummary();
 }
 export async function protectRovTether() {
     if (Boolean(state.get("tetherProtectionActive")))
@@ -156,7 +182,8 @@ export async function protectRovTether() {
     else {
         setAction("ROV safety hold not verified");
     }
-    projectRovState();
+    // From state, not a re-read — see commandRov.
+    publishRovSummary();
 }
 export async function handleRovOperatorEvent(event: string | undefined) {
     if (event === "rov-dive")
