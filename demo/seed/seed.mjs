@@ -86,11 +86,14 @@ if (WANT_PUBLIC_DEMO) {
     console.error("\n✗ This seed provisions the PUBLIC DEMO, but the running backend is in normal mode.");
     console.error("  /api/auth/demo-session answers 404, so AEOLUS_PUBLIC_DEMO was not set when it booted.");
     console.error("  Nothing has been changed.\n");
-    console.error("  Start the stack with the demo overlay, then seed again:");
-    console.error("    make demo-up");
-    console.error("    make seed-demo PASS=<password>\n");
-    console.error("  demo-up is also what bakes VITE_PUBLIC_DEMO into the frontend image, which a");
-    console.error("  restart alone cannot do — it is a build argument.");
+    console.error("  Start the stack with the public-demo overlay, then seed again:");
+    console.error("    make public-demo-local");
+    console.error("    make public-demo-local-seed PASS=<password>\n");
+    console.error("  That is also what bakes VITE_PUBLIC_DEMO into the frontend image, which a");
+    console.error("  restart alone cannot do — it is a build argument.\n");
+    console.error("  If you only wanted simulated hardware and the showcase content, you do not");
+    console.error("  need public-demo mode at all — use the unrestricted showcase instead:");
+    console.error("    make showcase && make showcase-seed PASS=<password>");
     process.exit(1);
   }
   console.log("  ✓ Backend confirms public-demo mode is live");
@@ -195,8 +198,8 @@ if (WANT_SIMULATOR) {
     console.error("    The simulator publishes its device state retained, so the backend only sees");
     console.error("    those devices after the simulator connects. If the broker volume was wiped");
     console.error("    (docker compose down -v), make it republish and seed again:");
-    console.error("      make demo-reset");
-    console.error("      make seed-demo PASS=<password>");
+    console.error("      make showcase-reset");
+    console.error("      make showcase-seed PASS=<password>");
     throw err;
   }
 }

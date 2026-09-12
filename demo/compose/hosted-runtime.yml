@@ -10,8 +10,10 @@
 #   CLOUDFLARE_TUNNEL_TOKEN=... DEMO_PUBLIC_ORIGIN=https://demo.aeolus.com.au \
 #     docker compose --project-directory . -f demo/compose/hosted-runtime.yml up -d
 #
-# For LOCAL demo-mode testing (no tunnel, no hardening) keep using the base stack
-# with the AEOLUS_PUBLIC_DEMO flag or the demo/compose/local-showcase.yml testing overlay.
+# For LOCAL testing of the visitor restrictions (no tunnel, no hardening), stack the
+# base + showcase + public-demo overlays instead: `make public-demo-local`. Note that
+# demo/compose/local-showcase.yml on its own is the UNRESTRICTED showcase and no longer
+# sets AEOLUS_PUBLIC_DEMO, so it will not exercise the guard.
 #
 # Hardening (requirements §13, §17, §21, §22):
 #   - bridge networking only; NO host networking; NO LAN discovery

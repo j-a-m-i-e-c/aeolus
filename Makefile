@@ -1,4 +1,4 @@
-.PHONY: deploy deploy-demo public-demo-preflight public-demo-build public-demo-up public-demo-seed public-demo-golden public-demo-reset up demo-up demo-reset down restart logs logs-backend status clean dev sim seed-image seed seed-demo reset test test-integration e2e e2e-fresh lint check verify verify-all help
+.PHONY: deploy deploy-demo public-demo-preflight public-demo-build public-demo-up public-demo-seed public-demo-golden public-demo-reset up showcase showcase-reset showcase-seed public-demo-local public-demo-local-seed simulator-republish demo-up demo-reset down restart logs logs-backend status clean dev sim seed-image seed seed-demo reset test test-integration e2e e2e-fresh lint check verify verify-all help
 
 # `USER` is normally set by the shell (your login name), which would leak into
 # the seed command. Ignore the environment value and default to "admin" unless
@@ -10,7 +10,14 @@ endif
 # Compose roles are intentionally explicit: root files are normal Aeolus; demo/compose
 # contains showcase-only definitions. The hosted stack sets the repo root as the
 # Compose project directory so .env, bind mounts and build contexts stay stable.
+# Two local modes, not three products (showcase-cleanup §10):
+#   base            = real Aeolus. What someone installing it for their own site gets.
+#   SHOWCASE        = the same unrestricted app + simulated hardware + seeded showcase.
+#   PUBLIC_DEMO     = SHOWCASE + anonymous visitor restrictions. Only for testing those.
+# The public-demo overlay stacks ON TOP of the showcase one, so the simulator is
+# defined once rather than described differently per file.
 LOCAL_SHOWCASE_COMPOSE := --project-directory . -f docker-compose.yml -f demo/compose/local-showcase.yml
+LOCAL_PUBLIC_DEMO_COMPOSE := $(LOCAL_SHOWCASE_COMPOSE) -f demo/compose/public-demo-local.yml
 HOSTED_DEMO_COMPOSE := --project-directory . -f demo/compose/hosted-runtime.yml
 HOSTED_DEMO_BUILD_COMPOSE := --project-directory . -f demo/compose/hosted-runtime.yml -f demo/compose/hosted-build.yml
 
@@ -73,15 +80,33 @@ clean: ## Remove unused Docker images and build cache (does NOT touch volumes/da
 
 # ─── Development ──────────────────────────────────────────────────────────────
 
-demo-up: ## Start the public demo overlay (backend demo mode + Phase 2 simulator)
+showcase: ## Start real Aeolus + simulated hardware + showcase content (no visitor restrictions)
 	docker compose $(LOCAL_SHOWCASE_COMPOSE) up -d --build
+	@echo ""
+	@echo "✅ Aeolus + Showcase is up: full unrestricted app with simulated hardware."
+	@echo "   Normal login, normal admin, normal authoring. Seed the content with:"
+	@echo "     make showcase-seed PASS=<admin-password>"
 
-demo-reset: ## Reset simulated hardware by restarting the simulator (it republishes initial state on reconnect)
+showcase-reset: ## Reset simulated hardware by restarting the simulator (it republishes initial state on reconnect)
 	docker compose $(LOCAL_SHOWCASE_COMPOSE) restart simulator
 	@echo "⏳ Waiting for the simulator to reconnect and republish initial state..."
 	@sleep 6
 	docker compose $(LOCAL_SHOWCASE_COMPOSE) logs --tail 20 simulator
-	@echo "✅ Simulator reset. If the database was wiped, re-run the seed with the demo overlay to reconfigure command profiles (AEOLUS_SIMULATOR_BOOTSTRAP=true)."
+	@echo "✅ Simulator reset. If the database was wiped, re-seed to reconfigure the command profiles: make showcase-seed PASS=<password>"
+
+public-demo-local: ## Start the showcase PLUS anonymous visitor restrictions (for testing those restrictions)
+	docker compose $(LOCAL_PUBLIC_DEMO_COMPOSE) up -d --build
+	@echo ""
+	@echo "✅ Public-demo mode is live locally. This is the showcase plus visitor"
+	@echo "   restrictions — not the hardened hosted runtime. Seed the demo identity:"
+	@echo "     make public-demo-local-seed PASS=<admin-password>"
+
+# Kept because muscle memory and older notes point at them. They now name what they
+# actually do: demo-up always meant "turn on public-demo restrictions", which was the
+# trap — you could not get simulated hardware without them.
+demo-up: public-demo-local ## Alias for public-demo-local (was the only way to get the simulator)
+
+demo-reset: showcase-reset ## Alias for showcase-reset (resetting the simulator is a showcase concern)
 
 dev: ## Start backend in dev mode (hot reload)
 	npm run dev
@@ -119,22 +144,38 @@ seed: ## Seed demo data via Docker, no host Node needed (usage: make seed PASS=y
 	@$(MAKE) --no-print-directory seed-image
 	docker compose --profile seed run --rm -e SEED_USER="$(USER)" -e SEED_PASS="$(PASS)" seed
 
-seed-demo: ## Seed the PUBLIC DEMO (needs the demo overlay running: make demo-up). Usage: make seed-demo PASS=yourpass [USER=admin]
+showcase-seed: ## Seed the showcase (needs make showcase running). Usage: make showcase-seed PASS=yourpass [USER=admin]
 	@if [ -z "$(PASS)" ]; then \
-		echo "Error: PASS is required.  Usage: make seed-demo PASS=<admin-password> [USER=admin]"; \
+		echo "Error: PASS is required.  Usage: make showcase-seed PASS=<admin-password> [USER=admin]"; \
 		exit 1; \
 	fi
 	@$(MAKE) --no-print-directory seed-image
-	@echo "⏳ Making the simulator republish its device state before seeding..."
-	@# The simulator publishes device state RETAINED, so the backend only learns about
-	@# the simulated actuators when the simulator connects. After `docker compose down -v`
-	@# the broker's retained store is gone too, so nothing will ever arrive and the
-	@# seeder's command-profile step would wait 30s and fail. Reconnecting first makes
-	@# that step deterministic. --no-deps so this never quietly recreates the backend.
-	docker compose $(LOCAL_SHOWCASE_COMPOSE) up -d --no-deps simulator
-	docker compose $(LOCAL_SHOWCASE_COMPOSE) restart simulator
-	@sleep 5
+	@$(MAKE) --no-print-directory simulator-republish COMPOSE="$(LOCAL_SHOWCASE_COMPOSE)"
 	docker compose $(LOCAL_SHOWCASE_COMPOSE) --profile seed run --rm -e SEED_USER="$(USER)" -e SEED_PASS="$(PASS)" seed
+
+public-demo-local-seed: ## Seed the local public demo, incl. the demo identity (needs make public-demo-local). Usage: PASS=yourpass
+	@if [ -z "$(PASS)" ]; then \
+		echo "Error: PASS is required.  Usage: make public-demo-local-seed PASS=<admin-password> [USER=admin]"; \
+		exit 1; \
+	fi
+	@$(MAKE) --no-print-directory seed-image
+	@$(MAKE) --no-print-directory simulator-republish COMPOSE="$(LOCAL_PUBLIC_DEMO_COMPOSE)"
+	docker compose $(LOCAL_PUBLIC_DEMO_COMPOSE) --profile seed run --rm -e SEED_USER="$(USER)" -e SEED_PASS="$(PASS)" seed
+
+seed-demo: public-demo-local-seed ## Alias for public-demo-local-seed
+
+# Make the simulator republish before seeding, so the command-profile step is
+# deterministic rather than a 30s gamble.
+#
+# The simulator publishes device state RETAINED, so the backend only learns about the
+# simulated actuators when the simulator connects. After `docker compose down -v` the
+# broker's retained store is gone too, so nothing would ever arrive on its own.
+# --no-deps so this never quietly recreates the backend underneath a running stack.
+simulator-republish:
+	@echo "⏳ Making the simulator republish its device state before seeding..."
+	docker compose $(COMPOSE) up -d --no-deps simulator
+	docker compose $(COMPOSE) restart simulator
+	@sleep 5
 
 reset: ## Wipe database and restart fresh, BASE stack (deletes all data!)
 	docker compose down -v
@@ -144,9 +185,9 @@ reset: ## Wipe database and restart fresh, BASE stack (deletes all data!)
 	@echo "✅ Fresh start (base stack). The seeder creates the admin itself:"
 	@echo "     make seed PASS=yourpass"
 	@echo "   Or visit http://localhost:3000 to create it by hand first."
-	@echo "   For the public demo, use the overlay instead: down -v dropped it,"
-	@echo "   along with the simulator and the broker's retained device state:"
-	@echo "     make demo-up && make seed-demo PASS=yourpass"
+	@echo "   For simulated hardware, use the showcase overlay instead: down -v dropped"
+	@echo "   the simulator along with the broker's retained device state:"
+	@echo "     make showcase && make showcase-seed PASS=yourpass"
 
 test: ## Run backend + frontend suites WITH coverage (mirrors CI's coverage thresholds)
 	npx vitest run --coverage

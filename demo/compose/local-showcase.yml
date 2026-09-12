@@ -1,51 +1,51 @@
-# demo/compose/local-showcase.yml — LOCAL showcase/public-demo-mode testing overlay.
+# demo/compose/local-showcase.yml — Aeolus + Showcase (Mode B).
 #
-# This is intentionally NOT the hosted demo.aeolus.com.au runtime. It flips a
-# normal Aeolus stack into public-demo application mode and adds the simulator
-# so the showcase can be exercised locally. Use it as an overlay on top of
-# the base compose file:
+# Adds simulated hardware and the showcase seed bootstrap to an OTHERWISE NORMAL
+# Aeolus stack. Overlay it on the base compose file:
 #
 #   docker compose --project-directory . -f docker-compose.yml -f demo/compose/local-showcase.yml up -d --build
 #
-# It (1) turns on the backend AEOLUS_PUBLIC_DEMO flag so /api/auth/demo-session
-# is live and the fail-closed PublicDemoGuard constrains public-demo sessions,
-# and (2) rebuilds the frontend with VITE_PUBLIC_DEMO baked in, so visitors get
-# an anonymous demo session (no login screen), the demo banner, and the
-# admin/authoring surfaces hidden.
+# or just:  make showcase
 #
-# The seeded `demo` user/group must exist — seed with the same overlay:
-#   docker compose --project-directory . -f docker-compose.yml -f demo/compose/local-showcase.yml \
-#     --profile seed run --rm -e SEED_USER=admin -e SEED_PASS=<pass> seed
+# What this is NOT
+# ----------------
+# It does not enable public-demo mode. It used to, and that conflation was the
+# problem: the only way to get simulated hardware locally was to also become an
+# anonymous read-only visitor on your own machine, with authoring hidden and the
+# fail-closed PublicDemoGuard rejecting most of the API. Reviewing the showcase and
+# restricting a public visitor are unrelated concerns that happened to share a file
+# (showcase-cleanup §11.1).
 #
-# The internet-facing runtime is demo/compose/hosted-runtime.yml. It adds the
-# Cloudflare Tunnel, resource limits, golden/active DB split, nightly reset and
-# no-inbound-port deployment model. See demo/README.md.
+# So this is the full, unrestricted application — normal login, normal admin, normal
+# authoring — plus simulated devices and seeded showcase content. It is what you want
+# on a Pi while developing or reviewing the showcase.
+#
+# The two things that DO want visitor restrictions have their own files:
+#
+#   demo/compose/public-demo-local.yml  — reproduce visitor behaviour locally.
+#                                         An overlay: it stacks ON TOP of this file,
+#                                         so the simulator is defined here once.
+#   demo/compose/hosted-runtime.yml     — the internet-facing demo.aeolus.com.au.
+#                                         Deliberately STANDALONE, not an overlay of
+#                                         anything: the base stack uses host
+#                                         networking for LAN discovery and the public
+#                                         demo must not, so it declares its own
+#                                         services, including its own simulator.
 
 services:
-  backend:
-    environment:
-      AEOLUS_PUBLIC_DEMO: "true"
-      DEMO_SESSION_MINUTES: "120"
-      DEMO_RESET_TIME: "03:30"
-
-  frontend:
-    build:
-      args:
-        VITE_PUBLIC_DEMO: "true"
-
-  # When seeding through this overlay, provision the public demo identity too,
-  # and configure the simulated actuators' MQTT command profiles (Phase 2) once
-  # the simulator has published its devices.
+  # Seeding through this overlay configures the simulated actuators' MQTT command
+  # profiles once the simulator has published its devices. No public-demo identity
+  # is provisioned — that belongs to the public-demo overlays, which add their own
+  # AEOLUS_PUBLIC_DEMO here.
   seed:
     environment:
-      AEOLUS_PUBLIC_DEMO: "true"
       AEOLUS_SIMULATOR_BOOTSTRAP: "true"
 
-  # Phase 2 simulated-hardware runtime. A SEPARATE process that speaks only MQTT
-  # to the internal broker — it holds no Aeolus admin credentials and exposes NO
-  # ports (Req 10.2, 10.4). Present ONLY in this demo overlay; a normal install
-  # never runs it (the base compose has no simulator service and the process is
-  # off unless AEOLUS_SIMULATOR_ENABLED=true — Req 10.1, 10.8).
+  # Simulated-hardware runtime. A SEPARATE process that speaks only MQTT to the
+  # internal broker — it holds no Aeolus admin credentials and exposes NO ports
+  # (Req 10.2, 10.4). A normal install never runs it: the base compose has no
+  # simulator service, and the process refuses to start unless
+  # AEOLUS_SIMULATOR_ENABLED=true (Req 10.1, 10.8).
   #
   # Runs the SAME built image as the backend (aeolus-app:local, produced by the
   # backend build) with a different command: the compiled `dist/simulator/index.js`.

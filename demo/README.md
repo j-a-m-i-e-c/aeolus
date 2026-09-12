@@ -6,50 +6,78 @@ The word **demo** used to refer to several different things spread across the re
 
 ## Boundaries
 
-### 1. Local showcase
+### Two local modes, not three products
 
-A normal Aeolus stack plus simulated hardware and the restricted public-demo UI/session behaviour. It is useful for exercising the showcase on a developer machine or a Pi before a hosted release.
+There are only two things you can run locally, and the difference is whether you want
+simulated hardware:
 
-Compose definition: [`compose/local-showcase.yml`](compose/local-showcase.yml).
+| | Command | What you get |
+|---|---|---|
+| **Real Aeolus** | `make up` | The product. No simulator, no showcase content, no restrictions. |
+| **Aeolus + Showcase** | `make showcase` | The *same unrestricted* app plus simulated hardware and seeded showcase content. |
 
-It is an **overlay** on the normal root [`../docker-compose.yml`](../docker-compose.yml):
+The hosted public demo is not a third mode — it is Aeolus + Showcase plus visitor
+restrictions plus host hardening. See the hosted runbook below.
+
+### 1. Aeolus + Showcase (local)
+
+The full application with simulated hardware. Normal login, normal admin, normal
+authoring — this is what you want on a Pi while developing or reviewing the showcase.
+
+Compose definition: [`compose/local-showcase.yml`](compose/local-showcase.yml), an
+**overlay** on the normal root [`../docker-compose.yml`](../docker-compose.yml):
 
 ```bash
-docker compose --project-directory . \
-  -f docker-compose.yml \
-  -f demo/compose/local-showcase.yml \
-  up -d --build
+make showcase                        # build + start with simulated hardware
+make showcase-seed PASS=<password>   # PASS is required; no default exists
+make showcase-reset                  # restart the simulator only; the database is untouched
 ```
 
-The `make demo-up`, `make demo-reset` and `make seed-demo` wrappers use this combination.
-
-```bash
-make demo-up                       # build + start with the overlay
-make seed-demo PASS=<password>     # PASS is required; no default exists
-make demo-reset                    # restart the simulator only; the database is untouched
-```
+This overlay used to also switch the backend into public-demo mode and rebuild the
+frontend as an anonymous visitor, which meant you could not review the showcase on
+your own machine without losing authoring, admin and most of the API. Those are
+unrelated concerns and are now separate files.
 
 Notes that are easy to discover the hard way:
 
 - **It builds from source, including native modules.** `better-sqlite3`, `isolated-vm` and `bcrypt` compile during the image build, so a first build on a Raspberry Pi takes a long time and needs a 64-bit OS.
-- **`make demo-up` does not stamp the build.** `BUILD_COMMIT`/`BUILD_DATE` are only set by `make deploy`, so the dashboard's version panel reports `unknown`. Pass them explicitly when the stamp matters:
+- **`make showcase` does not stamp the build.** `BUILD_COMMIT`/`BUILD_DATE` are only set by `make deploy`, so the dashboard's version panel reports `unknown`. Pass them explicitly when the stamp matters:
   ```bash
   BUILD_COMMIT=$(git rev-parse --short HEAD) BUILD_DATE=$(git log -1 --format=%cI HEAD) \
     docker compose --project-directory . -f docker-compose.yml \
     -f demo/compose/local-showcase.yml up -d --build
   ```
-- **Demo mode is a boot-time decision.** It is read once at backend start and `VITE_PUBLIC_DEMO` is a frontend *build* argument, so switching modes is a rebuild and container recreate rather than a restart. `make demo-up` does both. Seeding refuses when the running backend disagrees with the seed it was asked for, before touching any data — check by hand with `curl -X POST http://localhost:3001/api/auth/demo-session`, which answers 404 in normal mode.
-- **A full wipe must use the overlay.** A bare `docker compose down -v` leaves the simulator running and drops the broker's retained device state, which is why `make seed-demo` restarts the simulator before seeding.
+- **A full wipe drops the retained device state.** `docker compose down -v` removes the broker volume, so the simulator's retained device publishes go with it. `make showcase-seed` restarts the simulator first so the backend sees the simulated actuators before the command-profile step runs.
+- **Reseeding is safe.** The seeder replaces its own fixture set and leaves collections, buckets and data you created alone. You should not need `down -v` to seed again.
 
-**What this stack does not exercise.** It is a different Compose file from the hosted runtime, so validating here says nothing about Cloudflare Tunnel ingress, the golden/active database split, the nightly reset timer or the hosted resource limits. Those are only covered by the hosted release runbook below.
+### 2. Public-demo restrictions (local)
 
-### 2. Public-demo application mode
+Only when the restrictions themselves are what you are testing. Adds the anonymous
+visitor session, the demo banner, hidden admin/authoring surfaces and the fail-closed
+`PublicDemoGuard` on top of the showcase:
+
+```bash
+make public-demo-local                        # showcase + visitor restrictions
+make public-demo-local-seed PASS=<password>   # also provisions the demo user/group
+```
+
+Compose definition: [`compose/public-demo-local.yml`](compose/public-demo-local.yml).
+It defines no simulator of its own — it composes on top of the showcase overlay, so
+the simulated hardware is described in exactly one place.
+
+`make demo-up` and `make seed-demo` remain as aliases for these two.
+
+- **This is a boot-time decision.** `AEOLUS_PUBLIC_DEMO` is read once at backend start and `VITE_PUBLIC_DEMO` is a frontend *build* argument, so switching is a rebuild and container recreate rather than a restart. Both targets above do that. Seeding refuses when the running backend disagrees with the seed it was asked for, before touching any data — check by hand with `curl -X POST http://localhost:3001/api/auth/demo-session`, which answers 404 in normal mode.
+
+**What neither local stack exercises.** Both are different Compose files from the hosted runtime, so validating here says nothing about Cloudflare Tunnel ingress, the golden/active database split, the nightly reset timer or the hosted resource limits. Those are only covered by the hosted release runbook below.
+
+### 3. Public-demo application mode
 
 `AEOLUS_PUBLIC_DEMO=true` activates the fail-closed anonymous showcase policy. That is real application/security behaviour, so it deliberately remains under [`../src/demo/`](../src/demo/) rather than being moved here.
 
 Likewise, the generic MQTT simulator runtime remains under `src/simulator/`. This directory owns the **showcase scenarios and seed content**, not the simulator framework itself.
 
-### 3. Hosted public showcase
+### 4. Hosted public showcase
 
 The hardened deployment used by `demo.aeolus.com.au`: Cloudflare Tunnel-only ingress, bridge networking, unprivileged containers, simulated hardware, active/golden SQLite separation and the nightly reset lifecycle.
 
@@ -78,7 +106,8 @@ The repo root is intentionally supplied as Compose's `--project-directory`. That
 demo/
 ├── README.md
 ├── compose/
-│   ├── local-showcase.yml     # overlay for normal Aeolus
+│   ├── local-showcase.yml     # overlay: simulated hardware, still unrestricted
+│   ├── public-demo-local.yml  # overlay: visitor restrictions, on top of the above
 │   ├── hosted-runtime.yml     # standalone internet-facing demo runtime
 │   └── hosted-build.yml       # optional local/CI build overlay
 ├── config/

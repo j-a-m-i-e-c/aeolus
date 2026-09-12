@@ -1,0 +1,59 @@
+# demo/compose/public-demo-local.yml — public visitor restrictions, locally.
+#
+# Reproduces what an anonymous visitor to demo.aeolus.com.au sees, on your own
+# machine, without the hosted infrastructure. Layer it on the base stack AND the
+# showcase overlay, because a public demo is the showcase plus restrictions:
+#
+#   docker compose --project-directory . \
+#     -f docker-compose.yml \
+#     -f demo/compose/local-showcase.yml \
+#     -f demo/compose/public-demo-local.yml \
+#     up -d --build
+#
+# or just:  make public-demo-local
+#
+# Why this is a separate file
+# --------------------------
+# These settings used to sit in local-showcase.yml, which meant you could not run
+# simulated hardware locally without also becoming a restricted visitor on your own
+# install. Reviewing the showcase and constraining a public visitor are different
+# jobs (showcase-cleanup §11.1, §11.2), so they are different files. Use this one
+# only when the restrictions are the thing you are testing.
+#
+# This is still NOT the hosted runtime. demo/compose/hosted-runtime.yml adds the
+# Cloudflare Tunnel, resource ceilings, capability drops, the golden/active database
+# split and the nightly reset. This file is only the application-level flags, so it is
+# the right place to check guard and UI behaviour, and the wrong place to check
+# hardening.
+#
+# Seeding must use this same overlay stack, because the `demo` user and group and the
+# per-rule demo_access allowlists are provisioned by the seeder:
+#
+#   make public-demo-local-seed PASS=<pass>
+#
+# Note that VITE_PUBLIC_DEMO is a BUILD arg, not runtime env: the frontend bundle has
+# to be rebuilt for it to take effect, which is why the commands above pass --build.
+# A restart alone will leave you with a demo backend and a normal frontend.
+
+services:
+  backend:
+    environment:
+      # Makes /api/auth/demo-session live and arms the fail-closed PublicDemoGuard
+      # for sessions minted by it. Read once at boot, so this needs a recreate.
+      AEOLUS_PUBLIC_DEMO: "true"
+      DEMO_SESSION_MINUTES: "120"
+      DEMO_RESET_TIME: "03:30"
+
+  frontend:
+    build:
+      args:
+        # Anonymous demo session instead of a login screen, the demo banner, and
+        # admin/authoring surfaces hidden. Baked in at build time.
+        VITE_PUBLIC_DEMO: "true"
+
+  # Provision the public-demo identity when seeding: the `Public Demo` group with
+  # per-tab read/interact grants, the `demo` user, and each automation's demo_access
+  # allowlist. The simulator bootstrap comes from local-showcase.yml underneath.
+  seed:
+    environment:
+      AEOLUS_PUBLIC_DEMO: "true"

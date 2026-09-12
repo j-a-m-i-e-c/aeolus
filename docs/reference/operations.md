@@ -90,12 +90,15 @@ make sim            # AEOLUS_SIMULATOR_ENABLED=true npm run sim
 
 Simulated actuators are ordinary generic MQTT devices. Their acknowledgement capability is configured through the normal `PUT /api/devices/:id/mqtt-command-profile` path by a seed-time bootstrap (`demo/seed/simulator-bootstrap.mjs`), not by the simulator itself.
 
-In the public-demo overlay the simulator runs as a `simulator` service (no published ports, internal broker only):
+In the showcase overlay the simulator runs as a `simulator` service (no published ports, internal broker only). This is the full unrestricted application with simulated hardware — it does not enable public-demo restrictions:
 
 ```bash
-make demo-up        # backend demo mode + simulator
-make demo-reset     # restart the simulator; it republishes initial state on reconnect
+make showcase                        # real Aeolus + simulated hardware
+make showcase-seed PASS=<password>   # seed the showcase content
+make showcase-reset                  # restart the simulator; it republishes initial state on reconnect
 ```
+
+Add visitor restrictions only when those are what you are testing, with `make public-demo-local`. See [demo/README.md](../../demo/README.md).
 
 The reference `reference-water` scenario is a conformance fixture, not a public tab. Its device models live in `src/simulator/`.
 

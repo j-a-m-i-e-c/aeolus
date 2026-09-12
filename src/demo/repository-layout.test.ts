@@ -9,7 +9,14 @@ describe("demo repository layout", () => {
   it("keeps the normal Compose file at root and showcase-only Compose under demo/compose", () => {
     expect(existsSync(at("docker-compose.yml"))).toBe(true);
 
-    for (const file of ["local-showcase.yml", "hosted-runtime.yml", "hosted-build.yml"]) {
+    for (const file of [
+      "local-showcase.yml",
+      // The visitor restrictions the showcase overlay used to carry. Split out so
+      // simulated hardware no longer implies a restricted install (§11.1).
+      "public-demo-local.yml",
+      "hosted-runtime.yml",
+      "hosted-build.yml",
+    ]) {
       expect(existsSync(at("demo", "compose", file)), file).toBe(true);
     }
 
