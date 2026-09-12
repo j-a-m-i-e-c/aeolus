@@ -175,6 +175,35 @@ describe("Agriculture demo UI projection contract", () => {
     );
   });
 
+  it("Livestock draws strays where the collars say they are, not where the clock says", () => {
+    // showcase-cleanup §5.3 and §1.1. The pane used to place strays from its own
+    // animation phase and a hard-coded boundary side, so the picture of the animals
+    // being driven home was invented here rather than reported by the hardware.
+    expect(livestockAutomation.scriptSource).toMatch(/state\.set\(\s*["']strayPositions["']/);
+    expect(livestockAutomation.uiSource).toContain('aeolus.read("strayPositions")');
+    // Projected through the same GPS mapping the working dogs already use.
+    expect(livestockAutomation.uiSource).toMatch(/collarPosition\(stray\)/);
+    // The two mechanisms that invented position are gone.
+    expect(livestockAutomation.uiSource).not.toContain("returnProgress");
+    expect(livestockAutomation.uiSource).not.toContain("strayX");
+  });
+
+  it("Livestock never names a boundary side the simulated world has not reported", () => {
+    // §5.1. Which fence the animals crossed depends on the paddock the herd is in, so
+    // an operator-facing string cannot know it at the moment the button is pressed.
+    expect(livestockAutomation.scriptSource).not.toContain("east-boundary");
+    expect(livestockAutomation.scriptSource).toMatch(/breachSector/);
+  });
+
+  it("Livestock still proves containment with the collars and never with the dogs", () => {
+    // §5.4. The dogs are the mechanism; the collar network is the evidence. Keeping
+    // these apart is the clearest storytelling in the Agriculture tab, and the recall
+    // rework moved the dogs' timing without moving the proof.
+    expect(livestockAutomation.scriptSource).toMatch(/deviceId:\s*collars\.id/);
+    expect(livestockAutomation.scriptSource).toMatch(/condition:\s*\{\s*field:\s*["']strays["']/);
+    expect(livestockAutomation.scriptSource).not.toMatch(/deviceId:\s*dogs\.id/);
+  });
+
   it("Trough Watering never auto-refills while the herd is at the troughs", () => {
     // Guards on `herdPresent`, not `drinkingActive`. That is deliberately stronger:
     // cattle walking in or still moving off are physically at the water even though

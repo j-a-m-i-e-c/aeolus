@@ -8,6 +8,7 @@ import { createDemoActions } from "./demo-actions";
 export default function Livestock(aeolus: CustomComponentProps) {
   const model = {
     strays: aeolus.read("strays"),
+    strayPositions: aeolus.read("strayPositions"),
     herd: aeolus.read("herd"),
     tracked: aeolus.read("tracked"),
     avgBattery: aeolus.read("avgBattery"),

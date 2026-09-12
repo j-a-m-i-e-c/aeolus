@@ -11,15 +11,25 @@ type DogReading = {
     battery: number;
     targetStray: number | null;
 };
+/** One stray as its GPS collar reports it. Same collar network as the dogs. */
+type StrayReading = {
+    id: string;
+    lat: number;
+    lon: number;
+    outside: boolean;
+};
 
-// The dogs report real latitude and longitude, so the pane maps them into the
-// paddock diagram rather than the simulator publishing view coordinates.
+// Every animal on this diagram — dogs and cattle alike — reports real latitude and
+// longitude, so the pane maps GPS into the paddock view rather than the simulator
+// publishing view coordinates. The strays used to be placed by the pane's own animation
+// clock, which meant the picture of them being driven home was invented here instead of
+// reported by the collars.
 const PROPERTY_BOUNDS = { north: -33.8210, south: -33.8290, west: 149.5680, east: 149.5810 };
 const DIAGRAM = { x: 25, y: 22, width: 421, height: 190 };
 
-function dogPosition(dog: DogReading): { x: number; y: number } {
-    const fx = (dog.lon - PROPERTY_BOUNDS.west) / (PROPERTY_BOUNDS.east - PROPERTY_BOUNDS.west);
-    const fy = (dog.lat - PROPERTY_BOUNDS.north) / (PROPERTY_BOUNDS.south - PROPERTY_BOUNDS.north);
+function collarPosition(reading: { lat: number; lon: number }): { x: number; y: number } {
+    const fx = (reading.lon - PROPERTY_BOUNDS.west) / (PROPERTY_BOUNDS.east - PROPERTY_BOUNDS.west);
+    const fy = (reading.lat - PROPERTY_BOUNDS.north) / (PROPERTY_BOUNDS.south - PROPERTY_BOUNDS.north);
     return {
         x: DIAGRAM.x + Math.max(0, Math.min(1, fx)) * DIAGRAM.width,
         y: DIAGRAM.y + Math.max(0, Math.min(1, fy)) * DIAGRAM.height,
@@ -30,6 +40,7 @@ export default function LivestockDashboard({ model, actions }: {
     actions: Record<string, (...args: any[]) => void>;
 }) {
     const strays = Math.max(0, Number(model.strays ?? 0));
+    const strayPositions = (model.strayPositions as StrayReading[] | undefined) || [];
     const herd = Math.max(0, Number(model.herd ?? 30));
     const tracked = Math.max(0, Number(model.tracked ?? 30));
     const avgBattery = Math.max(0, Math.min(100, Number(model.avgBattery ?? 74)));
@@ -57,7 +68,13 @@ export default function LivestockDashboard({ model, actions }: {
     const dogs = (model.dogs as DogReading[] | undefined) || [];
     const dogsWorking = Boolean(model.dogsWorking);
     const actionLabel = lastAction?.label ? String(lastAction.label) : "Collar network online";
-    const mainStatus = recallInProgress ? "RECALL IN PROGRESS" : alert ? strays + " OUTSIDE" : "HERD CONTAINED";
+    // Which boundary was crossed is worth saying, now that it is reported rather than
+    // assumed: it is the difference between the herd being in A or B.
+    const mainStatus = recallInProgress
+        ? "RECALL IN PROGRESS"
+        : alert
+            ? strays + " OUTSIDE" + (breachSector ? " · " + breachSector.toUpperCase() + " BOUNDARY" : "")
+            : "HERD CONTAINED";
     // Recall is an observed-tier command, so the wait is the interesting part:
     // the control stays pending until collar telemetry confirms containment.
     const recallVisual = control({ pending: recallInProgress, disabled: !alert });
@@ -105,18 +122,19 @@ export default function LivestockDashboard({ model, actions }: {
           <text x="250" y="25" fill={!activeA ? "#82E8A0" : "#587262"} fontSize="10" letterSpacing="1.2">PADDOCK B</text>
           <path d="M229 25 L233 210" stroke="#2D4936" strokeWidth="2" strokeDasharray="3 5"/>
 
-          {cattle.map((cow, i) => {
-            const isStray = i < strays;
-            const baseX = activeA ? 58 + cow.col * 25 : 270 + cow.col * 24;
-            const baseY = 62 + cow.row * 29;
-            const returnProgress = movement === "returning" ? Math.min(1, ((phase * .025 + i * .02) % 1)) : 0;
-            const strayX = breachSector === "west" ? 8 : 456;
-            const x = isStray ? strayX + (activeA ? -returnProgress * 210 : -returnProgress * 90) : baseX;
-            const y = isStray ? 76 + i * 42 : baseY;
-            return <Cow key={i} x={x} y={y} stray={isStray} seed={cow.seed}/>;
-        })}
+          {/* The mob still inside the boundary, laid out on the paddock the collars
+              report. The strays are drawn separately below, from their own positions. */}
+          {cattle.slice(0, Math.max(0, cattle.length - strays)).map((cow, i) => (
+            <Cow key={"herd-" + i} x={activeA ? 58 + cow.col * 25 : 270 + cow.col * 24} y={62 + cow.row * 29} seed={cow.seed}/>
+          ))}
 
-          {recallInProgress && Array.from({ length: 4 }).map((_, i) => <path key={i} d="M438 86 C390 95 350 110 310 128" fill="none" stroke="#F0C967" strokeWidth="2" strokeDasharray="5 7" strokeDashoffset={-(phase * 2 + i * 12)} opacity={.35 + i * .12}/>)}
+          {/* Each stray where its collar says it is. The pane no longer decides where a
+              stray has got to; it projects the reported position exactly as it does for
+              Scout and Moss. */}
+          {strayPositions.map((stray, i) => {
+            const at = collarPosition(stray);
+            return <Cow key={stray.id} x={at.x} y={at.y} stray={stray.outside} seed={i * 0.61}/>;
+        })}
 
           {/* Kennel, and the dogs wherever their GPS collars currently place them. */}
           <g transform="translate(26 185)" opacity={dogsWorking ? .5 : .9}>
@@ -125,7 +143,7 @@ export default function LivestockDashboard({ model, actions }: {
             <text x="9" y="30" textAnchor="middle" fill="#5E6E60" fontSize="9">KENNEL</text>
           </g>
           {dogs.map((dog, i) => {
-            const at = dogPosition(dog);
+            const at = collarPosition(dog);
             const trot = Math.sin(phase * .22 + i * 1.7) * (dog.activity === "kenneled" ? 0 : 1.8);
             const busy = dog.activity !== "kenneled";
             return <g key={dog.name} transform={"translate(" + at.x.toFixed(1) + " " + (at.y + trot).toFixed(1) + ")"}>

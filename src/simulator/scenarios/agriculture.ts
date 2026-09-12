@@ -94,6 +94,28 @@ const TROUGH_LOW_THRESHOLD = 45;
 const DOG_WORK_GROUP = "dog-work";
 
 /**
+ * Shape of one recall, as fractions of the whole.
+ *
+ * The ordering here is the point, not the numbers (showcase-cleanup §5.2). Containment
+ * used to be reported at about 1.4s while the dogs were still running out to the
+ * strays, which made the pack decoration: the herd was already home before anything
+ * reached it. Now the animals only move once the dogs are on them, and the collars only
+ * report containment once the animals are actually back inside.
+ *
+ * `drive` ends at 3.5s of the 6s recall, comfortably inside the five-second observation
+ * window the recall command waits on, so the command still reaches OBSERVED on collar
+ * evidence. The dogs then trot home over the remaining 2.5s, after the command has
+ * completed — the visible sequence is longer than the verified one, which is the
+ * distinction the showcase exists to make.
+ */
+const RECALL_DURATION_MS = 6_000;
+const RECALL_STEPS = 24;
+/** Dogs reach the strays at this fraction; nothing has moved before it. */
+const RECALL_INTERCEPT_END = 0.25;
+/** Strays are back inside at this fraction. Containment is earned here. */
+const RECALL_DRIVE_END = 0.55;
+
+/**
  * Bounding box of the simulated property. The dogs wear real GPS collars, so they
  * report latitude and longitude like the hardware would; consumers map those into
  * whatever view they draw. Coordinates are a plausible slice of pastoral NSW.
@@ -176,7 +198,27 @@ interface FlowState extends SimulatedState {
   batchTargetLitres: number;
   batchTransferredLitres: number;
 }
-interface CollarState {
+/**
+ * One stray as its GPS collar reports it.
+ *
+ * The cattle wear the same collar network as the dogs, so a stray's position arrives as
+ * latitude and longitude exactly as a dog's does. Before this existed the pane
+ * reconstructed cattle movement from its own animation clock, which meant the picture of
+ * the animals returning was invented by the UI rather than reported by the hardware
+ * (showcase-cleanup §5.3, §1.1).
+ */
+interface StrayReading extends SimulatedState {
+  id: string;
+  lat: number;
+  lon: number;
+  /** Whether this animal is currently outside the virtual boundary. */
+  outside: boolean;
+}
+
+// Extends SimulatedState like FlowState, TroughState and DogPackState do, so a
+// `read() as CollarState` narrowing is legal rather than needing an `| undefined` union
+// to slip past the compiler.
+interface CollarState extends SimulatedState {
   herd: number;
   tracked: number;
   strays: number;
@@ -184,6 +226,39 @@ interface CollarState {
   paddock: string;
   breachSector: string | null;
   movement: string;
+  /**
+   * Where the strays are. Kept separate from the `strays` count deliberately: the count
+   * is what the recall command observes (`strays == 0`), and an observation condition
+   * should read a scalar rather than depend on the shape of an array.
+   */
+  strayPositions: StrayReading[];
+}
+
+/**
+ * Place `count` strays along the path from `from` to `to` at `progress`.
+ *
+ * The small offsets keep two animals from being drawn as one; they are applied to the
+ * reported position rather than left for a consumer to invent, so every collar reports
+ * a distinct real location.
+ */
+function strayPositionsAt(
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+  progress: number,
+  count: number,
+  outside: boolean,
+): StrayReading[] {
+  const lateral = [-0.028, 0.024];
+  const vertical = [-0.05, 0.06];
+  const point = between(from, to, progress);
+  return Array.from({ length: Math.max(0, count) }, (_, index) => ({
+    id: `C${index + 1}`,
+    ...toGps({
+      x: point.x + (lateral[index % lateral.length] ?? 0),
+      y: point.y + (vertical[index % vertical.length] ?? 0),
+    }),
+    outside,
+  }));
 }
 interface TroughState extends SimulatedState {
   total: number;
@@ -316,6 +391,7 @@ const INITIAL = {
     paddock: "A",
     breachSector: null,
     movement: "grazing",
+    strayPositions: [] as StrayReading[],
   } as CollarState,
   // The dog pack's resting state comes from kenneledPack(), which builds a fresh
   // object each time so a reset cannot hand out a shared mutable array of dogs.
@@ -372,10 +448,22 @@ class AgricultureEnvironment {
   }
 
   boundaryBreach(): void {
-    this.controller(AGRICULTURE_DEVICE_KEYS.collars)?.update({
-      strays: 2,
-      breachSector: "east",
+    const collars = this.controller(AGRICULTURE_DEVICE_KEYS.collars);
+    if (!collars) return;
+    // Animals leave through the boundary they are standing next to, so which fence
+    // line is the outside one depends on where the herd actually is: Paddock A is the
+    // western half of the property and B the eastern. This was hard-coded east, which
+    // put the strays clear across the property from the herd whenever it had rotated
+    // to A, and sent the dogs to the wrong fence to fetch them (showcase-cleanup §5.1).
+    const paddock = String((collars.read() as CollarState).paddock ?? "A");
+    const sector = paddock === "B" ? "east" : "west";
+    const breach = BREACH_POINTS[sector] ?? BREACH_POINTS.west;
+    const strays = 2;
+    collars.update({
+      strays,
+      breachSector: sector,
       movement: "boundary-breach",
+      strayPositions: strayPositionsAt(breach, breach, 1, strays, true),
     });
   }
 
@@ -384,7 +472,7 @@ class AgricultureEnvironment {
     if (!collars) return;
     const current = collars.read();
     const next = current.paddock === "A" ? "B" : "A";
-    collars.update({ paddock: next, strays: 0, breachSector: null, movement: "rotating" });
+    collars.update({ paddock: next, strays: 0, breachSector: null, movement: "rotating", strayPositions: [] });
     collars.update({ movement: "grazing" }, { delayMs: 2200 });
   }
 
@@ -512,9 +600,11 @@ class AgricultureEnvironment {
   }
 
   resetLivestock(): void {
-    // Cancel the pack's own movement first, so a reset mid-recall does not leave a
-    // transition writing dog positions over the state just restored. Scoped to the
-    // dog group, so nothing else in the simulated property is disturbed.
+    // Cancel the recall first, so a reset mid-recall does not leave a transition writing
+    // over the state just restored. Cancelling the dog group is enough for both devices
+    // now that one transition drives the pack and the strays it is moving — which is
+    // also why the collar restore below has to come after this line, not before.
+    // Scoped to the group, so nothing else in the simulated property is disturbed.
     const dogs = this.controller(AGRICULTURE_DEVICE_KEYS.dogs);
     dogs?.cancelTransitions(DOG_WORK_GROUP);
     this.controller(AGRICULTURE_DEVICE_KEYS.energiser)?.update({ ...INITIAL.energiser }, { forcePublish: true });
@@ -672,43 +762,37 @@ class AgricultureEnvironment {
   }
 
   completeRecall(): void {
-    const collars = this.controller(AGRICULTURE_DEVICE_KEYS.collars);
-    if (!collars) return;
-    // `paddock` is deliberately absent from these patches. A breach does not move
-    // the herd's paddock, so recall has nothing to restore — and naming it here is
-    // how the herd used to be teleported to Paddock A from wherever it had actually
-    // rotated to.
-    collars.update({ movement: "returning" }, { delayMs: 120 });
-    collars.update({ strays: 0, breachSector: null, movement: "contained" }, { delayMs: 1400 });
-    collars.update({ movement: "grazing" }, { delayMs: 2200 });
-
-    // The dogs are a separate physical device and their movement is deliberately
-    // NOT what tells Aeolus the herd is contained — the collars above are. The pack
-    // is dispatched alongside so the recall is something you can watch happen,
-    // and it keeps working after the command has already been verified.
-    this.deployDogs();
+    this.runRecall();
   }
 
   /**
-   * Send the pack out to the strays and back.
+   * Work the pack out to the strays, drive the animals home, and bring the dogs back.
    *
-   * Timing matters for a reason beyond looking right: containment above lands at
-   * about 1.4s, well inside the recall command's five-second observation window, so
-   * the command reaches OBSERVED on collar evidence. The dogs then trot home over
-   * the following few seconds, after the command has already completed. The visible
-   * sequence is longer than the verified one, which is exactly the distinction the
-   * showcase is trying to make.
+   * One transition drives both devices. That is the fix, not an optimisation: the dogs
+   * and the cattle they are pushing are a single physical event, and running them on two
+   * clocks is what let the collars report containment at 1.4s while the dogs were still
+   * a paddock away (showcase-cleanup §5.2). Sharing one clock makes the ordering
+   * structural — the animals cannot arrive before whatever is moving them.
+   *
+   * The collars remain the only evidence of containment. The dogs are the mechanism and
+   * are deliberately never consulted about whether the herd is in, which is why the
+   * recall command observes the collar network and not the pack.
    */
-  private deployDogs(): void {
+  private runRecall(): void {
     const dogsController = this.controller(AGRICULTURE_DEVICE_KEYS.dogs);
     const collars = this.controller(AGRICULTURE_DEVICE_KEYS.collars);
-    if (!dogsController) return;
+    if (!dogsController || !collars) return;
 
-    const collarState = collars?.read() as CollarState | undefined;
-    const paddock = String(collarState?.paddock ?? "A");
-    const sector = String(collarState?.breachSector ?? "east");
+    // `paddock` is deliberately never written back during a recall. A breach does not
+    // move the herd's paddock, so there is nothing to restore — naming it in a recall
+    // patch is how the herd used to be teleported to Paddock A from wherever it had
+    // actually rotated to.
+    const collarState = collars.read() as CollarState;
+    const paddock = String(collarState.paddock ?? "A");
+    const sector = String(collarState.breachSector ?? "west");
     const home = PADDOCK_CENTRES[paddock] ?? PADDOCK_CENTRES.A;
-    const breach = BREACH_POINTS[sector] ?? BREACH_POINTS.east;
+    const breach = BREACH_POINTS[sector] ?? BREACH_POINTS.west;
+    const strayCount = Math.max(0, Number(collarState.strays) || 0);
 
     const resting = kenneledPack();
     // Each dog takes a slightly different line, so the pack reads as two animals
@@ -726,27 +810,54 @@ class AgricultureEnvironment {
       })),
     }, { forcePublish: true });
 
+    // Each collar milestone is written once, on the frame that crosses it.
+    let driveStarted = false;
+    let contained = false;
+
     dogsController.transition({
-      durationMs: 6600,
-      steps: 22,
+      durationMs: RECALL_DURATION_MS,
+      steps: RECALL_STEPS,
       group: DOG_WORK_GROUP,
       frame: (progress) => {
-        // Out to the breach for the first third, driving the strays home for the
-        // second, then back to the kennel.
         let activity: string;
         let point: { x: number; y: number };
-        if (progress < 0.34) {
+
+        if (progress <= RECALL_INTERCEPT_END) {
+          // Running out to the strays. The animals have not moved and the collars say
+          // so: still outside, still counted, still at the breach.
           activity = "intercepting";
-          point = between(DOG_KENNEL, breach, progress / 0.34);
-        } else if (progress < 0.62) {
+          point = between(DOG_KENNEL, breach, progress / RECALL_INTERCEPT_END);
+        } else if (progress <= RECALL_DRIVE_END) {
           activity = "driving";
-          point = between(breach, home, (progress - 0.34) / 0.28);
+          const driven = (progress - RECALL_INTERCEPT_END) / (RECALL_DRIVE_END - RECALL_INTERCEPT_END);
+          point = between(breach, home, driven);
+          if (!driveStarted) {
+            driveStarted = true;
+            collars.update({ movement: "returning" });
+          }
+          // The animals are where the dogs have pushed them to — the same interpolation
+          // that places the dogs, so the two cannot disagree about how far they have got.
+          collars.update({ strayPositions: strayPositionsAt(breach, home, driven, strayCount, true) });
         } else if (progress < 1) {
           activity = "returning";
-          point = between(home, DOG_KENNEL, (progress - 0.62) / 0.38);
+          point = between(home, DOG_KENNEL, (progress - RECALL_DRIVE_END) / (1 - RECALL_DRIVE_END));
+          if (!contained) {
+            contained = true;
+            // Containment, earned here and nowhere earlier: the strays are inside the
+            // boundary because they have physically been driven there. This is the
+            // publish that lets the recall command reach OBSERVED. Positions clear
+            // because the animals have rejoined the herd and are no longer strays.
+            collars.update({
+              strays: 0,
+              breachSector: null,
+              movement: "contained",
+              strayPositions: [],
+            });
+          }
         } else {
           activity = "kenneled";
           point = DOG_KENNEL;
+          collars.update({ movement: "grazing" });
         }
 
         const finished = progress >= 1;
@@ -963,7 +1074,10 @@ export function createAgricultureScenario(): SimulatorScenario {
     (ctx, command) => {
       if (command.params.active !== true) return { accepted: false, error: "recall requires active=true" };
       env.completeRecall();
-      ctx.state.update({ active: false }, { delayMs: 1800 });
+      // The recall stays asserted until the animals are actually back inside. It used
+      // to drop at 1.8s, which was before containment even under the old timings and
+      // is well before it now.
+      ctx.state.update({ active: false }, { delayMs: 3_800 });
       return { accepted: true, state: { patch: { active: true } } };
     },
   );

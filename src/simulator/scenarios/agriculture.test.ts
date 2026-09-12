@@ -119,12 +119,52 @@ describe("agriculture simulator scenario", () => {
   it("recall changes collar telemetry instead of letting the automation fake containment", async () => {
     const { registry, command, fire, last } = setup();
     await fire(AGRICULTURE_STIMULUS.boundaryBreach);
-    expect(last(AGRICULTURE_STATE_TOPICS.collars)).toMatchObject({ strays: 2, breachSector: "east" });
+    // Herd is in Paddock A, the western half, so the animals leave through the western
+    // boundary — see the dedicated breach-side test below.
+    expect(last(AGRICULTURE_STATE_TOPICS.collars)).toMatchObject({ strays: 2, breachSector: "west" });
 
     const recall = registry.get(AGRICULTURE_DEVICE_KEYS.recall)!;
     const outcome = await recall.model.onCommand!(command(AGRICULTURE_COMMAND_TOPICS.recall, { active: true }));
     expect(outcome).toMatchObject({ accepted: true });
+    // Containment now arrives partway through the pack's deployment rather than
+    // synchronously, because the animals have to be driven back before the collars can
+    // report them inside.
+    await vi.advanceTimersByTimeAsync(8000);
     expect(last(AGRICULTURE_STATE_TOPICS.collars)).toMatchObject({ strays: 0, paddock: "A", movement: "grazing" });
+  });
+
+  it("breaches the boundary beside the paddock the herd is actually in", async () => {
+    // showcase-cleanup §5.1. The sector was hard-coded east, so with the herd in A the
+    // strays appeared clear across the property and the dogs were sent to the wrong
+    // fence to fetch them.
+    const { fire, last } = setup();
+
+    await fire(AGRICULTURE_STIMULUS.boundaryBreach);
+    expect(last(AGRICULTURE_STATE_TOPICS.collars)).toMatchObject({ paddock: "A", breachSector: "west" });
+
+    await fire(AGRICULTURE_STIMULUS.livestockReset);
+    await fire(AGRICULTURE_STIMULUS.moveHerd);
+    await fire(AGRICULTURE_STIMULUS.boundaryBreach);
+    expect(last(AGRICULTURE_STATE_TOPICS.collars)).toMatchObject({ paddock: "B", breachSector: "east" });
+  });
+
+  it("reports where each stray is, rather than leaving the pane to invent it", async () => {
+    // showcase-cleanup §5.3. Stray positions arrive as GPS on the same collar network
+    // the dogs use, so a consumer projects them instead of animating them.
+    const { fire, last } = setup();
+
+    await fire(AGRICULTURE_STIMULUS.boundaryBreach);
+    const breached = last(AGRICULTURE_STATE_TOPICS.collars)!;
+    const positions = breached.strayPositions as Array<{ id: string; lat: number; lon: number; outside: boolean }>;
+
+    expect(positions).toHaveLength(breached.strays as number);
+    for (const stray of positions) {
+      expect(stray.outside).toBe(true);
+      expect(typeof stray.lat).toBe("number");
+      expect(typeof stray.lon).toBe("number");
+    }
+    // Two animals at distinct real positions, not one position drawn twice.
+    expect(new Set(positions.map((stray) => stray.lon + "," + stray.lat)).size).toBe(positions.length);
   });
 
   it("returns strays to the paddock the herd is actually in, not always Paddock A", async () => {
@@ -138,6 +178,7 @@ describe("agriculture simulator scenario", () => {
 
     const recall = registry.get(AGRICULTURE_DEVICE_KEYS.recall)!;
     await recall.model.onCommand!(command(AGRICULTURE_COMMAND_TOPICS.recall, { active: true }));
+    await vi.advanceTimersByTimeAsync(8000);
 
     // Containment must return the strays to Paddock B. Recall previously named
     // Paddock A in its own state patch, teleporting the whole herd across the
@@ -147,6 +188,70 @@ describe("agriculture simulator scenario", () => {
       paddock: "B",
       movement: "grazing",
     });
+  });
+
+  it("only reports containment after the dogs have driven the animals back", async () => {
+    // showcase-cleanup §5.2, and the whole point of the recall rework. Containment used
+    // to land at about 1.4s while the pack was still running out to the strays, which
+    // made the dogs decoration and broke the physical story: the herd was home before
+    // anything had reached it.
+    const { registry, command, fire, published } = setup();
+
+    await fire(AGRICULTURE_STIMULUS.boundaryBreach);
+    const recall = registry.get(AGRICULTURE_DEVICE_KEYS.recall)!;
+    await recall.model.onCommand!(command(AGRICULTURE_COMMAND_TOPICS.recall, { active: true }));
+    await vi.advanceTimersByTimeAsync(8000);
+
+    // Walk the interleaved publish log once: the frame that reports containment must
+    // come after a frame in which the dogs were driving.
+    let sawDriving = false;
+    let containedAfterDriving: boolean | undefined;
+    let strayMovement = 0;
+    let lastStrayLon: number | undefined;
+
+    for (const entry of published) {
+      if (entry.topic === AGRICULTURE_STATE_TOPICS.dogs) {
+        const dogs = (JSON.parse(entry.payload) as { dogs: Array<{ activity: string }> }).dogs;
+        if (dogs.some((dog) => dog.activity === "driving")) sawDriving = true;
+      }
+      if (entry.topic === AGRICULTURE_STATE_TOPICS.collars) {
+        const collars = JSON.parse(entry.payload) as {
+          strays: number;
+          strayPositions?: Array<{ lon: number }>;
+        };
+        const lon = collars.strayPositions?.[0]?.lon;
+        if (lon !== undefined) {
+          if (lastStrayLon !== undefined && lon !== lastStrayLon) strayMovement += 1;
+          lastStrayLon = lon;
+        }
+        if (collars.strays === 0 && containedAfterDriving === undefined) {
+          containedAfterDriving = sawDriving;
+        }
+      }
+    }
+
+    expect(containedAfterDriving, "collars never reported containment").toBe(true);
+    // And the animals physically moved on the way in, rather than being teleported by
+    // a single patch.
+    expect(strayMovement).toBeGreaterThan(1);
+  });
+
+  it("earns containment inside the recall command's observation window", async () => {
+    // The reordering above is only safe because it still fits. recall.ts observes
+    // `strays == 0` with timeoutMs 5000, so containment landing later than that would
+    // turn a working OBSERVED command into a timeout.
+    const { registry, command, fire, published } = setup();
+
+    await fire(AGRICULTURE_STIMULUS.boundaryBreach);
+    const recall = registry.get(AGRICULTURE_DEVICE_KEYS.recall)!;
+    await recall.model.onCommand!(command(AGRICULTURE_COMMAND_TOPICS.recall, { active: true }));
+
+    const contained = (): boolean => published.some((entry) =>
+      entry.topic === AGRICULTURE_STATE_TOPICS.collars
+      && (JSON.parse(entry.payload) as { strays: number }).strays === 0);
+
+    await vi.advanceTimersByTimeAsync(4500);
+    expect(contained(), "containment must arrive within the 5s observation window").toBe(true);
   });
 
   it("works the dogs through the recall without letting them report containment", async () => {

@@ -21,7 +21,9 @@ export async function handleLivestockOperatorEvent(event: string | undefined) {
     if (event === "simulate-strays") {
         state.set("demoScenarioPending", "breach");
         events.emit("farm/sim/livestock-boundary-breach", {});
-        setAction("DEMO · injecting east-boundary crossing");
+        // Which boundary is decided by the simulated world, from the paddock the herd
+        // is standing in. Naming a side here was wrong half the time.
+        setAction("DEMO · injecting a boundary crossing");
     }
     else if (event === "move-herd") {
         state.set("demoScenarioPending", "move");
@@ -48,6 +50,11 @@ export function projectCollarTelemetry(context: EventContext) {
     const paddock = String(source.paddock || "A");
     const breachSector = String(source.breachSector || "");
     const movement = String(source.movement || "grazing");
+    // Where the collar network says each stray is. Projected exactly like the working
+    // dogs' positions are, so the pane maps reported GPS into the paddock diagram
+    // instead of reconstructing cattle movement from its own animation clock.
+    const strayPositions = Array.isArray(source.strayPositions) ? source.strayPositions : [];
+    state.set("strayPositions", strayPositions);
     state.set("strays", strays);
     state.set("herd", herd);
     state.set("tracked", tracked);
@@ -64,7 +71,7 @@ export function projectCollarTelemetry(context: EventContext) {
     const previous = Number(state.get("lastStrays"));
     state.set("lastStrays", strays);
     if (strays > 0 && previous !== strays) {
-        setAction(strays + " collars outside the virtual boundary · " + (breachSector || "sector unknown"));
+        setAction(strays + " collars outside the virtual boundary · " + (breachSector ? breachSector + " boundary" : "sector unknown"));
         events.emit("farm/livestock/breach", { strays, herd, tracked, sector: breachSector });
     }
     else if (strays === 0 && previous > 0) {
