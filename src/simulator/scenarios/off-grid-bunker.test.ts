@@ -157,13 +157,65 @@ describe("bunker simulator", () => {
     expect(perimeter().movement).toBe("clear");
   });
 
-  it("models low reserve then generator recovery", async () => {
+  it("brings the generator up to output instead of asserting it", async () => {
+    // showcase-cleanup §9.5. `outputW` used to be written in the same update as `on`,
+    // which left a command nothing to prove beyond the contactor closing.
+    const { send, state } = setup();
+    expect(Number(state(BUNKER_DEVICE_KEYS.generator).outputW)).toBe(0);
+
+    expect((await send(BUNKER_COMMAND_TOPICS.generator, { on: true })).accepted).toBe(true);
+    // Accepted, and producing nothing yet: the engine has to come up.
+    expect(state(BUNKER_DEVICE_KEYS.generator).on).toBe(true);
+    expect(Number(state(BUNKER_DEVICE_KEYS.generator).outputW)).toBe(0);
+
+    vi.advanceTimersByTime(1600);
+    expect(Number(state(BUNKER_DEVICE_KEYS.generator).outputW)).toBeGreaterThanOrEqual(1500);
+  });
+
+  it("integrates the power balance into the battery instead of asserting a percent", async () => {
+    // The generator used to wait 1.8s and then assert `battery: 31` — and rewrite
+    // `solarW` while it was there, so starting a generator changed the weather.
     const { fire, send, state } = setup();
     await fire(BUNKER_STIMULUS.lowPower);
     expect(state(BUNKER_DEVICE_KEYS.power).battery).toBe(27);
-    expect((await send(BUNKER_COMMAND_TOPICS.generator, { on: true })).accepted).toBe(true);
-    vi.advanceTimersByTime(1900);
-    expect(state(BUNKER_DEVICE_KEYS.power).battery).toBe(31);
+    const cloudedSolar = Number(state(BUNKER_DEVICE_KEYS.power).solarW);
+    // Cloud cover leaves the site running at a deficit, so the bank drains.
+    expect(Number(state(BUNKER_DEVICE_KEYS.power).netW)).toBeLessThan(0);
+    vi.advanceTimersByTime(6000);
+    const drained = Number(state(BUNKER_DEVICE_KEYS.power).battery);
+    expect(drained).toBeLessThan(27);
+
+    await send(BUNKER_COMMAND_TOPICS.generator, { on: true });
+    vi.advanceTimersByTime(2000);
+    // Output now covers the deficit, so the balance turns positive...
+    expect(Number(state(BUNKER_DEVICE_KEYS.power).netW)).toBeGreaterThan(0);
+    // ...and the sun is exactly where it was. A generator does not move it.
+    expect(Number(state(BUNKER_DEVICE_KEYS.power).solarW)).toBe(cloudedSolar);
+
+    vi.advanceTimersByTime(6000);
+    expect(Number(state(BUNKER_DEVICE_KEYS.power).battery)).toBeGreaterThan(drained);
+  });
+
+  it("spends fuel while the generator is carrying the site", async () => {
+    // `fuel` was a number no code path ever touched, which made the gauge decoration.
+    const { send, state } = setup();
+    const full = Number(state(BUNKER_DEVICE_KEYS.generator).fuel);
+
+    await send(BUNKER_COMMAND_TOPICS.generator, { on: true });
+    vi.advanceTimersByTime(20000);
+
+    expect(Number(state(BUNKER_DEVICE_KEYS.generator).fuel)).toBeLessThan(full);
+  });
+
+  it("winds generator output down when it is stopped", async () => {
+    const { send, state } = setup();
+    await send(BUNKER_COMMAND_TOPICS.generator, { on: true });
+    vi.advanceTimersByTime(1600);
+    expect(Number(state(BUNKER_DEVICE_KEYS.generator).outputW)).toBeGreaterThan(0);
+
+    await send(BUNKER_COMMAND_TOPICS.generator, { on: false });
+    vi.advanceTimersByTime(1200);
+    expect(Number(state(BUNKER_DEVICE_KEYS.generator).outputW)).toBeLessThanOrEqual(50);
   });
 
   it("charges the floodlights and a sealed filter to the power bus", async () => {

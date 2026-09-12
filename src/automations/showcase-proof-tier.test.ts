@@ -182,9 +182,9 @@ const EXPECTED: Record<string, { observed: number; acknowledged: number; why: st
     why: "maglock, hint screen and intercom all echo their command; a door sensor would be needed to prove the exit actually released",
   },
   "bunker-power": {
-    observed: 0,
-    acknowledged: 1,
-    why: "outputW would be the right proof but the fixture writes it in the same update as `on`; raising this belongs with ramping generator output and integrating battery SOC",
+    observed: 1,
+    acknowledged: 0,
+    why: "the generator now ramps to output and the bus integrates it, so `outputW >= 1500` is a measurement of the machine rather than an echo of `on` — which is what raising this from acknowledged was waiting on",
   },
   "bunker-air": {
     observed: 0,

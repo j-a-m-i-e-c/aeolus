@@ -52,6 +52,40 @@ export const BUNKER_STIMULUS = {
 const PERIMETER_GROUP = "perimeter-approach";
 /** Transition group for the floodlights coming up to brightness. */
 const FLOODLIGHT_GROUP = "floodlight-brightness";
+/** Transition group for the generator's output spinning up and down. */
+const GENERATOR_GROUP = "generator-output";
+
+/**
+ * The power model (showcase-cleanup §9.5).
+ *
+ * Battery charge used to be a pair of constants: starting the generator waited 1.8s and
+ * then asserted `battery: 31`, which also rewrote `solarW` — so a generator start
+ * changed the weather. Nothing integrated anything, `outputW` appeared at full value
+ * instantly, and `fuel` was a number no code ever touched.
+ *
+ * Now there is one balance, `netW = solarW + generatorOutputW - loadW`, integrated into
+ * a real state of charge. That makes the controls legible: the operator can see the
+ * generator cover the deficit, the battery climb, and the fuel pay for it.
+ */
+/**
+ * What the generator produces at full output, in watts.
+ *
+ * Power & Supplies verifies a start against 1500 W of measured output, so the ramp has
+ * to pass that comfortably. No threshold is needed here: unlike the floodlights, nothing
+ * in the simulated world reacts to a particular output level, so the number belongs to
+ * the automation that makes the claim and the scenario test is what holds the ramp to it.
+ */
+const GENERATOR_OUTPUT_W = 2200;
+/** How long the generator takes to come up to output, in ms. */
+const GENERATOR_RAMP_MS = 1400;
+/** Usable capacity of the battery bank, in watt-hours. */
+const BATTERY_CAPACITY_WH = 9600;
+/** Run time from a full tank at full output, in hours. */
+const GENERATOR_RUN_HOURS = 9;
+/** How often the power balance is integrated, in ms of wall time. */
+const POWER_TICK_MS = 2_000;
+/** Simulated seconds per real second, so a demo can watch the battery move. */
+const POWER_TIME_SCALE = 300;
 /** How far out the perimeter classifier can track movement, in metres. */
 const PERIMETER_TRACK_M = 140;
 /** Inside this range a tracked object is raised as a contact, in metres. */
@@ -101,8 +135,11 @@ const I = {
   // moving the air. Sealing the bunker warms it slightly.
   filter: { on: true, sealed: false, overpressure: 8, filterLife: 78, tempC: 19.4 },
   // Load is not authored: it is what the site's own draws add up to, so the opening
-  // reading agrees with the model that maintains it from then on.
-  power: { solarW: 1800, battery: 74, loadW: siteLoadW(false, false, false), netW: 1800 - siteLoadW(false, false, false) },
+  // reading agrees with the model that maintains it from then on. Solar is sized so a
+  // fair day roughly covers the site and trickles the bank upward, which is what an
+  // off-grid install is actually designed for — and it leaves the demo's own scenarios
+  // as the things that move the battery rather than the sun overwhelming them.
+  power: { solarW: 980, battery: 74, loadW: siteLoadW(false, false, false), netW: 980 - siteLoadW(false, false, false) },
   generator: { on: false, fuel: 62, outputW: 0 },
   supplies: { foodDays: 64, waterDays: 80, meds: 45, beans: 312, occupants: 4, bunks: 6 },
   radioRx: { frequency: 146.52, signal: "quiet", message: "", contactsToday: 3, ts: 0 },
@@ -135,6 +172,16 @@ class Env {
   private seq = 0;
   /** How many are in the group currently working its way in. */
   private group = 0;
+  /**
+   * Charge in the bank, in watt-hours.
+   *
+   * Held in energy rather than percent so the published integer is a rounding of a real
+   * quantity. A percent alone cannot be integrated without the rounding error becoming
+   * the model.
+   */
+  private socWh = BATTERY_CAPACITY_WH * (I.power.battery / 100);
+  /** Fuel remaining, as a percent of a full tank. */
+  private fuelPct = I.generator.fuel;
 
   register(k: string, s: SimulatedStateController): void { this.c.set(k, s); }
   get(k: string): SimulatedStateController | undefined { return this.c.get(k); }
@@ -144,27 +191,79 @@ class Env {
   }
   clearTimers(): void { for (const t of this.timers) clearTimeout(t); this.timers.clear(); }
 
-  recalc(): void {
+  /** The instantaneous balance on the bus, in watts. */
+  private balance(): { load: number; solar: number; gen: number; net: number } {
     const l = this.get(BUNKER_DEVICE_KEYS.lights)?.read();
     const f = this.get(BUNKER_DEVICE_KEYS.filter)?.read();
     const g = this.get(BUNKER_DEVICE_KEYS.generator)?.read();
     const p = this.get(BUNKER_DEVICE_KEYS.power);
-    if (!p) return;
     const load = siteLoadW(Boolean(l?.on), Boolean(f?.sealed), Boolean(this.get(BUNKER_DEVICE_KEYS.radio)?.read().tx));
-    const solar = Number(p.read().solarW ?? 1800);
+    const solar = Number(p?.read().solarW ?? I.power.solarW);
     const gen = Number(g?.outputW ?? 0);
-    p.update({ loadW: load, netW: solar + gen - load }, { forcePublish: true });
+    return { load, solar, gen, net: solar + gen - load };
   }
+
+  recalc(): void {
+    const p = this.get(BUNKER_DEVICE_KEYS.power);
+    if (!p) return;
+    const { load, net } = this.balance();
+    p.update({ loadW: load, netW: net }, { forcePublish: true });
+  }
+
+  /**
+   * Integrate the power balance, and the fuel that is paying for part of it.
+   *
+   * Self-rescheduling through `later`, so it is tracked in the same timer set everything
+   * else is and a reset or dispose stops it. The battery is only republished when its
+   * rounded percent actually moves, which keeps a bus that is merely sitting near
+   * equilibrium from publishing every couple of seconds.
+   */
+  private powerTick(): void {
+    const p = this.get(BUNKER_DEVICE_KEYS.power);
+    const g = this.get(BUNKER_DEVICE_KEYS.generator);
+    if (p) {
+      const simSeconds = (POWER_TICK_MS / 1000) * POWER_TIME_SCALE;
+      const { load, net } = this.balance();
+      const before = Math.round((this.socWh / BATTERY_CAPACITY_WH) * 100);
+      this.socWh = Math.max(0, Math.min(BATTERY_CAPACITY_WH, this.socWh + net * (simSeconds / 3600)));
+      const battery = Math.round((this.socWh / BATTERY_CAPACITY_WH) * 100);
+
+      // Fuel is spent in proportion to how hard the generator is working, so a ramping
+      // machine does not bill for output it is not producing yet.
+      if (g && Boolean(g.read().on)) {
+        const output = Number(g.read().outputW ?? 0);
+        const burnPctPerSimSecond = 100 / (GENERATOR_RUN_HOURS * 3600);
+        this.fuelPct = Math.max(0, this.fuelPct - burnPctPerSimSecond * simSeconds * (output / GENERATOR_OUTPUT_W));
+        const fuel = Math.round(this.fuelPct);
+        if (Number(g.read().fuel) !== fuel) g.update({ fuel });
+        // An empty tank stops the machine. Running on nothing would make the fuel
+        // gauge decoration.
+        if (this.fuelPct <= 0) this.setGenerator(g, false);
+      }
+
+      if (battery !== before) p.update({ battery, loadW: load, netW: net });
+    }
+    this.later(POWER_TICK_MS, () => this.powerTick());
+  }
+
+  /** Begin integrating. Called once the devices are registered. */
+  startPowerModel(): void { this.later(POWER_TICK_MS, () => this.powerTick()); }
 
   reset(): void {
     this.clearTimers();
     this.get(BUNKER_DEVICE_KEYS.perimeter)?.cancelTransitions(PERIMETER_GROUP);
     this.get(BUNKER_DEVICE_KEYS.lights)?.cancelTransitions(FLOODLIGHT_GROUP);
+    this.get(BUNKER_DEVICE_KEYS.generator)?.cancelTransitions(GENERATOR_GROUP);
     this.group = 0;
+    this.socWh = BATTERY_CAPACITY_WH * (I.power.battery / 100);
+    this.fuelPct = I.generator.fuel;
     for (const [k, v] of Object.entries(I)) {
       this.get(BUNKER_DEVICE_KEYS[k as keyof typeof BUNKER_DEVICE_KEYS])?.update({ ...v }, { forcePublish: true });
     }
     this.recalc();
+    // clearTimers() above stopped the integrator along with everything else, so it has
+    // to be armed again or the bus would freeze after a reset.
+    this.startPowerModel();
   }
 
   /** A group works its way in from the treeline. */
@@ -265,24 +364,54 @@ class Env {
   }
 
   lowPower(): void {
+    // Cloud cover and a drawn-down bank. The battery is set through the integrator's own
+    // store, so the model continues from this reading rather than fighting it.
+    this.socWh = BATTERY_CAPACITY_WH * 0.27;
     this.get(BUNKER_DEVICE_KEYS.power)?.update({ solarW: 160, battery: 27 }, { forcePublish: true });
     this.recalc();
   }
 
   powerReset(): void {
+    this.get(BUNKER_DEVICE_KEYS.generator)?.cancelTransitions(GENERATOR_GROUP);
+    this.socWh = BATTERY_CAPACITY_WH * (I.power.battery / 100);
+    this.fuelPct = I.generator.fuel;
     this.get(BUNKER_DEVICE_KEYS.power)?.update({ ...I.power }, { forcePublish: true });
     this.get(BUNKER_DEVICE_KEYS.generator)?.update({ ...I.generator }, { forcePublish: true });
     this.recalc();
   }
 
+  /**
+   * Start or stop the generator.
+   *
+   * Output ramps rather than appearing: a contactor that has closed is not yet a machine
+   * making power, and the gap between those two facts is what the generator command is
+   * verified against. `on` publishes immediately; `outputW` arrives as the engine comes
+   * up. The balance is recomputed on every frame, so the operator watches the deficit
+   * close rather than being told afterwards that it did.
+   */
   setGenerator(s: SimulatedStateController, on: boolean): void {
-    s.update({ on, outputW: on ? 2200 : 0 });
-    this.recalc();
-    if (!on) return;
-    this.later(1800, () => {
-      this.get(BUNKER_DEVICE_KEYS.power)?.update({ battery: 31, solarW: 220 }, { forcePublish: true });
-      this.recalc();
+    const from = Number(s.read().outputW ?? 0);
+    const to = on ? GENERATOR_OUTPUT_W : 0;
+    s.update({ on }, { forcePublish: true });
+    s.transition({
+      durationMs: on ? GENERATOR_RAMP_MS : 900,
+      steps: on ? 7 : 5,
+      group: GENERATOR_GROUP,
+      frame: (progress) => {
+        const outputW = Math.round(from + (to - from) * progress);
+        // The bus follows the machine on every frame, so the deficit visibly closes as
+        // the engine comes up. Computed from this frame's output rather than read back
+        // off the device, because the patch below has not been applied yet.
+        const p = this.get(BUNKER_DEVICE_KEYS.power);
+        if (p) {
+          const { load, solar } = this.balance();
+          p.update({ loadW: load, netW: solar + outputW - load });
+        }
+        return { outputW };
+      },
+      onSettled: () => this.recalc(),
     });
+    this.recalc();
   }
 
   radioContact(): void {
@@ -341,8 +470,12 @@ export function createOffGridBunkerScenario(): SimulatorScenario {
 
   const gen = act(BUNKER_DEVICE_KEYS.generator, "Backup Generator", BUNKER_STATE_TOPICS.generator, BUNKER_COMMAND_TOPICS.generator, { ...I.generator }, e, (ctx, c) => {
     if (typeof c.params.on !== "boolean") return { accepted: false, error: "generator requires boolean on" };
+    // No `outputW` in the resulting-state patch. It used to be asserted here at full
+    // value in the same breath as `on`, which made the two indistinguishable and left
+    // nothing for a command to prove beyond the contactor closing. Output is ramped by
+    // the machine, so `on` publishes now and power arrives as the engine comes up.
     e.setGenerator(ctx.state, c.params.on);
-    return { accepted: true, state: { patch: { on: c.params.on, outputW: c.params.on ? 2200 : 0 } } };
+    return { accepted: true, state: { patch: { on: c.params.on } } };
   });
 
   const radio = act(BUNKER_DEVICE_KEYS.radio, "VHF Radio", BUNKER_STATE_TOPICS.radio, BUNKER_COMMAND_TOPICS.radio, { ...I.radio }, e, (ctx, c) => {
@@ -350,6 +483,11 @@ export function createOffGridBunkerScenario(): SimulatorScenario {
     e.setRadio(ctx.state, c.params.tx);
     return { accepted: true, state: { patch: { tx: c.params.tx } } };
   });
+
+  // The bus is always doing something, so the integrator runs from the start rather than
+  // being switched on by an interaction. It publishes only when the rounded battery
+  // percent actually moves, so a site sitting near equilibrium stays quiet.
+  e.startPowerModel();
 
   return {
     key: BUNKER_SCENARIO_KEY,

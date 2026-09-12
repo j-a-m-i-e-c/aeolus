@@ -1,4 +1,13 @@
 // Off-grid power implementation. logic/index.ts owns policy flow.
+
+/**
+ * Output, in watts, at which the generator counts as actually generating.
+ *
+ * Below this the engine has been asked to start and has not got there yet, which is a
+ * different fact from the site having power.
+ */
+const GENERATOR_VERIFIED_W = 1500;
+
 function byTopic(wanted: string) {
     return devices.list().find((device) => device.topic === wanted);
 }
@@ -10,28 +19,40 @@ export async function setGenerator(on: boolean, reason: string) {
     if (!generator)
         return;
     state.set("pending", true);
-    // Acknowledgement is the honest ceiling until the generator is modelled properly.
+    // Proven by power on the bus, not by the contactor agreeing it closed.
     //
-    // `outputW` would be the right proof — a generator producing 2.2 kW is a fact
-    // about the machine, where `on` is only the contactor agreeing it closed. But the
-    // fixture currently writes `on` and `outputW` in the same update, so observing
-    // `outputW` today would be the same echo wearing a better name. Raising this back
-    // to observed belongs with ramping generator output and integrating battery SOC,
-    // which is where the interesting behaviour lives anyway.
+    // `on` is a command echo: the generator publishes it the instant it accepts. What an
+    // operator actually needs to know is whether the machine is making power, and
+    // `outputW` is that measurement — it ramps as the engine comes up, so a start that
+    // never reaches output fails verification instead of reporting success. This was
+    // acknowledged-only for an honest reason: the fixture used to assert `on` and a full
+    // `outputW` in the same update, so observing output would have been the same echo
+    // wearing a better name. Ramping the machine is what made the stronger claim true
+    // (showcase-cleanup §9.5).
     const result = await devices.action(generator.id, "command", { payload: { on } }, {
-        tier: "acknowledged",
+        tier: "observed",
+        deviceId: generator.id,
+        condition: on
+            ? { field: "outputW", op: "gte", value: GENERATOR_VERIFIED_W }
+            : { field: "outputW", op: "lte", value: 50 },
         timeoutMs: 5000,
         evidence: {
             intent: on ? "Start backup generator" : "Stop backup generator",
+            observedLabel: on
+                ? "generator reached " + GENERATOR_VERIFIED_W + " W of output"
+                : "generator output fell away",
         },
     });
     state.set("pending", false);
+    // Keep the proof, not just the verdict: every rung this command reached, with the
+    // evidence the runtime recorded for it.
+    state.set("lastCommand", devices.commandEvidence(result.commandId));
     if (result.success) {
         state.set("generatorOn", on);
         setAction(reason);
     }
     else {
-        setAction("Generator command not verified");
+        setAction("Generator command not verified: " + String(result.error || result.lifecycleState || "unknown"));
     }
 }
 export function handlePowerDemoEvent(event: string | undefined) {
@@ -61,6 +82,11 @@ export function projectPowerAndSupplies() {
     state.set("net", net);
     state.set("generatorOn", generatorOn);
     state.set("fuel", Number((generator && generator.state && generator.state.fuel) ?? 62));
+    // What the machine is actually producing, and whether the bank is gaining on it.
+    // Charging is a fact about the balance, so it is derived from the balance rather
+    // than from whether the generator happens to be running.
+    state.set("generatorOutputW", Number((generator && generator.state && generator.state.outputW) ?? 0));
+    state.set("charging", net > 0);
     state.set("foodDays", Number(supplyState.foodDays ?? 64));
     state.set("waterDays", Number(supplyState.waterDays ?? 80));
     state.set("meds", Number(supplyState.meds ?? 45));
@@ -73,6 +99,8 @@ export function projectPowerAndSupplies() {
         load,
         net,
         generatorOn: Boolean(state.get("generatorOn")),
+        generatorOutputW: Number(state.get("generatorOutputW") || 0),
+        charging: net > 0,
         foodDays: Number(supplyState.foodDays ?? 64),
         waterDays: Number(supplyState.waterDays ?? 80),
         // Who the days of food are actually for. The overview draws the habitat, so
