@@ -45,6 +45,7 @@ export function publishPerimeterSummary() {
         // how many there are.
         rangeM: Number(state.get("rangeM") || 140),
         movement: String(state.get("movement") || "clear"),
+        approachGroupSize: Number(state.get("approachGroupSize") || 0),
         ambientContacts: Number(state.get("ambientContacts") || 2),
         trackRangeM: Number(state.get("trackRangeM") || 140),
         detectRangeM: Number(state.get("detectRangeM") || 60),
@@ -142,6 +143,10 @@ export function projectPerimeterTelemetry() {
     state.set("rangeM", numberAt(observed, "rangeM", 140));
     state.set("closingMps", numberAt(observed, "closingMps", 0));
     state.set("movement", movement);
+    // How many are being tracked in, separately from how many are close enough to raise.
+    // A pane that only has the alert count cannot draw a group crossing the ground
+    // between the treeline and the ring.
+    state.set("approachGroupSize", numberAt(observed, "approachGroupSize", 0));
     state.set("ambientContacts", numberAt(observed, "ambientContacts", 2));
     state.set("trackRangeM", numberAt(observed, "trackRangeM", 140));
     state.set("detectRangeM", numberAt(observed, "detectRangeM", 60));

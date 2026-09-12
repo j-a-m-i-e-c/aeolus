@@ -158,8 +158,14 @@ function perimeterAt(rangeM: number, group: number, movement: PerimeterMovement,
   const raised = published <= PERIMETER_DETECT_M;
   return {
     rangeM: published,
+    // How big the group being tracked in is, whether or not it is close enough to raise.
+    // This used to be folded into `ambientContacts` while outside the ring, which left a
+    // consumer no way to draw an approaching group at the range it had actually reached —
+    // so it appeared at the treeline and then teleported inside the ring. Tracked size
+    // and alert-worthy count are different facts (showcase-cleanup §9.3).
+    approachGroupSize: group,
     contacts: raised ? group : 0,
-    ambientContacts: raised ? PERIMETER_AMBIENT : PERIMETER_AMBIENT + group,
+    ambientContacts: PERIMETER_AMBIENT,
     movement,
     closingMps: Math.round(closingMps * 10) / 10,
     classification: raised ? "shambling-biped" : "distant-movement",

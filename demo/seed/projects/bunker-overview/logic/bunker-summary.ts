@@ -7,7 +7,8 @@ export function projectPerimeterSummary(source: Record<string, unknown>) {
     // Range and movement come across too: the overview draws the approach, and a
     // contact count on its own cannot say where anything is.
     ["contacts", "sector", "classification", "lightsOn", "autoLights",
-        "rangeM", "movement", "ambientContacts", "trackRangeM", "detectRangeM", "fenceRangeM", "floodlightPct"]
+        "rangeM", "movement", "approachGroupSize", "ambientContacts",
+        "trackRangeM", "detectRangeM", "fenceRangeM", "floodlightPct"]
         .forEach((key) => copyDefined(source, key));
 }
 export function projectAirSummary(source: Record<string, unknown>) {

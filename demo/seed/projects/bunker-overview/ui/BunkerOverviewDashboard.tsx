@@ -24,6 +24,10 @@ export default function BunkerOverviewDashboard({ model }: {
     const battery = Number(model.battery ?? 74), gen = Boolean(model.generatorOn), signal = String(model.signal || "quiet");
     const occupants = Number(model.occupants ?? 4), bunks = Number(model.bunks ?? 6);
     const movement = String(model.movement || "clear"), ambient = Number(model.ambientContacts ?? 2);
+    // The group being tracked in, which is a different number from the one raised as an
+    // alert: a group crossing the ground outside the ring is real and has a position, so
+    // it is drawn where it is rather than left at the treeline until it crosses.
+    const approaching = Number(model.approachGroupSize ?? 0);
     const range = Number(model.rangeM ?? 140);
     const track = Math.max(40, Number(model.trackRangeM ?? 140)), detect = Number(model.detectRangeM ?? 60), fence = Number(model.fenceRangeM ?? 18);
     // Brightness rather than the switch: what lights the ground is the light.
@@ -58,8 +62,8 @@ export default function BunkerOverviewDashboard({ model }: {
       {[78, 682].map((lx, i) => <g key={lx}><line x1={lx} y1="120" x2={lx} y2="68" stroke="#6F796D" strokeWidth="3"/><rect x={lx - 7} y="64" width="14" height="8" rx="2" fill={beamPct > 5 ? "#E6D579" : "#54584D"}/><path d={i === 0 ? "M78 70 L198 100 L78 118 Z" : "M682 70 L562 100 L682 118 Z"} fill="url(#beam)" opacity={beam * 4}/></g>)}
       {/* nothing is deleted from the scene: distant wanderers are tracked, contacts are ranged */}
       {Array.from({ length: Math.min(ambient, 4) }).map((_, i) => <Zombie key={"a" + i} x={xFor(track, i % 2 === 0 ? -1 : 1) + (i < 2 ? 0 : 18 * (i % 2 === 0 ? 1 : -1))} y={116} p={p * .35 + i * 2} lit={false} scale={.72}/>)}
-      {Array.from({ length: Math.min(contacts, 4) }).map((_, i) => <Zombie key={i} x={xFor(range, i % 2 === 0 ? -1 : 1) + Math.floor(i / 2) * 22 * (i % 2 === 0 ? 1 : -1)} y={121} p={p + i} lit={beamPct > 40}/>)}
-      <text x="14" y="112" fill="#758076" fontSize="10">ALERT RING {integer(detect)} m · NEAREST {contacts || withdrawing ? integer(range) + " m" : "beyond ring"}</text>
+      {Array.from({ length: Math.min(approaching, 4) }).map((_, i) => <Zombie key={i} x={xFor(range, i % 2 === 0 ? -1 : 1) + Math.floor(i / 2) * 22 * (i % 2 === 0 ? 1 : -1)} y={121} p={p + i} lit={beamPct > 40}/>)}
+      <text x="14" y="112" fill="#758076" fontSize="10">ALERT RING {integer(detect)} m · {approaching > 0 ? "TRACKING " + integer(approaching) + " AT " + integer(range) + " m" : "NOTHING INSIDE TRACK"}</text>
       {/* access shaft */}<g><rect x="359" y="132" width="42" height="52" fill="#0D110C" stroke="#667064"/>{[142, 154, 166, 178].map(y => <line key={y} x1="370" y1={y} x2="390" y2={y} stroke="#5A6558"/>)}<line x1="370" y1="138" x2="370" y2="182" stroke="#5A6558"/><line x1="390" y1="138" x2="390" y2="182" stroke="#5A6558"/></g>
       {/* six shelter areas */}
       <rect x="104" y="186" width="552" height="200" rx="9" fill="#0B0E0A" stroke="#74786B" strokeWidth="3"/>
