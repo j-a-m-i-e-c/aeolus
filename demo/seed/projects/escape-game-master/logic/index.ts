@@ -8,6 +8,7 @@ import {
   projectRoomLook,
   projectRoomLookOutcome,
   reconcileExitForCompletion,
+  reconcileExpiry,
 } from "./game-master";
 
 export default async function run(context: EventContext) {
@@ -18,13 +19,16 @@ export default async function run(context: EventContext) {
     : {};
 
   initialiseGameSession();
+  // A session that has run out of time is retired here, so the recorded status catches
+  // up with the clock the next time anything wakes this automation.
+  reconcileExpiry();
   // Refresh what the room is physically doing before and after acting, so the
   // console reports the controller's observed scene rather than the last thing this
   // automation asked for.
   projectRoomLook();
 
   if (topic.startsWith("ui/")) {
-    await handleGameMasterAction(event, payload);
+    await handleGameMasterAction(event);
     projectRoomLook();
     return;
   }

@@ -65,6 +65,39 @@ describe("Escape Room showcase",()=>{
     }
   });
 
+  // showcase-cleanup §8.1 — the game waits in READY. Behaviour is covered in
+  // escape-room-session.test.ts; this pins the wiring the pane and the seed depend on.
+  it("waits in READY until an operator starts the game",()=>{
+    const script=String(gameMasterAutomation.scriptSource);
+    for(const state of ["ready","running","paused","completed","expired"]){
+      expect(script,`no ${state} session state`).toContain(`"${state}"`);
+    }
+    // The clock cannot be started by initialising, only by the action.
+    expect(script).toContain('state.set("timerStartedAt", 0)');
+    expect(gameMasterAutomation.demoAccess?.fireEvents).toContain("start-game");
+    expect(gameMasterAutomation.uiSource).toContain("START GAME");
+    expect(gameMasterAutomation.uiSource).toContain("START NEW GAME");
+  });
+
+  // §8.2 — a start establishes a known room, and does it through each owner's own path
+  // rather than by reaching into another automation's state.
+  it("resets the room on start without touching another automation's state",()=>{
+    const script=String(gameMasterAutomation.scriptSource);
+    expect(script).toContain('events.emit("escape/sim/reset"');
+    expect(script).toContain('events.emit("escape/game/look-request"');
+    // The puzzle network is still owned by Puzzle Progress: Game Master neither reads
+    // its sensor nor writes its projection.
+    expect(script).not.toContain("sensor/escape/puzzles");
+  });
+
+  // §8.3 — the browser no longer decides how much time is left. It used to pass the
+  // remaining seconds back with every session action, which on the public demo made a
+  // visitor-supplied number authoritative over the session clock.
+  it("keeps the session clock out of the browser's hands",()=>{
+    expect(gameMasterAutomation.scriptSource).not.toContain("payload.remaining");
+    expect(gameMasterAutomation.uiSource).not.toMatch(/fire\(\s*event\s*,\s*\{\s*remaining/);
+  });
+
   it("keeps the physical room controller owned by Room Systems alone",()=>{
     const fxCommands=(source: string)=>[...String(source).matchAll(/switch\/escape\/fx\/set/g)].length;
     expect(fxCommands(roomFxAutomation.scriptSource)).toBeGreaterThanOrEqual(0);

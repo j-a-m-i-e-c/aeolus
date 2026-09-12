@@ -5,6 +5,7 @@ export const gameMasterAutomation = {
   "triggerTopic": "aeolus/events/+/escape/observed/#",
   "demoAccess": {
     "fireEvents": [
+      "start-game",
       "add-time",
       "sub-time",
       "pause",

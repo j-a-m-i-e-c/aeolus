@@ -12,7 +12,7 @@ export default function GameMaster(aeolus: CustomComponentProps) {
     p4: aeolus.read("p4"),
     remaining: aeolus.read("remaining"),
     timerStartedAt: aeolus.read("timerStartedAt"),
-    paused: aeolus.read("paused"),
+    status: aeolus.read("status"),
     exitUnlocked: aeolus.read("exitUnlocked"),
     currentRoom: aeolus.read("currentRoom"),
     hintsSent: aeolus.read("hintsSent"),
@@ -30,7 +30,10 @@ export default function GameMaster(aeolus: CustomComponentProps) {
   };
 
   const actions = {
-    session: (event: string, remaining: number) => aeolus.fire(event, { remaining }),
+    // No remaining-seconds argument any more: the Logic derives the clock from its own
+    // recorded transition, so the browser cannot decide how much time is left.
+    session: (event: string) => aeolus.fire(event),
+    startGame: () => aeolus.fire("start-game"),
     hint: (event: string) => aeolus.fire(event),
     roomLook: (event: string) => aeolus.fire(event),
     talkStart: () => aeolus.fire("talk-start"),

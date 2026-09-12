@@ -5,12 +5,55 @@ function byTopic(wanted: string) {
 function setAction(label: string) {
     state.set("lastAction", { label, at: Date.now() });
 }
+/** A full session, in seconds. */
+const SESSION_SECONDS = 2700;
+/**
+ * Where the session is, as a state machine rather than a boolean.
+ *
+ *   ready → running ⇄ paused → completed | expired → (start again) → running
+ *
+ * `paused` used to be the only session flag, which left no way to express "no game has
+ * started yet" — so there was no such state and the clock simply ran (showcase-cleanup
+ * §8.1).
+ */
+type GameStatus = "ready" | "running" | "paused" | "completed" | "expired";
+function status(): GameStatus {
+    return String(state.get("status") || "ready") as GameStatus;
+}
+/**
+ * Seconds left on the clock.
+ *
+ * Derived the same way here and in the pane: the remaining recorded at the last
+ * transition, minus the time elapsed since it — and only while the clock is running.
+ * READY, PAUSED, COMPLETED and EXPIRED do not tick, so opening the pane cannot consume
+ * a session (§8.3).
+ */
+export function liveRemaining() {
+    const remaining = Math.max(0, Number(state.get("remaining") || 0));
+    if (status() !== "running")
+        return remaining;
+    const startedAt = Number(state.get("timerStartedAt") || 0);
+    if (startedAt <= 0)
+        return remaining;
+    return Math.max(0, remaining - Math.floor((Date.now() - startedAt) / 1000));
+}
+/** Freeze the clock where it currently stands and move to `next`. */
+function settleClock(next: GameStatus) {
+    state.set("remaining", liveRemaining());
+    state.set("status", next);
+    // Only a running clock has a start instant. Leaving a stale one behind is what
+    // would let a paused game keep counting down the moment anything resumed it.
+    state.set("timerStartedAt", next === "running" ? Date.now() : 0);
+}
 export function initialiseGameSession() {
-    if (state.get("remaining") !== undefined)
+    if (state.get("status") !== undefined)
         return;
-    state.set("remaining", 2700);
-    state.set("timerStartedAt", Date.now());
-    state.set("paused", false);
+    // READY, and the clock is not started. This line used to set `timerStartedAt` to
+    // now, so the session began on the automation's first invocation — before anyone had
+    // asked for a game, and whether or not a team was in the room.
+    state.set("status", "ready");
+    state.set("remaining", SESSION_SECONDS);
+    state.set("timerStartedAt", 0);
     state.set("p1", false);
     state.set("p2", false);
     state.set("p3", false);
@@ -161,22 +204,89 @@ async function setIntercom(tx: boolean) {
         setAction("Intercom command not verified");
     }
 }
-export async function handleGameMasterAction(event: string | undefined, payload: Record<string, unknown>) {
-    let remaining = Number(payload.remaining);
-    if (!Number.isFinite(remaining))
-        remaining = Number(state.get("remaining") || 2700);
-    if (event === "add-time" || event === "sub-time" || event === "pause") {
-        if (event === "add-time")
-            remaining = Math.min(7200, remaining + 60);
-        if (event === "sub-time")
-            remaining = Math.max(0, remaining - 60);
-        state.set("remaining", remaining);
-        state.set("timerStartedAt", Date.now());
-        if (event === "pause")
-            state.set("paused", !Boolean(state.get("paused")));
-        setAction(event === "pause"
-            ? (Boolean(state.get("paused")) ? "Game timer paused" : "Game timer resumed")
-            : (event === "add-time" ? "Game master added one minute" : "Game master removed one minute"));
+/**
+ * Put the room and the session back to a known start, then run the clock.
+ *
+ * Every fact a fresh session depends on is established here rather than assumed, which
+ * is the difference between starting a game and merely resetting a number (§8.2).
+ *
+ * The physical room goes back through its own reset path: the props return to their
+ * start positions, the puzzle network republishes, Puzzle Progress projects it and
+ * reports `escape/observed/puzzles` back here — the same route a real solve takes. This
+ * automation does not reach into the puzzle automation's state to do it.
+ */
+export async function startGame() {
+    events.emit("escape/sim/reset", {});
+
+    // Session-specific state this automation owns.
+    state.set("hintsSent", 0);
+    state.set("lastHint", "No hint sent yet.");
+    state.set("lastHintId", 0);
+    state.set("hintRoom", "Library");
+    state.set("hintLevel", 0);
+    state.set("solveSeconds", [0, 0, 0, 0]);
+    state.set("attempts", [0, 0, 0, 0]);
+
+    // The room look is requested the way any look is, so Room Systems commands its own
+    // controller and its pane agrees with this one about what scene the room is in.
+    state.set("requestedLook", "puzzle");
+    state.set("lookRequestedAt", Date.now());
+    events.emit("escape/game/look-request", { scene: "puzzle" });
+
+    // The exit is secured by a verified command rather than left to the reset's side
+    // effect. A session must not begin on the assumption that the door is shut.
+    await setExit(false);
+
+    state.set("remaining", SESSION_SECONDS);
+    state.set("status", "running");
+    state.set("timerStartedAt", Date.now());
+    setAction("Game started · full session on the clock");
+}
+/**
+ * Retire a session whose clock has run out.
+ *
+ * Checked whenever this automation runs. The pane shows the clock reaching zero as it
+ * happens, and this is what makes the recorded session agree the next time anything
+ * wakes the automation.
+ */
+export function reconcileExpiry() {
+    if (status() !== "running" || liveRemaining() > 0)
+        return;
+    settleClock("expired");
+    setAction("Session time expired");
+}
+export async function handleGameMasterAction(event: string | undefined) {
+    if (event === "start-game") {
+        await startGame();
+        return;
+    }
+    if (event === "pause") {
+        // Only a running clock can be paused, and only a paused one resumed. Toggling a
+        // boolean could not say that, so pausing a game that had never started used to
+        // look like it did something.
+        if (status() === "running") {
+            settleClock("paused");
+            setAction("Game timer paused");
+        }
+        else if (status() === "paused") {
+            settleClock("running");
+            setAction("Game timer resumed");
+        }
+        else {
+            setAction("No running game to pause");
+        }
+        return;
+    }
+    if (event === "add-time" || event === "sub-time") {
+        // Derived here rather than taken from the pane. The remaining seconds used to
+        // arrive in the event payload, which made the browser authoritative over the
+        // session clock — and on the public demo that is a visitor-supplied number.
+        const current = liveRemaining();
+        const next = event === "add-time" ? Math.min(7200, current + 60) : Math.max(0, current - 60);
+        state.set("remaining", next);
+        if (status() === "running")
+            state.set("timerStartedAt", Date.now());
+        setAction(event === "add-time" ? "Game master added one minute" : "Game master removed one minute");
         return;
     }
     if (event === "hint-nudge")
@@ -213,6 +323,10 @@ export function projectPuzzleStatus(payload: Record<string, unknown>) {
 export async function reconcileExitForCompletion(complete: boolean) {
     if (complete && !Boolean(state.get("exitUnlocked"))) {
         await setExit(true);
+        // The clock stops on the winning second rather than running on behind a
+        // finished game, so the time the team escaped in is the time reported.
+        if (status() === "running" || status() === "paused")
+            settleClock("completed");
         state.set("requestedLook", "victory");
         state.set("lookRequestedAt", Date.now());
         events.emit("escape/game/completed", { scene: "victory", solved: 4 });
