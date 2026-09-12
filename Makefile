@@ -1,4 +1,4 @@
-.PHONY: deploy deploy-demo public-demo-preflight public-demo-build public-demo-up public-demo-seed public-demo-golden public-demo-reset up showcase showcase-reset showcase-seed public-demo-local public-demo-local-seed simulator-republish demo-up demo-reset down restart logs logs-backend status clean dev sim seed-image seed seed-demo reset test test-integration e2e e2e-fresh lint check verify verify-all help
+.PHONY: deploy deploy-demo public-demo-preflight public-demo-build public-demo-up public-demo-seed public-demo-golden public-demo-reset up showcase showcase-reset showcase-seed public-demo-local public-demo-local-seed simulator-republish down restart logs logs-backend status clean dev sim seed-image seed reset test test-integration e2e e2e-fresh lint check verify verify-all help
 
 # `USER` is normally set by the shell (your login name), which would leak into
 # the seed command. Ignore the environment value and default to "admin" unless
@@ -101,12 +101,20 @@ public-demo-local: ## Start the showcase PLUS anonymous visitor restrictions (fo
 	@echo "   restrictions — not the hardened hosted runtime. Seed the demo identity:"
 	@echo "     make public-demo-local-seed PASS=<admin-password>"
 
-# Kept because muscle memory and older notes point at them. They now name what they
-# actually do: demo-up always meant "turn on public-demo restrictions", which was the
-# trap — you could not get simulated hardware without them.
-demo-up: public-demo-local ## Alias for public-demo-local (was the only way to get the simulator)
-
-demo-reset: showcase-reset ## Alias for showcase-reset (resetting the simulator is a showcase concern)
+# demo-up, demo-reset and seed-demo are gone rather than kept as aliases.
+#
+# An alias would have preserved the trap it was named after: `demo-up` read as "start
+# the demo" and meant "restrict this install to an anonymous visitor", so muscle memory
+# would keep landing on the restricted mode when the simulator was what was wanted.
+# There is no single correct forwarding target either — demo-up did two unrelated
+# things at once, and which replacement you want depends on which of the two you meant:
+#
+#   demo-up     → showcase            (simulated hardware, unrestricted) — usually this
+#               → public-demo-local   (visitor restrictions, for testing those)
+#   seed-demo   → showcase-seed       / public-demo-local-seed
+#   demo-reset  → showcase-reset
+#
+# Nothing automated referenced them, so `No rule to make target` is the whole cost.
 
 dev: ## Start backend in dev mode (hot reload)
 	npm run dev
@@ -161,8 +169,6 @@ public-demo-local-seed: ## Seed the local public demo, incl. the demo identity (
 	@$(MAKE) --no-print-directory seed-image
 	@$(MAKE) --no-print-directory simulator-republish COMPOSE="$(LOCAL_PUBLIC_DEMO_COMPOSE)"
 	docker compose $(LOCAL_PUBLIC_DEMO_COMPOSE) --profile seed run --rm -e SEED_USER="$(USER)" -e SEED_PASS="$(PASS)" seed
-
-seed-demo: public-demo-local-seed ## Alias for public-demo-local-seed
 
 # Make the simulator republish before seeding, so the command-profile step is
 # deterministic rather than a 30s gamble.

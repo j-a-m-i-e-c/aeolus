@@ -126,11 +126,30 @@ describe("Make targets read as the modes they start", () => {
   });
 
   it("names the public-demo target after what it turns on", () => {
-    // `demo-up` was the trap: it read as "start the demo" and meant "restrict this
-    // install to an anonymous visitor". It survives as an alias, but the real target
-    // says so.
     expect(makefile).toMatch(/^public-demo-local:/m);
-    expect(makefile).toMatch(/^demo-up: public-demo-local/m);
+    expect(makefile).toMatch(/^public-demo-local-seed:/m);
+  });
+
+  it("no longer offers the targets that conflated the two modes", () => {
+    // `demo-up` was the trap: it read as "start the demo" and meant "restrict this
+    // install to an anonymous visitor". Keeping it as an alias would have preserved
+    // that, because muscle memory would keep landing on the restricted mode when the
+    // simulator was what was wanted. There is also no single correct forwarding
+    // target — it did two unrelated things, so the right replacement depends on which
+    // one you meant. Failing with `No rule to make target` says that; an alias cannot.
+    for (const retired of ["demo-up", "demo-reset", "seed-demo"]) {
+      expect(makefile, retired).not.toMatch(new RegExp(`^${retired}:`, "m"));
+    }
+  });
+
+  it("leaves no dangling .PHONY entry for a target that no longer exists", () => {
+    const phony = /^\.PHONY:(.*)$/m.exec(makefile)?.[1] ?? "";
+    const declared = phony.trim().split(/\s+/);
+    for (const name of declared) {
+      expect(makefile, `.PHONY names ${name} but no such target exists`).toMatch(
+        new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}:`, "m"),
+      );
+    }
   });
 
   it("does not reach the public-demo overlay from a showcase target", () => {
