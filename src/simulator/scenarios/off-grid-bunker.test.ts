@@ -228,6 +228,34 @@ describe("bunker simulator", () => {
     expect(Number(state(BUNKER_DEVICE_KEYS.power).loadW)).toBeGreaterThan(lit);
   });
 
+  it("measures the water and leaves the counted stores as counted stores", () => {
+    // showcase-cleanup §9.6. Every supply figure used to be published as though a sensor
+    // produced it, including 312 tins of beans. The cistern has a level sensor; the rest
+    // is an inventory somebody maintains, and the payload now says which is which.
+    const { state } = setup();
+    const supplies = state(BUNKER_DEVICE_KEYS.supplies);
+
+    // Measured, with the tank it is measuring.
+    expect(Number(supplies.waterLitres)).toBeGreaterThan(0);
+    expect(Number(supplies.cisternCapacityL)).toBeGreaterThan(Number(supplies.waterLitres));
+    // Human-maintained, and no longer pretending to be a reading of anything.
+    expect(Number(supplies.beans)).toBeGreaterThan(0);
+    expect(Number(supplies.foodDays)).toBeGreaterThan(0);
+    // A runway is not a measurement, so the device does not publish one.
+    expect(supplies.waterDays).toBeUndefined();
+  });
+
+  it("draws the cistern down as the occupants use it", () => {
+    const { state } = setup();
+    const before = Number(state(BUNKER_DEVICE_KEYS.supplies).waterLitres);
+
+    // Slowly, because eighty days of water is slow. The point is that it moves at all:
+    // the level used to be a constant, so the runway derived from it never changed.
+    vi.advanceTimersByTime(400_000);
+
+    expect(Number(state(BUNKER_DEVICE_KEYS.supplies).waterLitres)).toBeLessThan(before);
+  });
+
   it("radio transmission is bounded", async () => {
     const { send, state } = setup();
     await send(BUNKER_COMMAND_TOPICS.radio, { tx: true });

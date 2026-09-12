@@ -86,6 +86,8 @@ const GENERATOR_RUN_HOURS = 9;
 const POWER_TICK_MS = 2_000;
 /** Simulated seconds per real second, so a demo can watch the battery move. */
 const POWER_TIME_SCALE = 300;
+/** What one occupant drinks, washes and cooks with per day, in litres. */
+const WATER_LITRES_PER_PERSON_DAY = 26;
 /** How far out the perimeter classifier can track movement, in metres. */
 const PERIMETER_TRACK_M = 140;
 /** Inside this range a tracked object is raised as a contact, in metres. */
@@ -141,7 +143,23 @@ const I = {
   // as the things that move the battery rather than the sun overwhelming them.
   power: { solarW: 980, battery: 74, loadW: siteLoadW(false, false, false), netW: 980 - siteLoadW(false, false, false) },
   generator: { on: false, fuel: 62, outputW: 0 },
-  supplies: { foodDays: 64, waterDays: 80, meds: 45, beans: 312, occupants: 4, bunks: 6 },
+  // Supplies are deliberately two different kinds of fact (showcase-cleanup §9.6).
+  //
+  // A sensor that magically knows there are 312 tins of beans is not credible, and it
+  // taught the wrong lesson: Aeolus does not need every operational fact to come from
+  // hardware. So the cistern has a level sensor, and everything a person had to count is
+  // published as what it is — an inventory somebody maintains.
+  supplies: {
+    // Measured. A level sensor in the cistern, and the tank it is sitting in.
+    waterLitres: 8_420,
+    cisternCapacityL: 10_500,
+    // Human-maintained. Nothing measures these; someone opened the store and counted.
+    foodDays: 64,
+    beans: 312,
+    medicalCheckedDaysAgo: 12,
+    occupants: 4,
+    bunks: 6,
+  },
   radioRx: { frequency: 146.52, signal: "quiet", message: "", contactsToday: 3, ts: 0 },
   radio: { on: true, tx: false, frequency: 146.52, lastTx: "none" },
 };
@@ -188,6 +206,8 @@ class Env {
   private socWh = BATTERY_CAPACITY_WH * (I.power.battery / 100);
   /** Fuel remaining, as a percent of a full tank. */
   private fuelPct = I.generator.fuel;
+  /** What is actually in the cistern, in litres, ahead of the sensor's rounding. */
+  private waterL = I.supplies.waterLitres;
 
   register(k: string, s: SimulatedStateController): void { this.c.set(k, s); }
   get(k: string): SimulatedStateController | undefined { return this.c.get(k); }
@@ -248,6 +268,18 @@ class Env {
       }
 
       if (battery !== before) p.update({ battery, loadW: load, netW: net });
+
+      // The cistern is genuinely being drawn down, by the people living here. It moves
+      // slowly, which is the honest speed for eighty days of water — the useful number
+      // is the runway derived from it, not the litres ticking over.
+      const s = this.get(BUNKER_DEVICE_KEYS.supplies);
+      if (s) {
+        const occupants = Number(s.read().occupants ?? I.supplies.occupants);
+        const litresPerSimSecond = (occupants * WATER_LITRES_PER_PERSON_DAY) / 86400;
+        this.waterL = Math.max(0, this.waterL - litresPerSimSecond * simSeconds);
+        const waterLitres = Math.round(this.waterL);
+        if (Number(s.read().waterLitres) !== waterLitres) s.update({ waterLitres });
+      }
     }
     this.later(POWER_TICK_MS, () => this.powerTick());
   }
@@ -263,6 +295,7 @@ class Env {
     this.group = 0;
     this.socWh = BATTERY_CAPACITY_WH * (I.power.battery / 100);
     this.fuelPct = I.generator.fuel;
+    this.waterL = I.supplies.waterLitres;
     for (const [k, v] of Object.entries(I)) {
       this.get(BUNKER_DEVICE_KEYS[k as keyof typeof BUNKER_DEVICE_KEYS])?.update({ ...v }, { forcePublish: true });
     }

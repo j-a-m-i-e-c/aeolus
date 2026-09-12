@@ -115,9 +115,14 @@ export default function BunkerOverviewDashboard({ model }: {
         <rect x="420" y="358" width="22" height="14" rx="2" fill="#141A13" stroke={linked ? "#77D695" : "#5C6659"}/><text x="431" y="369" textAnchor="middle" fill={linked ? "#9CC7A4" : "#7E8A7F"} fontSize="8">STN</text>
       </Area>
       <Area x={477} y={292} w={166} h={84} title="SUPPLIES">
-        <text x="497" y="337" fill="#D0D5CC" fontSize="19" fontWeight="850">{integer(model.foodDays)}d</text><text x="565" y="337" fill="#D0D5CC" fontSize="19" fontWeight="850">{integer(model.waterDays)}d</text>
-        <text x="497" y="355" fill="#7E8A7F" fontSize="10">food</text><text x="565" y="355" fill="#7E8A7F" fontSize="10">water</text>
-        <text x="497" y="372" fill="#7E8A7F" fontSize="10">for {integer(occupants)} at current draw</text>
+        {/* Two runways, from two different kinds of fact. Water is derived from a tank
+            the sensor is actually reading; food is what somebody counted. Saying which
+            is which is the point — Aeolus does not need every operational fact to come
+            from hardware (§9.6). */}
+        <text x="497" y="337" fill="#D0D5CC" fontSize="19" fontWeight="850">{integer(model.waterDays ?? 80)}d</text><text x="565" y="337" fill="#D0D5CC" fontSize="19" fontWeight="850">{integer(model.foodDays)}d</text>
+        <text x="497" y="352" fill="#7E8A7F" fontSize="10">water</text><text x="565" y="352" fill="#7E8A7F" fontSize="10">food</text>
+        <text x="497" y="364" fill="#6C7A6D" fontSize="8" fontWeight="700">TANK SENSOR</text><text x="565" y="364" fill="#6C7A6D" fontSize="8" fontWeight="700">MANUAL</text>
+        <text x="497" y="374" fill="#7E8A7F" fontSize="9">{integer(model.waterLitres)} L for {integer(occupants)}</text>
       </Area>
       <text x="14" y="402" fill="#7E8A7F" fontSize="11">BUILT FOR THE REAL WORLD. AND THE UNDEAD ONE.</text></svg></div></div>;
 }

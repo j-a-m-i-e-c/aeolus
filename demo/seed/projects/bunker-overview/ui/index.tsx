@@ -28,6 +28,7 @@ export default function BunkerOverview(aeolus: CustomComponentProps) {
     transmitting: aeolus.read("transmitting"),
     contactsToday: aeolus.read("contactsToday"),
     waterDays: aeolus.read("waterDays"),
+    waterLitres: aeolus.read("waterLitres"),
     foodDays: aeolus.read("foodDays"),
     occupants: aeolus.read("occupants"),
     bunks: aeolus.read("bunks"),

@@ -19,7 +19,10 @@ export function projectPowerSummary(source: Record<string, unknown>) {
     // machine is making power and whether the bank is gaining, rather than inferring
     // either from the fact that a generator was switched on.
     ["battery", "solar", "load", "net", "generatorOn", "generatorOutputW", "charging",
-        "foodDays", "waterDays", "occupants", "bunks"]
+        // `waterLitres` is the measurement and `waterDays` the runway derived from it.
+        // Carrying both is what lets the overview name its source instead of showing two
+        // day-counts that look equally measured.
+        "foodDays", "waterLitres", "waterDays", "occupants", "bunks"]
         .forEach((key) => copyDefined(source, key));
 }
 export function projectCommsSummary(source: Record<string, unknown>) {

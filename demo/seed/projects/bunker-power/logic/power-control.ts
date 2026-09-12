@@ -8,6 +8,14 @@
  */
 const GENERATOR_VERIFIED_W = 1500;
 
+/**
+ * Expected daily water use per occupant, in litres.
+ *
+ * The configured figure a runway is worked out against. It is an assumption, not a
+ * reading, which is exactly why the runway is derived here and labelled as derived.
+ */
+const WATER_LITRES_PER_PERSON_DAY = 26;
+
 function byTopic(wanted: string) {
     return devices.list().find((device) => device.topic === wanted);
 }
@@ -87,11 +95,22 @@ export function projectPowerAndSupplies() {
     // than from whether the generator happens to be running.
     state.set("generatorOutputW", Number((generator && generator.state && generator.state.outputW) ?? 0));
     state.set("charging", net > 0);
+    // Water is measured, and its runway is DERIVED from that measurement rather than
+    // published as a number. `waterDays` used to arrive from the device, which meant a
+    // tank sensor was somehow also reporting how long the water would last for however
+    // many people happened to be living here (§9.6).
+    const occupants = Number(supplyState.occupants ?? 4);
+    const waterLitres = Number(supplyState.waterLitres ?? 8420);
+    const dailyLitres = Math.max(1, occupants * WATER_LITRES_PER_PERSON_DAY);
+    state.set("waterLitres", waterLitres);
+    state.set("waterDays", Math.floor(waterLitres / dailyLitres));
+    state.set("waterDailyLitres", dailyLitres);
+    // Human-maintained inventory. Nobody's sensor knows any of this, and the pane says so
+    // rather than presenting it in the same breath as a reading.
     state.set("foodDays", Number(supplyState.foodDays ?? 64));
-    state.set("waterDays", Number(supplyState.waterDays ?? 80));
-    state.set("meds", Number(supplyState.meds ?? 45));
     state.set("beans", Number(supplyState.beans ?? 312));
-    state.set("occupants", Number(supplyState.occupants ?? 4));
+    state.set("medicalCheckedDaysAgo", Number(supplyState.medicalCheckedDaysAgo ?? 12));
+    state.set("occupants", occupants);
     state.set("bunks", Number(supplyState.bunks ?? 6));
     events.emit("bunker/summary/power", {
         battery,
@@ -101,11 +120,14 @@ export function projectPowerAndSupplies() {
         generatorOn: Boolean(state.get("generatorOn")),
         generatorOutputW: Number(state.get("generatorOutputW") || 0),
         charging: net > 0,
-        foodDays: Number(supplyState.foodDays ?? 64),
-        waterDays: Number(supplyState.waterDays ?? 80),
+        foodDays: Number(state.get("foodDays") || 0),
+        // Both the measurement and the runway derived from it, so the overview can say
+        // which of the two numbers it is showing.
+        waterLitres: Number(state.get("waterLitres") || 0),
+        waterDays: Number(state.get("waterDays") || 0),
         // Who the days of food are actually for. The overview draws the habitat, so
         // it needs the count rather than a hard-coded pair of figures.
-        occupants: Number(supplyState.occupants ?? 4),
+        occupants,
         bunks: Number(supplyState.bunks ?? 6),
     });
     return { battery, generatorOn };
