@@ -26,6 +26,12 @@ export function projectWildlifeStation() {
     const detection = byTopic("sensor/wildlife/detection");
     const power = byTopic("sensor/wildlife/site-power");
     const den = byTopic("sensor/wildlife/nest");
+    // Read-only interest in an actuator this automation does not own. The pane's job is
+    // to show the whole loop — camera, inference, event, and the physical response that
+    // followed — and it cannot do that while the response is invisible to it. Reading a
+    // device is not owning it: this project issues no device command at all, and the
+    // deterrent stays Predator Response's actuator (showcase-cleanup §6.2).
+    const deterrent = byTopic("switch/wildlife/deterrent/state");
     const detectionState = detection && detection.state ? detection.state : {};
     const cameraState = camera && camera.state ? camera.state : {};
     const nestState = den && den.state ? den.state : {};
@@ -46,6 +52,13 @@ export function projectWildlifeStation() {
     state.set("movement", String(detectionState.movement || "clear"));
     state.set("direction", String(detectionState.direction || "east"));
     state.set("detectedAt", numberAt(detection, "ts", Date.now() - 16000));
+    // The deterrent's commanded speed and its tachometer, kept apart on the way through
+    // exactly as the device reports them. The pane draws output from the measured value,
+    // so a controller that has accepted 2400 rpm but is not yet turning shows nothing —
+    // which is the same distinction the deterrent command is verified against.
+    state.set("deterrentActive", Boolean(deterrent && deterrent.state && deterrent.state.active));
+    state.set("deterrentCommandRpm", numberAt(deterrent, "commandRpm", 0));
+    state.set("deterrentMeasuredRpm", numberAt(deterrent, "measuredRpm", 0));
     state.set("battery", numberAt(power, "battery", 87));
     state.set("solarW", numberAt(power, "solarW", 41));
     state.set("nodeW", numberAt(power, "nodeW", 8.4));

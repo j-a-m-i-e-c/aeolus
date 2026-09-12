@@ -15,6 +15,40 @@ function Glider({ x, y }: {
     x: number;
     y: number;
 }) { return <g transform={"translate(" + x + " " + y + ") scale(.7)"} fill="#AAB6A1" stroke="#AAB6A1"><ellipse rx="14" ry="8"/><circle cx="13" cy="-7" r="6"/><circle cx="10" cy="-12" r="3"/><circle cx="17" cy="-12" r="3"/><path d="M-12 -1 Q-29 -12 -34 0 Q-31 12 -19 11" fill="none" strokeWidth="3"/></g>; }
+/**
+ * The deterrent unit, in the same scene as the camera that triggered it.
+ *
+ * `spin` is measured fan speed as a fraction of the speed the controller was asked for,
+ * so the emission is drawn from the tachometer and nothing else. At spin 0 — including
+ * the moment after the controller has accepted 2400 rpm but before the fan has moved —
+ * nothing is emitted. That is the same distinction the deterrent command is verified
+ * against, made visible rather than described (showcase-cleanup §6.1, §1.1).
+ *
+ * This pane does not own the deterrent and never commands it. It is drawn here because
+ * a visitor cannot follow camera → inference → event → physical response if the response
+ * happens off-screen.
+ */
+function Deterrent({ x, y, spin, rpm, active }: {
+    x: number;
+    y: number;
+    spin: number;
+    rpm: number;
+    active: boolean;
+}) {
+    const lit = spin > 0;
+    const body = lit ? "#F0B36A" : "#2A3A31";
+    const edge = lit ? "#FFD79A" : "#5B7466";
+    return <g transform={"translate(" + x + " " + y + ")"}>
+    {/* Emission arcs, one per third of measured speed, so a fan still spinning up
+        reads as partly effective rather than either off or fully on. */}
+    {[0, 1, 2].map((ring) => spin > ring / 3 && <path key={ring} d={"M18 " + (-6 + ring * 4) + " Q" + (44 + ring * 26) + " " + (-24 - ring * 8) + " " + (70 + ring * 44) + " " + (2 + ring * 6)} fill="none" stroke="#FFCE86" strokeWidth={2.2 - ring * .4} strokeLinecap="round" strokeDasharray="5 6" opacity={Math.min(.85, spin) * (.9 - ring * .2)}/>)}
+    <rect x="-5" y="26" width="10" height="34" rx="2" fill="#20302A" stroke="#546D5E"/>
+    <rect x="-16" y="-14" width="32" height="26" rx="5" fill="#1D2C25" stroke={edge} strokeWidth="1.3"/>
+    <circle cx="4" cy="-1" r="7" fill={body} stroke={edge} strokeWidth="1.2"/>
+    <text x="0" y="76" textAnchor="middle" fill={lit ? "#E8C089" : "#6E8578"} fontSize="9" fontWeight="800" letterSpacing=".5">DETERRENT</text>
+    <text x="0" y="88" textAnchor="middle" fill={lit ? "#D6B07C" : "#5C7266"} fontSize="9" fontFamily="monospace">{active || rpm > 0 ? Math.round(rpm) + " rpm" : "idle"}</text>
+  </g>;
+}
 export default function WildlifeDetectionDashboard({ model, actions }: {
     model: Record<string, any>;
     actions: Record<string, (...args: any[]) => void>;
@@ -27,19 +61,31 @@ export default function WildlifeDetectionDashboard({ model, actions }: {
     // so the creature blinked out of existence instead of leaving — and Predator
     // Response, looking at the same physical device, disagreed with this pane.
     const movement = String(model.movement ?? "clear");
-    const age = Math.max(0, now - detectedAt);
+    const speed = Number(model.speedMps ?? 0);
     const range = Math.max(0, Math.min(1, (distance - 5) / 33));
     const x = 104 + range * 330;
     // Only the gait bob is a UI flourish; the position itself is physical state.
     const y = 213 + Math.sin(now / 190) * 3;
     const predator = category === "predator", active = movement !== "clear", color = predator ? "#F08A68" : "#83D49A";
+    // Which way the animal is pointed follows the direction the collar network says it
+    // is travelling: an animal walking in faces the camera, one that has been deterred
+    // faces away. Both come from `movement`; neither is a timer.
+    const fleeing = movement === "fleeing";
+    const facing = movement === "approaching" ? -1 : 1;
+    // Deterrent state, read-only. Output is drawn from the tachometer as a fraction of
+    // the commanded speed, so nothing is emitted while the fan is merely commanded.
+    const deterrentActive = Boolean(model.deterrentActive);
+    const commandRpm = Number(model.deterrentCommandRpm ?? 0);
+    const measuredRpm = Number(model.deterrentMeasuredRpm ?? 0);
+    const spin = commandRpm > 0 && measuredRpm > 0 ? Math.min(1, measuredRpm / commandRpm) : 0;
     return <div style={{ padding: 14, minHeight: "100%", background: "linear-gradient(180deg,#07110E,#050A08)", color: "#EDF4EF" }}>
   <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10, gap: 12 }}><div><div style={{ fontSize: 18, fontWeight: 900 }}>WILDLIFE DETECTION</div><div style={{ fontSize: 12, color: "#82958A", marginTop: 3 }}>Trail camera → on-device inference → classified domain event · no cloud required</div></div><div style={{ textAlign: "right" }}><div style={{ fontSize: 12, fontWeight: 850, color }}>{predator ? "PREDATOR DETECTED" : "NATIVE FAUNA"}</div><div style={{ fontSize: 11, color: "#718278", marginTop: 2 }}>edge node {percent(battery)} · solar {watts(solar)}</div></div></div>
   <div style={{ display: "grid", gridTemplateColumns: "1.45fr .55fr", gap: 10 }}>
    <div style={{ border: "1px solid #20372C", borderRadius: 13, overflow: "hidden", background: "#08150F" }}><svg width="100%" height="300" viewBox="0 0 560 270"><defs><linearGradient id="wsky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#10251A"/><stop offset="1" stopColor="#203321"/></linearGradient><linearGradient id="wground" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#1B2E1A"/><stop offset="1" stopColor="#0B160E"/></linearGradient></defs><rect width="560" height="180" fill="url(#wsky)"/><rect y="180" width="560" height="90" fill="url(#wground)"/>{[20, 82, 158, 250, 337, 430, 510].map((tx, i) => <g key={tx} opacity={.72}><rect x={tx} y={42 + (i % 3) * 13} width={9 + i % 2 * 4} height={156} fill="#172619"/><circle cx={tx + 5} cy={38 + (i % 3) * 13} r={30 + i % 2 * 8} fill="#18301F"/><circle cx={tx - 15} cy={58 + (i % 2) * 8} r="24" fill="#16301E"/></g>)}<path d="M0 226 Q80 207 156 225 T315 218 T560 223 V270 H0Z" fill="#101C12"/><g transform="translate(39 112)"><rect width="28" height="42" rx="4" fill="#1D2922" stroke="#79917F"/><circle cx="14" cy="14" r="7" fill="#08100B" stroke="#68C890"/><circle cx="14" cy="14" r="2" fill="#80E8A8"/><path d="M28 17 L43 10 L43 31 L28 25Z" fill="#142119" stroke="#506A58"/></g>
    <g transform="translate(470 71)"><rect x="-28" y="-25" width="54" height="66" rx="4" fill="#5C482D" stroke="#A18457"/><path d="M-34 -22 L0 -39 L33 -22" fill="#3F321F" stroke="#A18457"/><circle cx="8" cy="-2" r="10" fill="#14150F" stroke="#9B855F"/>{denAdult && <Glider x={8} y={-1}/>}<text x="0" y="57" textAnchor="middle" fill="#B2B99B" fontSize="10">SUGAR GLIDER DEN</text><text x="0" y="69" textAnchor="middle" fill="#7F927E" fontSize="10">{denOccupied ? joeys + " joeys · " + denTemp.toFixed(1) + "°C" : "unoccupied"}</text></g>
-   {active && <Animal kind={species} x={x} y={y} predator={predator}/>} {active && <g><rect x={Math.min(342, x + 40)} y={Math.max(35, y - 74)} width="170" height="54" rx="6" fill="#07110E" stroke={color}/><text x={Math.min(354, x + 52)} y={Math.max(52, y - 57)} fill={color} fontSize="11" fontWeight="800">{label.toUpperCase()}</text><text x={Math.min(354, x + 52)} y={Math.max(70, y - 39)} fill="#9BAD9F" fontSize="10">{Math.round(confidence * 100)}% · {distance.toFixed(1)}m · LOCAL</text></g>}<text x="13" y="257" fill="#7E9588" fontSize="10">TRAILCAM-01 · IR/visible fusion · frame inference {formatNumber(inference, 0)} ms</text></svg></div>
-   <div style={{ display: "grid", gridTemplateRows: "auto auto 1fr", gap: 8 }}><div style={{ border: "1px solid #263B30", borderRadius: 11, padding: 10, background: "#09120E" }}><div style={{ fontSize: 11, color: "#81958A", letterSpacing: ".1em" }}>EDGE INFERENCE</div><div style={{ fontSize: 27, fontWeight: 900, color, marginTop: 4 }}>{Math.round(confidence * 100)}%</div><div style={{ fontSize: 12, color: "#C0CDC5" }}>{label}</div><div style={{ fontSize: 11, color: "#74867B", marginTop: 7 }}>{formatNumber(fps, 0)} fps · {formatNumber(inference, 0)} ms · Hailo-8L</div></div><div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 5 }}>{[["TODAY", total], ["NATIVE", native], ["PREDATOR", predators]].map((m: any) => <div key={m[0]} style={{ border: "1px solid #263B30", borderRadius: 8, padding: 8, background: "#09120E" }}><div style={{ fontSize: 11, color: "#778A7F" }}>{m[0]}</div><div style={{ fontSize: 17, fontFamily: "monospace", fontWeight: 800, color: "#D3DED7" }}>{m[1]}</div></div>)}</div><div style={{ border: "1px solid #20372C", borderRadius: 11, padding: 10, background: "#07100C" }}><div style={{ fontSize: 11, color: "#81958A", letterSpacing: ".1em" }}>PIPELINE</div>{[["01", "CAMERA", "motion + frame"], ["02", "LOCAL AI", "species classification"], ["03", "AEOLUS", "domain event"], ["04", "CONSUMERS", "response / history"]].map((r: any, i) => <div key={r[0]} style={{ display: "grid", gridTemplateColumns: "25px 66px 1fr", gap: 6, alignItems: "center", marginTop: 8 }}><span style={{ fontFamily: "monospace", fontSize: 11, color: i < 3 ? "#72C991" : "#819088" }}>{r[0]}</span><span style={{ fontSize: 11, fontWeight: 800, color: "#B7C3BB" }}>{r[1]}</span><span style={{ fontSize: 11, color: "#75877C" }}>{r[2]}</span></div>)}</div></div>
+   <Deterrent x={96} y={168} spin={spin} rpm={measuredRpm} active={deterrentActive}/>
+   {active && <g transform={"translate(" + x + " " + y + ") scale(" + facing + " 1)"}><Animal kind={species} x={0} y={0} predator={predator}/></g>} {active && <g><rect x={Math.min(342, x + 40)} y={Math.max(35, y - 74)} width="170" height="54" rx="6" fill="#07110E" stroke={color}/><text x={Math.min(354, x + 52)} y={Math.max(52, y - 57)} fill={color} fontSize="11" fontWeight="800">{label.toUpperCase()}</text><text x={Math.min(354, x + 52)} y={Math.max(70, y - 39)} fill="#9BAD9F" fontSize="10">{Math.round(confidence * 100)}% · {distance.toFixed(1)}m · {fleeing ? "RETREATING " + speed.toFixed(1) + " m/s" : "LOCAL"}</text></g>}<text x="13" y="257" fill="#7E9588" fontSize="10">TRAILCAM-01 · IR/visible fusion · frame inference {formatNumber(inference, 0)} ms</text></svg></div>
+   <div style={{ display: "grid", gridTemplateRows: "auto auto 1fr", gap: 8 }}><div style={{ border: "1px solid #263B30", borderRadius: 11, padding: 10, background: "#09120E" }}><div style={{ fontSize: 11, color: "#81958A", letterSpacing: ".1em" }}>EDGE INFERENCE</div><div style={{ fontSize: 27, fontWeight: 900, color, marginTop: 4 }}>{Math.round(confidence * 100)}%</div><div style={{ fontSize: 12, color: "#C0CDC5" }}>{label}</div><div style={{ fontSize: 11, color: "#74867B", marginTop: 7 }}>{formatNumber(fps, 0)} fps · {formatNumber(inference, 0)} ms · Hailo-8L</div></div><div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 5 }}>{[["TODAY", total], ["NATIVE", native], ["PREDATOR", predators]].map((m: any) => <div key={m[0]} style={{ border: "1px solid #263B30", borderRadius: 8, padding: 8, background: "#09120E" }}><div style={{ fontSize: 11, color: "#778A7F" }}>{m[0]}</div><div style={{ fontSize: 17, fontFamily: "monospace", fontWeight: 800, color: "#D3DED7" }}>{m[1]}</div></div>)}</div><div style={{ border: "1px solid #20372C", borderRadius: 11, padding: 10, background: "#07100C" }}><div style={{ fontSize: 11, color: "#81958A", letterSpacing: ".1em" }}>PIPELINE</div>{[["01", "CAMERA", "motion + frame"], ["02", "LOCAL AI", "species classification"], ["03", "AEOLUS", "domain event"], ["04", "DETERRENT", spin > 0 ? Math.round(measuredRpm) + " rpm measured" : deterrentActive ? "commanded · not yet turning" : "idle · owned by Predator Response"]].map((r: any, i) => <div key={r[0]} style={{ display: "grid", gridTemplateColumns: "25px 66px 1fr", gap: 6, alignItems: "center", marginTop: 8 }}><span style={{ fontFamily: "monospace", fontSize: 11, color: i < 3 ? "#72C991" : spin > 0 ? "#F0B36A" : "#819088" }}>{r[0]}</span><span style={{ fontSize: 11, fontWeight: 800, color: "#B7C3BB" }}>{r[1]}</span><span style={{ fontSize: 11, color: "#75877C" }}>{r[2]}</span></div>)}</div></div>
   </div>
   <div style={{ marginTop: 16, border: "1px dashed #5C5131", borderRadius: 10, padding: 9, background: "#151207" }}><div style={{ fontSize: 11, color: "#D4B66A", letterSpacing: ".1em" }}>DEMO SCENARIO</div><div style={{ fontSize: 11, color: "#9A8961", margin: "4px 0 7px" }}>Inject an animal entering the trail-camera field. The simulator publishes the physical detection; this automation classifies and emits the domain event.</div><div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}><button onClick={() => actions.simulateNative()} style={{ flex: 1, minWidth: 110, padding: "9px", borderRadius: 7, border: "1px solid #3D6049", background: "#102018", color: "#8FD6A4", fontSize: 12, cursor: "pointer" }}>Native animal</button><button onClick={() => actions.simulateFox()} style={{ flex: 1, minWidth: 110, padding: "9px", borderRadius: 7, border: "1px solid #704332", background: "#24110C", color: "#F09A7A", fontSize: 12, cursor: "pointer" }}>Red fox</button><button onClick={() => actions.simulateCat()} style={{ flex: 1, minWidth: 110, padding: "9px", borderRadius: 7, border: "1px solid #704332", background: "#24110C", color: "#F09A7A", fontSize: 12, cursor: "pointer" }}>Feral cat</button><button onClick={() => actions.resetWildlife()} style={{ padding: "9px 12px", borderRadius: 7, border: "1px solid #4A493C", background: "#161712", color: "#A0A59A", fontSize: 12, cursor: "pointer" }}>Reset</button></div></div>
   <div style={{ fontSize: 11, color: "#718278", marginTop: 7 }}>{last?.label ? String(last.label) : "Edge station scanning locally"}</div>

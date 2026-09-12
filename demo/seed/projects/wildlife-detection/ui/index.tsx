@@ -15,6 +15,11 @@ export default function WildlifeDetection(aeolus: CustomComponentProps) {
     movement: aeolus.read("movement"),
     speedMps: aeolus.read("speedMps"),
     detectedAt: aeolus.read("detectedAt"),
+    // Read-only view of the deterrent Predator Response owns, so the hero pane can show
+    // the consequence of a classification rather than stopping at the domain event.
+    deterrentActive: aeolus.read("deterrentActive"),
+    deterrentCommandRpm: aeolus.read("deterrentCommandRpm"),
+    deterrentMeasuredRpm: aeolus.read("deterrentMeasuredRpm"),
     battery: aeolus.read("battery"),
     solarW: aeolus.read("solarW"),
     fps: aeolus.read("fps"),

@@ -70,6 +70,11 @@ export async function stopDeterrent() {
             observedLabel: "tachometer wound down",
         },
     });
+    // Projected like the activation's receipt is. Without this a verified stop left the
+    // previous activation's proof on screen, so the card described a command that was no
+    // longer the last one issued — and the stop, which is evidenced just as well, showed
+    // nothing at all.
+    state.set("lastCommand", devices.commandEvidence(result.commandId));
     if (result.success) {
         state.set("activeUntil", 0);
         state.set("lastOutcome", "Deterrent physically stopped");

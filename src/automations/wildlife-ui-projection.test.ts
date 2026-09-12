@@ -59,6 +59,43 @@ describe("Wildlife showcase architecture",()=>{
    expect(script).not.toContain('field: "active"');
  });
 
+ // showcase-cleanup §6.1 — the hero pane must show the consequence of a
+ // classification, not stop at the domain event. It ends camera → inference → event →
+ // physical response, so the deterrent has to be visible in the top scene.
+ it("shows the deterrent in the hero scene, driven by the tachometer",()=>{
+   const script=String(wildlifeDetectionAutomation.scriptSource);
+   const ui=String(wildlifeDetectionAutomation.uiSource);
+   // Read-only projection of an actuator this automation does not own.
+   expect(script).toContain("switch/wildlife/deterrent/state");
+   expect(script).toContain('state.set("deterrentMeasuredRpm"');
+   expect(script).toContain('state.set("deterrentCommandRpm"');
+   // Output is drawn from measured speed, so a controller that has accepted a target
+   // but is not yet turning emits nothing — the same distinction the deterrent command
+   // is verified against (§1.3).
+   expect(ui).toContain("deterrentMeasuredRpm");
+   expect(ui).toMatch(/measuredRpm\s*\/\s*commandRpm/);
+ });
+
+ // §6.2 — showing the outcome must not turn the hero pane into a second owner of the
+ // deterrent. Reading a device is fine; commanding one is not.
+ it("keeps the deterrent's only owner as Predator Response even though Detection draws it",()=>{
+   expect(wildlifeDetectionAutomation.scriptSource).not.toContain("devices.action(");
+   expect(wildlifeDetectionAutomation.scriptSource).not.toContain("switch/wildlife/deterrent/set");
+   // Widened so a deterrent publish refreshes the pane; still scoped to this station.
+   expect(wildlifeDetectionAutomation.triggerTopic).toBe("+/wildlife/#");
+   expect(predatorResponseAutomation.scriptSource).toContain("devices.action(");
+ });
+
+ // §6.3 — a stop is evidenced just as well as an activation, and used to leave the
+ // previous activation's proof on screen.
+ it("leaves a receipt for every deterrent command, including the stop",()=>{
+   const script=String(predatorResponseAutomation.scriptSource);
+   const commands=[...script.matchAll(/devices\.action\(/g)].length;
+   const receipts=[...script.matchAll(/devices\.commandEvidence\(/g)].length;
+   expect(commands).toBeGreaterThan(1);
+   expect(receipts,"every deterrent command must project its evidence").toBe(commands);
+ });
+
  // Distance/movement are physical state the simulator owns, so both Wildlife panes
  // project the same animal instead of each animating a private copy.
  it("projects the animal's ranged position rather than inferring it from event age",()=>{

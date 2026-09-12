@@ -16,7 +16,10 @@ export default async function run(context: EventContext) {
     return;
   }
 
-  if (!topic.startsWith("sensor/wildlife/")) return;
+  // Sensors and the deterrent switch both wake this automation. The deterrent is read
+  // only so the pane can show what the classification led to; actuating it belongs to
+  // Predator Response and happens nowhere in this project.
+  if (!topic.includes("/wildlife/")) return;
 
   const station = projectWildlifeStation();
   publishNewClassification(station);
