@@ -104,6 +104,28 @@ describe("showcase audit — every seeded tab", () => {
     },
   );
 
+  // §2.5 from the other side: a receipt the Logic records and the pane never renders is
+  // invisible proof, and a card with nothing feeding it renders an empty surface. Both
+  // halves have to exist together, and the pairing has to match — a project that groups
+  // its commands under one execution needs the execution card, not the single-command one.
+  it.each(WITH_UI.map((p) => [p.name, p] as const))(
+    "%s renders the receipt it records, and records the receipt it renders",
+    (_name, project) => {
+      const recordsCommand = /state\.set\(\s*["']lastCommand["']/.test(project.logic);
+      const recordsExecution = /state\.set\(\s*["']lastExecution["']/.test(project.logic);
+      const rendersCommand = project.ui.includes("CommandProofCard");
+      const rendersExecution = project.ui.includes("CommandExecutionCard");
+
+      expect(rendersCommand, "records lastCommand but renders no CommandProofCard").toBe(
+        recordsCommand,
+      );
+      expect(
+        rendersExecution,
+        "records lastExecution but renders no CommandExecutionCard",
+      ).toBe(recordsExecution);
+    },
+  );
+
   // §13.4 — for every number shown, something must be able to answer "what produced
   // this?". A UI reading devices directly cannot, because a public-demo visitor is not
   // granted device visibility and the pane would render static defaults.
