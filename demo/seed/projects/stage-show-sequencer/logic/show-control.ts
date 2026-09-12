@@ -38,8 +38,15 @@ function setAction(label: string) {
 // is read from durable records rather than accumulated by this script.
 function publishExecutionProof() {
     const group = devices.executionEvidence();
-    if (group)
-        state.set("lastExecution", group);
+    // Cleared, not skipped, when this execution issued nothing.
+    //
+    // `executionEvidence()` returns undefined when the execution has no commands, and
+    // this used to leave the previous group in place — so a pyro cue refused because the
+    // exclusion zone was not clear showed the LAST cue's receipt sitting directly beside
+    // "blocked · Pyro permissive unavailable". The pane appeared to hold proof for
+    // something the safety loop had just prevented. An execution that dispatched nothing
+    // has no receipt, and saying so is the whole point.
+    state.set("lastExecution", group ?? null);
 }
 /**
  * Project the desk, rack and safety-loop readings.
@@ -171,6 +178,10 @@ export async function stopPhysicalEffects() {
     const rack = byTopic("switch/stage/fx/state");
     if (!rack)
         return;
+    // Marked pending like the fire path is. STOP FX shares `pendingFx` with the effect
+    // buttons, and this never set it, so the one control an operator reaches for when
+    // something is wrong was the only one that gave no sign it had been pressed.
+    state.set("pendingFx", true);
     const result = await devices.action(rack.id, "command", { payload: { active: false } }, {
         tier: "acknowledged",
         timeoutMs: 5000,
@@ -178,6 +189,7 @@ export async function stopPhysicalEffects() {
             intent: "Stop stage effects",
         },
     });
+    state.set("pendingFx", false);
     if (result.success) {
         // What the rack accepted, not a re-read. Without this the pane kept showing the
         // effect running immediately after a stop it had just acknowledged.
