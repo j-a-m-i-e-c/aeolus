@@ -5,6 +5,27 @@ function filterController() {
 function setAction(label: string) {
     state.set("lastAction", { label, at: Date.now() });
 }
+/**
+ * Report the air system's state to whoever is aggregating it.
+ *
+ * Emitted from this automation's own state rather than from a device read, so every
+ * caller reports the same thing and no caller has to be careful about when it runs.
+ */
+export function publishAirSummary() {
+    events.emit("bunker/summary/air", {
+        sealed: Boolean(state.get("sealed")),
+        overpressure: Number(state.get("overpressure") ?? 8),
+        filterLife: Number(state.get("filterLife") ?? 78),
+        tempC: Number(state.get("tempC") ?? 19.4),
+    });
+}
+/**
+ * Project the filter controller's observed state.
+ *
+ * Reading the device is correct *here*: this path runs because the controller
+ * published, so the snapshot is the state that woke the automation. It is not correct
+ * straight after issuing a command — see setBunkerSeal.
+ */
 export function projectAirState() {
     const controller = filterController();
     const observed = controller && controller.state ? controller.state : {};
@@ -19,7 +40,7 @@ export function projectAirState() {
     state.set("filterLife", filterLife);
     state.set("tempC", tempC);
     state.set("on", observed.on !== false);
-    events.emit("bunker/summary/air", { sealed, overpressure, filterLife, tempC });
+    publishAirSummary();
 }
 export async function setBunkerSeal(sealed: boolean) {
     const controller = filterController();
@@ -43,12 +64,25 @@ export async function setBunkerSeal(sealed: boolean) {
     });
     state.set("pending", false);
     if (result.success) {
+        // Record what the controller accepted. This used to call projectAirState(),
+        // which re-reads devices.list() — and that list is a snapshot taken once at the
+        // start of the execution, so it still described the bunker as it was BEFORE the
+        // command. A successful seal therefore projected `sealed: false` and emitted
+        // that to the overview, racing the correct summary produced a moment later by
+        // the controller's own state publish. Whichever landed second won, which is
+        // exactly why the airlock only sometimes followed a seal (showcase-cleanup
+        // §9.1). Perimeter and Power already record the commanded value this way.
+        state.set("sealed", sealed);
         setAction(sealed
             ? "Bunker sealed · positive pressure established"
             : "Airlock returned to normal ventilation");
-        projectAirState();
     }
     else {
         setAction("Filtration command not verified");
     }
+    // Reported either way, and from state. On failure that republishes the unchanged
+    // seal, so the overview cannot be left showing a transition that never happened.
+    // The pressure and temperature carried here are the last ones observed; the
+    // controller's publish re-runs this automation and corrects them.
+    publishAirSummary();
 }

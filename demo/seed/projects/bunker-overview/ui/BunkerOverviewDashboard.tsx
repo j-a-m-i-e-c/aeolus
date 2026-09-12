@@ -64,10 +64,20 @@ export default function BunkerOverviewDashboard({ model }: {
       {/* six shelter areas */}
       <rect x="104" y="186" width="552" height="200" rx="9" fill="#0B0E0A" stroke="#74786B" strokeWidth="3"/>
       <Area x={117} y={198} w={166} h={84} title="AIRLOCK">
-        <rect x="132" y="226" width="34" height="46" rx="2" fill="#0E140E" stroke={sealed ? "#72D293" : "#7C8A7E"} strokeWidth="2"/><circle cx="160" cy="249" r="2.5" fill={sealed ? "#72D293" : "#7C8A7E"}/>
-        <path d={sealed ? "M172 249 H196" : "M196 243 h-24 m0 12 h24"} stroke={sealed ? "#72D293" : "#6E7C70"} strokeWidth="2"/>
-        <text x="205" y="240" fill="#CED5CA" fontSize="11" fontWeight="800">{sealed ? "SEALED" : "OPEN CYCLE"}</text><text x="205" y="257" fill="#7E8A7F" fontSize="10">{integer(pressure)} Pa overpressure</text>
-        <text x="205" y="273" fill="#7E8A7F" fontSize="10">outer door interlocked</text>
+        {/* Two doors and the chamber between them, because that is what an airlock is:
+            the interlock is the whole idea and one rectangle could not show it. Outside
+            is to the left. Sealed means both doors shut and the chamber held above
+            outside pressure; open cycle means the outer door on the latch and air being
+            drawn in through the filter. */}
+        <rect x="139" y="228" width="26" height="44" rx="2" fill="#0E140E" stroke="#5E6B60"/>
+        <path d={sealed ? "M139 228 V272" : "M139 228 L128 236 L128 264 L139 272"} fill={sealed ? "none" : "#131A13"} stroke={sealed ? "#72D293" : "#93A08F"} strokeWidth="2.4"/>
+        <path d="M165 228 V272" stroke={sealed ? "#72D293" : "#7C8A7E"} strokeWidth="2.4"/>
+        <circle cx="152" cy="250" r="2.5" fill={sealed ? "#72D293" : "#7C8A7E"}/>
+        {/* Which way the air is going, arrowheads and all. */}
+        {[242, 258].map((ay) => <path key={ay} d={sealed ? "M150 " + ay + " l-16 0 m5 -4 l-5 4 l5 4" : "M130 " + ay + " l16 0 m-5 -4 l5 4 l-5 4"} fill="none" stroke={sealed ? "#72D293" : "#6E7C70"} strokeWidth="1.8"/>)}
+        <text x="176" y="240" fill="#CED5CA" fontSize="11" fontWeight="800">{sealed ? "SEALED" : "OPEN CYCLE"}</text>
+        <text x="176" y="257" fill="#7E8A7F" fontSize="10">{integer(pressure)} Pa {sealed ? "positive" : "ambient"}</text>
+        <text x="176" y="273" fill="#7E8A7F" fontSize="10">{sealed ? "both doors interlocked" : "outer door on the latch"}</text>
       </Area>
       <Area x={297} y={198} w={166} h={84} title="HABITAT">
         {/* bunks, and one of them occupied per head we actually count */}
@@ -87,12 +97,18 @@ export default function BunkerOverviewDashboard({ model }: {
         <text x="132" y="366" fill="#7E8A7F" fontSize="10">{sealed ? "recirculating on positive pressure" : "drawing outside air"}</text>
       </Area>
       <Area x={297} y={292} w={166} h={84} title="COMMS">
+        {/* The title row is reserved. The frequency used to be drawn at y=313 — four
+            units below the "COMMS" baseline and starting at the same x — so the two
+            overlapped, along with the mast whip and the first RF arc (§9.2). Every
+            sibling area starts its content well clear of its title; this one now does
+            too, and the mast moved onto its own row underneath the readout. */}
+        <text x="308" y="336" fill="#CED5CA" fontSize="13" fontWeight="800">{decimal(model.frequency, 2)} MHz</text>
+        <text x="394" y="336" fill={transmitting ? "#E7B36A" : linked ? "#77D695" : "#6E7C70"} fontSize="10" fontWeight="800">{transmitting ? "TX" : linked ? "RX" : "IDLE"}</text>
+        <text x="308" y="351" fill="#7E8A7F" fontSize="10">{linked ? "signal " + signal : "monitoring"} · {integer(model.contactsToday)} contacts today</text>
         {/* directionality: bunker → mast → remote station */}
-        <path d="M314 356 h16 v-32" stroke="#84A78C" strokeWidth="2" fill="none"/><path d="M330 324 l10 -9" stroke="#84A78C" strokeWidth="2"/>
-        {[0, 1, 2].map(i => <path key={i} d={"M" + (342 + i * 9) + " " + (318 + i * 2) + " q" + (7 + i * 3) + " " + (12 + i * 4) + " 0 " + (24 + i * 8)} fill="none" stroke={linked ? "#77D695" : "#3E4A40"} opacity={linked ? 1 - i * .22 : .5}/>)}
-        <rect x="424" y="330" width="22" height="16" rx="2" fill="#141A13" stroke={linked ? "#77D695" : "#5C6659"}/><text x="435" y="360" textAnchor="middle" fill="#7E8A7F" fontSize="9">STATION</text>
-        <text x="314" y="313" fill="#CED5CA" fontSize="11" fontWeight="800">{decimal(model.frequency, 2)} MHz {transmitting ? "· TX" : linked ? "· RX" : ""}</text>
-        <text x="314" y="374" fill="#7E8A7F" fontSize="10">{linked ? "signal " + signal : "monitoring"} · {integer(model.contactsToday)} contacts today</text>
+        <path d="M310 372 h12 v-11" stroke="#84A78C" strokeWidth="2" fill="none"/><path d="M322 361 l7 -5" stroke="#84A78C" strokeWidth="2"/>
+        {[0, 1, 2].map(i => <path key={i} d={"M" + (334 + i * 8) + " " + (356 + i * 2) + " q" + (5 + i * 2) + " " + (4 + i * 2) + " 0 " + (8 + i * 3)} fill="none" stroke={linked ? "#77D695" : "#3E4A40"} opacity={linked ? 1 - i * .22 : .5}/>)}
+        <rect x="420" y="358" width="22" height="14" rx="2" fill="#141A13" stroke={linked ? "#77D695" : "#5C6659"}/><text x="431" y="369" textAnchor="middle" fill={linked ? "#9CC7A4" : "#7E8A7F"} fontSize="8">STN</text>
       </Area>
       <Area x={477} y={292} w={166} h={84} title="SUPPLIES">
         <text x="497" y="337" fill="#D0D5CC" fontSize="19" fontWeight="850">{integer(model.foodDays)}d</text><text x="565" y="337" fill="#D0D5CC" fontSize="19" fontWeight="850">{integer(model.waterDays)}d</text>
