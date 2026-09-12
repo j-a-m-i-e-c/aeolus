@@ -77,6 +77,10 @@ export async function commandMuster(active: boolean) {
         },
     });
     state.set("commandPending", false);
+    // Keep the proof, not just the verdict. The observation named on the card is the
+    // personnel tracking network, not the muster controller — which is the whole
+    // argument of this command, and worth showing rather than only commenting.
+    state.set("lastCommand", devices.commandEvidence(result.commandId));
     if (!result.success) {
         setAction("Muster command not verified: " + String(result.error || result.lifecycleState || "unknown"));
     }

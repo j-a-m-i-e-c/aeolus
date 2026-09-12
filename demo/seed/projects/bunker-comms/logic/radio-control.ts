@@ -23,6 +23,10 @@ export async function transmitCheckIn() {
         },
     });
     state.set("pending", false);
+    // Keep the proof, not just the verdict. Nothing on this site can hear the
+    // transmission, so the receipt is what stops "check-in transmitted" reading as a
+    // confirmed contact: the observation stage is marked unavailable.
+    state.set("lastCommand", devices.commandEvidence(result.commandId));
     if (result.success) {
         state.set("txUntil", Date.now() + 1200);
         setAction("146.52 MHz check-in transmitted");

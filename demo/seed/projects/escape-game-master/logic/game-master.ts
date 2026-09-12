@@ -149,6 +149,10 @@ async function setExit(unlocked: boolean) {
             intent: unlocked ? "Release exit maglock" : "Secure exit maglock",
         },
     });
+    // Keep the proof, not just the verdict. The exit is the one command in this room a
+    // team's escape depends on, and the receipt is where the acknowledged ceiling shows:
+    // released means the maglock accepted the release, not that the door was seen open.
+    state.set("lastCommand", devices.commandEvidence(result.commandId));
     if (result.success) {
         state.set("exitUnlocked", unlocked);
         setAction(unlocked ? "All puzzles solved · exit maglock released" : "Exit maglock secured");
@@ -165,8 +169,19 @@ async function sendHint(level: number) {
     const text = hintText(room, level);
     const hintId = Number(state.get("lastHintId") || 0) + 1;
     state.set("pendingHint", true);
-    const result = await devices.action(screen.id, "command", { payload: { message: text, room, hintId } }, { tier: "acknowledged", deviceId: screen.id, timeoutMs: 5000 });
+    // Acknowledgement is the honest ceiling. The screen echoes the message it was
+    // given, so observing it is the command read back; whether a player looked up and
+    // read the hint is not something this room instruments.
+    const result = await devices.action(screen.id, "command", { payload: { message: text, room, hintId } }, {
+        tier: "acknowledged",
+        deviceId: screen.id,
+        timeoutMs: 5000,
+        evidence: {
+            intent: "Send hint #" + hintId + " to " + room,
+        },
+    });
     state.set("pendingHint", false);
+    state.set("lastCommand", devices.commandEvidence(result.commandId));
     if (result.success) {
         state.set("hintsSent", Number(state.get("hintsSent") || 0) + 1);
         state.set("lastHint", text);
@@ -195,6 +210,7 @@ async function setIntercom(tx: boolean) {
         },
     });
     state.set("intercomPending", false);
+    state.set("lastCommand", devices.commandEvidence(result.commandId));
     if (result.success) {
         state.set("intercomTx", tx);
         state.set("intercomRoom", room);

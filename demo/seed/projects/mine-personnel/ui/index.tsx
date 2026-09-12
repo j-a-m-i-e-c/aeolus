@@ -16,6 +16,7 @@ export default function PersonnelMuster(aeolus: CustomComponentProps) {
     musterState: aeolus.read("musterState"),
     musterActive: aeolus.read("musterActive"),
     commandPending: aeolus.read("commandPending"),
+    lastCommand: aeolus.read("lastCommand"),
     lastAction: aeolus.read("lastAction"),
   };
 

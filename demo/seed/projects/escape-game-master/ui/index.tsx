@@ -26,6 +26,7 @@ export default function GameMaster(aeolus: CustomComponentProps) {
     appliedLook: aeolus.read("appliedLook"),
     lookRequestedAt: aeolus.read("lookRequestedAt"),
     roomHaze: aeolus.read("roomHaze"),
+    lastCommand: aeolus.read("lastCommand"),
     lastAction: aeolus.read("lastAction"),
   };
 

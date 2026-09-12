@@ -124,6 +124,10 @@ export async function protectCtdTension() {
         },
     });
     state.set("tensionProtectionActive", false);
+    // The interlock gets a receipt for the same reason the operator's commands do, and
+    // more so: this is the one command on the pane nobody asked for, so the evidence
+    // that it worked has to be inspectable rather than asserted by a status line.
+    state.set("lastCommand", devices.commandEvidence(result.commandId));
     if (result.success) {
         // Recorded so the pane can say plainly that Aeolus did this, not the
         // operator: an automatic action the operator cannot account for is worse

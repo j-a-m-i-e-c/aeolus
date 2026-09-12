@@ -70,9 +70,11 @@ export async function commandRov(mode: string, targetDepth: number) {
     // straight into a recovery is a normal — sometimes urgent — operator action, and
     // demanding a Hold first is what made Hold look like a mandatory step.
     const options = mode === "dive"
-        ? { tier: "observed", deviceId: telemetry.id, condition: { field: "depth", op: "gte", value: targetDepth - 5 }, timeoutMs: 9000 }
+        ? { tier: "observed", deviceId: telemetry.id, condition: { field: "depth", op: "gte", value: targetDepth - 5 }, timeoutMs: 9000,
+            evidence: { intent: "Dive ROV to " + targetDepth + " m", observedLabel: "vehicle depth telemetry reached the target" } }
         : mode === "recover"
-            ? { tier: "observed", deviceId: telemetry.id, condition: { field: "depth", op: "lte", value: targetDepth + 8 }, timeoutMs: 9000 }
+            ? { tier: "observed", deviceId: telemetry.id, condition: { field: "depth", op: "lte", value: targetDepth + 8 }, timeoutMs: 9000,
+                evidence: { intent: "Recover ROV to launch depth", observedLabel: "vehicle back at launch depth" } }
             // Acknowledgement, and this is a correction rather than a downgrade. The
             // condition here was `mode == "surveying"`, which was wrong twice over: it
             // read back the mode the vehicle had just been told to adopt, and its value
@@ -81,10 +83,12 @@ export async function commandRov(mode: string, targetDepth: number) {
             // acknowledged, and now says so. Proving a transect really means waiting for
             // `transectLegs` to increment, which happens when the box has been flown.
             : mode === "survey"
-                ? { tier: "acknowledged", timeoutMs: 5000 }
+                ? { tier: "acknowledged", timeoutMs: 5000,
+                    evidence: { intent: "Start seabed transect" } }
                 // A hold is proven by the vehicle stopping, not by it reporting the
                 // mode it was asked for.
-                : { tier: "observed", deviceId: telemetry.id, condition: { field: "verticalSpeed", op: "eq", value: 0 }, timeoutMs: 5000 };
+                : { tier: "observed", deviceId: telemetry.id, condition: { field: "verticalSpeed", op: "eq", value: 0 }, timeoutMs: 5000,
+                    evidence: { intent: "Hold ROV position", observedLabel: "vertical movement stopped" } };
     state.set("commandPending", true);
     const liveMode = String(telemetry.state && telemetry.state.mode || "at-surface");
     setAction(mode === "dive"
@@ -98,6 +102,10 @@ export async function commandRov(mode: string, targetDepth: number) {
                 : "Holding ROV position");
     const result = await devices.action(vehicle.id, "command", { payload: { mode, targetDepth } }, options);
     state.set("commandPending", false);
+    // Keep the proof, not just the verdict. It also keeps the transect honest: three of
+    // these four commands are observed off vehicle telemetry and the transect is only
+    // acknowledged, which the receipt shows rather than levelling them all to "verified".
+    state.set("lastCommand", devices.commandEvidence(result.commandId));
     if (result.success) {
         setAction(mode === "survey"
             ? "Transect underway · telemetry verified"
@@ -130,8 +138,15 @@ export async function protectRovTether() {
         deviceId: telemetry.id,
         condition: { field: "tetherTension", op: "lt", value: 650 },
         timeoutMs: 5000,
+        evidence: {
+            // Named as Aeolus's own action rather than the operator's, so an automatic
+            // intervention is accountable on the same surface as a requested one.
+            intent: "Tether interlock · hold ROV station",
+            observedLabel: "tether load fell back below the limit",
+        },
     });
     state.set("tetherProtectionActive", false);
+    state.set("lastCommand", devices.commandEvidence(result.commandId));
     if (result.success) {
         // Recorded so the pane can state that Aeolus did this on its own.
         state.set("protectionAt", Date.now());

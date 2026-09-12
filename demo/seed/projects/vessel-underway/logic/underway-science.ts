@@ -61,8 +61,18 @@ export async function setSamplingPump(on: boolean) {
         deviceId: tsg.id,
         condition: { field: "flow", op: on ? "gt" : "eq", value: on ? 0.5 : 0 },
         timeoutMs: 5000,
+        evidence: {
+            intent: on ? "Start flow-through sampling" : "Stop flow-through sampling",
+            // The flow meter is a separate instrument from the pump, which is what makes
+            // this an observation rather than the pump agreeing with itself.
+            observedLabel: on ? "flow meter registered seawater moving" : "flow meter fell to zero",
+        },
     });
     state.set("commandPending", false);
+    // Keep the proof, not just the verdict. It also names the instrument: every number
+    // on this pane comes from water the pump is drawing, so whether flow was measured
+    // is the question behind all of them.
+    state.set("lastCommand", devices.commandEvidence(result.commandId));
     if (result.success) {
         setAction(on ? "Underway sampling verified · flow observed" : "Sampling stopped · zero flow observed");
     }

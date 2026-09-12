@@ -63,6 +63,11 @@ export async function setBunkerSeal(sealed: boolean) {
         },
     });
     state.set("pending", false);
+    // Keep the proof, not just the verdict. This is where the acknowledged ceiling
+    // stops being a comment in the source and becomes something the operator can see:
+    // the card marks the observation stage unavailable, so "sealed" reads as a claim
+    // the controller accepted rather than a pressure measurement.
+    state.set("lastCommand", devices.commandEvidence(result.commandId));
     if (result.success) {
         // Record what the controller accepted. This used to call projectAirState(),
         // which re-reads devices.list() — and that list is a snapshot taken once at the

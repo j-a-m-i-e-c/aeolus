@@ -1,6 +1,6 @@
 // vessel-rov — visual implementation behind ui/index.tsx
 import { useEffect, useState } from "react";
-import { control, decimal, integer, metres, percent } from "@aeolus/ui";
+import { CommandProofCard, control, decimal, integer, metres, percent } from "@aeolus/ui";
 function clamp(v: number, a: number, b: number) { return Math.min(b, Math.max(a, v)); }
 /** The vehicle's mission phase in the words a pilot would use. */
 const PHASE_LABEL: Record<string, string> = {
@@ -74,6 +74,11 @@ export default function RovOperationsDashboard({ model, actions }: {
       <div style={{ marginTop: 11, color: "#697E87", fontSize: 11 }}>CROSS-CURRENT</div><div style={{ fontFamily: "monospace", fontSize: 13, fontWeight: 800, color: current > 1 ? "#F0B98A" : "#BFCED2", marginTop: 2 }}>{decimal(current, 1)} kt</div>
       <div style={{ marginTop: 9, color: "#697E87", fontSize: 11 }}>THRUSTER {percent(model.thrusterPct)} · {integer(legs)} legs</div></div></div>
     <div style={{ marginTop: 7, border: "1px solid #263F4A", borderRadius: 9, padding: 8, background: "#07151D" }}><div style={{ color: "#80949D", fontSize: 11, letterSpacing: ".12em", marginBottom: 6 }}>OPERATOR CONTROLS</div><div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}><button {...diveVisual} style={{ ...diveVisual.style, flex: 1, minWidth: 75 }} onClick={() => actions.rovDive()}>{diveLabel}</button><button {...surveyVisual} style={{ ...surveyVisual.style, flex: 1, minWidth: 75 }} onClick={() => actions.rovSurvey()}>{surveyLabel}</button><button {...holdVisual} style={{ ...holdVisual.style, padding: "7px 9px" }} onClick={() => actions.rovHold()}>Hold position</button><button {...recoverVisual} style={{ ...recoverVisual.style, padding: "7px 9px" }} onClick={() => actions.rovRecover()}>{recovering ? "Recovering to surface…" : "Recover to surface"}</button></div></div>
+    {/* Four commands share this pane and they are not equally proven: dive, hold and
+        recover are observed off vehicle telemetry, the transect is only acknowledged.
+        The receipt is what keeps that difference visible, and it is also where the
+        automatic tether hold accounts for itself. */}
+    <CommandProofCard evidence={model.lastCommand} label="Last command"/>
     <div style={{ marginTop: 16, border: "1px dashed #69502E", borderRadius: 9, padding: 8, background: "#171309" }}><div style={{ color: "#D8B66D", fontSize: 11, letterSpacing: ".12em" }}>DEMO SCENARIO</div><div style={{ color: "#806F50", fontSize: 11, margin: "3px 0 6px" }}>Inject a deep cross-current. High tether load should make Aeolus command a safe hold.</div><div style={{ display: "flex", gap: 5 }}><button onClick={() => actions.simulateRovCurrent()} style={{ flex: 1, padding: "6px", borderRadius: 6, border: "1px solid #6A5130", background: "#21180B", color: "#E3B866", fontSize: 11, cursor: "pointer" }}>Inject cross-current</button><button onClick={() => actions.resetRov()} style={{ padding: "6px 9px", borderRadius: 6, border: "1px solid #454138", background: "#171713", color: "#898B82", fontSize: 11, cursor: "pointer" }}>Reset mission</button></div></div>
     <div style={{ color: "#5A6F78", fontSize: 11, marginTop: 6, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{action}</div>
   </div>;

@@ -13,6 +13,7 @@ export default function Communications(aeolus: CustomComponentProps) {
     contactsToday: aeolus.read("contactsToday"),
     txUntil: aeolus.read("txUntil"),
     pending: aeolus.read("pending"),
+    lastCommand: aeolus.read("lastCommand"),
     lastAction: aeolus.read("lastAction"),
   };
 

@@ -1,6 +1,6 @@
 // escape-game-master — visual implementation behind ui/index.tsx
 import { useEffect, useState } from "react";
-import { control } from "@aeolus/ui";
+import { CommandProofCard, control } from "@aeolus/ui";
 const ROOMS = ["Library", "Laser Hall", "Observatory", "Vault"];
 /**
  * How each room look reads on the plan.
@@ -90,5 +90,10 @@ export default function GameMasterConsole({ model, actions }: {
       // the physical state are separate facts, so they are marked separately.
       return <button key={scene} aria-pressed={requested} onClick={() => roomLook("look-" + scene)} style={{ flex: 1, padding: "9px 3px", borderRadius: 7, border: (requested ? "2px solid " : "1px solid ") + (requested ? s.stroke : s.stroke + "55"), background: requested ? s.stroke + "2E" : s.stroke + "14", color: requested ? s.text : s.stroke, fontSize: 11, fontWeight: requested ? 800 : 600, cursor: "pointer" }}>{s.label}{live ? " ●" : requested ? " ○" : ""}</button>; })}</div><div style={{ fontSize: 10, color: "#7C7280", marginTop: 6 }}>● in the room now · ○ requested, Room Systems applying</div></div>
     <div style={{ border: "1px solid " + (talking ? "#8E3E55" : "#49394F"), borderRadius: 10, padding: 9, background: talking ? "#1B0E13" : "#0E0C10" }}><div style={{ fontSize: 11, color: "#A097A5", letterSpacing: ".08em", marginBottom: 7 }}>GAME MASTER MIC · {currentRoom.toUpperCase()}</div><button {...micVisual} aria-pressed={talking} onPointerDown={talkStart} onPointerUp={talkStop} onPointerLeave={talkStop} onPointerCancel={talkStop} style={{ ...micVisual.style, width: "100%", padding: "10px", fontSize: 12, fontWeight: 800, userSelect: "none", ...(talking ? { border: "1px solid #EC6A85", background: "#451824", color: "#FFB0C0" } : {}) }}>{intercomPending ? "OPENING MIC…" : talking ? "● LIVE · RELEASE TO STOP" : "HOLD TO TALK"}</button></div></div>
+    {/* This console commands three separate devices — maglock, hint screen, intercom —
+        and all three are acknowledged-ceiling, because the room has no sensor watching
+        the door open, the players read the screen, or the audio arrive. One receipt for
+        whichever fired last, naming which device it was and where the proof stopped. */}
+    <CommandProofCard evidence={model.lastCommand} label="Last command"/>
     <div style={{ fontSize: 11, color: "#777079", marginTop: 7 }}>{last?.label ? String(last.label) : "Game session ready"}</div></div>;
 }
