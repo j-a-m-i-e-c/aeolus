@@ -28,6 +28,15 @@ const store = new Map<string, unknown>();
 const emitted: Array<{ topic: string; payload: Record<string, unknown> }> = [];
 const commands: Array<{ id: string; payload: Record<string, unknown> }> = [];
 
+/**
+ * Device ids whose commands must fail verification, by device id.
+ *
+ * Empty by default, so the happy path reads exactly as it did before. A test that needs
+ * a failure names the device rather than swapping the whole stub, which keeps the
+ * failure local to the one command under examination.
+ */
+const failingDevices = new Set<string>();
+
 function installSandboxGlobals(): void {
   const globals = globalThis as Record<string, unknown>;
   globals.state = {
@@ -43,7 +52,12 @@ function installSandboxGlobals(): void {
     ],
     action: async (id: string, _type: string, params: { payload: Record<string, unknown> }) => {
       commands.push({ id, payload: params.payload });
-      return { success: true, commandId: "cmd-" + commands.length, lifecycleState: "ACKNOWLEDGED" };
+      const success = !failingDevices.has(id);
+      return {
+        success,
+        commandId: "cmd-" + commands.length,
+        lifecycleState: success ? "ACKNOWLEDGED" : "TIMED_OUT",
+      };
     },
     commandEvidence: (commandId: string) => ({ commandId }),
   };
@@ -65,6 +79,7 @@ describe("escape room session lifecycle", () => {
     store.clear();
     emitted.length = 0;
     commands.length = 0;
+    failingDevices.clear();
     vi.useFakeTimers();
     vi.setSystemTime(new Date(START));
     installSandboxGlobals();
@@ -175,6 +190,46 @@ describe("escape room session lifecycle", () => {
     // Game Master owns the exit, hint screen and intercom. The FX controller belongs to
     // Room Systems and is reached by request, never by command.
     expect(commands.every((command) => command.id !== "fx-1")).toBe(true);
+  });
+
+  it("does not start a session when the exit maglock will not confirm it is secured", async () => {
+    // §8.2 says a session must not begin on the assumption that the door is shut. The
+    // code asked the question and threw the answer away: it awaited the secure command
+    // and then set RUNNING with a full clock regardless, so an unconfirmed maglock
+    // produced a running game carrying the PREVIOUS session's exit state.
+    //
+    // The setup is the worst case: a team has just escaped, so the door is open and
+    // `exitUnlocked` is true going in.
+    initialiseGameSession();
+    store.set("exitUnlocked", true);
+    failingDevices.add("exit-1");
+
+    await startGame();
+
+    // Still READY, so the clock has not been consumed and pressing start again is the
+    // whole recovery.
+    expect(status()).toBe("ready");
+    expect(store.get("timerStartedAt")).toBe(0);
+    expect(store.get("remaining")).toBe(FULL);
+    // And the door is not reported as shut, because nothing confirmed it.
+    expect(store.get("exitUnlocked")).toBe(true);
+    // The command really was attempted — this is a refusal to proceed, not a skipped step.
+    expect(commands.some((command) => command.id === "exit-1" && command.payload.locked === true)).toBe(true);
+    // The operator is told why, on the pane's own action line.
+    expect(String((store.get("lastAction") as { label?: string } | undefined)?.label)).toMatch(/not started/i);
+  });
+
+  it("still starts when the maglock confirms, so the guard is not simply refusing", async () => {
+    // The other half of the guard: with a working maglock the session begins exactly as
+    // before. Without this, the test above would pass on a startGame that never starts.
+    initialiseGameSession();
+    store.set("exitUnlocked", true);
+
+    await startGame();
+
+    expect(status()).toBe("running");
+    expect(store.get("exitUnlocked")).toBe(false);
+    expect(store.get("remaining")).toBe(FULL);
   });
 
   it("expires a session whose clock runs out", async () => {

@@ -134,10 +134,18 @@ function hintText(room: string, level: number) {
     const hints = HINTS[room] || HINTS.Library;
     return hints[Math.max(0, Math.min(2, level - 1))];
 }
-async function setExit(unlocked: boolean) {
+/**
+ * Drive the exit maglock, and report whether it confirmed.
+ *
+ * The return value is the point: a caller that depends on the door being in a known
+ * state has to be able to find out whether it is. startGame is that caller.
+ */
+async function setExit(unlocked: boolean): Promise<boolean> {
     const exit = byTopic("switch/escape/exit/state");
-    if (!exit)
-        return;
+    if (!exit) {
+        setAction("Exit maglock unavailable · the door state cannot be established");
+        return false;
+    }
     // Acknowledgement is the honest ceiling. A maglock that has accepted "release"
     // republishes `locked` immediately; nothing measures whether the door actually
     // let go. A real installation would use a door sensor or a reed switch, and that
@@ -156,10 +164,10 @@ async function setExit(unlocked: boolean) {
     if (result.success) {
         state.set("exitUnlocked", unlocked);
         setAction(unlocked ? "All puzzles solved · exit maglock released" : "Exit maglock secured");
+        return true;
     }
-    else {
-        setAction("Exit command not verified: " + String(result.error || result.lifecycleState || "unknown"));
-    }
+    setAction("Exit command not verified: " + String(result.error || result.lifecycleState || "unknown"));
+    return false;
 }
 async function sendHint(level: number) {
     const screen = byTopic("switch/escape/hint-screen/state");
@@ -172,9 +180,12 @@ async function sendHint(level: number) {
     // Acknowledgement is the honest ceiling. The screen echoes the message it was
     // given, so observing it is the command read back; whether a player looked up and
     // read the hint is not something this room instruments.
+    // No `deviceId` here. It used to name the screen as the observing device, which did
+    // nothing — an observation needs a condition, and without one the option is dropped
+    // and the capability snapshot is unaffected — while reading like a configured
+    // observation to anyone auditing the source.
     const result = await devices.action(screen.id, "command", { payload: { message: text, room, hintId } }, {
         tier: "acknowledged",
-        deviceId: screen.id,
         timeoutMs: 5000,
         evidence: {
             intent: "Send hint #" + hintId + " to " + room,
@@ -250,8 +261,21 @@ export async function startGame() {
     events.emit("escape/game/look-request", { scene: "puzzle" });
 
     // The exit is secured by a verified command rather than left to the reset's side
-    // effect. A session must not begin on the assumption that the door is shut.
-    await setExit(false);
+    // effect. A session must not begin on the assumption that the door is shut — and
+    // that has to mean acting on the answer, not merely asking the question.
+    //
+    // The result used to be discarded and the clock started regardless, so an
+    // unconfirmed maglock produced a RUNNING session carrying the PREVIOUS game's
+    // `exitUnlocked` — `true` straight after a team had escaped. The console showed a
+    // running game over an open door, and the comment above claimed the opposite.
+    const secured = await setExit(false);
+    if (!secured) {
+        // Deliberately still READY. The room has been reset, which is real and worth
+        // keeping, but the session does not start and the clock is untouched, so pressing
+        // start again is the whole recovery.
+        setAction("Game not started · exit maglock did not confirm it is secured");
+        return;
+    }
 
     state.set("remaining", SESSION_SECONDS);
     state.set("status", "running");
