@@ -1,6 +1,6 @@
 // farm-livestock — visual implementation behind ui/index.tsx
 import { useEffect, useMemo, useState } from "react";
-import { control, percent } from "@aeolus/ui";
+import { CommandProofCard, control, percent } from "@aeolus/ui";
 
 /** One working dog as its GPS collar reports it. */
 type DogReading = {
@@ -175,6 +175,11 @@ export default function LivestockDashboard({ model, actions }: {
           <button {...recallVisual} style={{ ...recallVisual.style, minWidth: 135, padding: "8px 6px" }} onClick={() => actions.recallStrays()}>{recallInProgress ? "Waiting for collars to confirm…" : alert ? "Recall herd" : "No recall required"}</button>
         </div>
       </div>
+
+      {/* The dogs are the mechanism; the collars are the proof. This card names which
+          one the verdict rested on, so "herd contained" is a reading rather than an
+          assumption that the dogs did their job. */}
+      <CommandProofCard evidence={model.lastCommand} label="Last command"/>
 
       <div style={{ marginTop: 16, padding: 8, border: "1px dashed #5A5132", borderRadius: 9, background: "#17150D" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}><div><div style={{ color: "#C5AA67", fontSize: 11, fontWeight: 850, letterSpacing: 1 }}>DEMO SCENARIO</div><div style={{ color: "#746D57", fontSize: 11, marginTop: 2 }}>Injects livestock movement and fence conditions into the simulated property.</div></div>{demoScenarioPending && <div style={{ color: "#D4B770", fontSize: 11 }}>INJECTING…</div>}</div>

@@ -23,6 +23,7 @@ export default function Livestock(aeolus: CustomComponentProps) {
     dogsWorking: aeolus.read("dogsWorking"),
     dogsDeployed: aeolus.read("dogsDeployed"),
     demoScenarioPending: aeolus.read("demoScenarioPending"),
+    lastCommand: aeolus.read("lastCommand"),
     lastAction: aeolus.read("lastAction"),
   };
 

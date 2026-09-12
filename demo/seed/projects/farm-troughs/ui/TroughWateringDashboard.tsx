@@ -1,6 +1,6 @@
 // farm-troughs — visual implementation behind ui/index.tsx
 import { useEffect, useMemo, useState } from "react";
-import { control, toggleProps } from "@aeolus/ui";
+import { CommandProofCard, control, toggleProps } from "@aeolus/ui";
 export default function TroughWateringDashboard({ model, actions }: {
     model: Record<string, any>;
     actions: Record<string, (...args: any[]) => void>;
@@ -166,6 +166,12 @@ export default function TroughWateringDashboard({ model, actions }: {
           <button {...autoVisual} style={{ ...autoVisual.style, padding: "8px 5px" }} onClick={() => actions.toggleAuto()}>Automatic refill {auto ? "ON" : "OFF"}</button>
         </div>
       </div>
+
+      {/* The refill status line above says whether Aeolus thinks the troughs recovered.
+          This says how it knows: which rung the manifold command reached, and which
+          sensors supplied the evidence. Automatic and operator refills use the same
+          path, so the receipt is the same either way. */}
+      <CommandProofCard evidence={model.lastCommand} label="Last command"/>
 
       <div style={{ marginTop: 16, padding: 8, border: "1px dashed #5D5331", borderRadius: 9, background: "#17150D" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>

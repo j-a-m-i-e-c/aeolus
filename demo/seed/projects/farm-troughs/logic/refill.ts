@@ -30,8 +30,15 @@ export async function refill(source: string) {
         deviceId: troughs.id,
         condition: { all: [{ field: "low", op: "eq", value: 0 }, { field: "refilling", op: "eq", value: 0 }] },
         timeoutMs: 5000,
+        evidence: {
+            intent: "Refill " + lowIds.length + " low trough" + (lowIds.length === 1 ? "" : "s"),
+            observedLabel: "every targeted trough back above the refill threshold",
+        },
     });
     state.set("refillCommandActive", false);
+    // Keep the proof, not just the verdict: every rung this command reached, with the
+    // evidence the runtime recorded for it.
+    state.set("lastCommand", devices.commandEvidence(result.commandId));
     if (result.success) {
         setAction((source === "automatic" ? "Automatic" : "Operator") + " refill verified · targeted troughs recovered");
         events.emit("farm/troughs/refill-verified", { source: source || "operator", targets: lowIds, lifecycleState: result.lifecycleState });

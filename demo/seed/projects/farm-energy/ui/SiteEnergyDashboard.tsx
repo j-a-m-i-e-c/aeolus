@@ -1,6 +1,6 @@
 // farm-energy — visual implementation behind ui/index.tsx
 import { useEffect, useState } from "react";
-import { toggleProps } from "@aeolus/ui";
+import { CommandProofCard, toggleProps } from "@aeolus/ui";
 export default function SiteEnergyDashboard({ model, actions }: {
     model: Record<string, any>;
     actions: Record<string, (...args: any[]) => void>;
@@ -124,6 +124,11 @@ export default function SiteEnergyDashboard({ model, actions }: {
           <div style={{ padding: "5px 6px", borderRadius: 6, background: chargerOn ? "#142319" : "#171B13", color: chargerOn ? "#8DD49A" : "#777F74" }}><b>3</b> Shed charging</div>
         </div>
       </div>
+
+      {/* The charger bank reports its own contactor and nothing downstream measures it,
+          so acknowledged is the honest ceiling. The card says so rather than leaving the
+          gap for a viewer to assume either way. */}
+      <CommandProofCard evidence={model.lastCommand} label="Last command"/>
 
       <div style={{ marginTop: 16, padding: 8, border: "1px dashed #615034", borderRadius: 9, background: "#19140D" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>

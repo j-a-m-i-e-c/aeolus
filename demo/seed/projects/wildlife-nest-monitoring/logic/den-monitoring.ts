@@ -142,9 +142,16 @@ async function startDenCooling(temp: number) {
         deviceId: fan.id,
         condition: { field: "measuredRpm", op: "gte", value: DEN_FAN_VERIFIED_RPM },
         timeoutMs: 5000,
+        evidence: {
+            intent: "Cool the den box",
+            observedLabel: "impeller tachometer reached cooling speed",
+        },
     });
     state.set("commandPending", false);
     projectFanReadings();
+    // Keep the proof, not just the verdict: every rung this command reached, with the
+    // evidence the runtime recorded for it.
+    state.set("lastCommand", devices.commandEvidence(result.commandId));
     if (result.success) {
         state.set("coolingVerifiedAt", Date.now());
         state.set("coolingOutcome", "Cooling VERIFIED · fan measured at speed");
@@ -167,9 +174,14 @@ export async function stopDenCooling(reason: string) {
         deviceId: fan.id,
         condition: { field: "measuredRpm", op: "lte", value: DEN_FAN_STOPPED_RPM },
         timeoutMs: 5000,
+        evidence: {
+            intent: "Stop den box cooling",
+            observedLabel: "impeller tachometer wound down",
+        },
     });
     state.set("commandPending", false);
     projectFanReadings();
+    state.set("lastCommand", devices.commandEvidence(result.commandId));
     if (result.success) {
         state.set("coolingOutcome", reason);
         setAction(reason);

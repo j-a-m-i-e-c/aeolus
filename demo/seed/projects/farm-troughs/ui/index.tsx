@@ -26,6 +26,7 @@ export default function TroughWatering(aeolus: CustomComponentProps) {
     refillFlowLpm: aeolus.read("refillFlowLpm"),
     autoRefill: aeolus.read("autoRefill"),
     refillCommandActive: aeolus.read("refillCommandActive"),
+    lastCommand: aeolus.read("lastCommand"),
     lastAction: aeolus.read("lastAction"),
   };
 

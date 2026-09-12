@@ -18,8 +18,17 @@ export async function recallStrays() {
         deviceId: collars.id,
         condition: { field: "strays", op: "eq", value: 0 },
         timeoutMs: 5000,
+        evidence: {
+            intent: "Recall stray livestock",
+            observedLabel: "collar network reports no animal outside the boundary",
+        },
     });
     state.set("recallInProgress", false);
+    // Keep the proof, not just the verdict: every rung this command reached, with the
+    // evidence the runtime recorded for it. The observation source named on the card is
+    // the collar network, which is the distinction worth showing — the dogs are the
+    // mechanism and never the proof.
+    state.set("lastCommand", devices.commandEvidence(result.commandId));
     if (result.success) {
         setAction("Recall verified · herd contained");
         events.emit("farm/livestock/recall-verified", { lifecycleState: result.lifecycleState });

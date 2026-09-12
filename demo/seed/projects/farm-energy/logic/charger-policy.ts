@@ -41,6 +41,10 @@ export async function setCharger(on: boolean, reason: string) {
         },
     });
     state.set("chargerCommandPending", false);
+    // Keep the proof, not just the verdict. Acknowledged is the honest ceiling here, and
+    // the receipt is where that shows: the card reports what the controller confirmed and
+    // marks the observation stage as unavailable rather than leaving it looking unproven.
+    state.set("lastCommand", devices.commandEvidence(result.commandId));
     if (result.success) {
         setAction((on ? "Opportunity charging online" : "Opportunity charging shed") + " · physical state verified");
         events.emit("farm/energy/opportunity-load", { on, reason, lifecycleState: result.lifecycleState });
