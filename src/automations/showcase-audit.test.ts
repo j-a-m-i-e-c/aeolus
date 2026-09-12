@@ -159,6 +159,65 @@ describe("showcase audit — every seeded tab", () => {
     },
   );
 
+  // A raised spinner must always come back down.
+  //
+  // Every commanding pane disables its control and shows a wait while a command is in
+  // flight, driven by a flag the Logic raises before `devices.action()` and clears after.
+  // An early return between those two lines leaves the flag raised for good: the pane
+  // spins forever and the control never becomes pressable again, so the tab is dead until
+  // the automation is edited. mine-dewatering did exactly this when the sump level sensor
+  // was missing — it reported the problem and returned, with `commandPending` still true.
+  //
+  // Deliberately not solved by wrapping the awaits in try/finally. `devices.action()` does
+  // not throw: the host callback catches everything, including an unexpected error inside
+  // CommandService, and resolves with a failure ActionResult (see the __actionRef
+  // reference in sandbox.ts). Guarding against a rejection the platform contract prevents
+  // would add noise to nineteen projects and still not catch the bug that actually
+  // happened, which was an ordinary early return.
+  it.each(COMMANDING.map((p) => [p.name, p] as const))(
+    "%s always lowers a spinner it raises",
+    (_name, project) => {
+      // The flags the pane genuinely uses as spinners, read off the UI rather than
+      // guessed from names: whatever it hands to control()/toggleProps() as `pending`,
+      // plus the naming conventions the projects use for the same idea.
+      const spinners = new Set<string>();
+      for (const match of project.ui.matchAll(/pending:\s*([^,}\n]+)/g)) {
+        for (const key of match[1].matchAll(/model\.([A-Za-z0-9_$]+)/g)) spinners.add(key[1]);
+      }
+      for (const match of project.ui.matchAll(
+        /aeolus\.read\(\s*"([A-Za-z0-9_$]*(?:[Pp]ending[A-Za-z0-9_$]*|InProgress|CommandActive))"/g,
+      )) {
+        spinners.add(match[1]);
+      }
+
+      const stranded: string[] = [];
+      for (const flag of spinners) {
+        const raise = new RegExp(`state\\.set\\(\\s*"${flag}"\\s*,\\s*true\\s*\\)`, "g");
+        for (const match of project.logic.matchAll(raise)) {
+          // The rest of the enclosing function; these files close at column 0.
+          const rest = project.logic.slice(match.index);
+          const end = rest.search(/\n\}/);
+          const body = end === -1 ? rest : rest.slice(0, end);
+          const clearAt = body.search(
+            new RegExp(`state\\.set\\(\\s*"${flag}"\\s*,\\s*false\\s*\\)`),
+          );
+          if (clearAt === -1) {
+            stranded.push(`${flag} is raised and never lowered`);
+            continue;
+          }
+          // A return before the clear abandons the flag on that path. A project that
+          // legitimately hands the clear to another function would show up here and needs
+          // a named exception rather than a quiet loosening of the rule.
+          const beforeClear = body.slice(0, clearAt);
+          if (/\n\s*return\b/.test(beforeClear)) {
+            stranded.push(`${flag} is left raised by an early return`);
+          }
+        }
+      }
+      expect([...new Set(stranded)]).toEqual([]);
+    },
+  );
+
   // Text a visitor reads must survive the trip from the editor to the pane.
   //
   // Five panes shipped with their UTF-8 re-encoded through CP1252, so every em dash,
