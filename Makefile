@@ -101,21 +101,6 @@ public-demo-local: ## Start the showcase PLUS anonymous visitor restrictions (fo
 	@echo "   restrictions — not the hardened hosted runtime. Seed the demo identity:"
 	@echo "     make public-demo-local-seed PASS=<admin-password>"
 
-# demo-up, demo-reset and seed-demo are gone rather than kept as aliases.
-#
-# An alias would have preserved the trap it was named after: `demo-up` read as "start
-# the demo" and meant "restrict this install to an anonymous visitor", so muscle memory
-# would keep landing on the restricted mode when the simulator was what was wanted.
-# There is no single correct forwarding target either — demo-up did two unrelated
-# things at once, and which replacement you want depends on which of the two you meant:
-#
-#   demo-up     → showcase            (simulated hardware, unrestricted) — usually this
-#               → public-demo-local   (visitor restrictions, for testing those)
-#   seed-demo   → showcase-seed       / public-demo-local-seed
-#   demo-reset  → showcase-reset
-#
-# Nothing automated referenced them, so `No rule to make target` is the whole cost.
-
 dev: ## Start backend in dev mode (hot reload)
 	npm run dev
 

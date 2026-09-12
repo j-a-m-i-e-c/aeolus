@@ -65,14 +65,6 @@ Compose definition: [`compose/public-demo-local.yml`](compose/public-demo-local.
 It defines no simulator of its own — it composes on top of the showcase overlay, so
 the simulated hardware is described in exactly one place.
 
-**If you are looking for `demo-up`, `seed-demo` or `demo-reset`, they are gone.** Not aliased — removed, because `demo-up` read as "start the demo" and meant "restrict this install to an anonymous visitor", and an alias would have kept sending muscle memory to the restricted mode when the simulator was what was wanted. It also did two unrelated things, so there is no single correct replacement:
-
-| Retired | You probably want | Unless you meant |
-|---|---|---|
-| `make demo-up` | `make showcase` | `make public-demo-local` |
-| `make seed-demo` | `make showcase-seed` | `make public-demo-local-seed` |
-| `make demo-reset` | `make showcase-reset` | — |
-
 - **This is a boot-time decision.** `AEOLUS_PUBLIC_DEMO` is read once at backend start and `VITE_PUBLIC_DEMO` is a frontend *build* argument, so switching is a rebuild and container recreate rather than a restart. Both targets above do that. Seeding refuses when the running backend disagrees with the seed it was asked for, before touching any data — check by hand with `curl -X POST http://localhost:3001/api/auth/demo-session`, which answers 404 in normal mode.
 
 **What neither local stack exercises.** Both are different Compose files from the hosted runtime, so validating here says nothing about Cloudflare Tunnel ingress, the golden/active database split, the nightly reset timer or the hosted resource limits. Those are only covered by the hosted release runbook below.
