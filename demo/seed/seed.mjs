@@ -8,7 +8,12 @@
  * domain-agnostic without forcing every use case into the same UI shape.
  *
  * Each tab lives in its own module under demo/seed/tabs/. This orchestrator
- * wires them together: clean → automations → devices → data store → layout.
+ * wires them together: reconcile → data store → automations → devices → layout.
+ *
+ * Rerunnable, and scoped to its own fixture set. It reclaims what a previous run
+ * created via a ledger in the Data Store and leaves automations, tabs, collections
+ * and buckets you authored alone, so seeding again is not a reason to wipe a
+ * database (Req §12.1).
  *
  * Usage:
  *   node demo/seed/seed.mjs [url] [username] [password]
@@ -21,7 +26,7 @@
 
 import {
   createApi,
-  cleanSlate,
+  reconcileShowcaseAutomations,
   enableDataStore,
   publishDevices,
   createAutomations,
@@ -51,8 +56,9 @@ const PASS = process.argv[4];
 // with a password that is public in this repo.
 if (!PASS) {
   console.error("Error: an admin password is required.\n");
-  console.error("  make seed PASS=<password> [USER=admin]        # normal install");
-  console.error("  make seed-demo PASS=<password> [USER=admin]   # public demo\n");
+  console.error("  make seed PASS=<password> [USER=admin]                    # normal install");
+  console.error("  make showcase-seed PASS=<password> [USER=admin]           # showcase");
+  console.error("  make public-demo-local-seed PASS=<password> [USER=admin]  # + visitor restrictions\n");
   console.error(`  node demo/seed/seed.mjs ${API} ${USER} <password>`);
   process.exit(1);
 }
@@ -99,11 +105,24 @@ if (WANT_PUBLIC_DEMO) {
   console.log("  ✓ Backend confirms public-demo mode is live");
 }
 
-// 1. Clean slate
-console.log("\n1. Cleaning existing data...");
-await cleanSlate(api);
+// 1. Enable the Data Store.
+//
+// First, because the showcase ownership ledger lives in it and step 2 cannot reconcile
+// without reading that. Enabling is idempotent.
+console.log("\n1. Preparing Data Store...");
+await enableDataStore(api);
 
-// 2. Enable the Data Store and seed its fixtures.
+// 2. Reclaim the previous showcase — and nothing else.
+//
+// This replaces a clean slate that deleted every automation on the box and cleared the
+// whole dashboard, which meant reseeding the showcase destroyed automations and tabs
+// the operator had authored (Req §12.1). Removal is now by recorded id, with a
+// one-time name-based adoption pass for installs seeded before the ledger existed.
+console.log("\n2. Reclaiming the previous showcase...");
+const allAutomations = tabModules.flatMap((m) => m.automations);
+await reconcileShowcaseAutomations(api, allAutomations);
+
+// 3. Seed the Data Store fixtures.
 //
 // This runs BEFORE automations are created, and the order is load-bearing. `db.write()`
 // auto-creates a collection, and several showcase automations write to the very names
@@ -111,14 +130,12 @@ await cleanSlate(api);
 // `stage-show-sequencer` whenever the simulator publishes to their trigger topics.
 // Created first, they would race the collection seeding and win, which is what
 // produced `POST /api/data-store/collections → 409: Collection already exists` on the
-// Pi. With no automations registered yet, nothing can auto-create anything.
+// Pi. With the previous showcase automations reclaimed in step 2 and the new ones not
+// yet created, nothing is registered that could auto-create anything.
 //
 // Each collection and bucket resets only itself, so a reseed replaces the showcase
 // fixture set without touching collections an operator created.
-console.log("\n2. Preparing Data Store...");
-await enableDataStore(api);
-
-console.log("\n2b. Seeding Data Store collections...");
+console.log("\n3. Seeding Data Store collections...");
 for (const mod of tabModules) {
   for (const collection of mod.dataStore || []) {
     await seedCollection(api, collection);
@@ -127,27 +144,26 @@ for (const mod of tabModules) {
 
 // Buckets are intentionally global in the current Data Store model, so showcase
 // buckets are examples rather than tab-owned coordination state.
-console.log("\n2c. Seeding Data Store buckets...");
+console.log("\n3b. Seeding Data Store buckets...");
 for (const bucket of demoBuckets) {
   await seedBucket(api, bucket);
 }
 
-// 3. Create automations (must exist before devices publish so state populates)
-console.log("\n3. Creating automations...");
-const allAutomations = tabModules.flatMap((m) => m.automations);
+// 4. Create automations (must exist before devices publish so state populates).
+// Each one is recorded in the showcase ledger as it is created, so step 2 of the next
+// run can reclaim exactly these rules even if this step aborts partway through.
+console.log("\n4. Creating automations...");
 const idMap = await createAutomations(api, allAutomations);
 
-// 3b. Apply per-rule public-demo access allowlists (writableStateKeys / fireEvents).
+// 4b. Apply per-rule public-demo access allowlists (writableStateKeys / fireEvents).
 await applyDemoAccess(api, allAutomations, idMap);
 
-// 4. Publish devices (triggers matching automations → populates live state)
-console.log("\n4. Publishing devices...");
+// 5. Publish devices (triggers matching automations → populates live state)
+console.log("\n5. Publishing devices...");
 const allDevices = tabModules.flatMap((m) => m.devices);
 await publishDevices(api, allDevices);
 
-// 5. (Data Store now seeded in step 2, ahead of automation creation — see there.)
-
-// 6. Build dashboard layout
+// 6. Build the dashboard layout, merging with whatever the operator authored.
 console.log("\n6. Building dashboard layout...");
 await buildLayout(api, tabModules, idMap);
 
@@ -206,8 +222,20 @@ if (WANT_SIMULATOR) {
 
 const finalAutomations = await api("GET", "/api/automations");
 const finalDevices = await api("GET", "/api/devices");
-if (!Array.isArray(finalAutomations) || finalAutomations.length !== allAutomations.length) {
-  throw new Error(`Seed verification failed: expected ${allAutomations.length} automations, found ${Array.isArray(finalAutomations) ? finalAutomations.length : "invalid response"}`);
+
+// Verify the showcase set specifically, not the total. The seeder no longer owns every
+// automation on the install, so a count comparison would fail on any install that has
+// automations of its own — punishing the operator for the thing §12.1 set out to allow.
+if (!Array.isArray(finalAutomations)) {
+  throw new Error("Seed verification failed: GET /api/automations returned an invalid response");
+}
+if (Object.keys(idMap).length !== allAutomations.length) {
+  throw new Error(`Seed verification failed: declared ${allAutomations.length} showcase automations but created ${Object.keys(idMap).length}`);
+}
+const liveIds = new Set(finalAutomations.map((rule) => rule?.id));
+const missing = Object.entries(idMap).filter(([, ruleId]) => !liveIds.has(ruleId));
+if (missing.length > 0) {
+  throw new Error(`Seed verification failed: ${missing.length} showcase automation(s) are not present after seeding: ${missing.map(([key]) => key).join(", ")}`);
 }
 if (WANT_SIMULATOR && (!Array.isArray(finalDevices) || finalDevices.length === 0)) {
   throw new Error("Seed verification failed: simulator bootstrap is enabled but no devices are registered");
@@ -218,7 +246,7 @@ console.log(`
 
    Dashboard: ${API.replace(":3001", ":3000")}
    Tabs:        ${tabModules.map((m) => m.tab.name).join(" · ")}
-   Automations: ${finalAutomations.length}
+   Automations: ${allAutomations.length} showcase${finalAutomations.length > allAutomations.length ? ` (${finalAutomations.length} on this install, the rest yours)` : ""}
    Devices:     ${Array.isArray(finalDevices) ? finalDevices.length : allDevices.length}
 
    Custom UI components render instantly — just open the dashboard.

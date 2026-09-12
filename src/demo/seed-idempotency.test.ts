@@ -216,8 +216,38 @@ describe("seed ordering", () => {
     expect(dataStore).toBeLessThan(automations);
   });
 
+  it("enables the Data Store, then reconciles, then seeds collections", () => {
+    // Two constraints in one order. The ownership ledger lives in the Data Store, so
+    // reconciling cannot read it until the store is enabled. And the previous run's
+    // cron automations have to be reclaimed before collections are seeded, or they are
+    // still registered and can auto-create the very collections being seeded.
+    const enable = seedSource.indexOf("enableDataStore(api)");
+    const reconcile = seedSource.indexOf("reconcileShowcaseAutomations(api, allAutomations)");
+    const collections = seedSource.indexOf("seedCollection(api, collection)");
+
+    expect(enable).toBeGreaterThan(-1);
+    expect(reconcile).toBeGreaterThan(-1);
+    expect(enable).toBeLessThan(reconcile);
+    expect(reconcile).toBeLessThan(collections);
+  });
+
   it("no longer wipes the whole Data Store", () => {
     expect(seedSource).not.toContain("clearDataStore");
+  });
+
+  it("no longer clean-slates every automation and the whole dashboard", () => {
+    // §12.1. The old first step deleted every automation on the install and sent
+    // `PUT /api/layout { tabs: [], panes: [] }`, so reseeding the showcase destroyed
+    // automations and tabs the operator had authored.
+    expect(seedSource).not.toContain("cleanSlate");
+    expect(seedSource).not.toContain("{ tabs: [], panes: [] }");
+  });
+
+  it("verifies the showcase set rather than the total automation count", () => {
+    // A total-count check would fail on any install that has automations of its own —
+    // punishing the operator for exactly the thing §12.1 set out to permit.
+    expect(seedSource).not.toContain("finalAutomations.length !== allAutomations.length");
+    expect(seedSource).toContain("Object.keys(idMap).length !== allAutomations.length");
   });
 
   it("declares collections that seeded automations also write to", () => {

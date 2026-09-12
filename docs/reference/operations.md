@@ -100,6 +100,8 @@ make showcase-reset                  # restart the simulator; it republishes ini
 
 Add visitor restrictions only when those are what you are testing, with `make public-demo-local`. See [demo/README.md](../../demo/README.md).
 
+`showcase-seed` is a reconcile and is safe to rerun. It reclaims the resources a previous run created — automations by id from the `_showcase:seed-ledger` Data Store bucket, tabs and panes by declared tab id, collections and buckets by declared name — and leaves anything you authored yourself in place. Wiping the database is not part of reseeding; `make reset` remains the separate full reset.
+
 The reference `reference-water` scenario is a conformance fixture, not a public tab. Its device models live in `src/simulator/`.
 
 ## Public demo deployment (hardened)

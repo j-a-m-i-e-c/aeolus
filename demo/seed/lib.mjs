@@ -152,25 +152,168 @@ export async function backendPublicDemoEnabled(baseUrl) {
   return res.status !== 404;
 }
 
-// ─── Cleanup ─────────────────────────────────────────────────────────────────
+// ─── Showcase ownership ledger ───────────────────────────────────────────────
 
 /**
- * Clean-slate reset: delete every automation and clear the dashboard layout.
+ * The bucket recording what this seeder created, so a rerun can reclaim its own
+ * resources and nothing else (Req §12.1, §12.2).
  *
- * The demo seed defines the entire dashboard, so it owns the full layout +
- * automation set. (There is no per-automation "seed" metadata flag to filter
- * on, so this deletes all automations — use `make reset` for a full DB wipe.)
+ * Why a ledger is needed at all. Automations get server-generated ids and carry no
+ * ownership column, so once `POST /api/automations` returns there is nothing on the
+ * row connecting it back to the `farm-water` key in demo/seed/tabs/. The old
+ * `cleanSlate` resolved that by deleting EVERY automation and clearing the WHOLE
+ * dashboard, which meant reseeding the showcase destroyed any automation or tab you
+ * had authored yourself.
+ *
+ * §12.2 offers two ways out: seed metadata on each resource, or a ledger keyed by
+ * stable id. The ledger is the one that needs no migration and no new API surface —
+ * the Data Store already exists, the seeder already owns fixtures in it, and a bucket
+ * is precisely a map of `stable module key → server-generated id`.
+ *
+ * It is deliberately visible in the Data Store UI, next to the platform's own
+ * `_metrics:*` collections. Anyone wondering what the showcase claims can read it.
  */
-export async function cleanSlate(api) {
-  const existing = await api("GET", "/api/automations");
-  if (Array.isArray(existing) && existing.length > 0) {
-    for (const rule of existing) {
-      await api("DELETE", `/api/automations/${rule.id}`);
+export const SHOWCASE_LEDGER_BUCKET = "_showcase:seed-ledger";
+
+const LEDGER_AUTOMATION_PREFIX = "automation:";
+const LEDGER_TAB_PREFIX = "tab:";
+
+const ledgerBucketPath = () => `/api/data-store/buckets/${encodeURIComponent(SHOWCASE_LEDGER_BUCKET)}`;
+const ledgerKeyPath = (key) => `${ledgerBucketPath()}/${encodeURIComponent(key)}`;
+
+/**
+ * Read the ledger: which automations and tabs the last seed run created.
+ *
+ * `existed: false` means this install has never been seeded by a ledger-aware seeder.
+ * That covers two cases which are indistinguishable from here — a genuinely first
+ * run, and an install seeded by an older revision that left showcase automations
+ * behind without recording them. Both are handled the same way, by the one-time
+ * adoption pass in `reconcileShowcaseAutomations`.
+ *
+ * Requires the Data Store to be enabled, which is why the seeder enables it before
+ * reconciling rather than as part of seeding fixtures.
+ */
+export async function readShowcaseLedger(api) {
+  const entries = await api("GET", ledgerBucketPath(), undefined, { tolerate: [404] });
+  const automations = new Map();
+  const tabIds = [];
+
+  if (Array.isArray(entries)) {
+    for (const entry of entries) {
+      if (!entry || typeof entry.key !== "string") continue;
+      if (entry.key.startsWith(LEDGER_AUTOMATION_PREFIX)) {
+        // A non-string value means a corrupted entry rather than a rule id. Skipping
+        // it costs one orphaned automation; trusting it would send a junk id into a
+        // DELETE path.
+        if (typeof entry.value !== "string" || entry.value.length === 0) continue;
+        automations.set(entry.key.slice(LEDGER_AUTOMATION_PREFIX.length), entry.value);
+      } else if (entry.key.startsWith(LEDGER_TAB_PREFIX)) {
+        tabIds.push(entry.key.slice(LEDGER_TAB_PREFIX.length));
+      }
     }
-    console.log(`  ✓ Deleted ${existing.length} existing automations`);
   }
-  await api("PUT", "/api/layout", { tabs: [], panes: [] });
-  console.log("  ✓ Cleared dashboard layout");
+
+  return { existed: automations.size > 0 || tabIds.length > 0, automations, tabIds };
+}
+
+/**
+ * Record one automation in the ledger, immediately after it is created.
+ *
+ * Per-automation rather than one bulk write at the end, because staying true through
+ * a partial failure is the ledger's whole job. A seed that dies midway through
+ * creating automations leaves the ledger naming exactly the rules that do exist, so
+ * the next run reclaims them instead of orphaning them and adding a second copy.
+ */
+export async function recordShowcaseAutomation(api, key, ruleId) {
+  await api("PUT", ledgerKeyPath(LEDGER_AUTOMATION_PREFIX + key), { value: ruleId });
+}
+
+/**
+ * Record which tabs the showcase owns, and release the ones it no longer declares.
+ *
+ * Releasing matters for the layout merge: a tab dropped from demo/seed/tabs/ would
+ * otherwise look like a tab you authored and be preserved forever. The ledger is what
+ * makes "the showcase used to own this" expressible at all.
+ */
+export async function recordShowcaseTabs(api, declaredTabIds, previousTabIds = []) {
+  for (const tabId of declaredTabIds) {
+    await api("PUT", ledgerKeyPath(LEDGER_TAB_PREFIX + tabId), { value: true });
+  }
+  const declared = new Set(declaredTabIds);
+  for (const tabId of previousTabIds) {
+    if (declared.has(tabId)) continue;
+    await api("DELETE", ledgerKeyPath(LEDGER_TAB_PREFIX + tabId), undefined, { tolerate: [404] });
+  }
+}
+
+// ─── Reconcile ───────────────────────────────────────────────────────────────
+
+/**
+ * Reclaim the previous showcase automations, and only those.
+ *
+ * Removal is by ledger id, which is exact. The one exception is the adoption pass for
+ * a pre-ledger install: with no ledger there is nothing but the display name to go on,
+ * so rules whose name exactly matches one the showcase declares are adopted and
+ * replaced. §12.2 says not to infer ownership from a display name *when a stable id
+ * exists* — here none does, which is the situation the ledger is being introduced to
+ * end. It happens once, it is bounded to the exact set of names in demo/seed/tabs/,
+ * and every adoption is printed so it is visible rather than silent.
+ *
+ * The residual risk is an automation you named exactly "Water Management" on an
+ * install that predates the ledger. After this run the ledger exists and name
+ * matching never happens again.
+ *
+ * @param {{key: string, name: string}[]} declared - the showcase's own automations
+ * @returns {Promise<{reclaimed: number, adopted: number, preserved: number}>}
+ */
+export async function reconcileShowcaseAutomations(api, declared) {
+  const ledger = await readShowcaseLedger(api);
+  const live = await api("GET", "/api/automations");
+  const liveRules = Array.isArray(live) ? live : [];
+  const liveIds = new Set(liveRules.map((rule) => rule?.id).filter(Boolean));
+
+  // ruleId → why it is being removed. A Map so a rule named in the ledger AND
+  // matching by name is only deleted once.
+  const doomed = new Map();
+  for (const ruleId of ledger.automations.values()) {
+    if (liveIds.has(ruleId)) doomed.set(ruleId, "ledger");
+  }
+
+  let adopted = 0;
+  if (!ledger.existed) {
+    const declaredNames = new Set(declared.map((a) => a.name).filter(Boolean));
+    for (const rule of liveRules) {
+      if (!rule?.id || doomed.has(rule.id)) continue;
+      if (!declaredNames.has(rule.name)) continue;
+      doomed.set(rule.id, "name");
+      adopted += 1;
+      console.log(`  · Adopting pre-ledger showcase automation "${rule.name}"`);
+    }
+  }
+
+  for (const ruleId of doomed.keys()) {
+    // Tolerated: a rule the ledger names may have been deleted by hand since.
+    await api("DELETE", `/api/automations/${ruleId}`, undefined, { tolerate: [404] });
+  }
+
+  // Clear every automation entry, including ones whose rule was already gone, so the
+  // ledger reflects only what step 3 is about to create.
+  for (const key of ledger.automations.keys()) {
+    await api("DELETE", ledgerKeyPath(LEDGER_AUTOMATION_PREFIX + key), undefined, { tolerate: [404] });
+  }
+
+  const preserved = liveRules.length - doomed.size;
+  console.log(
+    `  ✓ Reclaimed ${doomed.size} showcase automation(s)`
+    + (adopted > 0 ? ` — ${adopted} adopted by name on a pre-ledger install` : ""),
+  );
+  console.log(
+    preserved > 0
+      ? `  ✓ Left ${preserved} automation(s) you authored untouched`
+      : "  ✓ No other automations on this install",
+  );
+
+  return { reclaimed: doomed.size, adopted, preserved };
 }
 
 // ─── Devices ─────────────────────────────────────────────────────────────────
@@ -200,6 +343,10 @@ export async function publishDevices(api, devices) {
  * Demo automations use the same multi-file Automation Project model as normal
  * Aeolus authoring. Seed descriptors are Project-only so the showcase cannot
  * silently drift back to the removed single-file authoring contract.
+ *
+ * Each created rule is written to the showcase ledger straight away, before the next
+ * one is created. That is what lets a later rerun reclaim exactly these rules instead
+ * of deleting every automation on the box — see SHOWCASE_LEDGER_BUCKET.
  */
 export async function createAutomations(api, automations) {
   const ids = {};
@@ -224,6 +371,9 @@ export async function createAutomations(api, automations) {
     const created = await api("POST", "/api/automations", body);
     if (created) {
       ids[a.key] = created.id;
+      // Recorded before the loop continues, so an abort here still leaves the ledger
+      // naming every rule that actually exists.
+      await recordShowcaseAutomation(api, a.key, created.id);
       console.log(`  ✓ ${a.name}`);
     }
   }
@@ -381,7 +531,8 @@ export const round = (n, dp = 1) => Number(n.toFixed(dp));
 // ─── Layout ──────────────────────────────────────────────────────────────────
 
 /**
- * Build and persist the dashboard layout from declarative tab modules.
+ * Build and persist the dashboard layout from declarative tab modules, preserving
+ * tabs you authored yourself.
  *
  * Each tab module exposes `panes` referencing automations by their module key.
  * This resolves those keys to the real rule IDs produced by createAutomations.
@@ -390,11 +541,46 @@ export const round = (n, dp = 1) => Number(n.toFixed(dp));
  *   { kind: "device-grid", x, y, w, h }
  *   { kind: "automation", ref: "<automation key>", x, y, w, h }
  *
+ * `PUT /api/layout` is a whole-dashboard atomic replace, so this reads the current
+ * layout and merges rather than sending only the showcase (Req §12.1). Three groups
+ * come out of that read:
+ *
+ *   declared showcase tabs  — replaced from source; the showcase owns their contents
+ *   retired showcase tabs   — in the ledger but no longer declared, so dropped
+ *   everything else         — yours, passed through untouched
+ *
+ * Retirement is the reason tab ownership is in the ledger at all: without it, a tab
+ * removed from demo/seed/tabs/ would be indistinguishable from one you created and
+ * would survive every future reseed.
+ *
+ * Showcase tabs take orders 0..n-1 from module order, and your tabs follow in their
+ * existing relative order. The seeder owns the ordering of its own tabs, which keeps
+ * a rerun deterministic (Req §12.1) — until the §7 layout-capture workflow makes a
+ * hand-arranged order the source of truth.
+ *
  * @param {{tab: {id, name, icon}, panes: object[]}[]} tabModules
  * @param {Record<string, string>} idMap - automation key → ruleId
  */
 export async function buildLayout(api, tabModules, idMap) {
   const now = new Date().toISOString();
+  const declaredTabIds = tabModules.map((mod) => mod.tab.id);
+  const ledger = await readShowcaseLedger(api);
+  const showcaseOwned = new Set([...declaredTabIds, ...ledger.tabIds]);
+
+  const current = await api("GET", "/api/layout");
+  const currentTabs = Array.isArray(current?.tabs) ? current.tabs : [];
+  const currentPanes = Array.isArray(current?.panes) ? current.panes : [];
+
+  const keptTabs = currentTabs
+    .filter((tab) => tab && typeof tab.id === "string" && !showcaseOwned.has(tab.id))
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  const keptTabIds = new Set(keptTabs.map((tab) => tab.id));
+
+  // Panes are carried over verbatim, config included. That matters beyond geometry:
+  // the PUT rebuilds automation→tab ownership from each pane's `config.ruleId`, so
+  // dropping a pane here would silently unscope the automation behind it.
+  const keptPanes = currentPanes.filter((pane) => pane && keptTabIds.has(pane.tabId));
+
   const tabs = [];
   const panes = [];
 
@@ -430,8 +616,24 @@ export async function buildLayout(api, tabModules, idMap) {
     });
   });
 
+  keptTabs.forEach((tab, index) => {
+    tabs.push({ ...tab, order: tabModules.length + index });
+  });
+  panes.push(...keptPanes);
+
   await api("PUT", "/api/layout", { tabs, panes });
-  console.log(`  ✓ Layout: ${tabs.length} tabs, ${panes.length} panes`);
+  await recordShowcaseTabs(api, declaredTabIds, ledger.tabIds);
+
+  const retired = ledger.tabIds.filter((id) => !declaredTabIds.includes(id));
+  console.log(
+    `  ✓ Layout: ${declaredTabIds.length} showcase tabs, ${panes.length - keptPanes.length} panes`,
+  );
+  if (keptTabs.length > 0) {
+    console.log(`  ✓ Preserved ${keptTabs.length} tab(s) you authored, with ${keptPanes.length} pane(s)`);
+  }
+  if (retired.length > 0) {
+    console.log(`  ✓ Retired ${retired.length} tab(s) the showcase no longer declares: ${retired.join(", ")}`);
+  }
 }
 
 // ─── Public demo identity ────────────────────────────────────────────────────

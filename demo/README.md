@@ -48,7 +48,7 @@ Notes that are easy to discover the hard way:
     -f demo/compose/local-showcase.yml up -d --build
   ```
 - **A full wipe drops the retained device state.** `docker compose down -v` removes the broker volume, so the simulator's retained device publishes go with it. `make showcase-seed` restarts the simulator first so the backend sees the simulated actuators before the command-profile step runs.
-- **Reseeding is safe.** The seeder replaces its own fixture set and leaves collections, buckets and data you created alone. You should not need `down -v` to seed again.
+- **Reseeding is safe.** The seeder reclaims its own fixture set and leaves automations, tabs, collections, buckets and data you created alone. You should not need `down -v` to seed again. See [Showcase ownership](#showcase-ownership) below.
 
 ### 2. Public-demo restrictions (local)
 
@@ -70,6 +70,24 @@ the simulated hardware is described in exactly one place.
 - **This is a boot-time decision.** `AEOLUS_PUBLIC_DEMO` is read once at backend start and `VITE_PUBLIC_DEMO` is a frontend *build* argument, so switching is a rebuild and container recreate rather than a restart. Both targets above do that. Seeding refuses when the running backend disagrees with the seed it was asked for, before touching any data — check by hand with `curl -X POST http://localhost:3001/api/auth/demo-session`, which answers 404 in normal mode.
 
 **What neither local stack exercises.** Both are different Compose files from the hosted runtime, so validating here says nothing about Cloudflare Tunnel ingress, the golden/active database split, the nightly reset timer or the hosted resource limits. Those are only covered by the hosted release runbook below.
+
+### Showcase ownership
+
+Seeding is a reconcile, not a wipe. Rerun `make showcase-seed` as often as you like — you should never need `docker compose down -v` to seed again.
+
+The seeder owns exactly what it declares and nothing else:
+
+| Resource | How a rerun reclaims it | Yours survives because |
+|---|---|---|
+| Collections, buckets | Each declared name resets only itself | The seeder never enumerates the store to decide what to remove |
+| Automations | By id, recorded in a ledger when created | An id the ledger does not name is not touched |
+| Tabs, panes | Declared tab ids are replaced; ledger-known tabs it no longer declares are retired | A tab id in neither set is passed through |
+
+**The ledger.** Automations get server-generated ids and carry no ownership column, so nothing on the row connects it back to the `farm-water` key in `seed/tabs/`. The seeder therefore records `module key → rule id` in a Data Store bucket named `_showcase:seed-ledger` as each automation is created. It is visible in the Data Store UI next to the platform's own `_metrics:*` collections, so you can read what the showcase claims.
+
+**One-time adoption.** On an install seeded before the ledger existed there is nothing but the display name to go on, so the first ledger-aware reseed adopts automations whose name exactly matches one the showcase declares, and prints each one. After that, matching is by id only. The single exposure is an automation of yours named exactly e.g. `Water Management` on a pre-ledger install.
+
+**What still wipes everything.** `make reset` and `docker compose down -v`, deliberately. Those are full resets, not reseeds.
 
 ### 3. Public-demo application mode
 
