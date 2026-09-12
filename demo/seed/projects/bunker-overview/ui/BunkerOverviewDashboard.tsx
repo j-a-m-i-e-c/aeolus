@@ -112,7 +112,9 @@ export default function BunkerOverviewDashboard({ model }: {
         {/* directionality: bunker → mast → remote station */}
         <path d="M310 372 h12 v-11" stroke="#84A78C" strokeWidth="2" fill="none"/><path d="M322 361 l7 -5" stroke="#84A78C" strokeWidth="2"/>
         {[0, 1, 2].map(i => <path key={i} d={"M" + (334 + i * 8) + " " + (356 + i * 2) + " q" + (5 + i * 2) + " " + (4 + i * 2) + " 0 " + (8 + i * 3)} fill="none" stroke={linked ? "#77D695" : "#3E4A40"} opacity={linked ? 1 - i * .22 : .5}/>)}
-        <rect x="420" y="358" width="22" height="14" rx="2" fill="#141A13" stroke={linked ? "#77D695" : "#5C6659"}/><text x="431" y="369" textAnchor="middle" fill={linked ? "#9CC7A4" : "#7E8A7F"} fontSize="8">STN</text>
+        {/* Spelt out rather than abbreviated: this is the far end of the link, and "STN"
+            is exactly the kind of symbol a visitor cannot decode from context (§13.3). */}
+        <rect x="406" y="358" width="52" height="14" rx="2" fill="#141A13" stroke={linked ? "#77D695" : "#5C6659"}/><text x="432" y="369" textAnchor="middle" fill={linked ? "#9CC7A4" : "#7E8A7F"} fontSize="8">REMOTE</text>
       </Area>
       <Area x={477} y={292} w={166} h={84} title="SUPPLIES">
         {/* Two runways, from two different kinds of fact. Water is derived from a tank

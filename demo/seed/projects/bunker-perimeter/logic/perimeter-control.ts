@@ -90,6 +90,21 @@ export async function setFloodlights(on: boolean, reason: string) {
     state.set("lastCommand", devices.commandEvidence(result.commandId));
     if (result && result.success) {
         state.set("lightsOn", on);
+        // Write the brightness the command PROVED, not just the switch position.
+        //
+        // Only `lightsOn` used to be written here, which left `floodlightPct` holding the
+        // value projected before the command — 0 for a light that had just been verified
+        // at 70%. The pane resolves the beam with `floodlightPct ?? (lightsOn ? 100 : 0)`,
+        // and `??` does not fall back over a real 0, so the beam vanished, the contacts
+        // stayed unlit and the footer read FLOODLIGHTS 0% directly above a receipt saying
+        // "output reached 70% of deterrent brightness". The overview drew the same
+        // contradiction from the summary.
+        //
+        // The condition is a threshold, so what is known is a floor: at least
+        // FLOODLIGHT_DETER_PCT lit, or at most dark. Writing the floor can understate a
+        // fixture that ramped past it and never overstates one that did not. The
+        // controller's own publish re-runs this automation with the measured value.
+        state.set("floodlightPct", on ? FLOODLIGHT_DETER_PCT : 0);
         setAction(reason);
         return true;
     }

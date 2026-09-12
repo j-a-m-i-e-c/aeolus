@@ -159,6 +159,37 @@ describe("showcase audit — every seeded tab", () => {
     },
   );
 
+  // Text a visitor reads must survive the trip from the editor to the pane.
+  //
+  // Five panes shipped with their UTF-8 re-encoded through CP1252, so every em dash,
+  // middle dot, ellipsis, arrow and superscript in them turned into a run of two to six
+  // Latin-1 characters — in pane subtitles, SVG footers and button labels a visitor
+  // reads. Every existing invariant looked straight past it, because they all match on
+  // identifiers or on prose that was still spelt correctly.
+  //
+  // The damage is detectable on its own terms without hard-coding the mangled sequences:
+  // a CP1252 round trip always produces U+00C3 or U+00C2 immediately followed by another
+  // non-ASCII character, and correctly encoded prose has no reason to do that.
+  it.each(PROJECTS.map((p) => [p.name, p] as const))(
+    "%s source is not mojibake-corrupted",
+    (_name, project) => {
+      for (const [layer, source] of [
+        ["logic", project.logic],
+        ["ui", project.ui],
+      ] as const) {
+        // Escaped rather than written literally, so this file does not itself trip a
+        // repo-wide scan for the very sequences it exists to reject.
+        const hits = [...source.matchAll(/[\u00C3\u00C2][\u0080-\u02FF\u2000-\u206F]/g)].map(
+          (m) => m[0],
+        );
+        expect(
+          hits,
+          `${layer} contains CP1252 round-trip damage: ${[...new Set(hits)].join(" ")}`,
+        ).toEqual([]);
+      }
+    },
+  );
+
   // §13.3 — if a visitor cannot explain a symbol from context, label it. The water
   // schematic's "V" for valve was the case that prompted this; a bare one-character
   // SVG text node is the shape of that mistake.
