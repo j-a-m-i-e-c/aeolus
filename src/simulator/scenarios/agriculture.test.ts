@@ -167,6 +167,61 @@ describe("agriculture simulator scenario", () => {
     expect(new Set(positions.map((stray) => stray.lon + "," + stray.lat)).size).toBe(positions.length);
   });
 
+  it("stops calling a stray outside once the dogs have pushed it back through the fence", async () => {
+    // `outside` is a geometric claim, not a synonym for "still a stray". The breach point
+    // sits on the fence line and the drive interpolates from there to the paddock centre,
+    // so every driven position is already inside. This used to publish `outside: true` for
+    // the whole drive, which meant the final frame described an animal standing in the
+    // middle of the paddock as being beyond the boundary — and the pane drew a boundary
+    // alarm ring around it there.
+    //
+    // They stay strays throughout: the count and the positions keep reporting them until
+    // containment is earned. Only the boundary claim changes.
+    const { registry, command, fire, published } = setup();
+
+    await fire(AGRICULTURE_STIMULUS.boundaryBreach);
+    const recall = registry.get(AGRICULTURE_DEVICE_KEYS.recall)!;
+    await recall.model.onCommand!(command(AGRICULTURE_COMMAND_TOPICS.recall, { active: true }));
+    await vi.advanceTimersByTimeAsync(8000);
+
+    const collarFrames = published
+      .filter((entry) => entry.topic === AGRICULTURE_STATE_TOPICS.collars)
+      .map((entry) => JSON.parse(entry.payload) as {
+        strays: number;
+        strayPositions?: Array<{ id: string; lat: number; lon: number; outside: boolean }>;
+      })
+      .filter((frame) => (frame.strayPositions?.length ?? 0) > 0);
+
+    expect(collarFrames.length).toBeGreaterThan(1);
+
+    // Where the animals were when they were genuinely out, taken from the breach frame
+    // rather than restated here, so the assertion cannot drift from the fixture.
+    const atBreach = new Set(
+      collarFrames[0].strayPositions!.map((stray) => stray.lon + "," + stray.lat),
+    );
+    expect(collarFrames[0].strayPositions!.every((stray) => stray.outside)).toBe(true);
+
+    // The rule, stated geometrically: an animal that has been moved off the fence line is
+    // inside, so it may not be reported as outside. Frames still carrying the breach
+    // positions — the movement publish that precedes the first driven positions — are
+    // legitimately still outside.
+    let movedFrames = 0;
+    for (const frame of collarFrames) {
+      for (const stray of frame.strayPositions!) {
+        if (atBreach.has(stray.lon + "," + stray.lat)) continue;
+        movedFrames += 1;
+        expect(stray.outside, "an animal driven off the fence line is not outside").toBe(false);
+      }
+      // Still strays throughout, which is the fact the recall waits on.
+      expect(frame.strays).toBeGreaterThan(0);
+    }
+    expect(movedFrames, "the drive should report positions away from the breach").toBeGreaterThan(0);
+
+    // And the specific frame that prompted this: the animals reaching the paddock centre.
+    const finalPositions = collarFrames.at(-1)!.strayPositions!;
+    expect(finalPositions.some((stray) => stray.outside)).toBe(false);
+  });
+
   it("returns strays to the paddock the herd is actually in, not always Paddock A", async () => {
     const { registry, command, fire, last } = setup();
 

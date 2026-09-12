@@ -21,6 +21,11 @@ export default function BunkerOverviewDashboard({ model }: {
     model: Record<string, any>;
 }) {
     const contacts = Number(model.contacts ?? 0), sealed = Boolean(model.sealed), pressure = Number(model.overpressure ?? 8);
+    // Whether the pressure reading backs up the seal, decided by Air & Filtration, which
+    // owns both numbers. Absent on state written before this existed, in which case fall
+    // back to the seal so an upgraded install reads as it did before rather than
+    // announcing that every seal is equalising.
+    const pressureBacksSeal = model.pressureBacksSeal === undefined ? sealed : Boolean(model.pressureBacksSeal);
     const battery = Number(model.battery ?? 74), gen = Boolean(model.generatorOn), signal = String(model.signal || "quiet");
     const occupants = Number(model.occupants ?? 4), bunks = Number(model.bunks ?? 6);
     const movement = String(model.movement || "clear"), ambient = Number(model.ambientContacts ?? 2);
@@ -80,7 +85,10 @@ export default function BunkerOverviewDashboard({ model }: {
         {/* Which way the air is going, arrowheads and all. */}
         {[242, 258].map((ay) => <path key={ay} d={sealed ? "M150 " + ay + " l-16 0 m5 -4 l-5 4 l5 4" : "M130 " + ay + " l16 0 m-5 -4 l5 4 l-5 4"} fill="none" stroke={sealed ? "#72D293" : "#6E7C70"} strokeWidth="1.8"/>)}
         <text x="176" y="240" fill="#CED5CA" fontSize="11" fontWeight="800">{sealed ? "SEALED" : "OPEN CYCLE"}</text>
-        <text x="176" y="257" fill="#7E8A7F" fontSize="10">{integer(pressure)} Pa {sealed ? "positive" : "ambient"}</text>
+        {/* "positive" is only said when the reading supports it. Deriving that word from
+            the seal flag alone printed "8 Pa positive" for the moment between the
+            controller accepting a seal and its next pressure publish. */}
+        <text x="176" y="257" fill="#7E8A7F" fontSize="10">{integer(pressure)} Pa {sealed ? (pressureBacksSeal ? "positive" : "· equalising") : "ambient"}</text>
         <text x="176" y="273" fill="#7E8A7F" fontSize="10">{sealed ? "both doors interlocked" : "outer door on the latch"}</text>
       </Area>
       <Area x={297} y={198} w={166} h={84} title="HABITAT">

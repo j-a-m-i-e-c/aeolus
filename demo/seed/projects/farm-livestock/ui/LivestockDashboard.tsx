@@ -64,6 +64,13 @@ export default function LivestockDashboard({ model, actions }: {
         seed: i * 0.73,
     })), []);
     const alert = strays > 0;
+    // How many strays the diagram can actually place. The collars publish the count and
+    // the positions together, so these agree in normal operation; they can only diverge
+    // on state written by an older revision. The diagram is sized from this and the
+    // status line reports the gap, rather than the pane quietly drawing a smaller mob and
+    // no strays while the header insisted two were out.
+    const drawnStrays = Math.min(strayPositions.length, strays > 0 ? strays : strayPositions.length);
+    const unplacedStrays = Math.max(0, strays - drawnStrays);
     const activeA = paddock === "A";
     const dogs = (model.dogs as DogReading[] | undefined) || [];
     const dogsWorking = Boolean(model.dogsWorking);
@@ -74,6 +81,7 @@ export default function LivestockDashboard({ model, actions }: {
         ? "RECALL IN PROGRESS"
         : alert
             ? strays + " OUTSIDE" + (breachSector ? " · " + breachSector.toUpperCase() + " BOUNDARY" : "")
+                + (unplacedStrays > 0 ? " · " + unplacedStrays + " WITHOUT A POSITION" : "")
             : "HERD CONTAINED";
     // Recall is an observed-tier command, so the wait is the interesting part:
     // the control stays pending until collar telemetry confirms containment.
@@ -81,7 +89,10 @@ export default function LivestockDashboard({ model, actions }: {
     function Cow(props: {
         x: number;
         y: number;
+        /** Reported by the collars as not yet back with the herd. */
         stray?: boolean;
+        /** Reported by the collars as beyond the fence line. Only meaningful for a stray. */
+        outside?: boolean;
         faded?: boolean;
         seed: number;
     }) {
@@ -89,7 +100,10 @@ export default function LivestockDashboard({ model, actions }: {
         const sway = Math.cos(phase * .037 + props.seed) * 3.5;
         const color = props.stray ? "#FF786A" : props.faded ? "#7C7459" : "#D6C08B";
         return <g transform={"translate(" + (props.x + sway) + " " + (props.y + bob) + ")"} opacity={props.faded ? .42 : 1}>
-      {props.stray && <circle r="10" fill="none" stroke="#FF6A5E" strokeOpacity={.25 + (Math.sin(phase * .15 + props.seed) + 1) * .22}/>}
+      {/* The ring is the boundary alarm, so it tracks `outside` rather than strayhood: an
+          animal the dogs have pushed back through the fence is still a stray, but it is no
+          longer out. */}
+      {props.outside && <circle r="10" fill="none" stroke="#FF6A5E" strokeOpacity={.25 + (Math.sin(phase * .15 + props.seed) + 1) * .22}/>}
       <ellipse rx="6.5" ry="3.7" fill={color}/>
       <circle cx="5.5" cy="-1" r="2.5" fill={color}/>
       <line x1="-3" y1="3" x2="-4" y2="7" stroke={color} strokeWidth="1.3"/>
@@ -122,18 +136,29 @@ export default function LivestockDashboard({ model, actions }: {
           <text x="250" y="25" fill={!activeA ? "#82E8A0" : "#587262"} fontSize="10" letterSpacing="1.2">PADDOCK B</text>
           <path d="M229 25 L233 210" stroke="#2D4936" strokeWidth="2" strokeDasharray="3 5"/>
 
-          {/* The mob still inside the boundary, laid out on the paddock the collars
-              report. The strays are drawn separately below, from their own positions. */}
-          {cattle.slice(0, Math.max(0, cattle.length - strays)).map((cow, i) => (
+          {/* The mob with the herd, laid out on the paddock the collars report.
+              
+              Sized by how many strays are actually drawn, not by the reported count. It
+              used to subtract `strays`, so a count arriving without positions — stale
+              state on an upgraded install — drew a short mob and no strays at all while
+              the header still said two were out. The two numbers now cannot disagree
+              about how many animals are on the diagram, and the status line below says
+              so when the collars report a stray it has no position for. */}
+          {cattle.slice(0, Math.max(0, cattle.length - drawnStrays)).map((cow, i) => (
             <Cow key={"herd-" + i} x={activeA ? 58 + cow.col * 25 : 270 + cow.col * 24} y={62 + cow.row * 29} seed={cow.seed}/>
           ))}
 
           {/* Each stray where its collar says it is. The pane no longer decides where a
               stray has got to; it projects the reported position exactly as it does for
-              Scout and Moss. */}
+              Scout and Moss.
+              
+              Every animal in this list is an uncontained stray, which is what earns the
+              marking. `outside` is the narrower, geometric claim — beyond the fence line —
+              and it is what the alarm ring means, so the ring drops as the dogs push them
+              back through the boundary rather than staying on to the paddock centre. */}
           {strayPositions.map((stray, i) => {
             const at = collarPosition(stray);
-            return <Cow key={stray.id} x={at.x} y={at.y} stray={stray.outside} seed={i * 0.61}/>;
+            return <Cow key={stray.id} x={at.x} y={at.y} stray outside={stray.outside} seed={i * 0.61}/>;
         })}
 
           {/* Kennel, and the dogs wherever their GPS collars currently place them. */}

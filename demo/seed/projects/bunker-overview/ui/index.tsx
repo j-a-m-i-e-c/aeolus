@@ -17,6 +17,7 @@ export default function BunkerOverview(aeolus: CustomComponentProps) {
     lightsOn: aeolus.read("lightsOn"),
     sealed: aeolus.read("sealed"),
     overpressure: aeolus.read("overpressure"),
+    pressureBacksSeal: aeolus.read("pressureBacksSeal"),
     tempC: aeolus.read("tempC"),
     battery: aeolus.read("battery"),
     solar: aeolus.read("solar"),

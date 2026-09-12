@@ -12,7 +12,7 @@ export function projectPerimeterSummary(source: Record<string, unknown>) {
         .forEach((key) => copyDefined(source, key));
 }
 export function projectAirSummary(source: Record<string, unknown>) {
-    ["sealed", "overpressure", "filterLife", "tempC"].forEach((key) => copyDefined(source, key));
+    ["sealed", "overpressure", "pressureBacksSeal", "filterLife", "tempC"].forEach((key) => copyDefined(source, key));
 }
 export function projectPowerSummary(source: Record<string, unknown>) {
     // `generatorOutputW` and `charging` come across so the overview can say whether the

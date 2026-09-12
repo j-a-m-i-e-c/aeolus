@@ -133,8 +133,56 @@ describe("bunker air propagation", () => {
     publishAirSummary();
 
     const summary = airSummaries().at(-1)!;
-    for (const key of ["sealed", "overpressure", "filterLife", "tempC"]) {
+    for (const key of ["sealed", "overpressure", "pressureBacksSeal", "filterLife", "tempC"]) {
       expect(summary[key], `air summary is missing ${key}`).not.toBeUndefined();
     }
+  });
+
+  it("does not let the overview call an ambient reading positive pressure", async () => {
+    // The residual of the same defect, one field further out. Fixing `sealed` left
+    // `overpressure` holding the pre-command reading, and the overview derived the word
+    // "positive" from the seal flag alone — so a freshly sealed bunker read "8 Pa
+    // positive", which is ambient pressure described as positive pressure.
+    //
+    // The seal is real; the pressure simply has not been re-read. Air & Filtration owns
+    // both numbers, so it says whether they agree rather than leaving the overview to
+    // compare against a baseline it would have to hard-code.
+    installSandbox({ on: true, sealed: false, overpressure: 8, filterLife: 78, tempC: 19.4 });
+
+    await setBunkerSeal(true);
+
+    const summary = airSummaries().at(-1)!;
+    expect(summary).toMatchObject({ sealed: true, overpressure: 8 });
+    expect(summary.pressureBacksSeal, "ambient pressure must not corroborate a seal").toBe(false);
+  });
+
+  it("corroborates the seal once the controller has published the risen pressure", async () => {
+    // And the other half: when the reading has caught up, the overview is free to say
+    // positive, because now something backs it.
+    installSandbox({ on: true, sealed: true, overpressure: 15, filterLife: 78, tempC: 21.8 });
+
+    projectAirState();
+
+    expect(airSummaries().at(-1)).toMatchObject({
+      sealed: true,
+      overpressure: 15,
+      pressureBacksSeal: true,
+    });
+  });
+
+  it("does not claim an unsealed bunker is still holding pressure", async () => {
+    installSandbox({ on: true, sealed: true, overpressure: 15, filterLife: 78, tempC: 21.8 });
+    // The state a sealed bunker leaves behind, including the raised pressure the
+    // controller last published.
+    projectAirState();
+    emitted.length = 0;
+
+    await setBunkerSeal(false);
+
+    // Unsealed with the pressure not yet fallen: the seal is off, so a reading still
+    // above ambient does not corroborate the state being reported either.
+    const summary = airSummaries().at(-1)!;
+    expect(summary).toMatchObject({ sealed: false, overpressure: 15 });
+    expect(summary.pressureBacksSeal).toBe(false);
   });
 });

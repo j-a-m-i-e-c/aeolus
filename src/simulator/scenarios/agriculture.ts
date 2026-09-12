@@ -837,7 +837,17 @@ class AgricultureEnvironment {
           }
           // The animals are where the dogs have pushed them to — the same interpolation
           // that places the dogs, so the two cannot disagree about how far they have got.
-          collars.update({ strayPositions: strayPositionsAt(breach, home, driven, strayCount, true) });
+          //
+          // `outside` is geometric, not a synonym for "still a stray". The breach point
+          // sits on the fence line and `home` is the paddock centre, so the first driven
+          // step already has the animals back inside. This used to pass `true` for the
+          // whole drive, which meant the last frame reported an animal standing in the
+          // middle of the paddock as outside the boundary. They remain strays — the
+          // collars still count them and still report their positions — until the
+          // containment publish below.
+          collars.update({
+            strayPositions: strayPositionsAt(breach, home, driven, strayCount, driven <= 0),
+          });
         } else if (progress < 1) {
           activity = "returning";
           point = between(home, DOG_KENNEL, (progress - RECALL_DRIVE_END) / (1 - RECALL_DRIVE_END));

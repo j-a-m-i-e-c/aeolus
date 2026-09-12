@@ -1,4 +1,11 @@
 // Bunker air-system implementation. logic/index.ts owns the event flow.
+/**
+ * Pressure inside the shelter when it is not sealed, in Pa.
+ *
+ * Named because it is what makes "positive pressure" a claim that can be checked rather
+ * than a word attached to whatever number happens to be on hand.
+ */
+const AMBIENT_PA = 8;
 function filterController() {
     return devices.list().find((device) => device.topic === "switch/bunker/filter/state");
 }
@@ -12,9 +19,26 @@ function setAction(label: string) {
  * caller reports the same thing and no caller has to be careful about when it runs.
  */
 export function publishAirSummary() {
+    const sealed = Boolean(state.get("sealed"));
+    const overpressure = Number(state.get("overpressure") ?? AMBIENT_PA);
     events.emit("bunker/summary/air", {
-        sealed: Boolean(state.get("sealed")),
-        overpressure: Number(state.get("overpressure") ?? 8),
+        sealed,
+        overpressure,
+        // Whether the pressure this automation is holding actually backs up the seal it is
+        // reporting, so the overview does not have to guess.
+        //
+        // The seal flag and the pressure do not always move together. `sealed` is written
+        // the moment the controller accepts the command; `overpressure` is whatever the
+        // controller last published, which straight after a command is still the ambient
+        // reading. The overview used to derive the word "positive" from `sealed` alone and
+        // print it beside that number, so a freshly sealed bunker read "8 Pa positive" —
+        // ambient pressure described as positive pressure.
+        //
+        // Sent as a derived fact rather than leaving the overview to compare against a
+        // baseline it would have to hard-code. Note this is corroboration, not proof: the
+        // controller publishes `sealed` and `overpressure` in the same update, which is
+        // exactly why the seal command is acknowledged rather than observed.
+        pressureBacksSeal: sealed ? overpressure > AMBIENT_PA : overpressure <= AMBIENT_PA,
         filterLife: Number(state.get("filterLife") ?? 78),
         tempC: Number(state.get("tempC") ?? 19.4),
     });
@@ -30,7 +54,7 @@ export function projectAirState() {
     const controller = filterController();
     const observed = controller && controller.state ? controller.state : {};
     const sealed = Boolean(observed.sealed);
-    const overpressure = Number(observed.overpressure ?? 8);
+    const overpressure = Number(observed.overpressure ?? AMBIENT_PA);
     const filterLife = Number(observed.filterLife ?? 78);
     // The air system is the thing that knows how warm it is inside, because it is
     // the thing moving the air.
