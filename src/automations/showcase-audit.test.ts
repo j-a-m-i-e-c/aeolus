@@ -1,0 +1,179 @@
+// showcase-cleanup §8 — the audit, applied to every seeded tab rather than the ones the
+// spec happened to name.
+//
+// Phases 3 to 6 fixed the same handful of defects over and over, one domain at a time:
+// a command that left no receipt, a number with no source, a glyph nobody could decode,
+// a pane inventing a position. Each fix landed with a test scoped to its own domain,
+// which meant the next domain was free to have the same defect.
+//
+// So the invariants are hoisted here and applied to all of them. Where a project has a
+// legitimate exception it is named with a reason, because "this one is different" is
+// sometimes true and should be written down rather than discovered later.
+//
+// Proof TIERS are not audited here — src/automations/showcase-proof-tier.test.ts already
+// holds every command to a defended tier and bans command-echo conditions.
+
+import { describe, expect, it } from "vitest";
+import { readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
+import { readSeedProjectSource } from "../__test-helpers__/seed-project-source.js";
+import { tabModules } from "../../demo/seed/tabs/index.mjs";
+
+const PROJECTS_DIR = join(process.cwd(), "demo", "seed", "projects");
+
+interface Project {
+  name: string;
+  logic: string;
+  ui: string;
+  /** Whether the project has a demo-only stimulus module, by project convention. */
+  hasDemoActions: boolean;
+}
+
+function readProjects(): Project[] {
+  return readdirSync(PROJECTS_DIR)
+    .filter((entry) => {
+      try {
+        return statSync(join(PROJECTS_DIR, entry)).isDirectory();
+      } catch {
+        return false;
+      }
+    })
+    .map((name) => {
+      const { scriptSource, uiSource } = readSeedProjectSource(name);
+      let hasDemoActions = false;
+      try {
+        hasDemoActions = statSync(join(PROJECTS_DIR, name, "ui", "demo-actions.ts")).isFile();
+      } catch {
+        hasDemoActions = false;
+      }
+      return { name, logic: scriptSource, ui: uiSource, hasDemoActions };
+    });
+}
+
+const PROJECTS = readProjects();
+const COMMANDING = PROJECTS.filter((p) => p.logic.includes("devices.action("));
+const WITH_UI = PROJECTS.filter((p) => p.ui.trim().length > 0);
+
+const count = (source: string, pattern: RegExp): number => [...source.matchAll(pattern)].length;
+
+describe("showcase audit — every seeded tab", () => {
+  it("has projects to audit, and every one is reachable from a tab", () => {
+    // A project nobody seeds is a project nobody maintains.
+    expect(PROJECTS.length).toBeGreaterThan(0);
+    const referenced = new Set(
+      (tabModules as Array<{ automations?: Array<{ projectDir?: string }> }>)
+        .flatMap((mod) => mod.automations ?? [])
+        .map((automation) => automation.projectDir)
+        .filter((dir): dir is string => Boolean(dir)),
+    );
+    for (const project of PROJECTS) {
+      expect(referenced, `${project.name} is not seeded by any tab`).toContain(project.name);
+    }
+  });
+
+  // §2.5, §4.4 — a command with no receipt is a physical action the operator cannot
+  // inspect. Every project that issues commands must project evidence for all of them.
+  it.each(COMMANDING.map((p) => [p.name, p] as const))(
+    "%s leaves a receipt for every command it issues",
+    (_name, project) => {
+      const commands = count(project.logic, /devices\.action\(/g);
+      // A project whose trigger issues several commands at once groups them under the
+      // execution instead, which is one receipt covering all of them by design (§2.7).
+      // Requiring per-command receipts there would push it back to reporting whichever
+      // command happened to settle last.
+      if (project.logic.includes("devices.executionEvidence(")) {
+        expect(project.logic).toContain('state.set("lastExecution"');
+        return;
+      }
+      const receipts = count(project.logic, /devices\.commandEvidence\(/g);
+      expect(receipts, `${commands} commands but ${receipts} receipts`).toBe(commands);
+    },
+  );
+
+  // §2.4 — "device_action" tells an operator nothing. Every command names the operation
+  // it is, so a receipt is legible beside the control that caused it.
+  //
+  // At least one intent per command rather than exactly one: a command whose intent is
+  // chosen by a ternary declares two strings for one call site, which is fine.
+  it.each(COMMANDING.map((p) => [p.name, p] as const))(
+    "%s names the intent of every command",
+    (_name, project) => {
+      const commands = count(project.logic, /devices\.action\(/g);
+      const intents = count(project.logic, /intent:/g);
+      expect(intents, `${commands} commands but ${intents} intents`).toBeGreaterThanOrEqual(commands);
+    },
+  );
+
+  // §13.4 — for every number shown, something must be able to answer "what produced
+  // this?". A UI reading devices directly cannot, because a public-demo visitor is not
+  // granted device visibility and the pane would render static defaults.
+  it.each(WITH_UI.map((p) => [p.name, p] as const))(
+    "%s renders only its own projection, never devices directly",
+    (_name, project) => {
+      expect(project.ui).not.toContain("aeolus.devices");
+    },
+  );
+
+  // The same rule from the other side: a key the pane reads but the logic never writes
+  // renders a default and looks alive while being dead.
+  it.each(WITH_UI.map((p) => [p.name, p] as const))(
+    "%s writes every projection key its UI reads",
+    (_name, project) => {
+      const written = new Set(
+        [...project.logic.matchAll(/state\.set\(\s*["']([^"']+)["']/g)].map((m) => m[1]),
+      );
+      // The aggregating panes set their keys through a whitelist copier — `state.set(key,
+      // ...)` over an array of names — so a literal-key scan cannot see them. Where the
+      // logic writes state under a computed key, fall back to requiring the name to
+      // appear as a literal somewhere in it. That still catches a key the logic has never
+      // heard of, which is the failure worth catching.
+      const dynamic = /state\.set\(\s*[A-Za-z_$]/.test(project.logic);
+      const read = [...project.ui.matchAll(/aeolus\.read\(\s*["']([^"']+)["']/g)].map((m) => m[1]);
+      for (const key of read) {
+        const known = written.has(key)
+          || (dynamic && new RegExp(`["']${key}["']`).test(project.logic));
+        expect(known, `UI reads "${key}" but the Logic never writes it`).toBe(true);
+      }
+    },
+  );
+
+  // §13.3 — if a visitor cannot explain a symbol from context, label it. The water
+  // schematic's "V" for valve was the case that prompted this; a bare one-character
+  // SVG text node is the shape of that mistake.
+  it.each(WITH_UI.map((p) => [p.name, p] as const))(
+    "%s draws no unexplained single-letter glyph",
+    (_name, project) => {
+      const glyphs = [...project.ui.matchAll(/>\s*([A-Za-z])\s*<\/text>/g)].map((m) => m[1]);
+      expect(glyphs, `unexplained glyph(s): ${glyphs.join(", ")}`).toEqual([]);
+    },
+  );
+
+  // §13.2 — a control that injects a condition into simulated hardware is not an
+  // operator control and must not be presented as one.
+  //
+  // Keyed on the presence of ui/demo-actions.ts, which by the project convention exists
+  // exactly when a pane has demo-only controls. Keying it on the logic emitting a `/sim/`
+  // topic would be wrong: Game Master resets the room through the room's own reset path
+  // as part of starting a game, which is a real operator action, not a demo control.
+  it.each(WITH_UI.map((p) => [p.name, p] as const))(
+    "%s separates demo-world injection from real operator controls",
+    (_name, project) => {
+      // Only that demo controls are labelled as such. Requiring an OPERATOR section
+      // alongside would be wrong: Puzzle Progress and Wildlife Detection are observation
+      // panes whose physical work is done by participants or by another automation, so
+      // having nothing for an operator to press is the correct answer for them.
+      if (!project.hasDemoActions) return;
+      expect(project.ui, "has demo-only controls but no DEMO SCENARIO block").toContain("DEMO SCENARIO");
+    },
+  );
+
+  // §2.9 — DISPATCHED means Aeolus handed the command to the transport. It does not mean
+  // the device received it, and no showcase pane may say otherwise.
+  it.each(WITH_UI.map((p) => [p.name, p] as const))(
+    "%s never claims a dispatch proved the device received it",
+    (_name, project) => {
+      expect(project.ui).not.toMatch(/[Ss]ent to the device/);
+      expect(project.logic).not.toMatch(/[Ss]ent to the device/);
+    },
+  );
+});
