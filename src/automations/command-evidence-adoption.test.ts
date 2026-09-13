@@ -128,6 +128,30 @@ describe("command evidence adoption across the showcase", () => {
     expect(ui).toContain("lastCommand");
   });
 
+  it("opens the reference pane's proof rather than hiding it behind a toggle (§16)", () => {
+    // §16 asks that an unsupported stage read as unsupported rather than being hidden.
+    // A collapsed card hides precisely that: the four canonical stage names and the
+    // reason each unreached one was not reached live behind the toggle, so the teaching
+    // surface §2.2 was built for was one interaction away on every pane including this
+    // one.
+    //
+    // Only the reference pane. `defaultExpanded` everywhere would bury the telemetry the
+    // proof is about, which is why this asserts the asymmetry rather than the flag.
+    expect(String(waterAutomation.uiSource)).toContain("defaultExpanded");
+
+    // Compared by automation rather than by tab name: the reference pane is Water
+    // Management, whose tab is "Agriculture", and matching on the tab label would have
+    // silently excluded nothing.
+    const others = eachAdopter.filter(([, automation]) => automation !== waterAutomation);
+    expect(others.length).toBe(eachAdopter.length - 1);
+    for (const [tab, automation] of others) {
+      expect(
+        String(automation.uiSource),
+        `${tab} should leave the proof collapsed; only the reference pane opens it`,
+      ).not.toContain("defaultExpanded");
+    }
+  });
+
   it.each(eachAdopter)(
     "%s names the operation its command performed",
     (_tab, automation) => {

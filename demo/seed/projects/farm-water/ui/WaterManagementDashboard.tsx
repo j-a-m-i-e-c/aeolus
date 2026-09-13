@@ -93,9 +93,19 @@ export default function WaterManagementDashboard({ model, actions }: {
             receipt takes over, because that one carries the capability snapshot and can
             explain any stage the command did not reach. One card either way — the live
             feed and the receipt are the same shape. */}
+        {/* Open by default, only here. §4.4 makes this the reference Command Proof
+            example and §16 asks that an unsupported stage be visible as unsupported
+            rather than hidden — and a collapsed card hides exactly that: the four
+            canonical stage names and the reason each unreached one was not reached sit
+            behind the toggle. Water is the pane to spend that vertical space on, because
+            all three of its commands are observed against an independent instrument, so
+            the expanded ladder is showing real measurements rather than explaining
+            absences. Every other pane stays collapsed; a tab that opened four of these
+            at once would bury the telemetry the proof is about. */}
         <CommandProofCard
           evidence={model.liveCommand ?? model.lastCommand}
           label={model.liveCommand ? "Command in flight" : "Last command"}
+          defaultExpanded
         />
       </div>
 
