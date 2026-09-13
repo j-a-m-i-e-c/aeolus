@@ -85,10 +85,36 @@ export function createApi(baseUrl) {
       const setup = await request("POST", "/api/auth/setup", { username, password }, { authenticated: false, retries: 2 });
       if (!setup?.accessToken) throw new Error("Initial admin setup returned no access token");
       token = setup.accessToken;
-      console.log(`  ✓ Created initial admin account and logged in as ${username}`);
+      console.log(`  ✓ Created the initial admin account, named "${username}", and logged in`);
       return;
     }
-    const data = await request("POST", "/api/auth/login", { username, password }, { authenticated: false, retries: 2 });
+
+    let data;
+    try {
+      data = await request("POST", "/api/auth/login", { username, password }, { authenticated: false, retries: 2 });
+    } catch (err) {
+      // The make targets default USER to "admin", which is only right for an install
+      // this seeder set up itself — the branch above creates an account with that
+      // literal name. `setupAdmin` stores whatever username the first-run Setup page
+      // was given, so anyone who created their admin in the browser has a different
+      // one and lands here. A bare "→ 401" points at the password and never at the
+      // username, which is the likelier cause of the two.
+      if (err instanceof Error && / → 401\b/.test(err.message)) {
+        throw new Error(
+          `Could not log in as "${username}". Either the password is wrong, or that `
+          + `account does not exist.\n\n`
+          + `  There is no guarantee your admin is called "admin". The first-run Setup `
+          + `page stores\n  whatever username you typed, and the make targets only `
+          + `default to "admin" because that\n  is the name they use when they create `
+          + `the account themselves.\n\n`
+          + `  Pass yours on the command line (it must be inline — an exported USER is `
+          + `ignored):\n`
+          + `      make <target> PASS=<password> USER=<your-username>`,
+        );
+      }
+      throw err;
+    }
+
     if (!data?.accessToken) throw new Error(`Login for "${username}" returned no access token`);
     token = data.accessToken;
     console.log(`  ✓ Logged in as ${username}`);
