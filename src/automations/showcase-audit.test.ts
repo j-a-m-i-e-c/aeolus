@@ -56,6 +56,52 @@ const WITH_UI = PROJECTS.filter((p) => p.ui.trim().length > 0);
 
 const count = (source: string, pattern: RegExp): number => [...source.matchAll(pattern)].length;
 
+/**
+ * Source with comments removed.
+ *
+ * Several checks below match on identifiers and string literals, and these files carry
+ * long explanatory comments that name the very things being searched for — including the
+ * traps the comments exist to warn about. Matching prose instead of code is how a check
+ * passes while the property it guards is violated.
+ */
+const stripComments = (source: string): string =>
+  source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+
+/**
+ * Every top-level function in a project's logic, by name.
+ *
+ * Both declarations and arrow assignments, and including `export default async function
+ * run` — the entry point, which is where several of these invariants have to start.
+ */
+function indexFunctions(code: string): Map<string, string> {
+  const bodies = new Map<string, string>();
+  const declaration =
+    /(?:export\s+(?:default\s+)?)?(?:async\s+)?function\s+([A-Za-z0-9_$]+)\s*\([\s\S]*?\n\}/g;
+  for (const m of code.matchAll(declaration)) bodies.set(m[1], m[0]);
+  const arrow =
+    /(?:const|let)\s+([A-Za-z0-9_$]+)\s*=\s*(?:async\s*)?\([^)]*\)\s*(?::[^=]*)?=>\s*\{[\s\S]*?\n\}/g;
+  for (const m of code.matchAll(arrow)) bodies.set(m[1], m[0]);
+  return bodies;
+}
+
+/** Function names whose bodies reach `marker`, directly or through any helper they call. */
+function reaching(bodies: Map<string, string>, marker: string): Set<string> {
+  const found = new Set(
+    [...bodies].filter(([, body]) => body.includes(marker)).map(([name]) => name),
+  );
+  for (let changed = true; changed; ) {
+    changed = false;
+    for (const [name, body] of bodies) {
+      if (found.has(name)) continue;
+      if ([...found].some((f) => new RegExp(`\\b${f}\\s*\\(`).test(body))) {
+        found.add(name);
+        changed = true;
+      }
+    }
+  }
+  return found;
+}
+
 describe("showcase audit — every seeded tab", () => {
   it("has projects to audit, and every one is reachable from a tab", () => {
     // A project nobody seeds is a project nobody maintains.
@@ -76,16 +122,54 @@ describe("showcase audit — every seeded tab", () => {
   it.each(COMMANDING.map((p) => [p.name, p] as const))(
     "%s leaves a receipt for every command it issues",
     (_name, project) => {
-      const commands = count(project.logic, /devices\.action\(/g);
+      const code = stripComments(project.logic);
+      const commands = count(code, /devices\.action\(/g);
+
       // A project whose trigger issues several commands at once groups them under the
       // execution instead, which is one receipt covering all of them by design (§2.7).
       // Requiring per-command receipts there would push it back to reporting whichever
       // command happened to settle last.
-      if (project.logic.includes("devices.executionEvidence(")) {
-        expect(project.logic).toContain('state.set("lastExecution"');
+      //
+      // The exemption used to be unconditional: containing the words
+      // `devices.executionEvidence(` anywhere, plus one `lastExecution` write, bought a
+      // total skip of the receipt count. A project could then command from several entry
+      // points, group one of them, and leave the rest with no receipt at all.
+      //
+      // So the grouping is checked instead of taken on trust. Every entry point that can
+      // reach a command must also reach the execution receipt, which is the property that
+      // makes grouping equivalent to per-command receipts rather than weaker than them.
+      if (code.includes("devices.executionEvidence(")) {
+        expect(code, "groups by execution but never records one").toMatch(
+          /state\.set\(\s*["']lastExecution["']/,
+        );
+        // Half-grouping is the thing to catch: a project doing both records a per-command
+        // receipt that the pane's execution card cannot show.
+        expect(
+          code.includes("devices.commandEvidence("),
+          "records both an execution receipt and per-command receipts, so one of them is unrendered",
+        ).toBe(false);
+
+        const bodies = indexFunctions(code);
+        const commanders = reaching(bodies, "devices.action(");
+        const publishers = reaching(bodies, 'state.set("lastExecution"');
+        const entry = bodies.get("run");
+        expect(entry, "no entry point found to check the grouping against").toBeDefined();
+
+        const unreceipted = [...commanders].filter((name) => {
+          // Only what the entry point actually dispatches to. The internal helpers a
+          // grouped project builds its cue out of are reached through those, and holding
+          // each of them to publishing separately would defeat the grouping.
+          if (!new RegExp(`\\b${name}\\s*\\(`).test(entry!)) return false;
+          return !publishers.has(name);
+        });
+        expect(
+          unreceipted,
+          "reachable from the entry point, issues commands, and records no execution receipt",
+        ).toEqual([]);
         return;
       }
-      const receipts = count(project.logic, /devices\.commandEvidence\(/g);
+
+      const receipts = count(code, /devices\.commandEvidence\(/g);
       expect(receipts, `${commands} commands but ${receipts} receipts`).toBe(commands);
     },
   );
@@ -138,23 +222,80 @@ describe("showcase audit — every seeded tab", () => {
 
   // The same rule from the other side: a key the pane reads but the logic never writes
   // renders a default and looks alive while being dead.
+  //
+  // The keys are RESOLVED rather than approximated. This used to fall back, for any
+  // project that wrote state under a computed key, to "the name appears as a string
+  // literal somewhere in the logic" — and it searched the raw source, comments included.
+  // Eight of the projects tripped that fallback, among them farm-water and Game Master,
+  // so on the panes that matter most a key mentioned only in a comment satisfied the
+  // check. Every way these projects compute a key is finite and mechanical, so each is
+  // resolved instead.
   it.each(WITH_UI.map((p) => [p.name, p] as const))(
     "%s writes every projection key its UI reads",
     (_name, project) => {
+      const code = stripComments(project.logic);
       const written = new Set(
-        [...project.logic.matchAll(/state\.set\(\s*["']([^"']+)["']/g)].map((m) => m[1]),
+        [...code.matchAll(/state\.set\(\s*["']([^"']+)["']/g)].map((m) => m[1]),
       );
-      // The aggregating panes set their keys through a whitelist copier — `state.set(key,
-      // ...)` over an array of names — so a literal-key scan cannot see them. Where the
-      // logic writes state under a computed key, fall back to requiring the name to
-      // appear as a literal somewhere in it. That still catches a key the logic has never
-      // heard of, which is the failure worth catching.
-      const dynamic = /state\.set\(\s*[A-Za-z_$]/.test(project.logic);
+
+      // 1. Whitelist copiers: an array of names walked with .forEach, either inline or
+      //    through a const. Only arrays actually used that way count, so an unrelated
+      //    array of strings — the lighting scene names, the hint text — cannot quietly
+      //    widen what this accepts.
+      const arrayOfStrings = /\[\s*((?:["'][^"']+["']\s*,?\s*)+)\]/g;
+      const literalsIn = (body: string): string[] =>
+        [...body.matchAll(/["']([^"']+)["']/g)].map((m) => m[1]);
+      for (const match of code.matchAll(arrayOfStrings)) {
+        const after = code.slice(match.index! + match[0].length);
+        const inlineForEach = /^\s*(?:\r?\n\s*)?\.forEach\(/.test(after);
+        const binding = code
+          .slice(Math.max(0, match.index! - 120), match.index!)
+          .match(/(?:const|let)\s+([A-Za-z0-9_$]+)\s*=\s*$/);
+        const boundForEach = binding
+          ? new RegExp(`\\b${binding[1]}\\.forEach\\(`).test(code)
+          : false;
+        if (inlineForEach || boundForEach) {
+          for (const key of literalsIn(match[1])) written.add(key);
+        }
+      }
+
+      // 2. Helpers that write whatever key they are handed — `init(key, value)`,
+      //    `copy(source, key)`. The parameter that reaches state.set decides which
+      //    argument position to read, so a helper taking the key second is handled
+      //    without assuming an order.
+      for (const helper of code.matchAll(
+        /function\s+([A-Za-z0-9_$]+)\s*\(([^)]*)\)\s*\{([\s\S]*?)\n\}/g,
+      )) {
+        const [, name, rawParams, body] = helper;
+        const params = rawParams.split(",").map((p) => p.trim().split(/[:=\s]/)[0]).filter(Boolean);
+        const setParam = body.match(/state\.set\(\s*([A-Za-z0-9_$]+)\s*,/)?.[1];
+        if (!setParam) continue;
+        const index = params.indexOf(setParam);
+        if (index < 0) continue;
+        for (const call of code.matchAll(new RegExp(`\\b${name}\\(([^)]*)\\)`, "g"))) {
+          const arg = call[1].split(",")[index]?.trim();
+          const literal = arg?.match(/^["']([^"']+)["']$/);
+          if (literal) written.add(literal[1]);
+        }
+      }
+
+      // 3. A key chosen by a ternary and then written — farm-water picks between the two
+      //    zone flags that way.
+      for (const pick of code.matchAll(
+        /(?:const|let)\s+([A-Za-z0-9_$]+)\s*=\s*[^;\n]*\?\s*["']([^"']+)["']\s*:\s*["']([^"']+)["']/g,
+      )) {
+        if (new RegExp(`state\\.set\\(\\s*${pick[1]}\\s*,`).test(code)) {
+          written.add(pick[2]);
+          written.add(pick[3]);
+        }
+      }
+
       const read = [...project.ui.matchAll(/aeolus\.read\(\s*["']([^"']+)["']/g)].map((m) => m[1]);
       for (const key of read) {
-        const known = written.has(key)
-          || (dynamic && new RegExp(`["']${key}["']`).test(project.logic));
-        expect(known, `UI reads "${key}" but the Logic never writes it`).toBe(true);
+        expect(
+          written.has(key),
+          `UI reads "${key}" but the Logic never writes it`,
+        ).toBe(true);
       }
     },
   );
@@ -252,10 +393,27 @@ describe("showcase audit — every seeded tab", () => {
   // §13.3 — if a visitor cannot explain a symbol from context, label it. The water
   // schematic's "V" for valve was the case that prompted this; a bare one-character
   // SVG text node is the shape of that mistake.
+  //
+  // Broadened in syntax but deliberately NOT in length. The same lone letter written as a
+  // JSX expression or inside a `tspan` is the same defect and used to slip past, so those
+  // are matched now. Multi-letter abbreviations are a different question and are left
+  // alone on purpose: TX, RX, SST, CHL, DMX, VHF, HEPA, CTD and ROV are what the
+  // instruments are actually called, they sit under captioned headings, and banning them
+  // would replace a real rule with noise. The rule is "a symbol a visitor cannot decode",
+  // not "a short string".
   it.each(WITH_UI.map((p) => [p.name, p] as const))(
     "%s draws no unexplained single-letter glyph",
     (_name, project) => {
-      const glyphs = [...project.ui.matchAll(/>\s*([A-Za-z])\s*<\/text>/g)].map((m) => m[1]);
+      const glyphs: string[] = [];
+      for (const node of project.ui.matchAll(
+        /<(text|tspan)\b[^>]*>([\s\S]*?)<\/\1>/g,
+      )) {
+        const content = node[2].trim();
+        // A bare letter, or one wrapped in a JSX expression container.
+        const bare = /^[A-Za-z]$/.test(content);
+        const wrapped = /^\{\s*["']([A-Za-z])["']\s*\}$/.test(content);
+        if (bare || wrapped) glyphs.push(content);
+      }
       expect(glyphs, `unexplained glyph(s): ${glyphs.join(", ")}`).toEqual([]);
     },
   );
@@ -292,41 +450,13 @@ describe("showcase audit — every seeded tab", () => {
     (_name, project) => {
       // Comments mention these functions when explaining the trap, so the check runs on
       // code with the comments stripped.
-      const code = project.logic
-        .replace(/\/\*[\s\S]*?\*\//g, "")
-        .replace(/\/\/[^\n]*/g, "");
+      const code = stripComments(project.logic);
 
-      // Every top-level function in the project, by name. Arrow-assigned helpers and the
-      // `export default async function run` entry point are both included: the entry
-      // point is exactly where a caller-side re-read hides, so missing it would leave the
-      // most likely instance of this bug invisible.
-      const bodies = new Map<string, string>();
-      const declaration =
-        /(?:export\s+(?:default\s+)?)?(?:async\s+)?function\s+([A-Za-z0-9_$]+)\s*\([\s\S]*?\n\}/g;
-      for (const m of code.matchAll(declaration)) bodies.set(m[1], m[0]);
-      const arrow =
-        /(?:const|let)\s+([A-Za-z0-9_$]+)\s*=\s*(?:async\s*)?\([^)]*\)\s*(?::[^=]*)?=>\s*\{[\s\S]*?\n\}/g;
-      for (const m of code.matchAll(arrow)) bodies.set(m[1], m[0]);
-
-      /** Names whose bodies reach `marker`, directly or through any helper they call. */
-      const reaching = (marker: string): Set<string> => {
-        const found = new Set(
-          [...bodies].filter(([, body]) => body.includes(marker)).map(([name]) => name),
-        );
-        for (let changed = true; changed; ) {
-          changed = false;
-          for (const [name, body] of bodies) {
-            if (found.has(name)) continue;
-            if ([...found].some((f) => new RegExp(`\\b${f}\\s*\\(`).test(body))) {
-              found.add(name);
-              changed = true;
-            }
-          }
-        }
-        return found;
-      };
-      const readers = reaching("devices.list(");
-      const commanders = reaching("devices.action(");
+      // The entry point is included in the index, because it is exactly where a
+      // caller-side re-read hides.
+      const bodies = indexFunctions(code);
+      const readers = reaching(bodies, "devices.list(");
+      const commanders = reaching(bodies, "devices.action(");
 
       // Anything that issues a command, whether written inline, awaited or not, or
       // reached through a helper. Restricting this to a literal `await devices.action(`
