@@ -441,11 +441,25 @@ export function commandProof(evidence: unknown): CommandProof | null {
   const { reached, failure } = readTransitions(record);
   const stages = resolveStages(reached, failure, settled, ctx);
 
-  // A clamp is only a clamp against a recorded ceiling. Comparing the ask to the
-  // effective tier alone cannot tell "the device could not" from "the author asked
-  // for less on purpose", and the spec is explicit that a deliberate lower tier is
-  // correct rather than embarrassing.
-  const clamped = requested !== "" && requested !== tier && ceiling !== "" && ceiling === tier;
+  // A clamp is the ask exceeding what the DEVICE can prove, measured against the
+  // recorded ceiling. Comparing the ask to the effective tier alone cannot tell "the
+  // device could not" from "the author asked for less on purpose", and the spec is
+  // explicit that a deliberate lower tier is correct rather than embarrassing — asking
+  // for less than the ceiling is a choice, so `requested` below `ceiling` is never a
+  // clamp.
+  //
+  // This used to additionally require `ceiling === tier`, which silently dropped the
+  // case the distinction explains best: a command asking for `observed` on a device
+  // whose ceiling is `acknowledged` but which only reached `dispatch`. The ceiling row
+  // appeared and the clamp note did not, so the one command that was BOTH overruled and
+  // then failed short of even its ceiling was the one that explained neither.
+  //
+  // Where the command also fell short of the ceiling, that is a separate fact and the
+  // stages already carry it. The note speaks only to the clamp, which is why it names
+  // the device's limit rather than this command's outcome.
+  const requestedRank = TIER_TARGET_RANK[requested] ?? 0;
+  const ceilingRank = TIER_TARGET_RANK[ceiling] ?? 0;
+  const clamped = requested !== "" && ceiling !== "" && requestedRank > ceilingRank;
 
   return {
     intent: proofIntent(record, ctx),
@@ -465,7 +479,7 @@ export function commandProof(evidence: unknown): CommandProof | null {
     tier,
     ceiling,
     clamped,
-    clampNote: clamped ? `Asked for ${requested}; this command could only prove ${tier}` : "",
+    clampNote: clamped ? `Asked for ${requested}; this device can prove at most ${ceiling}` : "",
     targetDeviceName,
     observedDeviceName,
     conditionText,

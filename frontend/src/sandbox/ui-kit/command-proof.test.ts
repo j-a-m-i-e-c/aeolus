@@ -389,6 +389,32 @@ describe("commandProof — tier honesty", () => {
     const proof = commandProof(dispatchOnly({ requestedTier: "observed" }));
     expect(proof?.clamped).toBe(true);
     expect(proof?.clampNote).toContain("Asked for observed");
+    // The note names the DEVICE's limit, because that is what a clamp is. What this
+    // particular command then reached is the stages' job.
+    expect(proof?.clampNote).toContain("at most dispatch");
+  });
+
+  it("reports a clamp even when the command fell short of the ceiling too", () => {
+    // The case the old rule dropped, and the one the requested/ceiling/actual triple
+    // exists to explain: asked for observed, the device tops out at acknowledged, and
+    // this command only reached dispatch. Requiring the ceiling to equal the effective
+    // tier meant the ceiling row appeared with no clamp note beside it, so the single
+    // command that was both overruled AND short of its ceiling explained neither.
+    const proof = commandProof(
+      dispatchOnly({
+        requestedTier: "observed",
+        ackAvailable: true,
+        capabilityCeiling: "acknowledged",
+      }),
+    );
+
+    expect(proof?.clamped).toBe(true);
+    expect(proof?.clampNote).toContain("Asked for observed");
+    expect(proof?.clampNote).toContain("at most acknowledged");
+    // And the tier actually proven is still reported as dispatch, not lifted to the
+    // ceiling the clamp mentions.
+    expect(proof?.tier).toBe("dispatch");
+    expect(proof?.ceiling).toBe("acknowledged");
   });
 
   it("does not call a deliberate lower tier a clamp", () => {
