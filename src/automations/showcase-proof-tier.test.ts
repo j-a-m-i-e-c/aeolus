@@ -17,9 +17,12 @@
 // A deliberate `acknowledged` is a correct answer, not a weaker demo. Some equipment
 // genuinely cannot prove more, and the showcase exists partly to make that visible.
 
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { SimulatorDeviceRegistry } from "../simulator/device-registry.js";
+import { createScenario, SHOWCASE_SCENARIO_KEYS } from "../simulator/scenarios/index.js";
+import type { SimulatedInboundCommand } from "../simulator/types.js";
 
 const PROJECTS = join(process.cwd(), "demo", "seed", "projects");
 
@@ -79,15 +82,202 @@ function readLogic(): ProjectLogic[] {
 const LOGIC = readLogic();
 
 /**
- * Fields that are only ever a command read back.
+ * The command each fixture is asked to accept, so its echo can be measured.
  *
- * Every one of these is written by its fixture in the same update that accepts the
- * command — often returned verbatim as the acknowledgement's resulting-state patch —
- * so waiting for it can never establish a physical outcome. `transitioning` is
- * deliberately absent: the lighting desk clears it on a timer once the fade has
- * actually finished, which is a real wait.
+ * This table is INPUTS only, and that distinction is the point. Which fields a device
+ * echoes used to be a hand-written list of eight names checked against every project —
+ * but echo-ness is a property of a fixture, not of a field name. `mode` is an echo on the
+ * ventilation fan and a measurement nowhere; `brightness` is a measurement on the
+ * floodlights and would be an echo if that fixture published it on acceptance. A global
+ * name list cannot express that, and the old one was demonstrably incomplete: the tier
+ * register's own justifications named `demand`, `rpm`, `airflow`, `lightPct` and `watts`
+ * as echoes for their devices, none of which were banned.
+ *
+ * So the outcomes are measured instead of asserted. Each payload below is replayed
+ * through the real fixture, and whatever it changes at acceptance is that device's echo
+ * set. A fixture that starts echoing a new field is caught without anyone updating a
+ * list, and one that stops — as the generator did when `outputW` was taken out of its
+ * acceptance patch so the output could be genuinely observed — is released the same way.
  */
-const ECHO_FIELDS = ["on", "sealed", "tx", "locked", "mode", "scene", "smoke", "active"] as const;
+const COMMAND_PAYLOADS: Record<string, Record<string, unknown>> = {
+  "switch/farm/dam-pump/set": { on: true, litres: 500 },
+  "switch/farm/shed-fill/set": { on: true, target: 80 },
+  "switch/farm/house-fill/set": { on: true, target: 75 },
+  "switch/fence/recall/set": { active: true },
+  "switch/farm/trough-refill/set": { active: true, targets: ["T1"] },
+  "switch/farm/charger-bank/set": { on: true },
+  "switch/vessel/ctd-winch/set": { mode: "deploy", targetDepth: 420 },
+  "switch/rov/vehicle/set": { mode: "dive", targetDepth: 355 },
+  "switch/vessel/tsg-pump/set": { on: true },
+  "switch/mine/ventilation/set": { mode: "boost" },
+  "switch/mine/muster/set": { active: true },
+  "switch/mine/sump-pump/set": { on: true },
+  "switch/wildlife/deterrent/set": { active: true, target: "Fox", pulseMs: 6200, rpm: 2400 },
+  "switch/wildlife/den-fan/set": { active: true, rpm: 1800 },
+  "switch/stage/dmx/set": { scene: "chorus", master: 88, transitionMs: 900 },
+  "switch/stage/fx/set": { active: true, effect: "confetti", pulseMs: 1100, haze: 62 },
+  "switch/escape/exit/set": { locked: false },
+  "switch/escape/hint-screen/set": { message: "hint", room: "Library", hintId: 1 },
+  "switch/escape/fx/set": { scene: "tension" },
+  "switch/escape/intercom/set": { tx: true, room: "Library" },
+  "switch/bunker/floodlights/set": { on: true },
+  "switch/bunker/filter/set": { sealed: true },
+  "switch/bunker/generator/set": { on: true },
+  "switch/bunker/radio/set": { tx: true },
+};
+
+/**
+ * A field a project observes on a device that echoes it, allowed for a stated reason.
+ *
+ * The one legitimate shape: the fixture sets the field on acceptance, but to a value the
+ * condition is not waiting for, so satisfying the condition still requires physical
+ * progress. Each entry records the accepted value it relies on, and the test checks that
+ * the fixture really does behave that way — otherwise the exemption would quietly become
+ * a hole the moment the fixture changed.
+ */
+const ECHO_EXEMPTIONS: Array<{
+  topic: string;
+  field: string;
+  acceptedValue: unknown;
+  why: string;
+}> = [
+  {
+    topic: "switch/stage/dmx/state",
+    field: "transitioning",
+    acceptedValue: true,
+    why: "the desk sets transitioning TRUE on acceptance and clears it on a timer once the fade has actually finished, so waiting for false is a real wait rather than a read-back",
+  },
+];
+
+const SITES = readObservationSites();
+
+/** Every field a fixture writes at acceptance, and the value it writes, by state topic. */
+type EchoMap = Map<string, Map<string, unknown>>;
+
+/**
+ * Replay each showcase command against its real fixture and record what moves.
+ *
+ * "At acceptance" means synchronously: the fixture's own delayed updates and transitions
+ * are what make a field a measurement rather than an echo, so the fake clock is never
+ * advanced. That is precisely the distinction being measured — the floodlights publish
+ * `on` immediately and ramp `brightness` afterwards, and only the first of those is a
+ * read-back of the command.
+ */
+async function measureEchoFields(): Promise<EchoMap> {
+  const echo: EchoMap = new Map();
+  const silent = (): never => ({
+    debug: () => {}, info: () => {}, warn: () => {}, error: () => {},
+    child: () => silent(),
+  }) as never;
+
+  for (const scenarioKey of SHOWCASE_SCENARIO_KEYS) {
+    const scenario = createScenario(scenarioKey);
+    expect(scenario, `scenario ${scenarioKey} should build`).toBeDefined();
+    const registry = new SimulatorDeviceRegistry({
+      publish: () => {},
+      logger: silent(),
+      // Deliberately NOT 0. Clamping delays to zero would collapse the very gap this
+      // measurement depends on, turning every ramped measurement into an apparent echo.
+      maxDelayMs: 60_000,
+    });
+    for (const definition of scenario!.devices) registry.register(definition);
+
+    for (const definition of scenario!.devices) {
+      const entry = registry.get(definition.key);
+      if (!entry?.model.onCommand) continue;
+      const commandTopic = definition.commandTopic;
+      expect(commandTopic, `${definition.key} accepts commands but declares no command topic`).toBeDefined();
+      const payload = COMMAND_PAYLOADS[commandTopic!];
+      expect(payload, `no payload recorded for ${commandTopic}, so its echo cannot be measured`).toBeDefined();
+
+      const before = JSON.parse(JSON.stringify(entry.model.getState())) as Record<string, unknown>;
+      const command: SimulatedInboundCommand = {
+        topic: commandTopic!,
+        params: payload!,
+        rawPayload: payload!,
+        receivedAt: 1,
+      };
+      const outcome = await entry.model.onCommand(command);
+      expect(outcome, `${commandTopic} rejected the recorded payload: ${JSON.stringify(outcome)}`)
+        .toMatchObject({ accepted: true });
+
+      const after = JSON.parse(JSON.stringify(entry.model.getState())) as Record<string, unknown>;
+      const fields = new Map<string, unknown>();
+      // Two routes to the same thing: the acceptance patch the fixture returns, and any
+      // state it changed synchronously through the environment. Several fixtures use only
+      // the second — the floodlights, the deterrent and the den fan return a bare
+      // `{ accepted: true }` — so checking the patch alone would miss them entirely.
+      for (const [field, value] of Object.entries(
+        (outcome as { state?: { patch?: Record<string, unknown> } }).state?.patch ?? {},
+      )) {
+        fields.set(field, value);
+      }
+      for (const field of Object.keys(after)) {
+        if (JSON.stringify(after[field]) !== JSON.stringify(before[field])) {
+          fields.set(field, after[field]);
+        }
+      }
+      echo.set(definition.stateTopic, fields);
+    }
+  }
+  return echo;
+}
+
+/** One observation contract as authored: what is watched, on what, at what tier. */
+interface ObservationSite {
+  project: string;
+  file: string;
+  /**
+   * State topics the observed device could be.
+   *
+   * Usually exactly one. `"any"` means the binding could not be pinned to a literal —
+   * farm-water's distribution helper takes the tank topic as a parameter — and the field
+   * is then checked against every commanding fixture in the showcase. Being unable to
+   * resolve the device makes the check STRICTER rather than skipping it, so an
+   * unresolvable site can never be a silent hole.
+   */
+  candidates: string[] | "any";
+  field: string;
+  tier: string | undefined;
+}
+
+/**
+ * Every `field:` an authored condition watches, resolved back to a real device topic.
+ *
+ * The resolution is why this is worth doing at all: a condition naming `mode` says
+ * nothing until you know which fixture is being watched. Topics come from the project's
+ * own `byTopic("...")` bindings, and the observing device from the nearest preceding
+ * `deviceId:` — falling back to the commanded device, which is what the runtime does.
+ */
+function readObservationSites(): ObservationSite[] {
+  const sites: ObservationSite[] = [];
+  for (const entry of LOGIC) {
+    const topicOf = new Map<string, string>();
+    for (const bind of entry.source.matchAll(
+      /(?:const|let)\s+([A-Za-z0-9_$]+)\s*=\s*byTopic\(\s*["']([^"']+)["']\s*\)/g,
+    )) {
+      topicOf.set(bind[1], bind[2]);
+    }
+    for (const match of entry.source.matchAll(/field:\s*["']([^"']+)["']/g)) {
+      const before = entry.source.slice(0, match.index);
+      // Nearest preceding binding wins; both are searched in the same window so a
+      // per-phase options object cannot pick up a neighbour's observer.
+      const observerVar = [...before.matchAll(/deviceId:\s*([A-Za-z0-9_$]+)\.id/g)].at(-1)?.[1];
+      const targetVar = [...before.matchAll(/devices\.action\(\s*([A-Za-z0-9_$]+)\.id/g)].at(-1)?.[1];
+      const tier = [...before.matchAll(/tier:\s*["'](\w+)["']/g)].at(-1)?.[1];
+      const chosen = observerVar ?? targetVar;
+      const topic = chosen ? topicOf.get(chosen) : undefined;
+      sites.push({
+        project: entry.project,
+        file: entry.file,
+        candidates: topic ? [topic] : "any",
+        field: match[1],
+        tier,
+      });
+    }
+  }
+  return sites;
+}
 
 /**
  * The tier every showcase command is held to, and why that is the highest honest one.
@@ -229,21 +419,90 @@ describe("showcase proof tiers", () => {
     }
   });
 
-  it("never proves a command with a field that only echoes it", () => {
-    // The heart of the audit, and the assertion with real teeth. Each banned field is
-    // written by its fixture in the same update that accepts the command — several are
-    // returned verbatim as the acknowledgement's resulting-state patch — so waiting on
-    // one establishes nothing that DISPATCHED had not already established.
-    for (const entry of LOGIC) {
-      for (const condition of entry.conditions) {
-        for (const field of ECHO_FIELDS) {
-          expect(
-            condition,
-            `${entry.project}/${entry.file} proves a command with the echoed field "${field}"`,
-          ).not.toContain(`field: "${field}"`);
+  describe("echo detection, measured against the fixtures", () => {
+    let echo: EchoMap;
+
+    beforeEach(async () => {
+      vi.useFakeTimers();
+      echo = await measureEchoFields();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("measures an echo set for every device the showcase can command", () => {
+      // If this fails, a fixture was added or renamed and its echo is unmeasured — which
+      // would let every assertion below pass by simply having nothing to say.
+      expect(echo.size).toBeGreaterThan(0);
+      for (const [topic, fields] of echo) {
+        expect(fields.size, `${topic} echoes nothing at all, which is implausible`).toBeGreaterThan(0);
+      }
+    });
+
+    it("finds an observation contract to check in every commanding project", () => {
+      // Guards against the extraction quietly matching nothing, which would make every
+      // assertion below vacuously true.
+      const observed = SITES.filter((s) => s.tier === "observed");
+      expect(observed.length).toBeGreaterThan(10);
+      const projects = new Set(observed.map((s) => s.project));
+      for (const [project, entry] of Object.entries(EXPECTED)) {
+        if (entry.observed === 0) continue;
+        expect(projects, `no observation contract was extracted for ${project}`).toContain(project);
+      }
+    });
+
+    it("never proves a command with a field its fixture writes on acceptance", () => {
+      // The heart of the audit. A field the fixture sets as it accepts has measured
+      // nothing, so waiting on it establishes exactly what DISPATCHED already did while
+      // presenting it as physical verification.
+      const violations: string[] = [];
+      for (const site of SITES) {
+        if (site.tier !== "observed") continue;
+        // Sensors have no command handler and therefore no echo set, so observing one is
+        // always a genuine measurement — which is the whole reason to prefer them.
+        const topics = site.candidates === "any" ? [...echo.keys()] : site.candidates;
+        for (const topic of topics) {
+          const fields = echo.get(topic);
+          if (!fields?.has(site.field)) continue;
+
+          const exemption = ECHO_EXEMPTIONS.find((e) => e.topic === topic && e.field === site.field);
+          if (exemption) {
+            // The exemption is only as good as the fixture behaviour it rests on.
+            expect(
+              fields.get(site.field),
+              `${topic}.${site.field} no longer accepts as ${JSON.stringify(exemption.acceptedValue)}, so its exemption no longer holds`,
+            ).toEqual(exemption.acceptedValue);
+            expect(exemption.why.length).toBeGreaterThan(40);
+            continue;
+          }
+          violations.push(
+            `${site.project}/${site.file} observes "${site.field}" on ${topic}, which that fixture writes on acceptance`,
+          );
         }
       }
-    }
+      expect([...new Set(violations)]).toEqual([]);
+    });
+
+    it("keeps the flagship measurements out of their fixtures' echo sets", () => {
+      // Named explicitly because these are the examples the documentation points at, and
+      // because each was a real echo until this pass corrected it. If a fixture ever
+      // starts publishing one of these on acceptance, the proof it underwrites collapses.
+      const measurements: Array<[string, string]> = [
+        ["switch/bunker/floodlights/state", "brightness"],
+        ["switch/bunker/generator/state", "outputW"],
+        ["switch/wildlife/deterrent/state", "measuredRpm"],
+        ["switch/wildlife/den-fan/state", "measuredRpm"],
+      ];
+      for (const [topic, field] of measurements) {
+        const fields = echo.get(topic);
+        expect(fields, `${topic} has no measured echo set`).toBeDefined();
+        expect(
+          fields!.has(field),
+          `${topic} now writes "${field}" on acceptance, so observing it proves nothing`,
+        ).toBe(false);
+      }
+    });
   });
 
   it("declares a condition wherever it asks for an observed tier", () => {
