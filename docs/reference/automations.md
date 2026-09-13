@@ -216,6 +216,26 @@ Use the grouped card wherever one trigger issues more than one physical command.
 Keeping a single `lastCommand` in that case reports whichever command settled last and
 looks complete doing it.
 
+### If your UI still calls the ladder helpers
+
+`commandLadder()`, `commandVerdict()`, `rungProps()` and `verdictProps()` were removed
+([ADR-0014](../adr/0014-fixed-command-proof-scaffold.md)). They derived one rung per
+recorded transition, so a stage a device can never reach looked exactly like a stage that
+was required and never came — which is the distinction the proof surface exists to make.
+
+They are not aliased to anything, because a working alias would put that rendering back.
+Calling one now throws an error naming its replacement:
+
+| Removed | Use instead |
+| --- | --- |
+| `commandLadder(evidence)` | `commandProof(evidence)`, or `<CommandProofCard/>` |
+| `commandVerdict(evidence)` | `commandProof(evidence)` — the result carries the verdict |
+| `rungProps(rung)` | `proofStageProps(stage)`, or `<CommandProofCard/>` |
+| `verdictProps(verdict)` | `proofHeadlineProps(proof)`, or `<CommandProofCard/>` |
+
+Most panes need none of them: `<CommandProofCard evidence={...}/>` renders the whole
+surface, which is why eight showcase panes deleted their hand-rolled proof blocks.
+
 `evidence: { intent, observedLabel }` is the only author-supplied part of a receipt,
 and both labels are trimmed, stripped of control characters and capped. Everything
 that decides whether a command was *proven* is platform-owned, so a caption cannot

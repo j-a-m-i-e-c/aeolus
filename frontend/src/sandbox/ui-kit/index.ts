@@ -50,6 +50,17 @@ export {
 export { CommandProofCard, type CommandProofCardProps } from "./CommandProofCard";
 export { CommandExecutionCard, type CommandExecutionCardProps } from "./CommandExecutionCard";
 
+// The ladder helpers ADR-0014 replaced. Exported only so a custom UI still calling one
+// gets a sentence naming its replacement instead of "commandLadder is not a function" —
+// see removed.ts for why these throw rather than forward.
+export {
+  REMOVED_HELPERS,
+  commandLadder,
+  commandVerdict,
+  rungProps,
+  verdictProps,
+} from "./removed";
+
 // ── Control state ────────────────────────────────────────────────────────────
 
 /**
