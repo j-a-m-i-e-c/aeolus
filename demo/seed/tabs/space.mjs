@@ -18,16 +18,7 @@ const automations = [{
   },
   "projectDir": "space"
 }];
-const panes = [
-  {
-    "kind": "automation",
-    "ref": "space",
-    "x": 0,
-    "y": 0,
-    "w": 12,
-    "h": 24
-  }
-];
+// Pane geometry lives in demo/seed/layouts/showcase-layout.json (§7.2).
 const dataStore = [
   {
     "name": "iss-track",
@@ -70,4 +61,4 @@ const dataStore = [
   }
 ];
 
-export default { tab, devices, automations, panes, dataStore };
+export default { tab, devices, automations, dataStore };

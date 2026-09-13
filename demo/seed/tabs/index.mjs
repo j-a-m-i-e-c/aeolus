@@ -1,7 +1,12 @@
 // demo/seed/tabs/index.mjs — Ordered registry of demo tab modules.
 //
-// Each module exports a default object: { tab, devices, automations, panes, dataStore }.
+// Each module exports a default object: { tab, devices, automations, dataStore }.
 // Order here is the order tabs appear in the dashboard sidebar.
+//
+// Pane geometry is deliberately not here. It is arranged by hand on a running showcase
+// and captured into demo/seed/layouts/showcase-layout.json (§7.2). Tab ORDER stays in
+// this file, because the reasoning below is a decision about how the showcase argues its
+// case — not something to be rewritten by a stray drag on the Pi.
 
 import researchVessel from "./research-vessel.mjs";
 import undergroundMining from "./underground-mining.mjs";

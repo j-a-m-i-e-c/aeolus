@@ -32,11 +32,10 @@ const automations = [
 // The Agriculture tab groups four independent automation worlds. No pane is a
 // combined property dashboard and there is deliberately no mixed device grid.
 // Each visual surface explains one automation and its own physical domain.
-const panes = [
-  { kind: "automation", ref: "farm-water", x: 0, y: 0, w: 6, h: 13 },
-  { kind: "automation", ref: "farm-livestock", x: 6, y: 0, w: 6, h: 13 },
-  { kind: "automation", ref: "farm-troughs", x: 0, y: 13, w: 6, h: 13 },
-  { kind: "automation", ref: "farm-energy", x: 6, y: 13, w: 6, h: 13 },
-];
+//
+// Where those panes sit is in demo/seed/layouts/showcase-layout.json, arranged by hand
+// and captured from a running showcase (§7.2). It used to be here as x/y/w/h, which made
+// this file the author of the arrangement and meant every reseed overwrote a layout
+// someone had tuned on the Pi.
 
-export default { tab, devices, automations, panes, dataStore };
+export default { tab, devices, automations, dataStore };

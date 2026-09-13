@@ -33,6 +33,36 @@ make showcase-seed PASS=<password>   # PASS is required; no default exists
 make showcase-reset                  # restart the simulator only; the database is untouched
 ```
 
+#### Arranging the panes
+
+Pane geometry is not written by hand. It lives in
+[`seed/layouts/showcase-layout.json`](seed/layouts/showcase-layout.json), and the way to
+change it is to drag the panes where you want them and capture the result:
+
+```bash
+make showcase                                 # arrange on a real, unrestricted install
+make showcase-seed PASS=<password>
+#   ... drag and resize the panes in the browser ...
+make showcase-capture-layout PASS=<password>  # writes the JSON
+git diff demo/seed/layouts/showcase-layout.json
+```
+
+Review that diff before committing: this file is the arrangement every future seed
+reproduces, and a stray drag looks exactly like an intentional move.
+
+- **Capture on the unrestricted showcase, not the public demo.** Public-demo layout
+  persistence is deliberately disabled, so a visitor's rearrangement is never saved and
+  there would be nothing to capture.
+- **Your own tabs and panes are never captured.** Ownership comes from the seed ledger, so
+  a personal tab, or a personal automation's pane sitting on a showcase tab, is reported
+  and skipped. This matters more than it sounds: the seeder *retires* showcase-owned tabs
+  it no longer declares, so a captured personal tab would be deleted by a later reseed.
+- **Tab order is not captured.** The sidebar order is reasoned about in
+  [`seed/tabs/index.mjs`](seed/tabs/index.mjs) and stays there, so a stray drag cannot
+  silently rewrite the order in which the showcase makes its argument.
+- **`make showcase-check-layout PASS=...`** fails if the running install differs from the
+  committed file, without writing anything.
+
 This overlay used to also switch the backend into public-demo mode and rebuild the
 frontend as an anonymous visitor, which meant you could not review the showcase on
 your own machine without losing authoring, admin and most of the API. Those are

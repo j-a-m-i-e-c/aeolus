@@ -8,6 +8,7 @@
 // Project source loading is shared with the showcase architecture tests so the
 // tree layout and entry resolution are defined in exactly one place.
 import { loadProject } from "./project-loader.mjs";
+import { parseShowcaseLayout } from "./layouts/index.mjs";
 
 /**
  * Create an authenticated API client bound to a base URL.
@@ -554,14 +555,18 @@ export const round = (n, dp = 1) => Number(n.toFixed(dp));
  * would survive every future reseed.
  *
  * Showcase tabs take orders 0..n-1 from module order, and your tabs follow in their
- * existing relative order. The seeder owns the ordering of its own tabs, which keeps
- * a rerun deterministic (Req §12.1) — until the §7 layout-capture workflow makes a
- * hand-arranged order the source of truth.
+ * existing relative order. The seeder owns the ordering of its own tabs, which keeps a
+ * rerun deterministic (Req §12.1). Tab order stays in code deliberately: the module
+ * registry reasons about why Agriculture leads and Space is last, and a stray drag on the
+ * Pi should not silently rewrite that. Pane GEOMETRY is the opposite — it is meant to be
+ * tuned by eye — so it comes from the captured layout (§7.2).
  *
- * @param {{tab: {id, name, icon}, panes: object[]}[]} tabModules
+ * @param {{tab: {id, name, icon}, automations: object[]}[]} tabModules
  * @param {Record<string, string>} idMap - automation key → ruleId
+ * @param {{tabs: Record<string, object[]>}} [layout] Captured pane geometry. Defaults to
+ *   the committed fixture; injectable so a test can supply its own.
  */
-export async function buildLayout(api, tabModules, idMap) {
+export async function buildLayout(api, tabModules, idMap, layout = parseShowcaseLayout()) {
   const now = new Date().toISOString();
   const declaredTabIds = tabModules.map((mod) => mod.tab.id);
   const ledger = await readShowcaseLedger(api);
@@ -593,7 +598,17 @@ export async function buildLayout(api, tabModules, idMap) {
       createdAt: now,
     });
 
-    mod.panes.forEach((p, paneIndex) => {
+    // A declared tab with no captured geometry would seed as an empty tab and report
+    // success, which is the failure this refuses to perform quietly.
+    const declaredPanes = layout.tabs[mod.tab.id];
+    if (!Array.isArray(declaredPanes)) {
+      throw new Error(
+        `No captured layout for tab "${mod.tab.id}". Add it to demo/seed/layouts/showcase-layout.json, `
+        + `or arrange the tab and run: make showcase-capture-layout PASS=<password>`,
+      );
+    }
+
+    declaredPanes.forEach((p, paneIndex) => {
       const base = {
         id: `${mod.tab.id}-pane-${paneIndex}`,
         tabId: mod.tab.id,
@@ -607,10 +622,19 @@ export async function buildLayout(api, tabModules, idMap) {
         panes.push({ ...base, paneType: "device-grid", config: {} });
       } else if (p.kind === "automation") {
         const automation = mod.automations.find((a) => a.key === p.ref);
+        // A ref the tab does not declare would seed a pane pointing at an empty ruleId,
+        // which renders as a broken pane and unscopes nothing — so it is silent. This is
+        // the check that keeps a captured layout honest against a renamed automation.
+        if (!automation) {
+          throw new Error(
+            `Captured layout for "${mod.tab.id}" references automation "${p.ref}", which that tab `
+            + `does not declare. Rename it in demo/seed/layouts/showcase-layout.json, or re-capture.`,
+          );
+        }
         panes.push({
           ...base,
           paneType: "automation",
-          config: { ruleId: idMap[p.ref] || "", ruleName: automation?.name || "" },
+          config: { ruleId: idMap[p.ref] || "", ruleName: automation.name || "" },
         });
       }
     });

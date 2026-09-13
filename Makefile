@@ -146,6 +146,31 @@ showcase-seed: ## Seed the showcase (needs make showcase running). Usage: make s
 	@$(MAKE) --no-print-directory simulator-republish COMPOSE="$(LOCAL_SHOWCASE_COMPOSE)"
 	docker compose $(LOCAL_SHOWCASE_COMPOSE) --profile seed run --rm -e SEED_USER="$(USER)" -e SEED_PASS="$(PASS)" seed
 
+showcase-capture-layout: ## Capture the hand-arranged showcase layout into source (needs make showcase running). Usage: make showcase-capture-layout PASS=yourpass [USER=admin]
+	@if [ -z "$(PASS)" ]; then \
+		echo "Error: PASS is required.  Usage: make showcase-capture-layout PASS=<admin-password> [USER=admin]"; \
+		exit 1; \
+	fi
+	@$(MAKE) --no-print-directory seed-image
+	@# Same container and bind mount as the seeder, so the file it writes lands in the
+	@# working tree rather than inside the container. Arrange the panes in the browser
+	@# first, then read the diff before committing.
+	docker compose $(LOCAL_SHOWCASE_COMPOSE) --profile seed run --rm \
+		-e SEED_USER="$(USER)" -e SEED_PASS="$(PASS)" \
+		--entrypoint sh seed -c \
+		'node demo/operations/capture-showcase-layout.mjs http://localhost:$${API_PORT:-3001} "$$SEED_USER" "$$SEED_PASS"'
+
+showcase-check-layout: ## Fail if the running showcase layout differs from the committed fixture. Usage: make showcase-check-layout PASS=yourpass
+	@if [ -z "$(PASS)" ]; then \
+		echo "Error: PASS is required.  Usage: make showcase-check-layout PASS=<admin-password> [USER=admin]"; \
+		exit 1; \
+	fi
+	@$(MAKE) --no-print-directory seed-image
+	docker compose $(LOCAL_SHOWCASE_COMPOSE) --profile seed run --rm \
+		-e SEED_USER="$(USER)" -e SEED_PASS="$(PASS)" \
+		--entrypoint sh seed -c \
+		'node demo/operations/capture-showcase-layout.mjs --check http://localhost:$${API_PORT:-3001} "$$SEED_USER" "$$SEED_PASS"'
+
 public-demo-local-seed: ## Seed the local public demo, incl. the demo identity (needs make public-demo-local). Usage: PASS=yourpass
 	@if [ -z "$(PASS)" ]; then \
 		echo "Error: PASS is required.  Usage: make public-demo-local-seed PASS=<admin-password> [USER=admin]"; \

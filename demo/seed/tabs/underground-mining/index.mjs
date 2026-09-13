@@ -23,13 +23,6 @@ const automations = [
 ];
 
 // The cutaway is a read-only supervisory view. Each control surface below owns
-// exactly one real mine responsibility; no hidden mine coordinator exists.
-const panes = [
-  { kind: "automation", ref: "mine-overview", x: 0, y: 0, w: 12, h: 13 },
-  { kind: "automation", ref: "mine-atmosphere", x: 0, y: 13, w: 6, h: 11 },
-  { kind: "automation", ref: "mine-ventilation", x: 6, y: 13, w: 6, h: 11 },
-  { kind: "automation", ref: "mine-personnel", x: 0, y: 24, w: 6, h: 11 },
-  { kind: "automation", ref: "mine-dewatering", x: 6, y: 24, w: 6, h: 11 },
-];
-
-export default { tab, devices, automations, panes, dataStore };
+// exactly one real mine responsibility; no hidden mine coordinator exists. Where each
+// sits is in demo/seed/layouts/showcase-layout.json (§7.2).
+export default { tab, devices, automations, dataStore };

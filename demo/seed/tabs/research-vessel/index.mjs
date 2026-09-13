@@ -13,12 +13,7 @@ const devices = [];
 const automations = [missionOverviewAutomation, ctdAutomation, ctdHistoryAutomation, rovAutomation, underwayAutomation];
 
 // The hero is a read-only scientific mission view. CTD, ROV and underway
-// science remain the three owning applications below it.
-const panes = [
-  { kind: "automation", ref: "vessel-mission-overview", x: 0, y: 0, w: 12, h: 13 },
-  { kind: "automation", ref: "vessel-ctd", x: 0, y: 13, w: 6, h: 12 },
-  { kind: "automation", ref: "vessel-rov", x: 6, y: 13, w: 6, h: 12 },
-  { kind: "automation", ref: "vessel-underway", x: 0, y: 25, w: 12, h: 10 },
-];
+// science remain the three owning applications below it. Where each sits is in
+// demo/seed/layouts/showcase-layout.json (§7.2).
 
-export default { tab, devices, automations, panes, dataStore };
+export default { tab, devices, automations, dataStore };

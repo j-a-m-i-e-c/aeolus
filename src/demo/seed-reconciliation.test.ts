@@ -1,20 +1,20 @@
-// showcase-cleanup §12.1 — a reseed must not delete resources the operator authored.
+﻿// showcase-cleanup Â§12.1 â€” a reseed must not delete resources the operator authored.
 //
-// The collection half of §12.1 is covered in seed-idempotency.test.ts. This file covers
+// The collection half of Â§12.1 is covered in seed-idempotency.test.ts. This file covers
 // the two harder halves: automations, which have server-generated ids and no ownership
 // column, and the dashboard layout, which `PUT /api/layout` replaces wholesale.
 //
 // What the old seeder did, and what is being prevented:
 //
-//   cleanSlate()  → DELETE every automation on the install
-//                 → PUT /api/layout { tabs: [], panes: [] }
+//   cleanSlate()  â†’ DELETE every automation on the install
+//                 â†’ PUT /api/layout { tabs: [], panes: [] }
 //
 // So an operator who installed Aeolus, authored an automation and a tab, then tried the
-// showcase, lost both. The standing advice — "wipe the database and seed again" — hid
+// showcase, lost both. The standing advice â€” "wipe the database and seed again" â€” hid
 // that rather than fixing it.
 //
 // Ownership is now tracked in a Data Store bucket keyed by the stable module key
-// (§12.2). Removal is by recorded id, which is exact. The one exception is a single
+// (Â§12.2). Removal is by recorded id, which is exact. The one exception is a single
 // adoption pass for installs seeded before the ledger existed, where nothing but the
 // display name is available to go on.
 
@@ -140,7 +140,7 @@ function fakeAeolus(
 
   function reject(status: number, tolerate: number[], method: string, reqPath: string): null {
     if (tolerate.includes(status)) return null;
-    throw new Error(`${method} ${reqPath} → ${status}`);
+    throw new Error(`${method} ${reqPath} â†’ ${status}`);
   }
 
   return {
@@ -205,7 +205,7 @@ describe("showcase ledger", () => {
   });
 });
 
-describe("createAutomations — records ownership as it goes", () => {
+describe("createAutomations â€” records ownership as it goes", () => {
   // Real project directories, so this exercises the actual loader rather than a shape
   // that only resembles a seed descriptor.
   const declared = [
@@ -252,7 +252,7 @@ describe("createAutomations — records ownership as it goes", () => {
 
     await expect(createAutomations(api, declared as never)).rejects.toThrow("backend died");
 
-    // One rule exists, and the ledger names exactly that one — so the next run
+    // One rule exists, and the ledger names exactly that one â€” so the next run
     // reclaims it rather than leaving it behind beside a fresh copy.
     expect(box.automations.map((r) => r.id)).toEqual(["rule-1"]);
     const ledger = await readShowcaseLedger(box.api);
@@ -388,14 +388,20 @@ describe("reconcileShowcaseAutomations", () => {
   });
 });
 
-describe("buildLayout — merges instead of replacing the dashboard", () => {
+describe("buildLayout â€” merges instead of replacing the dashboard", () => {
   const tabModules = [
     {
       tab: { id: "tab-agriculture", name: "Agriculture", icon: "sprout" },
       automations: [{ key: "farm-water", name: "Water Management" }],
-      panes: [{ kind: "automation", ref: "farm-water", x: 0, y: 0, w: 6, h: 13 }],
     },
   ];
+  // Pane geometry now comes from the captured layout rather than the tab module, so this
+  // supplies one matching the fixture above. Passing it in rather than letting the real
+  // committed layout load keeps these tests about the merge, and stops them failing
+  // whenever the showcase is rearranged.
+  const layout = {
+    tabs: { "tab-agriculture": [{ kind: "automation", ref: "farm-water", x: 0, y: 0, w: 6, h: 13 }] },
+  };
   const idMap = { "farm-water": "rule-1" };
 
   it("keeps a tab the operator authored, and its panes", async () => {
@@ -404,21 +410,21 @@ describe("buildLayout — merges instead of replacing the dashboard", () => {
       panes: [{ id: "pane-mine", tabId: "tab-mine", paneType: "automation", config: { ruleId: "mine-1" }, x: 0, y: 0, w: 6, h: 4 }],
     });
 
-    await buildLayout(box.api, tabModules as never, idMap);
+    await buildLayout(box.api, tabModules as never, idMap, layout);
 
     expect(box.tabs.map((t) => t.id)).toContain("tab-mine");
     expect(box.panes.map((p) => p.id)).toContain("pane-mine");
   });
 
   it("carries an operator pane's config through untouched", async () => {
-    // Not cosmetic: PUT /api/layout rebuilds automation→tab ownership from each pane's
+    // Not cosmetic: PUT /api/layout rebuilds automationâ†’tab ownership from each pane's
     // config.ruleId, so dropping the config would silently unscope their automation.
     const box = fakeAeolus({
       tabs: [{ id: "tab-mine", name: "My Shed", icon: "home", order: 0, createdAt: 1 }],
       panes: [{ id: "pane-mine", tabId: "tab-mine", paneType: "automation", config: { ruleId: "mine-1", ruleName: "My Shed Lights" }, x: 1, y: 2, w: 3, h: 4 }],
     });
 
-    await buildLayout(box.api, tabModules as never, idMap);
+    await buildLayout(box.api, tabModules as never, idMap, layout);
 
     const kept = box.panes.find((p) => p.id === "pane-mine");
     expect(kept?.config).toEqual({ ruleId: "mine-1", ruleName: "My Shed Lights" });
@@ -431,7 +437,7 @@ describe("buildLayout — merges instead of replacing the dashboard", () => {
       panes: [{ id: "tab-agriculture-pane-0", tabId: "tab-agriculture", paneType: "automation", config: { ruleId: "stale" }, x: 0, y: 0, w: 6, h: 13 }],
     });
 
-    await buildLayout(box.api, tabModules as never, idMap);
+    await buildLayout(box.api, tabModules as never, idMap, layout);
 
     const showcasePanes = box.panes.filter((p) => p.tabId === "tab-agriculture");
     expect(showcasePanes).toHaveLength(1);
@@ -451,7 +457,7 @@ describe("buildLayout — merges instead of replacing the dashboard", () => {
       },
     });
 
-    await buildLayout(box.api, tabModules as never, idMap);
+    await buildLayout(box.api, tabModules as never, idMap, layout);
 
     expect(box.tabs.map((t) => t.id)).toEqual(["tab-agriculture", "tab-mine"]);
     expect(box.panes.some((p) => p.tabId === "tab-retired")).toBe(false);
@@ -465,7 +471,7 @@ describe("buildLayout — merges instead of replacing the dashboard", () => {
       ],
     });
 
-    await buildLayout(box.api, tabModules as never, idMap);
+    await buildLayout(box.api, tabModules as never, idMap, layout);
 
     expect(box.tabs.map((t) => t.id)).toEqual(["tab-agriculture", "tab-first", "tab-second"]);
     expect(box.tabs.map((t) => t.order)).toEqual([0, 1, 2]);
@@ -474,7 +480,7 @@ describe("buildLayout — merges instead of replacing the dashboard", () => {
   it("records the tabs it declared, so the next run can spot retirement", async () => {
     const box = fakeAeolus();
 
-    await buildLayout(box.api, tabModules as never, idMap);
+    await buildLayout(box.api, tabModules as never, idMap, layout);
 
     const ledger = await readShowcaseLedger(box.api);
     expect(ledger.tabIds).toEqual(["tab-agriculture"]);
@@ -485,7 +491,7 @@ describe("buildLayout — merges instead of replacing the dashboard", () => {
       tabs: [{ id: "tab-mine", name: "My Shed", icon: "home", order: 0, createdAt: 1 }],
     });
 
-    await buildLayout(box.api, tabModules as never, idMap);
+    await buildLayout(box.api, tabModules as never, idMap, layout);
 
     const puts = box.calls.filter((c) => c.method === "PUT" && c.path === "/api/layout");
     expect(puts).toHaveLength(1);
@@ -494,7 +500,7 @@ describe("buildLayout — merges instead of replacing the dashboard", () => {
 
   it("reads the current layout before replacing it", async () => {
     const box = fakeAeolus();
-    await buildLayout(box.api, tabModules as never, idMap);
+    await buildLayout(box.api, tabModules as never, idMap, layout);
 
     const order = box.calls.map((c) => `${c.method} ${c.path}`);
     expect(order.indexOf("GET /api/layout")).toBeLessThan(order.indexOf("PUT /api/layout"));
