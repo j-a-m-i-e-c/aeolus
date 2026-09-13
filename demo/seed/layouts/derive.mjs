@@ -18,10 +18,16 @@
  * @param {object[]} input.livePanes
  * @param {Record<string, object[]>} [input.previous] The committed layout, for noticing
  *   a pane that has disappeared rather than silently dropping it.
- * @returns {{tabs: Record<string, object[]>, skipped: string[]}}
+ * @returns {{tabs: Record<string, object[]>, skipped: string[], missingTabs: string[]}}
+ *   `missingTabs` names declared tabs this dashboard did not show. It is reported apart
+ *   from `skipped` because it means something different: the other notes describe panes
+ *   correctly left out, whereas a missing tab means the capture is not a picture of the
+ *   showcase at all, and writing it would erase that tab's geometry. The caller refuses
+ *   on it rather than writing a partial fixture.
  */
 export function deriveCapturedLayout({ tabModules, ledger, liveTabs, livePanes, previous = {} }) {
   const skipped = [];
+  const missingTabs = [];
   const tabs = {};
 
   /** ruleId → automation key, for the automations the seeder created. */
@@ -39,6 +45,7 @@ export function deriveCapturedLayout({ tabModules, ledger, liveTabs, livePanes, 
     const tabId = mod.tab.id;
     if (!liveTabs.some((tab) => tab?.id === tabId)) {
       skipped.push(`tab ${tabId} is declared by the showcase but not on this dashboard`);
+      missingTabs.push(tabId);
       continue;
     }
 
@@ -96,5 +103,5 @@ export function deriveCapturedLayout({ tabModules, ledger, liveTabs, livePanes, 
     tabs[tabId] = out;
   }
 
-  return { tabs, skipped };
+  return { tabs, skipped, missingTabs };
 }

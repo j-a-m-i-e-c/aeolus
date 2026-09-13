@@ -67,13 +67,36 @@ if (!ledger.existed) {
 const live = await api("GET", "/api/layout");
 const previous = parseShowcaseLayout();
 
-const { tabs, skipped } = deriveCapturedLayout({
+const { tabs, skipped, missingTabs } = deriveCapturedLayout({
   tabModules,
   ledger,
   liveTabs: Array.isArray(live?.tabs) ? live.tabs : [],
   livePanes: Array.isArray(live?.panes) ? live.panes : [],
   previous: previous.tabs,
 });
+
+// Refuse a partial picture before it can be written. A declared tab that is absent from
+// the response is never an intentional edit — retiring a tab means deleting it from
+// demo/seed/tabs/index.mjs, after which it is not declared — so its absence means the
+// answer is untrustworthy, and capturing would erase that tab's geometry wholesale.
+//
+// This is reachable without anything looking wrong. `GET /api/layout` answers 200 with
+// an empty layout if its database read throws, and it filters tabs to the caller's group
+// for a non-admin USER, so a mistyped account yields a confident, quietly partial answer.
+// Both would otherwise validate, be written, and print a tick.
+if (missingTabs.length > 0) {
+  console.error(`\n✗ ${missingTabs.length} showcase tab(s) are declared but were not on this dashboard:\n`);
+  for (const tabId of missingTabs) console.error(`    · ${tabId}`);
+  console.error(`
+  Nothing was written. Capturing now would drop those tabs' geometry from the
+  fixture, and the next seed would reproduce the loss. Likely causes:
+
+    · the showcase is not fully seeded yet   → make showcase-seed PASS=<password>
+    · USER is not an admin, so the dashboard came back filtered to their groups
+    · this is not the stack you arranged
+`);
+  process.exit(1);
+}
 
 const before = readFileSync(LAYOUT_PATH, "utf8");
 const after = formatShowcaseLayout({ $comment: JSON.parse(before).$comment, tabs });

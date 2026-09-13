@@ -156,10 +156,44 @@ describe("showcase layout capture", () => {
     const input = showcase();
     input.liveTabs = [];
 
-    const { tabs, skipped } = deriveCapturedLayout(input);
+    const { tabs, skipped, missingTabs } = deriveCapturedLayout(input);
 
     expect(tabs).toEqual({});
     expect(skipped.join(" ")).toMatch(/not on this dashboard/);
+    // Named separately from the prose so the capture tool can refuse rather than write an
+    // empty fixture. `parseShowcaseLayout` accepts `tabs: {}` — correctly, it validates
+    // shape, not completeness — so nothing downstream would object.
+    expect(missingTabs).toEqual(["tab-agriculture"]);
+    expect(parseShowcaseLayout(formatShowcaseLayout({ $comment: "x", tabs })).tabs).toEqual({});
+  });
+
+  it("distinguishes a missing tab from panes it merely declined to capture", () => {
+    // The difference the capture tool acts on: a pane left out is routine, a tab left out
+    // means the answer is partial. Reporting both only as prose made them the same thing.
+    const input = showcase();
+    input.livePanes.push({
+      tabId: "tab-agriculture", paneType: "hue-control", config: {}, x: 0, y: 13, w: 3, h: 3,
+    });
+
+    const { skipped, missingTabs } = deriveCapturedLayout(input);
+
+    expect(skipped).toHaveLength(1);
+    expect(missingTabs).toEqual([]);
+  });
+
+  it("names every absent tab when only part of the dashboard came back", () => {
+    // The shape a non-admin USER produces: GET /api/layout filters tabs to the caller's
+    // groups, so one tab arrives complete and the other is simply not mentioned.
+    const input = showcase();
+    input.tabModules.push({
+      tab: { id: "tab-space", name: "Space", icon: "satellite" },
+      automations: [{ key: "space-ground-station" }],
+    });
+
+    const { tabs, missingTabs } = deriveCapturedLayout(input);
+
+    expect(Object.keys(tabs)).toEqual(["tab-agriculture"]);
+    expect(missingTabs).toEqual(["tab-space"]);
   });
 
   it("orders panes the way the tab reads, so a nudge makes a small diff", () => {
