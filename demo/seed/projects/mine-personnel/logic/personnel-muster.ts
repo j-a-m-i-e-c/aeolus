@@ -1,11 +1,21 @@
 // Personnel tracking and verified muster control.
 /**
- * Crew underground, and therefore the refuge occupancy a complete muster reaches.
+ * How many people a complete muster has to account for.
  *
- * Named because it is the number the observation waits for: a muster is proven when
- * everyone who was down there is accounted for, not when the alarm starts.
+ * Read from the tracking network rather than written down: it is however many were
+ * underground when the muster was called. This was a hard-coded 14, which matched the
+ * fixture and nothing else — change the crew and the observation waits for a refuge
+ * occupancy that can never arrive, so every muster times out and reports unverified while
+ * working perfectly.
+ *
+ * Zero is a real answer and not a target. Waiting for `refuge >= 0` would be satisfied
+ * the instant it was asked, which is the purest form of the thing this pass exists to
+ * remove: a proof that cannot fail. A muster with nobody underground is refused instead.
  */
-const MUSTER_HEADCOUNT = 14;
+function crewUnderground(): number {
+    const counted = Number(state.get("underground"));
+    return isNaN(counted) || counted < 0 ? 0 : counted;
+}
 
 function byTopic(wanted: string) {
     return devices.list().find((device) => device.topic === wanted);
@@ -60,6 +70,12 @@ export async function commandMuster(active: boolean) {
         setAction("Muster controller unavailable");
         return;
     }
+    // Checked before the spinner goes up, so refusing cannot leave the pane waiting.
+    const crew = crewUnderground();
+    if (active && crew === 0) {
+        setAction("Nobody underground · no muster to verify");
+        return;
+    }
     state.set("commandPending", true);
     setAction(active
         ? "Initiating underground personnel muster"
@@ -83,7 +99,7 @@ export async function commandMuster(active: boolean) {
         tier: "observed",
         deviceId: tracking.id,
         condition: active
-            ? { field: "refuge", op: "gte", value: MUSTER_HEADCOUNT }
+            ? { field: "refuge", op: "gte", value: crew }
             // Clearing returns the crew to their working levels, so the refuge empties.
             : { field: "refuge", op: "eq", value: 0 },
         timeoutMs: active ? 9000 : 5000,

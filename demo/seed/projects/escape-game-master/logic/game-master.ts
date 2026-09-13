@@ -69,6 +69,12 @@ export function initialiseGameSession() {
     state.set("intercomTx", false);
     state.set("intercomRoom", "Library");
     state.set("lookRequestedAt", 0);
+    // The boolean the status machine replaced. An install upgraded across §8.1 still has
+    // it in persisted state, where nothing reads it and its value contradicts `status` the
+    // moment the session moves. Dropped here because this branch runs exactly once per
+    // install — the early return above sees to that.
+    if (state.get("paused") !== undefined)
+        state.delete("paused");
 }
 /**
  * Read the room controller's observed scene.
@@ -102,7 +108,6 @@ export function projectRoomLook() {
  */
 export function projectRoomLookOutcome(payload: Record<string, unknown>) {
     projectRoomLook();
-    state.set("lookSettledAt", Date.now());
     const requested = String(payload.requested || state.get("requestedLook") || "puzzle");
     setAction(Boolean(payload.verified)
         ? "Room systems applied the " + requested + " look"
@@ -198,7 +203,6 @@ async function sendHint(level: number) {
         state.set("lastHint", text);
         state.set("lastHintId", hintId);
         state.set("hintRoom", room);
-        state.set("hintLevel", level);
         setAction("Hint #" + hintId + " delivered to " + room);
     }
     else {
@@ -250,7 +254,6 @@ export async function startGame() {
     state.set("lastHint", "No hint sent yet.");
     state.set("lastHintId", 0);
     state.set("hintRoom", "Library");
-    state.set("hintLevel", 0);
     state.set("solveSeconds", [0, 0, 0, 0]);
     state.set("attempts", [0, 0, 0, 0]);
 
