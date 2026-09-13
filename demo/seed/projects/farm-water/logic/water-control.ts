@@ -170,10 +170,16 @@ export function publishSourceReserve(snapshot: WaterSnapshot) {
 }
 export async function reconcileWaterPolicy(snapshot: WaterSnapshot, pumpOn: boolean) {
     await reconcileDownstream();
-    const header = byTopic("sensor/farm/header-tank");
-    const headerPct = Number(header && header.state && header.state.value);
-    if (!isNaN(headerPct))
-        state.set("headerPct", headerPct);
+    // The header level comes from the snapshot this was handed, not from a fresh read.
+    //
+    // It used to call byTopic() again here, after reconcileDownstream() may have opened
+    // the header feed to refill a downstream tank — which draws the header down. The
+    // re-read could not see that: devices.list() is a snapshot serialised once per
+    // execution, so it returned the same value projectWaterTelemetry() had already
+    // recorded, and the state write was a no-op. Harmless in what it displayed, but every
+    // threshold below was then decided on a reading from before the draw, and reading a
+    // parameter that is already in scope is plainer besides.
+    const headerPct = snapshot.headerPct;
     const recoveryHeld = Date.now() < (Number(state.get("recoveryHoldUntil")) || 0);
     const headerLow = Boolean(state.get("headerLowActive"));
     if (!isNaN(headerPct) && headerPct <= 30 && !headerLow && !recoveryHeld
@@ -198,8 +204,10 @@ export async function reconcileWaterPolicy(snapshot: WaterSnapshot, pumpOn: bool
         await stopPump("header high-level safety");
         pumpOn = false;
     }
-    const battery = byTopic("sensor/farm/energy/battery");
-    const energyAllowed = !battery || battery.state.available !== false;
+    // Also from the projection rather than a second device read. projectWaterTelemetry
+    // already folded the battery's availability and its state of charge into one fact, and
+    // the combined condition below is the same either way.
+    const energyAllowed = state.get("energyAllowed") !== false;
     if (pumpOn && (!energyAllowed || (!isNaN(snapshot.soc) && snapshot.soc < 30)) && !Boolean(state.get("transferStopping"))) {
         setAction("Energy reserve low · stopping discretionary pump load");
         await stopPump("energy reserve protection");

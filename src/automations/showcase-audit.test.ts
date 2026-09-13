@@ -296,41 +296,109 @@ describe("showcase audit — every seeded tab", () => {
         .replace(/\/\*[\s\S]*?\*\//g, "")
         .replace(/\/\/[^\n]*/g, "");
 
-      // Any function that reaches devices.list(), directly or through a helper.
+      // Every top-level function in the project, by name. Arrow-assigned helpers and the
+      // `export default async function run` entry point are both included: the entry
+      // point is exactly where a caller-side re-read hides, so missing it would leave the
+      // most likely instance of this bug invisible.
       const bodies = new Map<string, string>();
-      for (const m of code.matchAll(
-        /(?:export\s+)?(?:async\s+)?function\s+([A-Za-z0-9_$]+)\s*\([\s\S]*?\n\}/g,
-      )) {
-        bodies.set(m[1], m[0]);
-      }
-      const readers = new Set(
-        [...bodies].filter(([, body]) => body.includes("devices.list(")).map(([name]) => name),
-      );
-      for (let changed = true; changed; ) {
-        changed = false;
-        for (const [name, body] of bodies) {
-          if (readers.has(name)) continue;
-          if ([...readers].some((r) => new RegExp(`\\b${r}\\(`).test(body))) {
-            readers.add(name);
-            changed = true;
+      const declaration =
+        /(?:export\s+(?:default\s+)?)?(?:async\s+)?function\s+([A-Za-z0-9_$]+)\s*\([\s\S]*?\n\}/g;
+      for (const m of code.matchAll(declaration)) bodies.set(m[1], m[0]);
+      const arrow =
+        /(?:const|let)\s+([A-Za-z0-9_$]+)\s*=\s*(?:async\s*)?\([^)]*\)\s*(?::[^=]*)?=>\s*\{[\s\S]*?\n\}/g;
+      for (const m of code.matchAll(arrow)) bodies.set(m[1], m[0]);
+
+      /** Names whose bodies reach `marker`, directly or through any helper they call. */
+      const reaching = (marker: string): Set<string> => {
+        const found = new Set(
+          [...bodies].filter(([, body]) => body.includes(marker)).map(([name]) => name),
+        );
+        for (let changed = true; changed; ) {
+          changed = false;
+          for (const [name, body] of bodies) {
+            if (found.has(name)) continue;
+            if ([...found].some((f) => new RegExp(`\\b${f}\\s*\\(`).test(body))) {
+              found.add(name);
+              changed = true;
+            }
           }
         }
-      }
+        return found;
+      };
+      const readers = reaching("devices.list(");
+      const commanders = reaching("devices.action(");
+
+      // Anything that issues a command, whether written inline, awaited or not, or
+      // reached through a helper. Restricting this to a literal `await devices.action(`
+      // was the gap: Game Master's entry point awaited a helper that commanded, then
+      // called a projection, and the check could not see across that boundary.
+      const commandCalls = [
+        "devices\\.action\\(",
+        ...[...commanders].map((name) => `\\b${name}\\s*\\(`),
+      ];
 
       const offenders = new Set<string>();
-      for (const match of code.matchAll(/await devices\.action\(/g)) {
-        // The rest of the enclosing function: these files close top-level functions with
-        // a brace at column 0.
-        const rest = code.slice(match.index);
-        const end = rest.search(/\n\}/);
-        const tail = end === -1 ? rest : rest.slice(0, end);
-        for (const reader of readers) {
-          if (new RegExp(`\\b${reader}\\(`).test(tail)) offenders.add(reader);
+      for (const [owner, body] of bodies) {
+        for (const pattern of commandCalls) {
+          for (const match of body.matchAll(new RegExp(pattern, "g"))) {
+            // A command reached through the enclosing function itself is recursion, not a
+            // re-read; skip it so a commander does not flag its own name.
+            if (new RegExp(`^\\b${owner}\\s*\\(`).test(match[0])) continue;
+            const at = match.index! + match[0].length;
+            // Only what can still run after the command on the same path.
+            //
+            // Two ways to leave that path, and both matter.
+            //
+            // Closing past the command's own block means the rest belongs to a sibling
+            // branch. And for a brace-less arm there is no block to close, so an `else`
+            // ends the path instead: the operator-event dispatchers are written
+            // `if (e === "pump-on") await command(...)` followed by
+            // `else if (e === "toggle-auto") { project(); }`, and those two calls can never
+            // both run.
+            //
+            // That `else` rule has to be narrow or it swallows the common case. A command
+            // followed by its own `if (result.success) { … } else { … }` and THEN a
+            // projection is the original defect, and an unconditional `else` break would
+            // stop the scan at that `else` and miss it. So the break only applies while no
+            // complete block has been passed yet — which is exactly the brace-less arm.
+            //
+            // Stated limit: a command nested inside a conditional block, whose projection
+            // comes after that block closes, is not seen. Both real shapes of this defect
+            // are — same-depth within a function, and a caller projecting after an awaited
+            // helper.
+            let depth = 0;
+            let sawBlock = false;
+            let tail = "";
+            for (let i = at; i < body.length; i += 1) {
+              const ch = body[i];
+              if (ch === "{") depth += 1;
+              else if (ch === "}") {
+                depth -= 1;
+                if (depth < 0) break;
+                if (depth === 0) sawBlock = true;
+              }
+              if (
+                !sawBlock
+                && depth === 0
+                && body.startsWith("else", i)
+                && /\s/.test(body[i - 1] ?? " ")
+              ) {
+                break;
+              }
+              tail += ch;
+            }
+            for (const reader of readers) {
+              if (commanders.has(reader)) continue;
+              if (new RegExp(`\\b${reader}\\s*\\(`).test(tail)) {
+                offenders.add(`${owner} -> ${reader}`);
+              }
+            }
+          }
         }
       }
       expect(
         [...offenders],
-        `called after devices.action(), which can only see pre-command state`,
+        `a projection that reads devices.list() runs after a command, so it can only see pre-command state`,
       ).toEqual([]);
     },
   );

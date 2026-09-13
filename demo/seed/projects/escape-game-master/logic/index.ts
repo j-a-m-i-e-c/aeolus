@@ -22,14 +22,20 @@ export default async function run(context: EventContext) {
   // A session that has run out of time is retired here, so the recorded status catches
   // up with the clock the next time anything wakes this automation.
   reconcileExpiry();
-  // Refresh what the room is physically doing before and after acting, so the
-  // console reports the controller's observed scene rather than the last thing this
-  // automation asked for.
+  // What the room is physically doing, read once, here.
+  //
+  // This used to be called again after each action, on the stated reasoning that it
+  // refreshed the scene "before and after acting". It cannot: devices.list() is a
+  // snapshot serialised into the isolate once per execution, so a second read returns
+  // the same values as the first. The repeat was harmless — identical values written
+  // twice — but the reasoning was the same one that produced real misreports in nine
+  // other projects, and a comment claiming a refresh that cannot happen is worse than
+  // no comment. Room Systems reports the applied scene back through
+  // `escape/observed/room-look`, which is what actually closes the loop.
   projectRoomLook();
 
   if (topic.startsWith("ui/")) {
     await handleGameMasterAction(event);
-    projectRoomLook();
     return;
   }
 
@@ -43,5 +49,4 @@ export default async function run(context: EventContext) {
 
   const complete = projectPuzzleStatus(payload);
   await reconcileExitForCompletion(complete);
-  projectRoomLook();
 }
