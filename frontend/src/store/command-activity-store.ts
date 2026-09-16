@@ -1,20 +1,20 @@
 // frontend/src/store/command-activity-store.ts
 // showcase-cleanup §2.8 — live command activity, per automation.
 //
-// Assembles the durable lifecycle transitions arriving over the WebSocket into one
-// growing record per command, so a pane can watch the evidence stages be reached
-// instead of receiving the whole ladder in a single write.
+// Assembles durable lifecycle transitions arriving over the WebSocket into one
+// growing record per command. The platform-owned Evidence inspector merges this live
+// stream over its durable REST backfill; advanced authored UIs may also read the same
+// scoped activity for domain-specific in-progress feedback.
 //
 // The assembled shape is deliberately the same shape `devices.commandEvidence()`
-// returns, so `commandProof()` and `CommandProofCard` consume it with no reshaping and
-// a pane uses one rendering path for live and settled commands alike.
+// returns, so the shared proof renderers consume it without a second live-only model.
 //
 // What it does NOT do is fill in the parts the transition event does not carry. There
 // is no capability snapshot here, so a live command's ACKNOWLEDGED and OBSERVED stages
-// read as `not-recorded` rather than claiming a capability nobody reported. Once Logic
-// projects the settled receipt, the snapshot arrives with it and the stages explain
-// themselves properly. A live view that guessed the ceiling in the meantime would be
-// inventing the one fact the whole model exists to record honestly.
+// read as `not-recorded` rather than claiming a capability nobody reported. The
+// platform inspector gets that context from its durable backfill. A live view that
+// guessed the ceiling in the meantime would be inventing the one fact the whole model
+// exists to record honestly.
 //
 // Every update replaces the per-rule array rather than mutating it, so the broker's
 // reference-equality diff sees the change — the same contract

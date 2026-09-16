@@ -231,6 +231,7 @@ describe("automation.routes", () => {
   let mockExecutionLog: ReturnType<typeof createMockExecutionLog>;
   let mockStateStore: ReturnType<typeof createMockStateStore>;
   let mockConditionRegistry: ReturnType<typeof createMockConditionRegistry>;
+  let mockCommandHistoryStore: { listForRule: ReturnType<typeof vi.fn> };
 
   beforeEach(() => {
     mockDb = createMockDb();
@@ -240,6 +241,9 @@ describe("automation.routes", () => {
     mockExecutionLog = createMockExecutionLog();
     mockStateStore = createMockStateStore();
     mockConditionRegistry = createMockConditionRegistry();
+    mockCommandHistoryStore = {
+      listForRule: vi.fn(() => []),
+    };
 
     app = express();
     app.use(express.json());
@@ -257,6 +261,7 @@ describe("automation.routes", () => {
         undefined, // connectorRegistry
         mockStateStore as unknown as AutomationStateStore,
         mockConditionRegistry as unknown as ConditionRegistry,
+        mockCommandHistoryStore,
       ),
     );
     app.use(errorHandler);
@@ -308,6 +313,46 @@ describe("automation.routes", () => {
       const res = await request(app, "GET", "/api/automations/history?limit=1");
       expect(res.status).toBe(200);
       expect((res.body as any[]).length).toBe(1);
+    });
+  });
+
+  // ─── GET /api/automations/:id/command-evidence ───────────────────────────
+
+  describe("GET /api/automations/:id/command-evidence", () => {
+    it("returns bounded durable evidence for the readable automation", async () => {
+      mockDb._rows.push({ id: "rule-1" });
+      mockCommandHistoryStore.listForRule.mockReturnValue([
+        {
+          commandId: "cmd-1",
+          ruleId: "rule-1",
+          targetDeviceId: "pump-1",
+          actionType: "device_action",
+          effectiveTier: "observed",
+          lifecycleState: "OBSERVED",
+          requestedAt: 1000,
+          terminalAt: 1200,
+          success: true,
+          transitions: [
+            { id: 1, commandId: "cmd-1", toState: "REQUESTED", timestamp: 1000 },
+            { id: 2, commandId: "cmd-1", fromState: "REQUESTED", toState: "DISPATCHED", timestamp: 1050 },
+            { id: 3, commandId: "cmd-1", fromState: "DISPATCHED", toState: "OBSERVED", timestamp: 1200 },
+          ],
+        },
+      ]);
+
+      const res = await request(app, "GET", "/api/automations/rule-1/command-evidence?limit=9999");
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({
+        limit: 200,
+        commands: [{ commandId: "cmd-1", lifecycleState: "OBSERVED" }],
+      });
+      expect(mockCommandHistoryStore.listForRule).toHaveBeenCalledWith("rule-1", 200);
+    });
+
+    it("returns 404 before exposing evidence for a missing automation", async () => {
+      const res = await request(app, "GET", "/api/automations/missing/command-evidence");
+      expect(res.status).toBe(404);
+      expect(mockCommandHistoryStore.listForRule).not.toHaveBeenCalled();
     });
   });
 

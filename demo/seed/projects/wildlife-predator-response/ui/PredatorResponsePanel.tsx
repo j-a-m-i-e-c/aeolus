@@ -1,6 +1,6 @@
 // wildlife-predator-response — visual implementation behind ui/index.tsx
 import { useEffect, useState } from "react";
-import { CommandProofCard, control, decimal, metres, percent, rpm, toggleProps, watts } from "@aeolus/ui";
+import { control, decimal, metres, percent, rpm, toggleProps, watts } from "@aeolus/ui";
 export default function PredatorResponsePanel({ model, actions }: {
     model: Record<string, any>;
     actions: Record<string, (...args: any[]) => void>;
@@ -44,6 +44,5 @@ export default function PredatorResponsePanel({ model, actions }: {
       </div>
     </div>
     <div style={{ marginTop: 8, border: "1px solid #373B34", borderRadius: 10, padding: 9, background: "#0E100D" }}><div style={{ fontSize: 11, color: "#A0A69E", letterSpacing: ".1em", marginBottom: 7 }}>OPERATOR CONTROLS</div><div style={{ display: "flex", gap: 6 }}><button {...armVisual} style={{ ...armVisual.style, flex: 1, padding: "9px" }} onClick={() => actions.toggleArmed()}>{pending ? "Verifying deterrent command…" : armed ? "Disarm response" : "Arm response"}</button><button {...stopVisual} style={{ ...stopVisual.style, flex: 1, padding: "9px" }} onClick={() => actions.stopDeterrent()}>Stop active pulse</button></div><div style={{ fontSize: 11, color: "#767D75", marginTop: 7 }}>No simulator controls here. Only predator-classified domain events can request this actuator.</div></div><div style={{ fontSize: 11, color: "#7B827A", marginTop: 7 }}>{pending ? "Waiting for command verification…" : last?.label ? String(last.label) : outcome}</div>
-    <CommandProofCard evidence={model.lastCommand}/>
     </div>;
 }

@@ -64,6 +64,7 @@ describe("buildDemoPolicy", () => {
     // Seeded showcase automations are Automation Projects; the demo's read-only
     // source viewer fetches this tree, so it must stay allowlisted.
     expect(has("GET", "/api/automations/:id/project")).toBe(true);
+    expect(has("GET", "/api/automations/:id/command-evidence")).toBe(true);
     expect(has("GET", "/api/data-store/collections/:name/records")).toBe(true);
     expect(has("PUT", "/api/automations/:id/state")).toBe(true);
     expect(has("POST", "/api/automations/:id/fire")).toBe(true);

@@ -17,7 +17,6 @@ export default function CtdOperations(aeolus: CustomComponentProps) {
     verticalSpeed: aeolus.read("verticalSpeed"),
     commandPending: aeolus.read("commandPending"),
     interlockAt: aeolus.read("interlockAt"),
-    lastCommand: aeolus.read("lastCommand"),
     lastAction: aeolus.read("lastAction"),
   };
 

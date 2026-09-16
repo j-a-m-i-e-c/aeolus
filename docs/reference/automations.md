@@ -175,113 +175,107 @@ holds no reference to the SDK or the host page, so it widens what a custom UI ca
 express without widening what it can do. Any other bare import is still refused at
 compile time.
 
-### Showing what a command proved
+### Command Evidence
 
-Logic reads back the evidence for commands it issued and projects it into automation
-state; the pane renders it with a shared component. Two shapes, matching the two
-shapes an operation takes:
+Command Evidence is a platform-owned runtime surface.
+
+Every Automation Pane has an **Evidence** button beside **Edit**. The inspector shows
+the recent physical commands issued by that automation, groups commands that belong to
+the same execution, and renders the fixed Aeolus proof scaffold:
+
+```text
+REQUESTED → DISPATCHED → ACKNOWLEDGED → OBSERVED
+```
+
+The inspector reads durable command history from the backend and merges it with the
+live lifecycle feed. A stage appears only when Aeolus records it. Unsupported,
+unconfigured and not-required stages stay visible and say why they were not reached.
+
+This keeps authored UIs about their physical system. A water automation should spend
+its space on tanks, pumps and operator controls rather than recreating the platform's
+audit UI.
+
+The author still supplies semantic context at command time:
 
 ```ts
-// One physical command per execution.
-const result = await devices.action(pump.id, "command", { payload: { on: true } }, {
-  tier: "observed",
-  deviceId: flow.id,
-  condition: { field: "litresPerMinute", op: "gt", value: 0 },
-  evidence: { intent: "Transfer 500 L", observedLabel: "Flow detected" },
-});
-state.set("lastCommand", devices.commandEvidence(result.commandId));
-
-// Several physical commands per execution, grouped under the trigger that caused them.
-state.set("lastExecution", devices.executionEvidence());
+const result = await devices.action(
+  pump.id,
+  "command",
+  { payload: { on: true } },
+  {
+    tier: "observed",
+    deviceId: flow.id,
+    condition: { field: "litresPerMinute", op: "gt", value: 0 },
+    evidence: {
+      intent: "Transfer 500 L",
+      observedLabel: "Flow detected",
+    },
+  },
+);
 ```
 
-```tsx
-import { CommandExecutionCard, CommandProofCard } from "@aeolus/ui";
+Everything that decides whether the command was proven remains platform-owned.
+`intent` and `observedLabel` explain the operation; they cannot change lifecycle
+states, capability ceilings or observed conditions.
 
-<CommandProofCard evidence={aeolus.read("lastCommand")} />
-<CommandExecutionCard evidence={aeolus.read("lastExecution")} label="Last cue" />
+The inspector is authorized like the automation itself. A user with read access to an
+automation can inspect commands issued by that automation and cannot use the endpoint
+to enumerate commands from another automation, REST actions or system commands.
+
+### Programmatic evidence in Logic and custom UI
+
+The lower-level evidence APIs remain available when an automation genuinely needs to
+reason about or present command evidence itself:
+
+```ts
+const receipt = devices.commandEvidence(result.commandId);
+const execution = devices.executionEvidence();
 ```
 
-Both reads are scoped to the calling rule: an automation sees commands it issued and
-nothing else. `executionEvidence()` resolves the running execution on the host, so it
-normally takes no argument.
+Both reads are scoped to the calling rule. `executionEvidence()` normally resolves the
+running execution on the host, so it takes no argument.
 
-`CommandProofCard` renders all four canonical stages whatever the command proved, and
-an unreached stage states why it was not reached. `CommandExecutionCard` groups an
-execution's commands, names its trigger from the record, and lets each command keep
-its own tier — a group is summarised by how many commands proved what was asked, never
-by a single tier, because commands that reached different tiers have none between them.
+`@aeolus/ui` still exports `commandProof()`, `CommandProofCard` and
+`CommandExecutionCard` for bespoke custom UIs. They are optional components now, not
+something each normal pane is expected to mount.
 
-Use the grouped card wherever one trigger issues more than one physical command.
-Keeping a single `lastCommand` in that case reports whichever command settled last and
-looks complete doing it.
+Use `CommandExecutionCard` instead of a single-command receipt when one execution
+issues several physical commands. Commands within one execution may honestly prove
+different tiers; the group therefore reports how many commands proved what was asked
+rather than inventing one tier for the whole execution.
 
 ### If your UI still calls the ladder helpers
 
 `commandLadder()`, `commandVerdict()`, `rungProps()` and `verdictProps()` were removed
 ([ADR-0014](../adr/0014-fixed-command-proof-scaffold.md)). They derived one rung per
-recorded transition, so a stage a device can never reach looked exactly like a stage that
-was required and never came — which is the distinction the proof surface exists to make.
+recorded transition, so a stage a device can never reach looked exactly like a stage
+that was required and never came.
 
-They are not aliased to anything, because a working alias would put that rendering back.
-Calling one now throws an error naming its replacement:
+They are not aliased to anything:
 
 | Removed | Use instead |
 | --- | --- |
 | `commandLadder(evidence)` | `commandProof(evidence)`, or `<CommandProofCard/>` |
-| `commandVerdict(evidence)` | `commandProof(evidence)` — the result carries the verdict |
+| `commandVerdict(evidence)` | `commandProof(evidence)` |
 | `rungProps(rung)` | `proofStageProps(stage)`, or `<CommandProofCard/>` |
 | `verdictProps(verdict)` | `proofHeadlineProps(proof)`, or `<CommandProofCard/>` |
 
-Most panes need none of them: `<CommandProofCard evidence={...}/>` renders the whole
-surface, which is why eight showcase panes deleted their hand-rolled proof blocks.
+### Live command activity
 
-`evidence: { intent, observedLabel }` is the only author-supplied part of a receipt,
-and both labels are trimmed, stripped of control characters and capped. Everything
-that decides whether a command was *proven* is platform-owned, so a caption cannot
-overstate a tier.
+`aeolus.commands` remains available to custom UIs as an advanced read-only capability.
+It contains this automation's recent commands as lifecycle events are durably recorded.
 
-### Watching a command be proven
+Use it when the authored UI needs domain-specific feedback such as a compact
+"verifying pump start" indicator. Do not use it merely to recreate the standard
+Evidence inspector.
 
-A projected receipt is always complete by the time it exists: `devices.action()` resolves
-at its completion tier and Logic projects afterwards. So a pane using only the projection
-can report that a command was proven, never that it is being proven.
+Important properties:
 
-`aeolus.commands` is the live feed for that. It is this automation's recent commands,
-newest first, each growing as its lifecycle transitions are durably recorded:
-
-```tsx
-// The one still climbing, if any.
-const inFlight = (aeolus.commands ?? []).find(
-  (command) => (command as { terminalAt?: number }).terminalAt === undefined,
-);
-
-<CommandProofCard
-  evidence={inFlight ?? aeolus.read("lastCommand")}
-  label={inFlight ? "Command in flight" : "Last command"}
-/>
-```
-
-Each entry is shaped like a `commandEvidence` record, so `commandProof()` and
-`CommandProofCard` read it with no reshaping and a pane needs one rendering path.
-
-Three properties worth knowing:
-
-- **Stages appear when the runtime records them.** Each transition is broadcast only
-  after its durable write commits. Never add client-side staggered timers or
-  interpolate between recorded stages — that is fabricated timing, and it defeats the
-  point of recording real ones.
-- **The feed carries no capability snapshot.** A transition does not report one, so an
-  unreached stage on an in-flight command reads `not-recorded` rather than claiming a
-  device cannot acknowledge. Prefer the projected receipt once a command settles: it
-  has the snapshot and can explain the stages the command did not reach.
-- **It is bounded and starts empty.** A pane sees commands that transition while it is
-  mounted, not history from before it loaded.
-
-The host mediates the feed; the frame holds no token and cannot ask for another
-automation's activity. The broadcast is scoped to the tabs exposing the automation that
-issued the command, the same scope as that automation's state, and a command issued
-outside any automation stays admin-only.
+- stages arrive from real durable lifecycle writes, never client timers;
+- the live message intentionally carries less metadata than a full durable receipt;
+- the feed is bounded and starts empty when the page mounts;
+- historical backfill belongs to the platform Evidence inspector, not the sandbox
+  frame.
 
 ## Actions
 

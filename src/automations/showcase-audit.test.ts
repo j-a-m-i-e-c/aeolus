@@ -188,25 +188,16 @@ describe("showcase audit — every seeded tab", () => {
     },
   );
 
-  // §2.5 from the other side: a receipt the Logic records and the pane never renders is
-  // invisible proof, and a card with nothing feeding it renders an empty surface. Both
-  // halves have to exist together, and the pairing has to match — a project that groups
-  // its commands under one execution needs the execution card, not the single-command one.
+  // Command Evidence is platform chrome. A custom UI may still project a receipt for
+  // its own bespoke logic, but the seeded showcase must not spend application space
+  // recreating the platform's standard audit surface.
   it.each(WITH_UI.map((p) => [p.name, p] as const))(
-    "%s renders the receipt it records, and records the receipt it renders",
+    "%s leaves the standard command-evidence surface to AutomationPane",
     (_name, project) => {
-      const recordsCommand = /state\.set\(\s*["']lastCommand["']/.test(project.logic);
-      const recordsExecution = /state\.set\(\s*["']lastExecution["']/.test(project.logic);
-      const rendersCommand = project.ui.includes("CommandProofCard");
-      const rendersExecution = project.ui.includes("CommandExecutionCard");
-
-      expect(rendersCommand, "records lastCommand but renders no CommandProofCard").toBe(
-        recordsCommand,
-      );
-      expect(
-        rendersExecution,
-        "records lastExecution but renders no CommandExecutionCard",
-      ).toBe(recordsExecution);
+      expect(project.ui).not.toContain("CommandProofCard");
+      expect(project.ui).not.toContain("CommandExecutionCard");
+      expect(project.ui).not.toContain('aeolus.read("lastCommand")');
+      expect(project.ui).not.toContain('aeolus.read("lastExecution")');
     },
   );
 

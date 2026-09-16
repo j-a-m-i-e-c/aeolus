@@ -595,6 +595,54 @@ export class CommandHistoryStore {
     }));
   }
 
+  /**
+   * Return recent commands issued by one automation, newest first, with each
+   * command's complete transition timeline.
+   *
+   * This is the platform-facing history counterpart to {@link getForRule}: the
+   * Automation Pane Evidence inspector needs more than the one command a custom
+   * UI happened to project into state. The `rule_id` predicate is applied in SQL
+   * so callers cannot accidentally broaden the read to another automation.
+   *
+   * The result is deliberately bounded by the same clamp as {@link list}. The
+   * UI is an operational inspector, not an unbounded audit export.
+   */
+  listForRule(ruleId: string, limit?: number): CommandRecordWithTransitions[] {
+    if (!ruleId) return [];
+
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM command_records
+           WHERE rule_id = ?
+           ORDER BY requested_at DESC, rowid DESC
+           LIMIT ?`,
+      )
+      .all(ruleId, clampLimit(limit)) as CommandRow[];
+    if (rows.length === 0) return [];
+
+    // Fetch all member transitions in one query rather than one lookup per row.
+    const placeholders = rows.map(() => "?").join(", ");
+    const transitions = this.db
+      .prepare(
+        `SELECT * FROM command_transitions
+           WHERE command_id IN (${placeholders})
+           ORDER BY id ASC`,
+      )
+      .all(...rows.map((row) => row.command_id)) as TransitionRow[];
+
+    const byCommand = new Map<string, CommandTransition[]>();
+    for (const row of transitions) {
+      const list = byCommand.get(row.command_id);
+      if (list) list.push(rowToTransition(row));
+      else byCommand.set(row.command_id, [rowToTransition(row)]);
+    }
+
+    return rows.map((row) => ({
+      ...rowToRecord(row),
+      transitions: byCommand.get(row.command_id) ?? [],
+    }));
+  }
+
   /** Return a command with its chronological transition timeline, or undefined. */
   get(commandId: string): CommandRecordWithTransitions | undefined {
     const row = this.db

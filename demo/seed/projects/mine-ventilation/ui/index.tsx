@@ -14,7 +14,6 @@ export default function VentilationControl(aeolus: CustomComponentProps) {
     manualOverride: aeolus.read("manualOverride"),
     commandPending: aeolus.read("commandPending"),
     atmosphereSeverity: aeolus.read("atmosphereSeverity"),
-    lastCommand: aeolus.read("lastCommand"),
     lastAction: aeolus.read("lastAction"),
   };
 

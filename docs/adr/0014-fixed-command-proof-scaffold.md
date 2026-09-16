@@ -165,26 +165,27 @@ strongest. A count is a true statement about a group.
 - Two migrations add thirteen nullable columns to `command_records`. They are write-once
   at acceptance, so the cost is storage rather than contention, but the table is wider
   for a presentation concern.
-- The scaffold is taller. A dispatch-only command now renders four lines where it
-  rendered two, and two of those lines say nothing happened. That verbosity is the
-  feature, but it costs vertical space on dense panes.
+- The fixed scaffold is deliberately verbose when expanded. Moving the standard
+  presentation into a right-hand inspector keeps authored panes uncluttered, but the
+  inspector still spends four rows to teach the capability/evidence ladder honestly.
 - Pre-017 and pre-018 records render `not-recorded` and carry no trigger. The
   scaffold degrades honestly, but early history is permanently less explanatory.
 - `intentLabel` is author-supplied, so an author can still name an operation badly.
   Sanitisation bounds the damage to a poor caption, not a false tier.
-- Adopting the grouped card is a per-project decision. A project that issues several
-  commands per execution and keeps `CommandProofCard` still loses commands; the
-  adoption test pins which projects are which, but the platform cannot detect it.
+- Grouping now belongs to the platform inspector rather than each project. Authored
+  UIs can still opt into the lower-level proof components, so a bespoke UI can choose
+  a less complete presentation; that is an explicit advanced-use trade-off rather
+  than the showcase default.
 - `command-lifecycle` is no longer admin-only. The scope is the automation's own
   exposing tabs and the payload adds nothing readable at that scope, but it is a
   widening, and an automation placed on a tab now discloses its command timing there.
-- The live feed is bounded per automation and starts empty on mount, so a pane cannot
-  show a command that settled before it loaded. That is a real limitation, accepted
-  because the alternative is a backfill read surface this ADR does not need.
-- Two sources now describe the same command: the live feed and the projected receipt.
-  They agree, being built from the same durable transitions, but a pane must choose
-  which to render, and choosing the live one for a settled command would show
-  `not-recorded` where the snapshot has the answer.
+- The live feed remains bounded and intentionally metadata-light. The inspector now
+  backfills from durable rule-scoped history and merges live lifecycle events over it,
+  which adds one read surface and merge path that must stay scope-correct.
+- Two sources describe an open inspector's command: the durable snapshot and the live
+  transition stream. They are built from the same committed lifecycle writes; the
+  merge must preserve durable capability/intent metadata while letting live lifecycle
+  fields advance.
 
 ## Live progression
 
@@ -225,14 +226,26 @@ The read-only neutralisation was rewritten from a denylist of mutating ops to an
 allowlist of reads while adding this. With a denylist a future op is permitted by
 omission and the failure is silent; with an allowlist omission denies.
 
+11. **The standard surface belongs to AutomationPane chrome.** Command Evidence is
+    runtime provenance supplied by Aeolus, not part of an authored application's
+    domain UI. Every persisted automation therefore gets an Evidence action beside
+    Edit. The right-hand inspector uses the shared proof components, while showcase
+    UIs stop mounting those components themselves. `@aeolus/ui` keeps the components
+    available for genuinely bespoke evidence presentations.
+
+12. **Backfill from a rule-scoped durable read.** The inspector must explain commands
+    that happened before the browser mounted, so the deferred read surface is now
+    justified. `GET /api/automations/:id/command-evidence` returns a bounded recent
+    history with complete transition timelines and uses the same automation `read`
+    permission as state/source/history. The global `/api/commands` surface remains
+    admin-only. Live WebSocket records are merged over the durable snapshot so an open
+    inspector can watch a command climb without fabricating timing.
+
 ## Revisit when
 
 - A pane needs a command's capability context while it is still in flight. That means
   carrying the snapshot on the transition event, which widens what the broadcast
   discloses and should be decided on its own terms rather than added for convenience.
-- A pane needs command history it did not observe live. The live feed is bounded and
-  starts empty on mount, deliberately: a backfill is a rule-scoped read surface, which
-  is the tab-scoped HTTP route ADR-0011 declined to build speculatively.
 - Retention becomes a question. Wider rows make `command_records` growth a product
   concern sooner.
 - A third proof shape appears — a receipt spanning several executions, say. Two
@@ -248,6 +261,9 @@ omission and the failure is silent; with an allowlist omission denies.
 - `frontend/src/sandbox/ui-kit/command-proof.ts`
 - `frontend/src/sandbox/ui-kit/command-execution.ts`
 - `frontend/src/store/command-activity-store.ts`
+- `frontend/src/components/CommandEvidenceInspector.tsx`
+- `frontend/src/components/panes/AutomationPane.tsx`
+- `src/api/routes/automation.routes.ts` (rule-scoped durable backfill)
 - `frontend/src/sandbox/sdk-broker.ts` (the read-only allowlist)
 - `src/index.ts` (the `command-lifecycle` visibility scope)
 - `docs/adr/0011-command-evidence-surface.md`

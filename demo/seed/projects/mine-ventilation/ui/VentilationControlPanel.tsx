@@ -1,6 +1,6 @@
 // mine-ventilation — visual implementation behind ui/index.tsx
 import { useEffect, useState } from "react";
-import { CommandProofCard, control, formatNumber } from "@aeolus/ui";
+import { control, formatNumber } from "@aeolus/ui";
 export default function VentilationControlPanel({ model, actions }: {
     model: Record<string, any>;
     actions: Record<string, (...args: any[]) => void>;
@@ -27,7 +27,6 @@ export default function VentilationControlPanel({ model, actions }: {
     </svg></div>
     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 7 }}><div style={{ border: "1px solid #30363A", borderRadius: 8, padding: 7, background: "#0B0E10" }}><div style={{ fontSize: 11, color: "#707A80" }}>ATMOSPHERIC REQUEST</div><div style={{ fontSize: 17, fontFamily: "monospace", fontWeight: 800, color: requested >= 80 ? "#F0B85D" : "#B9C7CC", marginTop: 2 }}>{Math.round(requested)}%</div><div style={{ fontSize: 11, color: "#626D72" }}>{severity.toUpperCase()} from Atmospheric Safety</div></div><div style={{ border: "1px solid #30363A", borderRadius: 8, padding: 7, background: "#0B0E10" }}><div style={{ fontSize: 11, color: "#707A80" }}>PHYSICAL OUTPUT</div><div style={{ fontSize: 17, fontFamily: "monospace", fontWeight: 800, color, marginTop: 2 }}>{formatNumber(airflow, 0)} m³/s</div><div style={{ fontSize: 11, color: "#626D72" }}>fan mode {mode}</div></div></div>
     <div style={{ marginTop: 7, border: "1px solid #343A3E", borderRadius: 9, padding: 8, background: "#0D1012" }}><div style={{ fontSize: 11, color: "#8D969B", letterSpacing: ".12em", marginBottom: 6 }}>OPERATOR CONTROLS</div><div style={{ display: "flex", gap: 5 }}><button {...boostVisual} style={{ ...boostVisual.style, flex: 1 }} onClick={() => actions.forceBoost()}>{boosting ? "Forcing boost…" : manual ? "Boost held" : "Force boost"}</button><button {...autoVisual} style={{ ...autoVisual.style, flex: 1 }} onClick={() => actions.returnAuto()}>{releasing ? "Returning to automatic control…" : "Return to automatic control"}</button></div><div style={{ fontSize: 11, color: "#626B70", marginTop: 6 }}>Automatic boost requests come over the Aeolus event bus from Atmospheric Safety. This pane owns the fan actuator.</div></div>
-    <CommandProofCard evidence={model.lastCommand}/>
     <div style={{ fontSize: 11, color: "#60696D", marginTop: 6, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{action}</div>
 
     </div>;

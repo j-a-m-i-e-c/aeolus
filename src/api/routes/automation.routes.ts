@@ -9,6 +9,7 @@ import type { AutomationEngine } from "../../automations/automation-engine.js";
 import type { DeviceRegistry } from "../../core/device-registry.js";
 import type { CommandService, ActionDescriptor } from "../../automations/command-service.js";
 import type { ExecutionLog } from "../../automations/execution-log.js";
+import type { CommandHistoryStore } from "../../automations/command-history-store.js";
 import type { EventContext, NormalizedEvent, Rule } from "../../core/types.js";
 import type { ConditionRegistry } from "../../automations/condition-registry.js";
 import { transpileUi } from "../../automations/transpiler.js";
@@ -75,6 +76,7 @@ export function createAutomationRoutes(
   connectorRegistry?: ConnectorRegistry,
   stateStore?: AutomationStateStore,
   conditionRegistry?: ConditionRegistry,
+  commandHistoryStore?: Pick<CommandHistoryStore, "listForRule">,
 ): Router {
   const router = Router();
 
@@ -229,6 +231,34 @@ export function createAutomationRoutes(
       entries = entries.slice(0, limit);
     }
     res.json(entries);
+  });
+
+  /**
+   * GET /api/automations/:id/command-evidence — bounded durable command history
+   * for one readable automation, including complete transition timelines.
+   *
+   * This is the platform-owned Evidence inspector surface. It intentionally lives
+   * beside automation state/history rather than under the admin-only global
+   * /api/commands route: a user who may read an automation may inspect what that
+   * automation physically commanded, but gains no visibility into unrelated
+   * automations, REST-origin commands, or system commands.
+   */
+  router.get("/:id/command-evidence", (req, res, next) => {
+    const id = req.params.id as string;
+    if (!queryRuleById(db, id)) {
+      return next(new NotFoundError(`Automation rule ${id} not found`));
+    }
+    if (!canReadAutomation(req, id)) {
+      return next(new ForbiddenError());
+    }
+
+    const rawLimit = req.query.limit === undefined ? 100 : Number(req.query.limit);
+    const limit = Number.isFinite(rawLimit)
+      ? Math.max(1, Math.min(200, Math.floor(rawLimit)))
+      : 100;
+
+    const commands = commandHistoryStore?.listForRule(id, limit) ?? [];
+    return res.json({ commands, limit });
   });
 
   /**

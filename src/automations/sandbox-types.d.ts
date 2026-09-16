@@ -314,15 +314,18 @@ declare const devices: {
    * resolves, so there is nothing to wait for.
    *
    * Returns `undefined` for a command this automation did not issue, an unknown
-   * id, or an action that was never a verified physical command. Project the value
-   * into state and render it with `<CommandProofCard>` from `@aeolus/ui`.
+   * id, or an action that was never a verified physical command. Aeolus exposes
+   * the standard history automatically from the Automation Pane's Evidence
+   * inspector; call this lower-level API only when Logic itself needs to retain or
+   * reason about a particular command's evidence.
    *
    * ```ts
    * const result = await devices.action(pump.id, "command", { on: true }, {
    *   tier: "observed",
    *   condition: { field: "litresPerMinute", op: "gt", value: 0 },
    * });
-   * state.set("lastCommand", devices.commandEvidence(result.commandId));
+   * const proof = devices.commandEvidence(result.commandId);
+   * if (proof?.lifecycleState === "OBSERVED") state.set("lastVerifiedAt", Date.now());
    * ```
    */
   commandEvidence(commandId?: string): CommandEvidenceRecord | undefined;
@@ -343,14 +346,15 @@ declare const devices: {
    * call it after the actions you want it to include have resolved.
    *
    * Returns `undefined` outside an execution, or when the execution issued no
-   * physical commands. Project it into state and render with
-   * `<CommandExecutionCard>` from `@aeolus/ui`.
+   * physical commands. The Automation Pane Evidence inspector groups durable
+   * command history by execution automatically; use this lower-level read when
+   * Logic has a domain-specific reason to inspect the group itself.
    *
    * ```ts
    * await runLightingCue(scene, master, transitionMs, label);
    * await runPhysicalEffect(effect, pulseMs, label);
-   * // One receipt covering both, grouped under the cue that caused them.
-   * state.set("lastExecution", devices.executionEvidence());
+   * const proof = devices.executionEvidence();
+   * state.set("physicalCommandCount", proof?.commands.length ?? 0);
    * ```
    */
   executionEvidence(executionId?: string): CommandExecutionEvidence | undefined;

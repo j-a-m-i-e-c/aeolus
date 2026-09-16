@@ -107,6 +107,9 @@ export function buildDemoPolicy(deps: DemoValidatorDeps): DemoPolicyEntry[] {
     // exposes the same authored source already returned by GET /:id, just as a
     // file tree. The PUT counterpart stays unlisted so authoring remains blocked.
     { method: "GET", pattern: "/api/automations/:id/project" },
+    // Command Evidence is a read-only platform inspector scoped by the same
+    // automation resource permission as state and source browsing.
+    { method: "GET", pattern: "/api/automations/:id/command-evidence" },
     { method: "GET", pattern: "/api/automations/history" },
     { method: "GET", pattern: "/api/data-store/collections" },
     { method: "GET", pattern: "/api/data-store/collections/:name/records" },

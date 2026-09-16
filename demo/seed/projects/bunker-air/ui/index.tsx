@@ -9,7 +9,6 @@ export default function AirFiltration(aeolus: CustomComponentProps) {
     overpressure: aeolus.read("overpressure"),
     filterLife: aeolus.read("filterLife"),
     pending: aeolus.read("pending"),
-    lastCommand: aeolus.read("lastCommand"),
     lastAction: aeolus.read("lastAction"),
   };
 

@@ -10,6 +10,7 @@ import {
   Loader2,
   AlertTriangle,
   RotateCcw,
+  ShieldCheck,
 } from "lucide-react";
 import { authFetch } from "../../lib/auth-fetch";
 const AutomationProjectEditor = lazy(() => import("../AutomationProjectEditor").then(m => ({ default: m.AutomationProjectEditor })));
@@ -17,6 +18,7 @@ import type { AutomationProjectSource } from "../AutomationProjectEditor";
 import { FlowDiagram } from "../FlowDiagram";
 import { ActivityFeed } from "../ActivityFeed";
 import { AutomationAuthoringFields } from "../AutomationAuthoringFields";
+import { CommandEvidenceInspector } from "../CommandEvidenceInspector";
 import { createDefaultAutomationProject, describeAutomationTrigger, triggerIsConfigured, type TranspileError } from "../automation-authoring";
 import { SandboxHost } from "../../sandbox/SandboxHost";
 import type { PropsPayload } from "../../sandbox/rpc-types";
@@ -26,6 +28,7 @@ import { useAuthStore } from "../../store/auth-store";
 import { usePermissionsStore } from "../../store/permissions-store";
 import { useDeviceStore, type Device } from "../../store/device-store";
 import { useAutomationStateStore } from "../../store/automation-state-store";
+import { useCommandActivityStore } from "../../store/command-activity-store";
 import type { PaneConfig } from "../../types/dashboard";
 
 import { API_URL, PUBLIC_DEMO } from "../../lib/env";
@@ -103,6 +106,7 @@ export function AutomationPane({ config, paneId }: Props) {
   const [notFound, setNotFound] = useState(false);
   const [executionHistory, setExecutionHistory] = useState<ExecutionEntry[]>([]);
   const [draftSavedAt, setDraftSavedAt] = useState<number | null>(null);
+  const [evidenceOpen, setEvidenceOpen] = useState(false);
 
   // Track ruleId changes to switch modes
   useEffect(() => {
@@ -117,6 +121,7 @@ export function AutomationPane({ config, paneId }: Props) {
   const devices = useDeviceStore((s) => s.devices);
   const automationEvents = useDeviceStore((s) => s.automationEvents);
   const ruleState = useAutomationStateStore((s) => s.stateByRule[ruleId]) ?? EMPTY_STATE;
+  const latestCommandActivity = useCommandActivityStore((s) => s.activityByRule[ruleId]?.[0]);
 
   useEffect(() => {
     if (!ruleId) return;
@@ -460,6 +465,7 @@ export function AutomationPane({ config, paneId }: Props) {
     const hasUiSource = rule.hasUi === true;
 
     return (
+      <>
       <div className="h-full flex flex-col p-4 gap-3 overflow-auto">
         {/* Header */}
         <div className="flex items-center justify-between">
@@ -468,15 +474,36 @@ export function AutomationPane({ config, paneId }: Props) {
               {describeAutomationTrigger(rule)}
             </div>
           </div>
-          {rule.ruleType === "script" && (
+          <div className="flex shrink-0 items-center gap-1.5">
             <button
-              onClick={handleEdit}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg text-[#9AA6B2] hover:text-[#E6EDF3] hover:bg-elevated/50 border border-[#2A3441] transition-colors shrink-0"
+              onClick={() => setEvidenceOpen(true)}
+              className="relative flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg text-[#9AA6B2] hover:text-[#E6EDF3] hover:bg-elevated/50 border border-[#2A3441] transition-colors"
             >
-              <Pencil size={12} />
-              Edit
+              <ShieldCheck size={12} />
+              Evidence
+              {latestCommandActivity && (
+                <span
+                  aria-hidden="true"
+                  className={`h-1.5 w-1.5 rounded-full ${
+                    latestCommandActivity.terminalAt === undefined
+                      ? "bg-[#F59E0B] animate-pulse"
+                      : latestCommandActivity.success === false
+                        ? "bg-[#EF4444]"
+                        : "bg-[#22C55E]"
+                  }`}
+                />
+              )}
             </button>
-          )}
+            {rule.ruleType === "script" && (
+              <button
+                onClick={handleEdit}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg text-[#9AA6B2] hover:text-[#E6EDF3] hover:bg-elevated/50 border border-[#2A3441] transition-colors"
+              >
+                <Pencil size={12} />
+                Edit
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Runtime status. Deliberate interactions belong in the project UI, not a generic bypass button. */}
@@ -518,6 +545,13 @@ export function AutomationPane({ config, paneId }: Props) {
           />
         </div>
       </div>
+      <CommandEvidenceInspector
+        open={evidenceOpen}
+        ruleId={ruleId}
+        ruleName={rule.name}
+        onClose={() => setEvidenceOpen(false)}
+      />
+      </>
     );
   }
 

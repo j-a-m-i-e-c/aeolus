@@ -1,6 +1,6 @@
 // farm-water — visual implementation behind ui/index.tsx
 import { useEffect, useState } from "react";
-import { CommandProofCard, control } from "@aeolus/ui";
+import { control } from "@aeolus/ui";
 import { clamp, useSmooth } from "./hooks";
 import { WaterSchematic } from "./WaterSchematic";
 export default function WaterManagementDashboard({ model, actions }: {
@@ -83,30 +83,6 @@ export default function WaterManagementDashboard({ model, actions }: {
           <button {...stopVisual} style={{ ...stopVisual.style, padding: "7px 4px" }} onClick={() => actions.pumpStop()}>{transferStopping ? "Stopping pump…" : "Stop transfer"}</button>
         </div>
 
-        {/* Directly under the controls that caused it, so the proof names an action the
-            operator recognises rather than sitting anonymously at the foot of the pane.
-            Every stage is a durable record the runtime wrote; nothing here is inferred
-            from the outcome. */}
-        {/* While a command is in flight, show the live one: its stages appear as the
-            runtime records them, so the operator watches the transfer being verified
-            rather than being told afterwards that it was. Once it settles the projected
-            receipt takes over, because that one carries the capability snapshot and can
-            explain any stage the command did not reach. One card either way — the live
-            feed and the receipt are the same shape. */}
-        {/* Open by default, only here. §4.4 makes this the reference Command Proof
-            example and §16 asks that an unsupported stage be visible as unsupported
-            rather than hidden — and a collapsed card hides exactly that: the four
-            canonical stage names and the reason each unreached one was not reached sit
-            behind the toggle. Water is the pane to spend that vertical space on, because
-            all three of its commands are observed against an independent instrument, so
-            the expanded ladder is showing real measurements rather than explaining
-            absences. Every other pane stays collapsed; a tab that opened four of these
-            at once would bury the telemetry the proof is about. */}
-        <CommandProofCard
-          evidence={model.liveCommand ?? model.lastCommand}
-          label={model.liveCommand ? "Command in flight" : "Last command"}
-          defaultExpanded
-        />
       </div>
 
       <div style={{ marginTop: 18, padding: 10, border: "1px dashed #6A5935", borderRadius: 10, background: "#17150D" }}>

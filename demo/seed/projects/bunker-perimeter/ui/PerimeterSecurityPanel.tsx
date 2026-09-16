@@ -1,6 +1,6 @@
 // bunker-perimeter — visual implementation behind ui/index.tsx
 import { useEffect, useState } from "react";
-import { CommandProofCard, control, integer, metres, percent, toggleProps } from "@aeolus/ui";
+import { control, integer, metres, percent, toggleProps } from "@aeolus/ui";
 function Z({ x, y, p, lit, scale = 1 }: {
     x: number;
     y: number;
@@ -67,7 +67,6 @@ export default function PerimeterSecurityPanel({ model, actions }: {
       <div style={{ fontSize: 13, fontFamily: "monospace", fontWeight: 800, color: cell[2], marginTop: 3 }}>{cell[1]}</div>
     </div>)}</div>
     <div style={{ marginTop: 8, border: "1px solid #373A33", borderRadius: 10, padding: 9, background: "#0F110E" }}><div style={{ fontSize: 11, color: "#9BA097", letterSpacing: ".1em", marginBottom: 7 }}>OPERATOR CONTROLS</div><div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}><button {...lightVisual} style={{ ...lightVisual.style, padding: "9px" }} onClick={() => actions.toggleLights()}>{!available ? "Floodlight controller offline" : pending ? "Verifying floodlight command…" : lights ? "Turn floodlights off" : "Turn floodlights on"}</button><button {...autoVisual} style={{ ...autoVisual.style, padding: "9px" }} onClick={() => actions.returnAuto()}>{auto ? "AUTO policy active" : "Return to automatic control"}</button></div><div style={{ fontSize: 11, color: "#7D847A", marginTop: 7 }}>The button reflects the floodlights Aeolus last OBSERVED, not what it asked for. A verified manual command enters MANUAL override; Return to AUTO hands the lights back to contact policy.</div></div>
-    <CommandProofCard evidence={model.lastCommand}/>
     <div style={{ marginTop: 16, border: "1px dashed #685237", borderRadius: 10, padding: 9, background: "#171309" }}><div style={{ fontSize: 11, color: "#D6B773", letterSpacing: ".1em" }}>DEMO SCENARIO</div><div style={{ fontSize: 11, color: "#9C8964", margin: "4px 0 7px" }}>Inject something regrettably bipedal crossing the treeline. It walks in, and lit floodlights turn it back.</div><div style={{ display: "flex", gap: 6 }}><button disabled={threat} onClick={() => actions.simulateContacts()} style={{ flex: 1, padding: "9px", borderRadius: 7, border: "1px solid #6D4936", background: "#21130D", color: "#E7A47E", fontSize: 12 }}>Simulate zombies</button><button onClick={() => actions.clearPerimeter()} style={{ padding: "9px 12px", borderRadius: 7, border: "1px solid #48483D", background: "#161713", color: "#A3A398", fontSize: 12 }}>Force retreat</button></div></div>
     <div style={{ fontSize: 11, color: "#777E74", marginTop: 7 }}>{last?.label ? String(last.label) : "Perimeter classifier online"}</div>
     </div>;

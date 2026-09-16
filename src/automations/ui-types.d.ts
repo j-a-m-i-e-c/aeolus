@@ -144,20 +144,16 @@ interface CustomComponentProps {
    * finished receipt Logic projects afterwards. Entries appear as the runtime records
    * them; nothing here is a client-side estimate of when a stage was reached.
    *
-   * Shaped like the record `devices.commandEvidence()` returns, so it goes straight
-   * into `commandProof()` or `<CommandProofCard>`:
-   *
-   * ```tsx
-   * {aeolus.commands.map((command) => (
-   *   <CommandProofCard key={String(commandProof(command)?.commandId)} evidence={command} />
-   * ))}
-   * ```
+   * Shaped like the record `devices.commandEvidence()` returns, so an advanced
+   * domain UI may pass an entry to `commandProof()` when it needs immediate
+   * operational feedback. The standard audit/history presentation is already
+   * provided by the Automation Pane's Evidence inspector and should not normally
+   * be recreated inside authored UI.
    *
    * It carries no capability snapshot, because a transition does not report one. A
    * command still in flight therefore shows its unreached stages as `not-recorded`
-   * rather than claiming a ceiling nobody stated; the projected receipt explains them
-   * once it settles. Prefer the projected receipt for the durable record of what was
-   * proven, and this for showing that it is happening.
+   * rather than claiming a ceiling nobody stated. Use this feed for domain-specific
+   * live feedback; use the platform inspector for durable command history.
    */
   commands: unknown[];
 }
@@ -377,9 +373,10 @@ declare module "@aeolus/ui" {
 
   export interface CommandProofCardProps {
     /**
-     * The projected evidence record, straight from `aeolus.read(...)`. Passed raw so
-     * a pane needs one line and cannot forget the null case. A prebuilt
-     * {@link CommandProof} is accepted too.
+     * A command evidence record for an advanced authored UI that deliberately wants
+     * to present proof inside its domain surface. A prebuilt {@link CommandProof} is
+     * accepted too. Standard command history lives in the Automation Pane Evidence
+     * inspector.
      */
     evidence: unknown;
     /** Section heading. "Last command" suits a pane with several controls. */
@@ -393,14 +390,11 @@ declare module "@aeolus/ui" {
    * reached, the actuator → sensor chain, and the four-stage ladder behind a
    * toggle.
    *
-   * The one component in the kit. It exists because eight panes were each carrying
-   * a copy of the same proof block under a heading that named no action, which is
-   * how the presentation drifted per tab. Renders `null` when there is no command,
-   * so it can be mounted unconditionally.
-   *
-   * ```tsx
-   * <CommandProofCard evidence={aeolus.read("lastCommand")} />
-   * ```
+   * Aeolus uses this same renderer in its platform-owned Evidence inspector. It is
+   * also exported for advanced authored UIs with a genuine domain-specific reason
+   * to show physical proof inline. Most project UIs should stay focused on their
+   * physical system and rely on the pane chrome for audit/provenance. Renders
+   * `null` when there is no command.
    */
   export function CommandProofCard(props: CommandProofCardProps): JSX.Element | null;
 
@@ -456,9 +450,9 @@ declare module "@aeolus/ui" {
 
   export interface CommandExecutionCardProps {
     /**
-     * The projected group, straight from `aeolus.read(...)` of a
-     * `devices.executionEvidence()` value. A prebuilt {@link CommandExecutionProof}
-     * is accepted too.
+     * An execution evidence group for an advanced authored UI. A prebuilt
+     * {@link CommandExecutionProof} is accepted too. The standard Automation Pane
+     * Evidence inspector performs execution grouping automatically.
      */
     evidence: unknown;
     /** Section heading. Defaults to "Execution". */
@@ -471,14 +465,10 @@ declare module "@aeolus/ui" {
    * Render everything one operator action or one trigger actually proved: the cause,
    * the elapsed time, and each command with its own tier and hardware chain.
    *
-   * Use this in place of {@link CommandProofCard} wherever one execution issues more
-   * than one physical command. Keeping a single `lastCommand` in that case means the
-   * last command overwrites the others and the pane reports half the operation while
-   * looking complete.
-   *
-   * ```tsx
-   * <CommandExecutionCard evidence={aeolus.read("lastExecution")} />
-   * ```
+   * The platform Evidence inspector uses this renderer when one execution issued
+   * multiple physical commands. It remains available to authored UIs that need the
+   * same grouped proof for a domain-specific reason; it is not the default place for
+   * command audit history.
    */
   export function CommandExecutionCard(props: CommandExecutionCardProps): JSX.Element | null;
 }

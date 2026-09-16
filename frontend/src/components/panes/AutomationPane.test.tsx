@@ -187,6 +187,29 @@ describe("AutomationPane — status mode", () => {
     expect(screen.queryByRole("button", { name: "Fire Now" })).not.toBeInTheDocument();
   });
 
+  it("opens platform-owned Command Evidence beside Edit", async () => {
+    routeStatus();
+    render(<AutomationPane config={{ ruleId: "r1" } as unknown as PaneConfig} />);
+    await screen.findByText("MQTT · a/b");
+
+    const evidence = screen.getByRole("button", { name: "Evidence" });
+    expect(evidence).toBeInTheDocument();
+    fireEvent.click(evidence);
+
+    expect(await screen.findByRole("dialog", { name: "Command evidence for My Rule" })).toBeInTheDocument();
+    expect(screen.getByText("No command evidence yet")).toBeInTheDocument();
+    expect(
+      mockAuthFetch.mock.calls.some(([url]) =>
+        String(url).includes("/api/automations/r1/command-evidence?limit=100"),
+      ),
+    ).toBe(true);
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Close command evidence" })[1]!);
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Command evidence for My Rule" })).not.toBeInTheDocument(),
+    );
+  });
+
   it("enters editing mode and updates via PUT", async () => {
     routeStatus();
     render(<AutomationPane config={{ ruleId: "r1" } as unknown as PaneConfig} paneId="p1" />);

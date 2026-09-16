@@ -22,7 +22,6 @@ export default function ShowControl(aeolus: CustomComponentProps) {
     pyroArmed: aeolus.read("pyroArmed"),
     exclusionClear: aeolus.read("exclusionClear"),
     waterReady: aeolus.read("waterReady"),
-    lastExecution: aeolus.read("lastExecution"),
     lastAction: aeolus.read("lastAction"),
   };
 

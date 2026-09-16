@@ -1,22 +1,11 @@
 // frontend/src/sandbox/ui-kit/CommandProofCard.tsx — the default Command Proof surface
 //
-// Why this is a component and not another pure helper. Before it existed, seven of the
-// eight showcase panes carried a byte-identical block of proof JSX that differed only
-// in one muted hex value, under a heading that named no action: an anonymous
-// "COMMAND EVIDENCE" box at the bottom of the pane. Two problems came out of that.
-// Duplication meant the presentation drifted per tab, which is the exact failure the
-// ui-kit was introduced to stop. And an anonymous block cannot answer the first
-// question an operator has — "proof of WHAT?" — because nothing in it names the
-// command.
+// This remains available to authored UIs that genuinely want bespoke proof in their
+// domain surface. The standard Aeolus treatment lives in the Automation Pane Evidence
+// inspector instead: command audit/provenance is platform chrome, not something every
+// custom UI should recreate. Keeping this component pure means both the platform
+// inspector and advanced authored UIs share exactly the same four-stage rendering.
 //
-// So the default treatment is contextual: it belongs directly beneath the control that
-// caused it, it leads with the operation's own name, and it names the hardware chain
-// that supplied the proof. The full four-stage ladder is one click away rather than
-// permanently occupying a third of the pane.
-//
-// It stays as inert as the rest of the kit: props in, elements out. No I/O, no SDK, no
-// host access. A pane keeps ownership of when to render it.
-
 import { useState } from "react";
 import { commandProof, proofHeadlineProps, proofStageProps, type CommandProof } from "./command-proof";
 import { tokens } from "./primitives";

@@ -448,7 +448,7 @@ async function main(): Promise<void> {
     }),
   );
   const sandboxTypesPath = path.resolve(import.meta.dirname, "automations/sandbox-types.d.ts");
-  app.use("/api/automations", createAutomationRoutes(engine, db, registry, commandService, executionLog, sandboxTypesPath, requireAutomation, permissionResolver, connectorRegistry, stateStore, conditionRegistry));
+  app.use("/api/automations", createAutomationRoutes(engine, db, registry, commandService, executionLog, sandboxTypesPath, requireAutomation, permissionResolver, connectorRegistry, stateStore, conditionRegistry, commandHistoryStore));
   app.use("/api/connectors", createConnectorRoutes(connectorManager, connectorRegistry));
   app.use("/api/metrics", createMetricsSummaryRoute(metricsService));
   app.use("/api/commands", createCommandRoutes(commandHistoryStore));

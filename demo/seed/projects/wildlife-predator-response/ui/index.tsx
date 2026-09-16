@@ -27,7 +27,6 @@ export default function PredatorResponse(aeolus: CustomComponentProps) {
     lastVerifiedAt: aeolus.read("lastVerifiedAt"),
     lastVerifiedTarget: aeolus.read("lastVerifiedTarget"),
     lastOutcome: aeolus.read("lastOutcome"),
-    lastCommand: aeolus.read("lastCommand"),
     lastAction: aeolus.read("lastAction"),
   };
 

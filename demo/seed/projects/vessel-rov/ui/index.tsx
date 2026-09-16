@@ -23,7 +23,6 @@ export default function RovOperations(aeolus: CustomComponentProps) {
     commandPending: aeolus.read("commandPending"),
     tetherProtectionActive: aeolus.read("tetherProtectionActive"),
     protectionAt: aeolus.read("protectionAt"),
-    lastCommand: aeolus.read("lastCommand"),
     lastAction: aeolus.read("lastAction"),
   };
 

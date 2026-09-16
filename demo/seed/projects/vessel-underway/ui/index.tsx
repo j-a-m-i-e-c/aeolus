@@ -16,7 +16,6 @@ export default function UnderwayScience(aeolus: CustomComponentProps) {
     frontDetected: aeolus.read("frontDetected"),
     commandPending: aeolus.read("commandPending"),
     profile: aeolus.read("profile"),
-    lastCommand: aeolus.read("lastCommand"),
     lastAction: aeolus.read("lastAction"),
   };
 

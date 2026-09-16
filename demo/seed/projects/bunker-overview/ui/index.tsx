@@ -9,6 +9,7 @@ export default function BunkerOverview(aeolus: CustomComponentProps) {
     sector: aeolus.read("sector"),
     rangeM: aeolus.read("rangeM"),
     movement: aeolus.read("movement"),
+    approachGroupSize: aeolus.read("approachGroupSize"),
     ambientContacts: aeolus.read("ambientContacts"),
     trackRangeM: aeolus.read("trackRangeM"),
     detectRangeM: aeolus.read("detectRangeM"),

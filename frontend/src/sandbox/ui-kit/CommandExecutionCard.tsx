@@ -171,9 +171,11 @@ function isExecutionProof(value: unknown): value is CommandExecutionProof {
 /**
  * Render everything one operator action or one trigger actually proved.
  *
- * Use this in place of `CommandProofCard` wherever a single execution issues more
- * than one physical command. The group names its cause and its elapsed time; each
- * command keeps its own tier and hardware chain.
+ * Groups one execution's physical commands without inventing a shared tier.
+ *
+ * The Automation Pane Evidence inspector uses this for execution groups. It remains
+ * exported through `@aeolus/ui` for advanced authored UIs that have a domain-specific
+ * reason to present the same provenance inline.
  *
  * Returns `null` when there is no execution to show, so a pane can mount it
  * unconditionally.

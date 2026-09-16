@@ -191,6 +191,7 @@ export function createTestApp(
     undefined, // connectorRegistry
     stateStore,
     conditionRegistry,
+    commandHistoryStore,
   ));
   app.use("/api/commands", createCommandRoutes(commandHistoryStore));
   app.use("/api/system", createSystemRoutes());

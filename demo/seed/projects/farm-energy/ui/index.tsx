@@ -22,7 +22,6 @@ export default function SiteEnergy(aeolus: CustomComponentProps) {
     autoOpportunity: aeolus.read("autoOpportunity"),
     chargerCommandPending: aeolus.read("chargerCommandPending"),
     demoScenarioPending: aeolus.read("demoScenarioPending"),
-    lastCommand: aeolus.read("lastCommand"),
     lastAction: aeolus.read("lastAction"),
   };
 

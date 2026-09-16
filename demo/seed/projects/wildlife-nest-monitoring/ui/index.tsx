@@ -26,7 +26,6 @@ export default function SugarGliderDen(aeolus: CustomComponentProps) {
     coolingOutcome: aeolus.read("coolingOutcome"),
     solarW: aeolus.read("solarW"),
     batteryPct: aeolus.read("batteryPct"),
-    lastCommand: aeolus.read("lastCommand"),
     lastAction: aeolus.read("lastAction"),
   };
 

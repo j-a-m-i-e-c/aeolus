@@ -15,7 +15,6 @@ export default function PowerSupplies(aeolus: CustomComponentProps) {
     generatorOutputW: aeolus.read("generatorOutputW"),
     charging: aeolus.read("charging"),
     fuel: aeolus.read("fuel"),
-    lastCommand: aeolus.read("lastCommand"),
     foodDays: aeolus.read("foodDays"),
     waterDays: aeolus.read("waterDays"),
     waterLitres: aeolus.read("waterLitres"),

@@ -252,6 +252,33 @@ describe("CommandHistoryStore — list filters and bounds", () => {
     expect(MAX_COMMAND_LIST_LIMIT).toBe(200);
     expect(store.list({ limit: 9999 }).length).toBeLessThanOrEqual(MAX_COMMAND_LIST_LIMIT);
   });
+
+  it("returns one automation's recent commands with complete timelines", () => {
+    store.transition({
+      commandId: "b",
+      toState: "DISPATCHED",
+      timestamp: nextTs(),
+      terminal: true,
+      success: true,
+    });
+    store.create(
+      baseRecord({
+        commandId: "d",
+        sourceKind: "automation",
+        ruleId: "r1",
+        targetDeviceId: "dev-3",
+      }),
+    );
+
+    const evidence = store.listForRule("r1", 10);
+    expect(evidence.map((command) => command.commandId)).toEqual(["d", "b"]);
+    expect(evidence[1]?.transitions.map((transition) => transition.toState)).toEqual([
+      "REQUESTED",
+      "DISPATCHED",
+    ]);
+    expect(store.listForRule("other-rule", 10)).toEqual([]);
+    expect(store.listForRule("", 10)).toEqual([]);
+  });
 });
 
 describe("CommandHistoryStore — correlation linkage", () => {

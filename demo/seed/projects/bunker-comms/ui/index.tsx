@@ -11,9 +11,8 @@ export default function Communications(aeolus: CustomComponentProps) {
     signal: aeolus.read("signal"),
     message: aeolus.read("message"),
     contactsToday: aeolus.read("contactsToday"),
-    txUntil: aeolus.read("txUntil"),
+    transmitting: aeolus.read("transmitting"),
     pending: aeolus.read("pending"),
-    lastCommand: aeolus.read("lastCommand"),
     lastAction: aeolus.read("lastAction"),
   };
 

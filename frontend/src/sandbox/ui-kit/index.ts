@@ -44,9 +44,9 @@ export {
   type CommandExecutionProof,
 } from "./command-execution";
 
-// The components in the kit. They exist because eight panes were each carrying a
-// copy of the same proof block, which is how the presentation drifted per tab in the
-// first place.
+// Shared proof renderers. Aeolus uses these in the platform-owned Automation Pane
+// Evidence inspector and also re-exports them for advanced authored UIs that have a
+// domain-specific reason to present the same provenance inline.
 export { CommandProofCard, type CommandProofCardProps } from "./CommandProofCard";
 export { CommandExecutionCard, type CommandExecutionCardProps } from "./CommandExecutionCard";
 
