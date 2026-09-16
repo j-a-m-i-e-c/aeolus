@@ -167,8 +167,8 @@ export async function runPhysicalEffect(effect: string, pulseMs: number, label: 
         state.set("fxActive", true);
         state.set("effect", effect);
         state.set("haze", haze);
-        state.set("lastFxVerifiedAt", Date.now());
-        setAction(label + " · physical effect verified");
+        state.set("lastFxAcknowledgedAt", Date.now());
+        setAction(label + " · effects rack acknowledged the cue");
         return true;
     }
     setAction(label + " not verified: " + String(result.error || result.lifecycleState || "unknown"));

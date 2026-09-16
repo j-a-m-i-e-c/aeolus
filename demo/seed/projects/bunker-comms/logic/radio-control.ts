@@ -28,8 +28,10 @@ export async function transmitCheckIn() {
     // confirmed contact: the observation stage is marked unavailable.
     state.set("lastCommand", devices.commandEvidence(result.commandId));
     if (result.success) {
-        state.set("txUntil", Date.now() + 1200);
-        setAction("146.52 MHz check-in transmitted");
+        // ACK proves the radio controller accepted the TX request. Whether it is
+        // currently keyed comes from the radio state topic, which wakes this
+        // automation separately; nothing on-site claims the RF was heard remotely.
+        setAction("146.52 MHz check-in acknowledged by radio controller");
     }
     else {
         setAction("Radio transmission not verified");

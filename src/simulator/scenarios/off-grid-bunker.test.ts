@@ -63,25 +63,18 @@ describe("bunker simulator", () => {
     expect(Number(rest.rangeM)).toBe(Number(rest.trackRangeM));
   });
 
-  it("walks contacts in from the treeline instead of materialising them at the fence", async () => {
+  it("shows a visible approach before the demo group crosses the alert ring", async () => {
     const { fire, perimeter } = setup(200);
     await fire(BUNKER_STIMULUS.shuffle);
-    // They start at the treeline, outside the alert ring, so nothing is raised yet.
+    // The explicit demo stimulus starts just outside the alert ring: far enough to
+    // see an approach, close enough that a visitor does not wait ~11 seconds before
+    // anything interesting happens.
     expect(Number(perimeter().rangeM)).toBeGreaterThan(Number(perimeter().detectRangeM));
     expect(Number(perimeter().contacts)).toBe(0);
+    expect(Number(perimeter().approachGroupSize)).toBeGreaterThan(0);
     expect(perimeter().movement).toBe("approaching");
 
-    // 122 m at a 0.6 m/s shamble is ~17 s at the scenario's time scale, so the
-    // approach is watched over that long. The clamp only decides how many timers a
-    // step costs; it does not shorten the walk, which is why advancing less than the
-    // real duration leaves the contacts still out past the detect ring.
-    let closest = Number(perimeter().rangeM);
-    for (let step = 0; step < 12; step += 1) {
-      vi.advanceTimersByTime(1500);
-      const range = Number(perimeter().rangeM);
-      expect(range).toBeLessThanOrEqual(closest);
-      closest = range;
-    }
+    vi.advanceTimersByTime(3500);
     // The count is a consequence of range, so the two cannot disagree.
     expect(Number(perimeter().contacts)).toBeGreaterThan(0);
     expect(Number(perimeter().rangeM)).toBeLessThanOrEqual(Number(perimeter().detectRangeM));
@@ -129,8 +122,23 @@ describe("bunker simulator", () => {
     expect(Number(gone.contacts)).toBe(0);
     expect(gone.movement).toBe("clear");
     expect(Number(gone.rangeM)).toBe(Number(gone.trackRangeM));
-    // They are still out there; they are simply no longer worth raising.
+    // The explicit group has left tracking range; only unrelated ambient movement
+    // remains beyond the treeline.
+    expect(Number(gone.approachGroupSize)).toBe(0);
     expect(Number(gone.ambientContacts)).toBeGreaterThan(0);
+  });
+
+  it("cancels an approach even when clear is pressed immediately", async () => {
+    const { fire, perimeter } = setup(200);
+    await fire(BUNKER_STIMULUS.shuffle);
+    expect(perimeter().movement).toBe("approaching");
+
+    await fire(BUNKER_STIMULUS.clear);
+    vi.advanceTimersByTime(500);
+
+    expect(perimeter().movement).toBe("clear");
+    expect(Number(perimeter().approachGroupSize)).toBe(0);
+    expect(Number(perimeter().contacts)).toBe(0);
   });
 
   it("lets contacts lose interest at the fence with no response at all", async () => {

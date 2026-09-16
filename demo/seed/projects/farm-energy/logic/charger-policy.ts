@@ -46,7 +46,7 @@ export async function setCharger(on: boolean, reason: string) {
     // marks the observation stage as unavailable rather than leaving it looking unproven.
     state.set("lastCommand", devices.commandEvidence(result.commandId));
     if (result.success) {
-        setAction((on ? "Opportunity charging online" : "Opportunity charging shed") + " · physical state verified");
+        setAction((on ? "Opportunity charging requested" : "Opportunity charging shed") + " · charger controller acknowledged");
         events.emit("farm/energy/opportunity-load", { on, reason, lifecycleState: result.lifecycleState });
     }
     else {

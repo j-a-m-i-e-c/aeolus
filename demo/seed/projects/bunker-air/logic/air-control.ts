@@ -103,8 +103,8 @@ export async function setBunkerSeal(sealed: boolean) {
         // §9.1). Perimeter and Power already record the commanded value this way.
         state.set("sealed", sealed);
         setAction(sealed
-            ? "Bunker sealed · positive pressure established"
-            : "Airlock returned to normal ventilation");
+            ? "Seal request acknowledged by filter controller"
+            : "Normal-ventilation request acknowledged by filter controller");
     }
     else {
         setAction("Filtration command not verified");

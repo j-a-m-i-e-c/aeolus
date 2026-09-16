@@ -92,6 +92,13 @@ const WATER_LITRES_PER_PERSON_DAY = 26;
 const PERIMETER_TRACK_M = 140;
 /** Inside this range a tracked object is raised as a contact, in metres. */
 const PERIMETER_DETECT_M = 60;
+/**
+ * Where the explicit demo stimulus places a new group. The classifier itself still
+ * tracks to 140 m, but spawning a demo interaction at that outer limit made a visitor
+ * wait ~11 seconds before anything crossed the alert ring. Starting just outside the
+ * ring keeps the important sequence visible: approach first, then detection ~2–3s later.
+ */
+const PERIMETER_DEMO_SPAWN_M = 78;
 /** The fence line, in metres from the cabin. */
 const PERIMETER_FENCE_M = 18;
 /** Objects the classifier is always tracking out past the treeline. */
@@ -312,7 +319,7 @@ class Env {
     this.seq += 1;
     const sectors = ["east", "north", "west", "south"];
     this.group = 1 + (this.seq % 4);
-    const from = PERIMETER_TRACK_M;
+    const from = PERIMETER_DEMO_SPAWN_M;
     perimeter.update({
       sector: sectors[this.seq % 4],
       ...perimeterAt(from, this.group, "approaching", CONTACT_PACE_MPS),
@@ -340,14 +347,20 @@ class Env {
       frame: (progress) => {
         const rangeM = from + (to - from) * progress;
         const done = progress >= 1;
+        // Once a withdrawing group crosses the outer tracking boundary it is no
+        // longer part of the tracked approach group. Keeping its old group size at
+        // `movement=clear` left three invisible-but-still-tracked zombies in the
+        // overview after "Force retreat" completed.
+        const visibleGroup = done && settled === "clear" ? 0 : group;
         return perimeterAt(
           rangeM,
-          group,
+          visibleGroup,
           done ? settled : movement,
           done ? 0 : direction * CONTACT_PACE_MPS,
         );
       },
       onSettled: (completed) => {
+        if (completed && settled === "clear") this.group = 0;
         // Reaching the fence is not the end of the story: without a response they
         // mill about and then lose interest, so the scene resolves either way.
         if (completed && settled === "at-fence") this.later(6000, () => this.withdraw());
@@ -360,7 +373,24 @@ class Env {
     const perimeter = this.get(BUNKER_DEVICE_KEYS.perimeter);
     if (!perimeter) return;
     const from = Number(perimeter.read().rangeM ?? PERIMETER_TRACK_M);
-    if (from >= PERIMETER_TRACK_M) return;
+    if (from >= PERIMETER_DETECT_M) {
+      // Outside the alert ring nothing was ever raised as a contact — `perimeterAt`
+      // only reports one at or inside PERIMETER_DETECT_M — so there is no withdrawal
+      // for anyone to watch, just an approach to abandon. Walking it out anyway left
+      // `movement` reading `withdrawing` for several seconds while the count it refers
+      // to stayed zero.
+      //
+      // This is also the path taken when `clear` arrives in the same tick as the
+      // approach that started it, before that approach has rendered a single frame.
+      // The transition is cancelled explicitly rather than left running underneath a
+      // state that says the perimeter is clear.
+      perimeter.cancelTransitions(PERIMETER_GROUP);
+      this.group = 0;
+      perimeter.update(perimeterAt(PERIMETER_TRACK_M, 0, "clear", 0), { forcePublish: true });
+      return;
+    }
+    // Inside the ring the group is a reported contact, so it has to be seen leaving
+    // rather than deleted from under the operator.
     this.walkPerimeter(from, PERIMETER_TRACK_M, "withdrawing", "clear");
   }
 

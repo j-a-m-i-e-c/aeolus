@@ -29,6 +29,18 @@ const rules=[bunkerOverviewAutomation,bunkerPerimeterAutomation,bunkerAirAutomat
     }
   });
 
+  it("keeps the approaching zombie group visible before it becomes an alert",()=>{
+    expect(bunkerOverviewAutomation.scriptSource).toContain('"approachGroupSize"');
+    expect(bunkerOverviewAutomation.uiSource).toContain('aeolus.read("approachGroupSize")');
+  });
+
+  it("drives the radio transmit indicator from physical radio state, not a UI countdown",()=>{
+    expect(bunkerCommsAutomation.triggerTopic).toBe("+/bunker/radio/#");
+    expect(bunkerCommsAutomation.uiSource).toContain('aeolus.read("transmitting")');
+    expect(bunkerCommsAutomation.uiSource).not.toContain('aeolus.read("txUntil")');
+    expect(bunkerCommsAutomation.scriptSource).not.toContain('state.set("txUntil"');
+  });
+
   // Floodlights that have accepted a command are not yet a lit approach, and light on
   // the ground is what turns anything back.
   it("distinguishes the floodlight switch from the light it produces",()=>{

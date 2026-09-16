@@ -131,7 +131,7 @@ export async function handlePerimeterOperatorEvent(event: string | undefined, ob
     }
     else if (event === "simulate-contacts") {
         events.emit("bunker/sim/shambling-contacts", {});
-        setAction("Injecting shambling contacts at the perimeter");
+        setAction("DEMO · injecting a zombie group on the approach");
     }
     else if (event === "clear-perimeter") {
         events.emit("bunker/sim/perimeter-clear", {});
