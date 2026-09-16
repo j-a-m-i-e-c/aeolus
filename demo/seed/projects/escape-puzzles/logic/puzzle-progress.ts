@@ -12,7 +12,9 @@ export function handlePuzzleDemoEvent(event: string | undefined) {
     }
     else if (event === "reset-puzzles") {
         events.emit("escape/sim/reset", {});
-        state.set("previousSolved", -1);
+        // Keep the previous count so the physical reset is recognised as a decrease,
+        // not as a fictional "Puzzle 0 solved" event. `publishedInitial=false`
+        // guarantees the reset state is still emitted once even if it was already 0.
         state.set("publishedInitial", false);
         setAction("Resetting physical puzzle network");
     }
@@ -37,19 +39,26 @@ export function projectPuzzleNetwork() {
     return { values, solved, attempts, solveSeconds, lastSolved, currentRoom };
 }
 export function publishPuzzleProgress(progress: ReturnType<typeof projectPuzzleNetwork>) {
-    const previous = Number(state.get("previousSolved") || 0);
+    const previousRaw = state.get("previousSolved");
+    const previous = previousRaw === undefined ? progress.solved : Number(previousRaw);
     const changed = previous !== progress.solved;
     const firstPublish = state.get("publishedInitial") !== true;
     if (!changed && !firstPublish)
         return;
-    if (changed) {
-        state.set("previousSolved", progress.solved);
+
+    // Every emitted snapshot becomes the baseline for the next one. Previously a
+    // changed first publish updated `previousSolved` but left `publishedInitial=false`,
+    // so the same physical state was emitted a second time on the next telemetry tick.
+    state.set("previousSolved", progress.solved);
+    state.set("publishedInitial", true);
+
+    if (changed && progress.solved > previous) {
         setAction(progress.solved === 4
             ? "Final puzzle physically solved"
             : "Puzzle " + Number(progress.lastSolved || progress.solved) + " solved by team");
     }
-    else {
-        state.set("publishedInitial", true);
+    else if (changed && progress.solved < previous) {
+        setAction("Puzzle network reset to start state");
     }
     // `escape/observed/...` is the namespace for physical facts reported by whoever
     // owns the hardware. Game Master subscribes to it and publishes its requests

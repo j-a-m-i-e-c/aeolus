@@ -12,7 +12,7 @@ export default async function run(context: EventContext) {
     return;
   }
 
-  if (topic.startsWith("sensor/bunker/radio/")) {
+  if (topic.includes("/bunker/radio/")) {
     projectRadioState();
   }
 }

@@ -98,6 +98,15 @@ describe("Escape Room showcase",()=>{
     expect(gameMasterAutomation.uiSource).not.toMatch(/fire\(\s*event\s*,\s*\{\s*remaining/);
   });
 
+  it("treats puzzle reset as a reset, never as a fictional puzzle zero solve",()=>{
+    const script=String(puzzleProgressAutomation.scriptSource);
+    expect(script).not.toContain('state.set("previousSolved", -1)');
+    expect(script).toContain('progress.solved > previous');
+    expect(script).toContain('progress.solved < previous');
+    expect(script).toContain('state.set("publishedInitial", true)');
+    expect(script).toContain("Puzzle network reset to start state");
+  });
+
   it("keeps the physical room controller owned by Room Systems alone",()=>{
     const fxCommands=(source: string)=>[...String(source).matchAll(/switch\/escape\/fx\/set/g)].length;
     expect(fxCommands(roomFxAutomation.scriptSource)).toBeGreaterThanOrEqual(0);

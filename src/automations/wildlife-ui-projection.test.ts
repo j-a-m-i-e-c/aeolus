@@ -10,7 +10,12 @@ attachSeedProjectSource(wildlifeDetectionAutomation, predatorResponseAutomation,
 const rules=[wildlifeDetectionAutomation,predatorResponseAutomation,nestMonitoringAutomation];
 describe("Wildlife showcase architecture",()=>{
  it("has three first-class automations and no direct device reads in UIs",()=>{expect(rules).toHaveLength(3);for(const rule of rules)expect(rule.uiSource).not.toContain("aeolus.devices");});
- it("routes classification to Predator Response over Automation Events",()=>{expect(wildlifeDetectionAutomation.scriptSource).toContain('events.emit("wildlife/detection/classified"');expect(predatorResponseAutomation.triggerTopic).toBe("aeolus/events/+/wildlife/detection/classified");});
+ it("routes classification and physical station updates to Predator Response over Automation Events",()=>{
+   expect(wildlifeDetectionAutomation.scriptSource).toContain('events.emit("wildlife/detection/classified"');
+   expect(wildlifeDetectionAutomation.scriptSource).toContain('events.emit("wildlife/detection/station"');
+   expect(predatorResponseAutomation.triggerTopic).toBe("aeolus/events/+/wildlife/detection/#");
+   expect(predatorResponseAutomation.scriptSource).toContain("/wildlife/detection/station");
+ });
  // Each actuator has exactly one owner. Detection observes and classifies only;
  // the deterrent belongs to Predator Response and the den fan to Sugar Glider Den,
  // so no two automations can fight over the same physical thing.
@@ -32,6 +37,13 @@ describe("Wildlife showcase architecture",()=>{
    expect(script).not.toContain("acknowledge");
    expect(nestMonitoringAutomation.uiSource).not.toContain("acknowledge");
    expect(nestMonitoringAutomation.demoAccess?.fireEvents).toContain("stop-cooling");
+ });
+ it("keeps live den fan and power telemetry fresh without rerunning thermal policy for unrelated wildlife",()=>{
+   expect(nestMonitoringAutomation.triggerTopic).toBe("+/wildlife/#");
+   const script=String(nestMonitoringAutomation.scriptSource);
+   expect(script).toContain('topic === "switch/wildlife/den-fan/state"');
+   expect(script).toContain('topic === "sensor/wildlife/site-power"');
+   expect(script).toContain('topic === "sensor/wildlife/nest"');
  });
  it("labels simulator injection controls as demo scenarios",()=>{expect(wildlifeDetectionAutomation.uiSource).toContain("DEMO SCENARIO");expect(nestMonitoringAutomation.uiSource).toContain("DEMO SCENARIO");expect(predatorResponseAutomation.uiSource).not.toContain("DEMO SCENARIO");});
 

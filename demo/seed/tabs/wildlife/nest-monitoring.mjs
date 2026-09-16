@@ -2,7 +2,7 @@
 export const nestMonitoringAutomation = {
   "key": "wildlife-nest-monitoring",
   "name": "Sugar Glider Den",
-  "triggerTopic": "sensor/wildlife/nest",
+  "triggerTopic": "+/wildlife/#",
   "demoAccess": {
     "fireEvents": [
       "toggle-auto-cooling",

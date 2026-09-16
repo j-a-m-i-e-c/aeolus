@@ -2,7 +2,7 @@
 export const bunkerCommsAutomation = {
   "key": "bunker-comms",
   "name": "Communications",
-  "triggerTopic": "sensor/bunker/radio/#",
+  "triggerTopic": "+/bunker/radio/#",
   "demoAccess": {
     "fireEvents": [
       "transmit-checkin",

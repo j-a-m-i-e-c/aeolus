@@ -68,6 +68,32 @@ export function projectWildlifeStation() {
     state.set("denTemp", numberAt(den, "temp", 31.8));
     return { detection, detectionState };
 }
+
+/**
+ * Publish the physical station facts Predator Response is allowed to observe.
+ * Detection already wakes on these device topics to draw the hero view, so relaying
+ * the same read-only facts avoids giving the response automation an impossibly broad
+ * `#` trigger just to keep its tachometer, range and site-power readings current.
+ */
+export function publishPredatorStationStatus(topic: string) {
+    if (![
+        "sensor/wildlife/detection",
+        "sensor/wildlife/site-power",
+        "switch/wildlife/deterrent/state",
+    ].includes(topic))
+        return;
+    events.emit("wildlife/detection/station", {
+        commandRpm: Number(state.get("deterrentCommandRpm") || 0),
+        measuredRpm: Number(state.get("deterrentMeasuredRpm") || 0),
+        deterrentActive: Boolean(state.get("deterrentActive")),
+        solarW: Number(state.get("solarW") || 0),
+        batteryPct: Number(state.get("battery") || 0),
+        predatorDistanceM: Number(state.get("distanceM") || 0),
+        predatorSpeedMps: Number(state.get("speedMps") || 0),
+        predatorMovement: String(state.get("movement") || "clear"),
+    });
+}
+
 export function publishNewClassification(projected: ReturnType<typeof projectWildlifeStation>) {
     const eventId = String(projected.detectionState.eventId || "");
     const previous = String(state.get("lastEventId") || "");

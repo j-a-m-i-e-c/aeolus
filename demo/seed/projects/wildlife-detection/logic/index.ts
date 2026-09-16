@@ -5,6 +5,7 @@ import {
   handleWildlifeDemoEvent,
   projectWildlifeStation,
   publishNewClassification,
+  publishPredatorStationStatus,
 } from "./detection-pipeline";
 
 export default async function run(context: EventContext) {
@@ -22,5 +23,9 @@ export default async function run(context: EventContext) {
   if (!topic.includes("/wildlife/")) return;
 
   const station = projectWildlifeStation();
+  // Keep Predator Response's read-only instrument panel current from the same
+  // physical publishes that drive this hero. Policy and actuation remain entirely
+  // inside Predator Response.
+  publishPredatorStationStatus(topic);
   publishNewClassification(station);
 }

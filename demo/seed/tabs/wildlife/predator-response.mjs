@@ -2,7 +2,7 @@
 export const predatorResponseAutomation = {
   "key": "wildlife-predator-response",
   "name": "Predator Response",
-  "triggerTopic": "aeolus/events/+/wildlife/detection/classified",
+  "triggerTopic": "aeolus/events/+/wildlife/detection/#",
   "demoAccess": {
     "fireEvents": [
       "toggle-armed",

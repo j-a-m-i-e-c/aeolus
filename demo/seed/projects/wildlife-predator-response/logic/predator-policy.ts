@@ -52,6 +52,23 @@ export function projectStationReadings() {
     state.set("predatorSpeedMps", Number(animalState.speedMps || 0));
     state.set("predatorMovement", String(animalState.movement || "clear"));
 }
+
+/** Project a read-only station summary emitted by Wildlife Detection. */
+export function projectStationSummary(payload: Record<string, unknown>) {
+    for (const key of [
+        "commandRpm",
+        "measuredRpm",
+        "deterrentActive",
+        "solarW",
+        "batteryPct",
+        "predatorDistanceM",
+        "predatorSpeedMps",
+        "predatorMovement",
+    ]) {
+        if (payload[key] !== undefined) state.set(key, payload[key]);
+    }
+}
+
 export function publishResponseStatus() {
     events.emit("wildlife/response/status", {
         armed: Boolean(state.get("armed")),
