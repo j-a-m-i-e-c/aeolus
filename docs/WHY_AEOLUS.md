@@ -2,9 +2,9 @@
 
 > **Audience:** software engineers, technical reviewers, systems integrators and anyone evaluating the architecture or product thesis. For a code-free introduction, start with [What Is Aeolus?](./WHAT_IS_AEOLUS.md).
 
-Aeolus is a local-first platform for building software around physical devices and places.
+Aeolus is a local first platform for building software around physical devices and places.
 
-It receives events from hardware and services, puts them into a common model, runs user-authored logic, stores state and history, sends commands back out and renders interfaces made for the job at hand. It runs on site and does not need an Aeolus cloud service to keep doing its core work.
+It receives events from hardware and services, puts them into a common model, runs user written logic, stores state and history, sends commands back out and renders interfaces made for the job at hand. It runs on site and does not need an Aeolus cloud service to keep doing its core work.
 
 The technical idea is straightforward:
 
@@ -28,15 +28,15 @@ I started Aeolus on a rural property because the equipment around me did not beh
 
 Each part was useful. Joining them together was the problem:
 
-- every product had its own protocol, application or cloud service
-- there was no shared view of the site
-- simple automation tools became awkward once the behaviour started looking like an application
-- generic dashboards could show values, but struggled to become a purpose-built operating screen
-- a pile of scripts could solve the immediate problem, but would leave me rebuilding the same platform work for every new idea
+* every product had its own protocol, application or cloud service
+* there was no shared view of the site
+* simple automation tools became awkward once the behaviour started looking like an application
+* generic dashboards could show values, but struggled to become the operating screen the site actually needed
+* a pile of scripts could solve the immediate problem, but would leave me rebuilding the same platform work for every new idea
 
 The first version could have stayed as a personal collection of MQTT topics, Node scripts and dashboards. Instead, I pulled the repeated pieces into a reusable runtime: device ingestion, state, automation execution, storage, interfaces, authentication, logs, upgrades and deployment.
 
-The property is still the best real reference for Aeolus, but it is only one example. The seed demo deliberately stretches the same primitives across agriculture, a research vessel, underground mining, spacecraft operations, a stage show, an escape room, wildlife monitoring and an off-grid bunker. Those are simulations, not claims of finished industry integrations. Their purpose is to show that Aeolus is a platform model rather than a pump controller with ambitions.
+The property is still the best real reference for Aeolus, but it is only one example. The seed demo deliberately stretches the same primitives across agriculture, a research vessel, underground mining, spacecraft operations, a stage show, an escape room, wildlife monitoring and an off grid bunker. Those are simulations, not claims of finished industry integrations. Their purpose is to show that Aeolus is a platform model rather than a pump controller with ambitions.
 
 ## The gap Aeolus is trying to fill
 
@@ -52,13 +52,13 @@ Aeolus treats the site as the system boundary. A Hue light, Kasa plug, ESP32 sen
 
 Configuration and visual editors are highly effective when the problem fits the available model. They become harder to reason about when behaviour needs:
 
-- branching and composition
-- reusable functions and data structures
-- external API calls
-- state accumulated across events
-- richer failure handling
-- a custom interface coupled to one workflow
-- version control, review and testing using normal software practices.
+* branching and composition
+* reusable functions and data structures
+* external API calls
+* state accumulated across events
+* richer failure handling
+* a custom interface coupled to one workflow
+* version control, review and testing using normal software practices.
 
 Aeolus deliberately assumes its author is comfortable writing code. That narrows the audience, but it avoids forcing increasingly application-like behaviour through an abstraction designed for simple rules.
 
@@ -76,15 +76,15 @@ Aeolus aims to make the bespoke part small. The developer writes the logic and i
 
 ### Industrial control and SCADA
 
-Traditional PLC/SCADA systems are the correct choice for deterministic control, certified safety functions, hard real-time requirements and large industrial deployments. Aeolus is not currently a substitute for those systems.
+Traditional PLC/SCADA systems are the correct choice for deterministic control, certified safety functions, hard real time requirements and large industrial deployments. Aeolus is not currently a substitute for those systems.
 
-Its potential role is below or beside that tier: custom supervisory logic, data integration, operator interfaces and orchestration for smaller or heterogeneous sites, while independent hardware retains responsibility for safety-critical protection.
+Its potential role is below or beside that tier: custom supervisory logic, data integration, operator interfaces and orchestration for smaller or heterogeneous sites, while independent hardware retains responsibility for safety critical protection.
 
 ## Design principles
 
 The architecture follows several principles rather than a checklist of device integrations.
 
-### 1. Local-first, not local-only
+### 1. Local first, not local-only
 
 Core operation should continue on the site when the internet is unavailable. Sensor ingestion, rules, state, dashboards and local device control should not depend on a hosted account.
 
@@ -94,7 +94,7 @@ That does not forbid external services. An automation may call a weather API, re
 
 Aeolus exposes JavaScript/TypeScript, a Monaco editor and explicit platform APIs. The goal is not code for its own sake; it is to preserve the expressiveness, structure and tooling that software engineers already use.
 
-### 3. An automation can be a full-stack edge application
+### 3. An automation can be a full stack edge application
 
 Logic, persistent state and a custom interface belong together when they implement one operational concern. Aeolus makes that relationship explicit.
 
@@ -102,7 +102,7 @@ Logic, persistent state and a custom interface belong together when they impleme
 
 MQTT and connectors may use different protocols, but automations should receive the same shape of event and query the same device registry.
 
-### 5. User-authored code needs real boundaries
+### 5. User written code needs real boundaries
 
 Backend logic and frontend components are powerful enough to damage stability or expose privileges if executed directly in the host context. Aeolus uses separate isolation mechanisms for each.
 
@@ -120,7 +120,7 @@ Software orchestration must not replace independent electrical and mechanical pr
 
 ## Detailed architecture
 
-The README keeps the architecture deliberately simple. This is the component-level view for readers who want to see what is actually happening inside the platform.
+The README keeps the architecture deliberately simple. This is the component level view for readers who want to see what is actually happening inside the platform.
 
 ```mermaid
 flowchart TB
@@ -144,7 +144,7 @@ flowchart TB
         API[REST API and WebSocket]
         Dashboard[React dashboard]
         Broker[Host SDK broker]
-        CustomUI[Sandboxed custom UI<br/>opaque-origin iframe]
+        CustomUI[Sandboxed custom UI<br/>opaque origin iframe]
     end
 
     Database[(SQLite)]
@@ -176,7 +176,7 @@ flowchart TB
 
 The important paths are:
 
-1. MQTT devices and connector-backed products enter through different adapters, then become the same kind of internal event.
+1. MQTT devices and connector backed products enter through different adapters, then become the same kind of internal event.
 2. The typed event bus updates the device registry and triggers matching automations.
 3. Automation Logic runs in isolated V8 contexts and uses platform APIs for state, data and device commands.
 4. Commands leave through the transport that owns the device, such as MQTT or a connector.
@@ -187,10 +187,10 @@ The diagram shows the main runtime relationships, not every class. Later section
 
 ## The core abstraction: paired Logic and UI
 
-Every code-driven automation can contain two halves:
+Every automation defined in code can contain two halves:
 
-- **Logic:** backend JavaScript/TypeScript executed when an event, schedule or manual/UI trigger fires.
-- **UI:** an optional React/TSX component rendered as the automation’s operational surface.
+* **Logic:** backend JavaScript/TypeScript executed when an event, schedule or manual/UI trigger fires.
+* **UI:** an optional React/TSX component rendered as the automation’s operational surface.
 
 The two halves share a private persistent state namespace.
 
@@ -209,12 +209,12 @@ This is more than dashboard customisation. It changes the deployment unit.
 
 A tank manager, escape-room sequencer, CTD profiler or stage cue controller can carry:
 
-- the code that makes decisions
-- its own configuration and computed state
-- the interface an operator actually needs
-- history and execution context relevant to that function.
+* the code that makes decisions
+* its own configuration and computed state
+* the interface an operator actually needs
+* history and execution context relevant to that function.
 
-The platform handles transport, persistence, authentication, real-time updates and isolation.
+The platform handles transport, persistence, authentication, real time updates and isolation.
 
 ### State flow
 
@@ -227,7 +227,7 @@ The automation state store supports three common interaction patterns:
 This makes it possible to keep device decisions in backend logic while exposing a narrowly tailored operator interface.
 
 <!--
-MEDIA TODO: Full-stack authoring GIF
+MEDIA TODO: Full stack authoring GIF
 File: media/logic-ui-roundtrip.gif
 Length: 15 to 25 seconds.
 Show:
@@ -269,7 +269,7 @@ Logic runs inside a fresh `isolated-vm` V8 isolate. The runtime provides a delib
 
 The isolation boundary limits memory, execution time and host capabilities. A script failure is returned as a structured execution result rather than being silently treated as success.
 
-### Code-first, with optional structure
+### Code first, with optional structure
 
 Free-form code is available when the automation starts behaving like an application:
 
@@ -317,12 +317,12 @@ The diagram is derived from the code. It is not a separate configuration represe
 
 The Logic editor uses Monaco with Aeolus-specific type definitions supplied by the backend. It provides:
 
-- autocomplete and parameter hints for platform globals
-- hover documentation
-- syntax and transpilation errors with line/column markers
-- platform and connector-contributed snippets
-- inline API documentation
-- Logic/UI editing in the same automation pane.
+* autocomplete and parameter hints for platform globals
+* hover documentation
+* syntax and transpilation errors with line/column markers
+* platform and connector-contributed snippets
+* inline API documentation
+* Logic/UI editing in the same automation pane.
 
 Scripts and TSX are transpiled with esbuild for a fast save cycle. Type annotations are optional and stripped during transpilation; the editor experience is typed, while runtime validation remains the responsibility of the script and platform APIs.
 
@@ -336,7 +336,7 @@ Communication occurs through a dedicated `MessageChannel`:
 
 ```text
 Custom component
-      │ schema-validated RPC
+      │ schema validated RPC
       ▼
 MessagePort in iframe with opaque origin
       │
@@ -349,15 +349,15 @@ Explicit Aeolus operations
 
 The broker in the host exposes only named operations such as:
 
-- read or save automation state
-- fire the associated logic
-- request a device action
-- publish an MQTT message
-- receive state and props updates.
+* read or save automation state
+* fire the associated logic
+* request a device action
+* publish an MQTT message
+* receive state and props updates.
 
 The frame does not receive `authFetch`, a generic HTTP proxy or the user’s token. The broker ignores frame-supplied identity and scopes entity operations to the immutable grant created by the host.
 
-This is a capability boundary, not complete third-party marketplace security. Today, custom UIs should still be treated as administrator-authored or explicitly trusted code, particularly because a component may be granted broad device-control or MQTT capabilities. A future distribution model should add manifest-level permissions for specific devices, topics and data.
+This is a capability boundary, not complete third-party marketplace security. Today, custom UIs should still be treated as administrator written or explicitly trusted code, particularly because a component may be granted broad device-control or MQTT capabilities. A future distribution model should add manifest-level permissions for specific devices, topics and data.
 
 ### Runtime lifecycle
 
@@ -374,8 +374,8 @@ Show: a concise diagram of Host Dashboard → sandboxed iframe → MessageChanne
 
 Aeolus accepts two broad classes of source:
 
-- **MQTT devices:** custom sensors, microcontrollers, gateways and software publishers
-- **connectors:** integrations that speak a vendor or protocol-specific API.
+* **MQTT devices:** custom sensors, microcontrollers, gateways and software publishers
+* **connectors:** integrations that speak a vendor or protocol specific API.
 
 Both are normalised into a shared internal model and placed on the typed event bus.
 
@@ -429,17 +429,17 @@ interface Connector {
 
 The platform handles:
 
-- connector registration and persisted configuration
-- enable/disable lifecycle
-- guided setup steps
-- health polling
-- device discovery and registry updates
-- action routing
-- optional editor snippets, conditions and connector-specific handlers.
+* connector registration and persisted configuration
+* enable/disable lifecycle
+* guided setup steps
+* health polling
+* device discovery and registry updates
+* action routing
+* optional editor snippets, conditions and connector specific handlers.
 
 Hue and TP-Link Kasa are included as reference implementations.
 
-The framework matters more than the current connector count. Aeolus cannot compete with mature ecosystems on breadth today. Its goal is to make support for unusual or site-specific hardware an ordinary TypeScript contribution rather than a core-platform rewrite.
+The framework matters more than the current connector count. Aeolus cannot compete with mature ecosystems on breadth today. Its goal is to make support for unusual hardware or equipment unique to a site an ordinary TypeScript contribution rather than a rewrite of the core platform.
 
 <!--
 MEDIA TODO: Connector architecture screenshot/GIF
@@ -487,12 +487,12 @@ Selected device values can be retained for diagnosis and trend visualisation.
 
 The Data Store provides:
 
-- timestamped collections
-- tag-based filtering
-- time-window queries
-- basic aggregation (`sum`, `avg`, `min`, `max`, `count`)
-- key/value buckets shared across automations
-- retention, collection and record limits.
+* timestamped collections
+* tag-based filtering
+* time-window queries
+* basic aggregation (`sum`, `avg`, `min`, `max`, `count`)
+* key/value buckets shared across automations
+* retention, collection and record limits.
 
 It is disabled until storage limits are configured, reducing the risk of silently filling a Raspberry Pi storage device.
 
@@ -506,34 +506,34 @@ Pinned areas cover system health, connectors, data and security. Custom tabs con
 
 Built-in pane categories include:
 
-- device and connector controls
-- automation authoring and status
-- sensors and state history
-- MQTT inspection and event logs
-- schedules and triggers
-- system and metrics monitoring.
+* device and connector controls
+* automation authoring and status
+* sensors and state history
+* MQTT inspection and event logs
+* schedules and triggers
+* system and metrics monitoring.
 
 The same platform can therefore expose different levels of complexity:
 
-- a developer sees editors, logs and topic inspectors
-- an operator sees a purpose-built control surface
-- an administrator sees accounts, connectors and system health.
+* a developer sees editors, logs and topic inspectors
+* an operator sees a control surface designed for that workflow
+* an administrator sees accounts, connectors and system health.
 
-Permissions currently organise access around dashboard roles and tabs. That suits the present single-site model. A future multi-site product would need permissions tied more directly to sites, devices, automations and data.
+Permissions currently organise access around dashboard roles and tabs. That suits the present single site model. A future multiple sites product would need permissions tied more directly to sites, devices, automations and data.
 
 ## Observability
 
 Aeolus includes operational feedback at several levels:
 
-- structured application logs
-- connector health
-- MQTT connection and message metrics
-- device state history
-- automation execution history
-- HTTP and WebSocket metrics
-- process memory, CPU and event-loop measurements
-- Prometheus-compatible output
-- built-in short-term and aggregated metric charts.
+* structured application logs
+* connector health
+* MQTT connection and message metrics
+* device state history
+* automation execution history
+* HTTP and WebSocket metrics
+* process memory, CPU and event-loop measurements
+* Prometheus compatible output
+* built-in short term and aggregated metric charts.
 
 The purpose is not to recreate a full observability stack. It is to make a local deployment diagnosable before an operator has to attach external tooling.
 
@@ -560,24 +560,24 @@ Aeolus tracks schema migrations in `schema_migrations` and applies pending migra
 
 The migration system includes:
 
-- ordered numeric migration IDs
-- duplicate-ID validation
-- legacy database adoption
-- per-migration transactions
-- pre-migration backups
-- backup retention
-- downgrade refusal when a database is newer than the binary
-- migration and property-based tests.
+* ordered numeric migration IDs
+* duplicate-ID validation
+* legacy database adoption
+* per-migration transactions
+* database backups before migrations
+* backup retention
+* downgrade refusal when a database is newer than the binary
+* migration and property based tests.
 
 For edge installations, upgrade behaviour matters as much as clean installation. A device may be deployed for years and updated remotely after its local data has become valuable.
 
 ### Linux and host networking
 
-The intended deployment target is Linux. The backend uses host networking for local discovery and direct LAN protocols. This is practical for a small on-site appliance, but it also makes network segmentation and host hardening important.
+The intended deployment target is Linux. The backend uses host networking for local discovery and direct LAN protocols. This is practical for a small on site appliance, but it also makes network segmentation and host hardening important.
 
 ### Remote access
 
-Aeolus is local-first. Remote access should be added through an explicit secure path rather than by exposing the dashboard or broker directly to the public internet.
+Aeolus is local first. Remote access should be added through an explicit secure path rather than by exposing the dashboard or broker directly to the public internet.
 
 ## Security model
 
@@ -585,32 +585,32 @@ Aeolus includes several distinct security boundaries.
 
 ### Authentication
 
-- initial administrator creation
-- bcrypt password hashing
-- short-lived access tokens
-- HTTP-only refresh cookies
-- login rate limiting
-- authenticated WebSockets.
+* initial administrator creation
+* bcrypt password hashing
+* access tokens with short lifetimes
+* refresh cookies that scripts cannot read
+* login rate limiting
+* authenticated WebSockets.
 
 ### Authorisation
 
-User groups and read/interact/write tab permissions support different dashboard roles. The current model is aimed at a trusted single-site deployment rather than hostile multi-tenant isolation.
+User groups and read/interact/write tab permissions support different dashboard roles. The current model is aimed at a trusted single site deployment rather than hostile multi tenant isolation.
 
 ### MQTT credentials
 
 The broker can operate in open, shared-password or per-device modes. Open mode is intended only for development or tightly trusted networks.
 
-### User-authored code
+### User written code
 
 Backend logic is isolated in V8. Custom UI is isolated in iframe with opaque origins and reaches privileged operations only through the broker API.
 
 ### Trust boundaries
 
-The sandboxes limit what user-authored code can reach, but they do not turn unknown code into something automatically trustworthy. HTTP access can still reach network services, UI components can be granted control capabilities and the Linux host still needs ordinary network hardening. Aeolus should describe those boundaries plainly and keep third-party code reviewable.
+The sandboxes limit what user written code can reach, but they do not turn unknown code into something automatically trustworthy. HTTP access can still reach network services, UI components can be granted control capabilities and the Linux host still needs ordinary network hardening. Aeolus should describe those boundaries plainly and keep third-party code reviewable.
 
 ## Testing and engineering posture
 
-Aeolus has unit, integration, property-based, component and Playwright end-to-end tests, along with type checks, production builds and Docker Compose CI paths.
+Aeolus has unit, integration, property based, component and Playwright end-to-end tests, along with type checks, production builds and Docker Compose CI paths.
 
 That breadth matters because edge software tends to fail in the joins: ordering, reconnects, state transitions, upgrades and partial outages. Test count is not the goal by itself. The useful tests are the ones that make those awkward paths repeatable before they happen on a remote machine in the rain.
 
@@ -630,25 +630,25 @@ The comparison below is intentionally about design centre, not a feature-score c
 
 Aeolus should be explicit about the areas where other products are presently stronger:
 
-- breadth of supported commercial devices
-- community size and third-party packages
-- turnkey onboarding for non-programmers
-- certified industrial control and safety features
-- fleet management, high availability and remote lifecycle operations
-- large-scale time series analytics
-- long-term production deployments across many organisations.
+* breadth of supported commercial devices
+* community size and third-party packages
+* turnkey onboarding for people who do not program
+* certified industrial control and safety features
+* fleet management, high availability and remote lifecycle operations
+* large-scale time series analytics
+* long term production deployments across many organisations.
 
 ### Where Aeolus is strongest
 
 Aeolus is most compelling when:
 
-- the author is a developer or technical integrator
-- the site contains custom or unusual hardware
-- behaviour is application-like rather than a list of simple rules
-- cloud dependence is undesirable
-- operators need a custom interface rather than a generic device card
-- local data, history and external APIs must be composed in code
-- command outcomes and physical confirmation need to be represented explicitly.
+* the author is a developer or technical integrator
+* the site contains custom or unusual hardware
+* behaviour is application-like rather than a list of simple rules
+* cloud dependence is undesirable
+* operators need a custom interface rather than a generic device card
+* local data, history and external APIs must be composed in code
+* command outcomes and physical confirmation need to be represented explicitly.
 
 ## Example applications
 
@@ -668,7 +668,7 @@ Combine atmospheric readings, ventilation demand, personnel muster and dewaterin
 
 ### Stage and show control
 
-Give an operator a lighting board, cue stack, atmosphere controls and a show log. The same Logic/UI pairing that manages a water workflow can also become a purpose-built production console.
+Give an operator a lighting board, cue stack, atmosphere controls and a show log. The same Logic/UI pairing that manages a water workflow can also become a production console designed around the show.
 
 ### Escape room
 
@@ -676,13 +676,13 @@ Track puzzle state, unlock sequences, hints, timers and lighting scenes from a g
 
 ### Spacecraft or remote station
 
-Model life support, power budget, attitude data and communications windows. The seed is simulated, but the local-first and event-driven ideas suit remote systems where connectivity is intermittent.
+Model life support, power budget, attitude data and communications windows. The seed is simulated, but the local first and event driven ideas suit remote systems where connectivity is intermittent.
 
-### Off-grid bunker
+### Off grid bunker
 
 Track generator fuel, battery reserves, air filtration, perimeter events and supplies. This one is partly serious resilience planning and partly an excuse to have fun with the demo.
 
-### Wildlife and on-device vision
+### Wildlife and on device vision
 
 Treat a camera model’s detections as ordinary events, alongside nest-box sensors or deterrent controls. Wildlife is one application of the platform, not the identity of Aeolus.
 
@@ -694,13 +694,13 @@ None of the underlying technologies is novel in isolation. MQTT, React, SQLite, 
 
 The value is in their composition around a consistent edge-development model:
 
-- heterogeneous devices become one event and registry model
-- site-specific logic remains ordinary code
-- each workflow can carry its own interface and state
-- user-authored code is separated from the host
-- operation does not depend on a remote service
-- physical command uncertainty can be represented instead of hidden
-- deployment and schema evolution are treated as platform responsibilities.
+* heterogeneous devices become one event and registry model
+* logic for a particular site remains ordinary code
+* each workflow can carry its own interface and state
+* user written code is separated from the host
+* operation does not depend on a remote service
+* physical command uncertainty can be represented instead of hidden
+* deployment and schema evolution are treated as platform responsibilities.
 
 The interesting question is not whether the individual technologies are new. They are not. The question is whether this combination saves developers and integrators from rebuilding the same edge platform every time a physical site becomes too custom for an off-the-shelf product. Real deployments will answer that better than another long feature list.
 

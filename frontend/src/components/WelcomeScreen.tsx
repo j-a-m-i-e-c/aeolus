@@ -20,7 +20,7 @@ export function WelcomeScreen() {
       <div className="text-center space-y-2">
         <h1 className="text-3xl font-bold text-[#E6EDF3]">Welcome to Aeolus</h1>
         <p className="text-[#9AA6B2] text-base max-w-md">
-          Your local-first IoT automation platform
+          Your local first IoT automation platform
         </p>
       </div>
 
