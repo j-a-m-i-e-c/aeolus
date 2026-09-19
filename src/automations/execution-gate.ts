@@ -22,6 +22,12 @@ export interface ExecutionRequest {
   ruleId: string;
   deviceId: string;
   topic: string;
+  /**
+   * Optional key for keep-latest coalescing. When an execution with the same
+   * key is active, the gate retains at most one pending request and replaces
+   * that pending request with the newest state. Discrete events omit this key.
+   */
+  coalesceKey?: string;
   /** Thunk called when the request is admitted. */
   execute: () => Promise<unknown>;
 }
@@ -32,6 +38,7 @@ export interface ExecutionRequest {
 export type AdmitResult =
   | { status: "admitted"; handle: string }
   | { status: "queued" }
+  | { status: "coalesced" }
   | { status: "dropped"; reason: "queue_full" }
   | { status: "suppressed"; reason: "duplicate" };
 
@@ -72,7 +79,7 @@ export class ExecutionGate {
   private readonly deps: ExecutionGateDeps;
 
   /** handle → metadata for currently active executions. */
-  private readonly activeSet = new Map<string, { ruleId: string; dedupKey: string }>();
+  private readonly activeSet = new Map<string, { ruleId: string; dedupKey: string; coalesceKey?: string }>();
   /** ruleId → FIFO queue of pending executions. */
   private readonly queues = new Map<string, QueuedEntry[]>();
   /** Set of dedup keys currently active or queued. */
@@ -95,26 +102,49 @@ export class ExecutionGate {
    */
   submit(request: ExecutionRequest): AdmitResult {
     const dedupKey = `${request.ruleId}:${request.deviceId}:${request.topic}`;
+    const queue = this.queues.get(request.ruleId) ?? [];
 
-    // 1. Duplicate suppression — if same key is already active or queued, suppress.
-    if (this.dedupKeys.has(dedupKey)) {
+    if (request.coalesceKey) {
+      // If a matching state-driven execution is already pending, replace its
+      // thunk with the newest state while keeping its original queue position.
+      const pending = queue.find((entry) => entry.request.coalesceKey === request.coalesceKey);
+      if (pending) {
+        pending.request = request;
+        return { status: "coalesced" };
+      }
+
+      // Preserve per-source serialization. If A is active and B/C/D arrive,
+      // only the newest pending request survives, so execution becomes A -> D.
+      const sameKeyActive = Array.from(this.activeSet.values()).some(
+        (entry) => entry.coalesceKey === request.coalesceKey,
+      );
+      if (sameKeyActive) {
+        if (queue.length >= this.config.maxQueuePerRule) {
+          this.deps.onDrop?.(request.ruleId, request.deviceId, request.topic);
+          return { status: "dropped", reason: "queue_full" };
+        }
+        this.dedupKeys.add(dedupKey);
+        queue.push({ request, dedupKey, enqueuedAt: Date.now() });
+        this.queues.set(request.ruleId, queue);
+        return { status: "queued" };
+      }
+    } else if (this.dedupKeys.has(dedupKey)) {
+      // Discrete/manual requests retain the existing duplicate suppression.
       this.deps.onSuppress?.(request.ruleId, request.deviceId, request.topic);
       return { status: "suppressed", reason: "duplicate" };
     }
 
-    // 2. Active capacity available — admit immediately.
+    // Active capacity available — admit immediately.
     if (this.activeSet.size < this.config.maxActive) {
       return this.admit(request, dedupKey);
     }
 
-    // 3. At capacity — attempt to queue under the rule's limit.
-    const queue = this.queues.get(request.ruleId) ?? [];
+    // At capacity — attempt to queue under the rule's limit.
     if (queue.length >= this.config.maxQueuePerRule) {
       this.deps.onDrop?.(request.ruleId, request.deviceId, request.topic);
       return { status: "dropped", reason: "queue_full" };
     }
 
-    // 4. Enqueue.
     this.dedupKeys.add(dedupKey);
     queue.push({ request, dedupKey, enqueuedAt: Date.now() });
     this.queues.set(request.ruleId, queue);
@@ -163,7 +193,7 @@ export class ExecutionGate {
    */
   private admit(request: ExecutionRequest, dedupKey: string): { status: "admitted"; handle: string } {
     const handle = randomUUID();
-    this.activeSet.set(handle, { ruleId: request.ruleId, dedupKey });
+    this.activeSet.set(handle, { ruleId: request.ruleId, dedupKey, coalesceKey: request.coalesceKey });
     this.dedupKeys.add(dedupKey);
 
     // Fire-and-forget — wrap with finally to guarantee slot release.
@@ -193,7 +223,11 @@ export class ExecutionGate {
       // The dedup key is already in the set from when it was enqueued.
       // Admit it as active now.
       const handle = randomUUID();
-      this.activeSet.set(handle, { ruleId: entry.request.ruleId, dedupKey: entry.dedupKey });
+      this.activeSet.set(handle, {
+        ruleId: entry.request.ruleId,
+        dedupKey: entry.dedupKey,
+        coalesceKey: entry.request.coalesceKey,
+      });
 
       // Fire the thunk.
       void entry.request.execute().finally(() => this.complete(handle));

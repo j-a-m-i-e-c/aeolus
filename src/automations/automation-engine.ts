@@ -260,6 +260,10 @@ export class AutomationEngine {
         ruleId: rule.id,
         deviceId: context.deviceId,
         topic: context.topic,
+        // Device state is a level, not a discrete occurrence. While one
+        // execution is active keep only the newest pending state for this
+        // rule/source pair. Automation Events intentionally omit this key.
+        coalesceKey: `${rule.id}:${context.deviceId}:${context.topic}`,
         execute: () => this.executeRule(rule, context),
       });
       if (result.status === "dropped" || result.status === "suppressed") {
@@ -305,7 +309,10 @@ export class AutomationEngine {
       }
       const result = this.gate.submit({
         ruleId: rule.id,
-        deviceId: context.deviceId,
+        // Each Automation Event is a discrete occurrence. Use its event id only
+        // for gate identity so two events on the same topic are never mistaken
+        // for duplicate state. The EventContext itself remains non-device data.
+        deviceId: envelope.meta.eventId,
         topic: context.topic,
         execute: () => this.executeRule(rule, context),
       });

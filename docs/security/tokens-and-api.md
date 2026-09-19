@@ -51,7 +51,6 @@ The authentication middleware allows these routes without a dashboard access tok
 | Method | Path |
 |---|---|
 | `GET`, `HEAD` | `/api/health` |
-| `GET` | `/api/system/version` |
 | `GET` | `/api/auth/status` |
 | `POST` | `/api/auth/setup` |
 | `POST` | `/api/auth/login` |
@@ -70,7 +69,7 @@ The frontend connects to the WebSocket endpoint without including the token in t
 
 The server holds the connection in a pending-auth state for up to five seconds. If no valid auth message arrives within that window, the connection is closed with code 4001. Once authenticated, the server verifies the token and its expiry, then closes the connection when the token expires so the client can refresh and reconnect.
 
-For backward compatibility during rolling deploys, the server also accepts a `?token=` query parameter if present. This path is deprecated and will be removed once all clients use first-message auth.
+First-message auth is the only accepted path. A `?token=` query parameter is ignored, so a client that sends one and nothing else is closed at the end of the pending-auth window like any other unauthenticated connection. Access tokens are kept out of the URL because reverse proxies and access logs routinely record request targets.
 
 ## CORS and rate limits
 

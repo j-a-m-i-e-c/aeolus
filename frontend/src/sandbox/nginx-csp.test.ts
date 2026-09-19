@@ -1,6 +1,6 @@
 // frontend/src/sandbox/nginx-csp.test.ts — Config/smoke test asserting CSP hardening in nginx.conf
 // Parses the two CSP strings from frontend/nginx.conf and validates:
-// - Host script-src has neither 'unsafe-eval' nor blob: (Req 11.1)
+// - Host script-src has neither 'unsafe-eval', 'unsafe-inline' nor blob: (Req 11.1)
 // - Host worker-src still has 'self' blob: (Req 11.2)
 // - Host has frame-src 'self'
 // - Sandbox CSP has connect-src 'none' and script-src 'self' blob: (Req 11.3)
@@ -44,6 +44,10 @@ describe("nginx.conf CSP hardening", () => {
       expect(hostDirectives["script-src"]).not.toContain("'unsafe-eval'");
     });
 
+    it("script-src does NOT contain 'unsafe-inline'", () => {
+      expect(hostDirectives["script-src"]).not.toContain("'unsafe-inline'");
+    });
+
     it("script-src does NOT contain blob:", () => {
       expect(hostDirectives["script-src"]).not.toContain("blob:");
     });
@@ -70,7 +74,7 @@ describe("nginx.conf CSP hardening", () => {
   });
 
   describe("Sandbox CSP (/sandbox.html)", () => {
-    it("has connect-src 'none' (no network egress)", () => {
+    it("has connect-src 'none' (blocks direct fetch/XHR/WebSocket egress)", () => {
       expect(sandboxDirectives["connect-src"]).toBe("'none'");
     });
 

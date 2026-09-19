@@ -27,11 +27,13 @@ interface SystemInfo {
 }
 
 interface BuildVersionInfo {
+  version: string;
   commit: string;
   buildDate: string;
-  updateAvailable: boolean;
-  latestCommit: string | null;
-  commitsBehind: number;
+  latestVersion?: string | null;
+  updateAvailable?: boolean | null;
+  checkedAt?: string;
+  error?: string;
 }
 
 function formatBytes(bytes: number): string {
@@ -70,6 +72,7 @@ export function SystemPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [version, setVersion] = useState<BuildVersionInfo | null>(null);
+  const [checkingVersion, setCheckingVersion] = useState(false);
 
   // Health polling (device count, rule count, uptime, MQTT status)
   const health = useDeviceStore((s) => s.health);
@@ -105,6 +108,20 @@ export function SystemPage() {
       }
     } catch {}
   }, []);
+
+  const checkForUpdate = useCallback(async () => {
+    if (!isAdmin || checkingVersion) return;
+    setCheckingVersion(true);
+    try {
+      const res = await authFetch(`${API_URL}/api/system/version/check`, { method: "POST" });
+      const body = await res.json();
+      setVersion(body);
+    } catch {
+      setVersion((current) => current ? { ...current, error: "Release check failed" } : current);
+    } finally {
+      setCheckingVersion(false);
+    }
+  }, [checkingVersion, isAdmin]);
 
   useEffect(() => {
     fetchInfo();
@@ -176,10 +193,20 @@ export function SystemPage() {
                 · {new Date(version.buildDate).toLocaleDateString()}
               </span>
             )}
-            {version.updateAvailable && (
+            {version.updateAvailable === true && (
               <span className="ml-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-[#F59E0B]/15 text-[#F59E0B] border border-[#F59E0B]/30">
-                Update available{version.commitsBehind > 0 ? ` (${version.commitsBehind} commit${version.commitsBehind > 1 ? "s" : ""} behind)` : ""}
+                Release {version.latestVersion} available
               </span>
+            )}
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={checkForUpdate}
+                disabled={checkingVersion}
+                className="ml-1 text-[10px] font-semibold text-primary hover:underline disabled:opacity-50"
+              >
+                {checkingVersion ? "Checking..." : "Check releases"}
+              </button>
             )}
           </div>
         )}

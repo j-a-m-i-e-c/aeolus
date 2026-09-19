@@ -579,6 +579,7 @@ async function main(): Promise<void> {
 
       // 4. Stop automation engine (cron timers)
       engine.dispose();
+      registry.dispose();
 
       // 4b. Dispose MetricsService
       metricsService.dispose();

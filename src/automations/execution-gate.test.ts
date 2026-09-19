@@ -9,6 +9,9 @@ function makeRequest(overrides: Partial<ExecutionRequest> = {}): ExecutionReques
     ruleId: overrides.ruleId ?? "rule-1",
     deviceId: overrides.deviceId ?? "device-1",
     topic: overrides.topic ?? "sensors/temp",
+    // Forwarded rather than defaulted: its absence is what marks a request as a
+    // discrete occurrence, so the helper has to be able to express both.
+    coalesceKey: overrides.coalesceKey,
     execute: overrides.execute ?? (() => new Promise(() => {})), // never resolves by default
   };
 }
@@ -47,6 +50,36 @@ describe("ExecutionGate", () => {
       const q2 = gate.submit(makeRequest({ ruleId: "r1", deviceId: "d3", topic: "t3" }));
       expect(q1.status).toBe("queued");
       expect(q2.status).toBe("queued");
+    });
+  });
+
+  describe("submit — state coalescing", () => {
+    it("keeps only the latest queued state for one coalesce key", async () => {
+      const gate = new ExecutionGate({ maxActive: 1, maxQueuePerRule: 3 });
+      const executed: string[] = [];
+      let release!: () => void;
+      const blocker = new Promise<void>((resolve) => { release = resolve; });
+
+      const a = gate.submit(makeRequest({ coalesceKey: "rule-1:device-1:state", execute: async () => { executed.push("A"); await blocker; } }));
+      const b = gate.submit(makeRequest({ coalesceKey: "rule-1:device-1:state", execute: async () => { executed.push("B"); } }));
+      const c = gate.submit(makeRequest({ coalesceKey: "rule-1:device-1:state", execute: async () => { executed.push("C"); } }));
+      const d = gate.submit(makeRequest({ coalesceKey: "rule-1:device-1:state", execute: async () => { executed.push("D"); } }));
+
+      expect(a.status).toBe("admitted");
+      expect(b.status).toBe("queued");
+      expect(c.status).toBe("coalesced");
+      expect(d.status).toBe("coalesced");
+      release();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(executed).toEqual(["A", "D"]);
+    });
+
+    it("does not coalesce discrete requests that have no coalesce key", () => {
+      const gate = new ExecutionGate({ maxActive: 1, maxQueuePerRule: 3 });
+      gate.submit(makeRequest({ ruleId: "events", deviceId: "event-a", topic: "event/a" }));
+      expect(gate.submit(makeRequest({ ruleId: "events", deviceId: "event-b", topic: "event/b" })).status).toBe("queued");
+      expect(gate.submit(makeRequest({ ruleId: "events", deviceId: "event-c", topic: "event/c" })).status).toBe("queued");
+      expect(gate.stats().queueDepths.events).toBe(2);
     });
   });
 

@@ -64,10 +64,21 @@ const demoSessionRateLimiter = rateLimit({
 /**
  * Set the refresh token as an HttpOnly cookie.
  */
-function setRefreshCookie(res: import("express").Response, token: string): void {
+function refreshCookieSecure(req: import("express").Request): boolean {
+  const configured = (process.env.AUTH_COOKIE_SECURE ?? "auto").trim().toLowerCase();
+  if (configured === "true") return true;
+  if (configured === "false") return false;
+  // In auto mode follow the request scheme. Local HTTP installs keep working,
+  // while HTTPS deployments mark the refresh cookie Secure. Express only
+  // trusts X-Forwarded-Proto when the deployment has explicitly enabled a
+  // trusted proxy, so an arbitrary client cannot force this value.
+  return req.secure;
+}
+
+function setRefreshCookie(req: import("express").Request, res: import("express").Response, token: string): void {
   res.cookie(REFRESH_COOKIE_NAME, token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure: refreshCookieSecure(req),
     sameSite: "strict",
     path: "/api/auth",
     maxAge: REFRESH_COOKIE_MAX_AGE * 1000, // Express expects milliseconds
@@ -77,10 +88,10 @@ function setRefreshCookie(res: import("express").Response, token: string): void 
 /**
  * Clear the refresh token cookie.
  */
-function clearRefreshCookie(res: import("express").Response): void {
+function clearRefreshCookie(req: import("express").Request, res: import("express").Response): void {
   res.clearCookie(REFRESH_COOKIE_NAME, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure: refreshCookieSecure(req),
     sameSite: "strict",
     path: "/api/auth",
   });
@@ -109,7 +120,7 @@ export function createAuthRoutes(): Router {
     asyncHandler(async (req, res) => {
       const { username, password } = req.body;
       const result = await authService.setupAdmin(username, password);
-      setRefreshCookie(res, result.refreshToken);
+      setRefreshCookie(req, res, result.refreshToken);
       res.status(201).json({
         accessToken: result.accessToken,
         user: result.user,
@@ -125,7 +136,7 @@ export function createAuthRoutes(): Router {
     asyncHandler(async (req, res) => {
       const { username, password } = req.body;
       const result = await authService.login(username, password);
-      setRefreshCookie(res, result.refreshToken);
+      setRefreshCookie(req, res, result.refreshToken);
       res.json({
         accessToken: result.accessToken,
         user: result.user,
@@ -169,7 +180,7 @@ export function createAuthRoutes(): Router {
     if (refreshToken) {
       authService.logout(refreshToken);
     }
-    clearRefreshCookie(res);
+    clearRefreshCookie(req, res);
     res.json({ success: true });
   }));
 

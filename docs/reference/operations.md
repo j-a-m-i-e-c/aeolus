@@ -229,7 +229,7 @@ The authenticated dashboard summary is served at `/api/metrics/summary`.
 - `/api/health` reports backend, broker, device and automation status.
 - `/api/system` reports host details.
 - `/api/system/logs` reports recent application logs.
-- `/api/system/version` reports build information and checks the public GitHub main branch for a newer commit.
+- `/api/system/version` reports local build information without making a network request. An administrator can explicitly run `POST /api/system/version/check` to compare the installed semantic version with the latest published GitHub release.
 
 Aeolus reports update availability but does not update itself from the dashboard. Upgrades are applied through the deployment environment.
 

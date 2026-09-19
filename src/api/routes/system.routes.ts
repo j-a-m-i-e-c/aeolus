@@ -33,23 +33,72 @@ function getDiskUsage(): { total: number; used: number; free: number; usagePerce
   }
 }
 
-interface VersionInfo {
+interface LocalVersionInfo {
+  version: string;
   commit: string;
   buildDate: string;
-  updateAvailable: boolean;
-  latestCommit: string | null;
-  commitsBehind: number;
 }
 
-/** Cache the version/update-check response so the per-request GitHub call is throttled. */
-const VERSION_CACHE_TTL_MS = 15 * 60 * 1000;
+interface ReleaseCheckInfo extends LocalVersionInfo {
+  latestVersion: string | null;
+  updateAvailable: boolean | null;
+  checkedAt: string;
+  error?: string;
+}
+
+function readLocalVersionInfo(): LocalVersionInfo {
+  let version = process.env.AEOLUS_VERSION || "0.0.0-dev";
+  let commit = process.env.BUILD_COMMIT || "unknown";
+  let buildDate = process.env.BUILD_DATE || "unknown";
+
+  for (const candidate of [
+    path.join(process.cwd(), "dist", "build-info.json"),
+    path.join(process.cwd(), "build-info.json"),
+  ]) {
+    try {
+      const info = JSON.parse(fs.readFileSync(candidate, "utf-8")) as {
+        version?: string; commit?: string; buildDate?: string;
+      };
+      if (info.version) version = info.version;
+      if (info.commit) commit = info.commit;
+      if (info.buildDate) buildDate = info.buildDate;
+      break;
+    } catch {
+      // Try the next build-info location.
+    }
+  }
+
+  if (version === "0.0.0-dev") {
+    try {
+      const pkg = JSON.parse(fs.readFileSync(path.join(process.cwd(), "package.json"), "utf-8")) as { version?: string };
+      if (pkg.version) version = pkg.version;
+    } catch {
+      // Development/source checkouts may not have package metadata at cwd.
+    }
+  }
+
+  return { version, commit, buildDate };
+}
+
+function normalizeSemver(value: string): [number, number, number] | null {
+  const match = value.trim().match(/^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/);
+  if (!match) return null;
+  return [Number(match[1]), Number(match[2]), Number(match[3])];
+}
+
+function isNewerSemver(latest: string, current: string): boolean | null {
+  const a = normalizeSemver(latest);
+  const b = normalizeSemver(current);
+  if (!a || !b) return null;
+  for (let i = 0; i < 3; i++) {
+    if (a[i] > b[i]) return true;
+    if (a[i] < b[i]) return false;
+  }
+  return false;
+}
 
 export function createSystemRoutes(): Router {
   const router = Router();
-
-  // Cached version response (build info is process-stable; the update check is an
-  // outbound GitHub call we don't want to make on every request).
-  let versionCache: { at: number; data: VersionInfo } | null = null;
 
   /**
    * GET /api/system — host diagnostics (admin only).
@@ -125,69 +174,53 @@ export function createSystemRoutes(): Router {
     res.json(logs);
   });
 
-  /** GET /api/system/version — build-time version info + update check (cached) */
-  router.get("/version", async (_req, res) => {
-    // Serve a recent cached result to avoid an outbound GitHub call per request.
-    if (versionCache && Date.now() - versionCache.at < VERSION_CACHE_TTL_MS) {
-      res.json(versionCache.data);
-      return;
-    }
+  /** GET /api/system/version — local build information only; no network I/O. */
+  router.get("/version", (_req, res) => {
+    res.json(readLocalVersionInfo());
+  });
 
-    // Read build info from file baked at container build time
-    let commit = "unknown";
-    let buildDate = "unknown";
+  /**
+   * POST /api/system/version/check — explicit, admin-only release lookup.
+   * Update checks never run merely because somebody opened the System page.
+   */
+  router.post("/version/check", requireAdmin, async (_req, res) => {
+    const local = readLocalVersionInfo();
+    const checkedAt = new Date().toISOString();
     try {
-      // In production: /app/dist/build-info.json. Locally: try relative to cwd.
-      const candidates = [
-        path.join(process.cwd(), "dist", "build-info.json"),
-        path.join(process.cwd(), "build-info.json"),
-      ];
-      for (const candidate of candidates) {
-        try {
-          const raw = fs.readFileSync(candidate, "utf-8");
-          const info = JSON.parse(raw) as { commit?: string; buildDate?: string };
-          if (info.commit) commit = info.commit;
-          if (info.buildDate) buildDate = info.buildDate;
-          break;
-        } catch { continue; }
+      const response = await fetch(
+        "https://api.github.com/repos/j-a-m-i-e-c/aeolus/releases/latest",
+        {
+          headers: {
+            Accept: "application/vnd.github+json",
+            "User-Agent": "Aeolus-update-check",
+          },
+          signal: AbortSignal.timeout(5000),
+        },
+      );
+      if (response.status === 404) {
+        const data: ReleaseCheckInfo = { ...local, latestVersion: null, updateAvailable: false, checkedAt };
+        res.json(data);
+        return;
       }
-    } catch {
-      // Fall back to env vars (for local dev without container)
-      commit = process.env.BUILD_COMMIT || "unknown";
-      buildDate = process.env.BUILD_DATE || "unknown";
-    }
-
-    // Check GitHub for latest commit on main
-    let updateAvailable = false;
-    let latestCommit: string | null = null;
-    let commitsBehind = 0;
-
-    if (commit !== "unknown") {
-      try {
-        const response = await fetch(
-          "https://api.github.com/repos/j-a-m-i-e-c/aeolus/commits?sha=main&per_page=20",
-          { headers: { "Accept": "application/vnd.github.v3+json" }, signal: AbortSignal.timeout(5000) }
-        );
-        if (response.ok) {
-          const commits = await response.json() as Array<{ sha: string }>;
-          latestCommit = commits[0]?.sha.slice(0, 7) ?? null;
-          const currentIndex = commits.findIndex((c) => c.sha.startsWith(commit));
-          if (currentIndex > 0) {
-            updateAvailable = true;
-            commitsBehind = currentIndex;
-          } else if (currentIndex === -1 && latestCommit && latestCommit !== commit) {
-            updateAvailable = true;
-            commitsBehind = -1;
-          }
-        }
-      } catch {
-        // GitHub unreachable — skip update check silently
+      if (!response.ok) {
+        res.status(502).json({ ...local, latestVersion: null, updateAvailable: null, checkedAt, error: `GitHub returned HTTP ${response.status}` });
+        return;
       }
+      const release = await response.json() as { tag_name?: string };
+      const latestVersion = release.tag_name ?? null;
+      const updateAvailable = latestVersion ? isNewerSemver(latestVersion, local.version) : false;
+      const data: ReleaseCheckInfo = { ...local, latestVersion, updateAvailable, checkedAt };
+      if (updateAvailable === null) data.error = "Current or latest version is not valid semantic versioning";
+      res.json(data);
+    } catch (err) {
+      res.status(502).json({
+        ...local,
+        latestVersion: null,
+        updateAvailable: null,
+        checkedAt,
+        error: `Release check failed: ${(err as Error).message}`,
+      });
     }
-
-    const data: VersionInfo = { commit, buildDate, updateAvailable, latestCommit, commitsBehind };
-    versionCache = { at: Date.now(), data };
-    res.json(data);
   });
 
   return router;

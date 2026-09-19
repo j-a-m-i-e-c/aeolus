@@ -32,6 +32,28 @@ function createMockDeviceExposureResolver() {
   } as any;
 }
 
+function authenticatedWebSocket(port: number, token: string): WebSocket {
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+  ws.on("open", () => ws.send(JSON.stringify({ type: "auth", token })));
+  return ws;
+}
+
+/**
+ * Wait until the server has observed something, polling briefly.
+ *
+ * `waitForOpen` is not enough to know a client is authenticated. The auth frame
+ * is sent from the socket's own `open` handler, so when `open` resolves it has
+ * only just been written and the server has not necessarily read it yet. The
+ * removed query-string auth completed during the handshake, which is why these
+ * assertions used to be safe immediately after `open`.
+ */
+async function waitUntil(read: () => number, expected: number, timeoutMs = 2000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (read() !== expected && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
 function waitForOpen(ws: WebSocket): Promise<void> {
   return new Promise((resolve, reject) => {
     if (ws.readyState === WebSocket.OPEN) { resolve(); return; }
@@ -112,8 +134,9 @@ describe("WsServer — branch coverage", () => {
       role: "admin",
       groupId: null,
     });
-    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${token}`);
+    const ws = authenticatedWebSocket(port, token);
     await waitForOpen(ws);
+    await waitUntil(() => wsServer.clientCount, 1);
     expect(wsServer.clientCount).toBe(1);
 
     // Simulate an error by terminating the underlying socket abruptly
@@ -132,8 +155,8 @@ describe("WsServer — branch coverage", () => {
       role: "admin",
       groupId: null,
     });
-    const ws1 = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${token}`);
-    const ws2 = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${token}`);
+    const ws1 = authenticatedWebSocket(port, token);
+    const ws2 = authenticatedWebSocket(port, token);
     const collector1 = collectMessages(ws1);
     const collector2 = collectMessages(ws2);
     await waitForOpen(ws1);
@@ -166,8 +189,9 @@ describe("WsServer — branch coverage", () => {
       { algorithm: "HS256", expiresIn: "1s" },
     );
 
-    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${shortToken}`);
+    const ws = authenticatedWebSocket(port, shortToken);
     await waitForOpen(ws);
+    await waitUntil(() => wsServer.clientCount, 1);
     expect(wsServer.clientCount).toBe(1);
 
     const { code } = await waitForClose(ws);
@@ -240,8 +264,9 @@ describe("WsServer — branch coverage", () => {
       role: "admin",
       groupId: null,
     });
-    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${token}`);
+    const ws = authenticatedWebSocket(port, token);
     await waitForOpen(ws);
+    await waitUntil(() => connectEvents.length, 1);
 
     expect(connectEvents.length).toBe(1);
 
@@ -267,7 +292,7 @@ describe("WsServer — branch coverage", () => {
       groupId: "group-1",
     });
 
-    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${token}`);
+    const ws = authenticatedWebSocket(port, token);
     const { code, reason } = await waitForClose(ws);
     expect(code).toBe(4002);
     expect(reason).toBe("Authentication error");

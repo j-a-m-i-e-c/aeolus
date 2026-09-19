@@ -148,170 +148,71 @@ describe("system.routes — branch coverage", () => {
     });
   });
 
-  describe("GET /api/system/version — branch coverage", () => {
-    beforeEach(() => {
-      // Nothing needed — originalFetch is already saved at module level
-    });
-
+  describe("version routes — branch coverage", () => {
     afterEach(() => {
       globalThis.fetch = originalFetch;
+      delete process.env.AEOLUS_VERSION;
       delete process.env.BUILD_COMMIT;
       delete process.env.BUILD_DATE;
     });
 
-    it("reads build-info.json successfully", async () => {
-      mockReadFileSync.mockImplementation((p: string) => {
-        if (typeof p === "string" && p.includes("build-info.json")) {
-          return JSON.stringify({ commit: "abc1234", buildDate: "2024-06-01" });
-        }
-        throw new Error("ENOENT");
-      });
-      // Mock fetch to fail (no GitHub check)
-      globalThis.fetch = vi.fn().mockRejectedValue(new Error("offline")) as any;
+    it("GET /version is local only and does not contact GitHub", async () => {
+      process.env.AEOLUS_VERSION = "1.2.3";
+      process.env.BUILD_COMMIT = "abc1234";
+      process.env.BUILD_DATE = "2026-09-19";
+      const fetchSpy = vi.fn();
+      globalThis.fetch = fetchSpy as any;
 
       const res = await request(app, "GET", "/api/system/version");
       expect(res.status).toBe(200);
-      expect(res.body.commit).toBe("abc1234");
-      expect(res.body.buildDate).toBe("2024-06-01");
-    });
-
-    it("falls back to env vars when build-info.json not found", async () => {
-      mockReadFileSync.mockImplementation(() => { throw new Error("ENOENT"); });
-      process.env.BUILD_COMMIT = "envcommit";
-      process.env.BUILD_DATE = "2024-07-01";
-      globalThis.fetch = vi.fn().mockRejectedValue(new Error("offline")) as any;
-
-      const res = await request(app, "GET", "/api/system/version");
-      expect(res.status).toBe(200);
-      // Note: the outer try/catch means env vars are the fallback of the outer catch
-      expect(res.body).toHaveProperty("commit");
-      expect(res.body).toHaveProperty("buildDate");
-    });
-
-    it("detects update available when current commit is behind", async () => {
-      mockReadFileSync.mockImplementation((p: string) => {
-        if (typeof p === "string" && p.includes("build-info.json")) {
-          return JSON.stringify({ commit: "abc1234", buildDate: "2024-06-01" });
-        }
-        throw new Error("ENOENT");
-      });
-
-      const commits = [
-        { sha: "newer999newer999newer999newer999newer999n" },
-        { sha: "abc1234abc1234abc1234abc1234abc1234abc1234" },
-      ];
-      globalThis.fetch = vi.fn().mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve(commits),
-      }) as any;
-
-      const res = await request(app, "GET", "/api/system/version");
-      expect(res.status).toBe(200);
-      expect(res.body.updateAvailable).toBe(true);
-      expect(res.body.commitsBehind).toBe(1);
-    });
-
-    it("detects update available when commit not found in list (very old)", async () => {
-      mockReadFileSync.mockImplementation((p: string) => {
-        if (typeof p === "string" && p.includes("build-info.json")) {
-          return JSON.stringify({ commit: "oldold7", buildDate: "2024-01-01" });
-        }
-        throw new Error("ENOENT");
-      });
-
-      const commits = [
-        { sha: "newer111newer111newer111newer111newer111n" },
-        { sha: "newer222newer222newer222newer222newer222n" },
-      ];
-      globalThis.fetch = vi.fn().mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve(commits),
-      }) as any;
-
-      const res = await request(app, "GET", "/api/system/version");
-      expect(res.status).toBe(200);
-      expect(res.body.updateAvailable).toBe(true);
-      expect(res.body.commitsBehind).toBe(-1);
-    });
-
-    it("reports no update when commit is the latest", async () => {
-      mockReadFileSync.mockImplementation((p: string) => {
-        if (typeof p === "string" && p.includes("build-info.json")) {
-          return JSON.stringify({ commit: "latest7", buildDate: "2024-06-01" });
-        }
-        throw new Error("ENOENT");
-      });
-
-      const commits = [
-        { sha: "latest7latest7latest7latest7latest7latest7" },
-        { sha: "older88older88older88older88older88older88" },
-      ];
-      globalThis.fetch = vi.fn().mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve(commits),
-      }) as any;
-
-      const res = await request(app, "GET", "/api/system/version");
-      expect(res.status).toBe(200);
-      expect(res.body.updateAvailable).toBe(false);
-      expect(res.body.commitsBehind).toBe(0);
-    });
-
-    it("skips update check when commit is 'unknown'", async () => {
-      mockReadFileSync.mockImplementation(() => { throw new Error("ENOENT"); });
-      // No env vars, so commit defaults to "unknown"
-      const fetchSpy = vi.fn().mockResolvedValue({ ok: false }) as any;
-      globalThis.fetch = fetchSpy;
-
-      const res = await request(app, "GET", "/api/system/version");
-      expect(res.status).toBe(200);
-      expect(res.body.updateAvailable).toBe(false);
-      // fetch should not have been called since commit === "unknown"
+      expect(res.body).toMatchObject({ version: "1.2.3", commit: "abc1234", buildDate: "2026-09-19" });
       expect(fetchSpy).not.toHaveBeenCalled();
     });
 
-    it("handles GitHub API returning non-ok response", async () => {
-      mockReadFileSync.mockImplementation((p: string) => {
-        if (typeof p === "string" && p.includes("build-info.json")) {
-          return JSON.stringify({ commit: "abc1234", buildDate: "2024-06-01" });
-        }
-        throw new Error("ENOENT");
-      });
+    it("POST /version/check compares the latest release semver", async () => {
+      process.env.AEOLUS_VERSION = "1.2.3";
+      globalThis.fetch = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ tag_name: "v1.3.0" }) }) as any;
+      const res = await request(app, "POST", "/api/system/version/check");
+      expect(res.status).toBe(200);
+      expect(res.body.latestVersion).toBe("v1.3.0");
+      expect(res.body.updateAvailable).toBe(true);
+      expect(res.body.checkedAt).toBeTruthy();
+    });
 
-      globalThis.fetch = vi.fn().mockResolvedValue({
-        ok: false,
-        status: 403,
-      }) as any;
-
-      const res = await request(app, "GET", "/api/system/version");
+    it("reports current when the release is not newer", async () => {
+      process.env.AEOLUS_VERSION = "1.3.0";
+      globalThis.fetch = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ tag_name: "v1.3.0" }) }) as any;
+      const res = await request(app, "POST", "/api/system/version/check");
       expect(res.status).toBe(200);
       expect(res.body.updateAvailable).toBe(false);
     });
 
-    it("caches the update check so repeat requests do not re-hit GitHub", async () => {
-      mockReadFileSync.mockImplementation((p: string) => {
-        if (typeof p === "string" && p.includes("build-info.json")) {
-          return JSON.stringify({ commit: "abc1234", buildDate: "2024-06-01" });
-        }
-        throw new Error("ENOENT");
-      });
-      const commits = [
-        { sha: "newer999newer999newer999newer999newer999n" },
-        { sha: "abc1234abc1234abc1234abc1234abc1234abc1234" },
-      ];
-      const fetchSpy = vi.fn().mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve(commits),
-      }) as any;
-      globalThis.fetch = fetchSpy;
+    it("handles repositories with no published release", async () => {
+      process.env.AEOLUS_VERSION = "1.3.0";
+      globalThis.fetch = vi.fn().mockResolvedValue({ ok: false, status: 404 }) as any;
+      const res = await request(app, "POST", "/api/system/version/check");
+      expect(res.status).toBe(200);
+      expect(res.body.latestVersion).toBeNull();
+      expect(res.body.updateAvailable).toBe(false);
+    });
 
-      const first = await request(app, "GET", "/api/system/version");
-      const second = await request(app, "GET", "/api/system/version");
+    it("does not invent an update result for non-semver development builds", async () => {
+      process.env.AEOLUS_VERSION = "dev";
+      globalThis.fetch = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ tag_name: "v1.3.0" }) }) as any;
+      const res = await request(app, "POST", "/api/system/version/check");
+      expect(res.status).toBe(200);
+      expect(res.body.updateAvailable).toBeNull();
+      expect(res.body.error).toContain("semantic versioning");
+    });
 
-      expect(first.body.updateAvailable).toBe(true);
-      expect(second.body).toEqual(first.body);
-      // The GitHub update check runs once; the second request is served from cache.
-      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    it("returns 502 when GitHub is unavailable", async () => {
+      process.env.AEOLUS_VERSION = "1.2.3";
+      globalThis.fetch = vi.fn().mockRejectedValue(new Error("offline")) as any;
+      const res = await request(app, "POST", "/api/system/version/check");
+      expect(res.status).toBe(502);
+      expect(res.body.updateAvailable).toBeNull();
+      expect(res.body.error).toContain("offline");
     });
   });
+
 });

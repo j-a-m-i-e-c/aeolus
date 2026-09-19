@@ -255,6 +255,7 @@ describe("auth.routes", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    delete process.env.AUTH_COOKIE_SECURE;
     mocks.needsSetup.mockReturnValue(true);
     mocks.setupAdmin.mockResolvedValue({
       accessToken: "access-token-123",
@@ -354,6 +355,17 @@ describe("auth.routes", () => {
       expect(setCookie).toBeDefined();
       expect(setCookie).toContain("refreshToken=");
       expect(setCookie).toContain("HttpOnly");
+    });
+
+    it("keeps the refresh cookie usable on a local HTTP install in auto mode", async () => {
+      const res = await request(app, "POST", "/api/auth/login", { username: "testuser", password: "validpassword123" });
+      expect(res.headers["set-cookie"]).not.toContain("Secure");
+    });
+
+    it("can force Secure refresh cookies for an HTTPS deployment", async () => {
+      process.env.AUTH_COOKIE_SECURE = "true";
+      const res = await request(app, "POST", "/api/auth/login", { username: "testuser", password: "validpassword123" });
+      expect(res.headers["set-cookie"]).toContain("Secure");
     });
 
     it("returns 401 when credentials are invalid", async () => {

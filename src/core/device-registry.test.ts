@@ -28,6 +28,7 @@ describe("DeviceRegistry — unit tests", () => {
   });
 
   afterEach(() => {
+    registry.dispose();
     db.close();
   });
 
@@ -78,6 +79,7 @@ describe("DeviceRegistry — unit tests", () => {
         connectorInstanceId: "bridge-a",
       });
 
+      registry.flushPendingWrites();
       const reloaded = new DeviceRegistry(db, eventBus);
       reloaded.loadFromDb();
       expect(reloaded.getById("hue-1")?.connectorInstanceId).toBe("bridge-a");
@@ -157,6 +159,7 @@ describe("DeviceRegistry — unit tests", () => {
         lastSeen: Date.now(),
       };
       registry.registerDevice(device);
+      registry.flushPendingWrites();
       const row = db.prepare("SELECT * FROM devices WHERE id = ?").get("persist-device");
       expect(row).toBeDefined();
     });
@@ -279,11 +282,13 @@ describe("DeviceRegistry — unit tests", () => {
         timestamp: Date.now(),
       });
 
+      registry.flushPendingWrites();
       const stored = db.prepare(
         "SELECT topic FROM devices WHERE id = ?",
       ).get("pump-well-state") as { topic: string };
       expect(stored.topic).toBe("pump/well/state");
 
+      registry.flushPendingWrites();
       const afterRestart = new DeviceRegistry(db, eventBus);
       afterRestart.loadFromDb();
       expect(afterRestart.getByMqttTopic("pump/well/state")).toMatchObject({
@@ -338,6 +343,7 @@ describe("DeviceRegistry — unit tests", () => {
         commandTopic: "pump/well/command",
       });
 
+      registry.flushPendingWrites();
       const afterRestart = new DeviceRegistry(db, eventBus);
       afterRestart.loadFromDb();
       expect(afterRestart.getByMqttTopic("pump/well/state")?.commandTopic)
@@ -368,6 +374,7 @@ describe("DeviceRegistry — unit tests", () => {
         },
       });
 
+      registry.flushPendingWrites();
       const afterRestart = new DeviceRegistry(db, eventBus);
       afterRestart.loadFromDb();
       const restored = afterRestart.getById("esp32-relay");
@@ -394,14 +401,40 @@ describe("DeviceRegistry — unit tests", () => {
         topic: "home/plain",
       });
 
+      registry.flushPendingWrites();
       const stored = db
         .prepare("SELECT mqtt_command_profile FROM devices WHERE id = ?")
         .get("plain-mqtt") as { mqtt_command_profile: string | null };
       expect(stored.mqtt_command_profile).toBeNull();
 
+      registry.flushPendingWrites();
       const afterRestart = new DeviceRegistry(db, eventBus);
       afterRestart.loadFromDb();
       expect(afterRestart.getById("plain-mqtt")?.mqttCommandProfile).toBeUndefined();
+    });
+  });
+
+  describe("write behind persistence", () => {
+    it("persists only the newest dirty snapshot when telemetry changes before a flush", () => {
+      registry.upsert({ deviceId: "sensor-fast", deviceType: "sensor", state: { value: 1 }, topic: "bench/sensor-fast/state", timestamp: 1 });
+      registry.upsert({ deviceId: "sensor-fast", deviceType: "sensor", state: { value: 2 }, topic: "bench/sensor-fast/state", timestamp: 2 });
+      registry.upsert({ deviceId: "sensor-fast", deviceType: "sensor", state: { value: 3 }, topic: "bench/sensor-fast/state", timestamp: 3 });
+
+      expect(db.prepare("SELECT id FROM devices WHERE id = ?").get("sensor-fast")).toBeUndefined();
+      registry.flushPendingWrites();
+
+      const row = db.prepare("SELECT state, last_seen FROM devices WHERE id = ?").get("sensor-fast") as { state: string; last_seen: number };
+      expect(JSON.parse(row.state)).toEqual({ value: 3 });
+      expect(row.last_seen).toBe(3);
+    });
+
+    it("flushes dirty state during dispose", () => {
+      registry.registerDevice({
+        id: "shutdown-device", name: "Shutdown Device", type: "sensor", capabilities: ["temperature"],
+        state: { temperature: 21 }, integration: "mqtt", lastSeen: 1, topic: "shutdown/device/state",
+      });
+      registry.dispose();
+      expect(db.prepare("SELECT id FROM devices WHERE id = ?").get("shutdown-device")).toBeDefined();
     });
   });
 

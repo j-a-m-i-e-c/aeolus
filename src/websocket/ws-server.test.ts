@@ -63,6 +63,28 @@ function collectMessages(ws: WebSocket) {
   };
 }
 
+function authenticatedWebSocket(port: number, token: string): WebSocket {
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+  ws.on("open", () => ws.send(JSON.stringify({ type: "auth", token })));
+  return ws;
+}
+
+/**
+ * Wait until the server has observed something, polling briefly.
+ *
+ * `waitForOpen` is not enough to know a client is authenticated. The auth frame
+ * is sent from the socket's own `open` handler, so when `open` resolves it has
+ * only just been written and the server has not necessarily read it yet. The
+ * removed query-string auth completed during the handshake, which is why these
+ * assertions used to be safe immediately after `open`.
+ */
+async function waitUntil(read: () => number, expected: number, timeoutMs = 2000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (read() !== expected && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
 function waitForOpen(ws: WebSocket): Promise<void> {
   return new Promise((resolve, reject) => {
     if (ws.readyState === WebSocket.OPEN) {
@@ -159,10 +181,22 @@ describe("WsServer Authentication", () => {
     });
 
     it("should reject connection with invalid token (close code 4001)", async () => {
-      const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=invalid-token`);
+      const ws = authenticatedWebSocket(port, "invalid-token");
       const { code, reason } = await waitForClose(ws);
       expect(code).toBe(4001);
       expect(reason).toBe("Invalid token");
+    });
+
+    it("does not authenticate a valid token supplied in the WebSocket URL", async () => {
+      const token = generateAccessToken({
+        userId: "admin-1", username: "admin", role: "admin", groupId: null,
+      });
+      const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${token}`);
+      await waitForOpen(ws);
+      ws.send(JSON.stringify({ type: "not-auth" }));
+      const { code, reason } = await waitForClose(ws);
+      expect(code).toBe(4001);
+      expect(reason).toBe("Authentication required");
     });
 
     it("should reject connection with expired token (close code 4001)", async () => {
@@ -172,7 +206,7 @@ describe("WsServer Authentication", () => {
         "test-ws-secret-key-for-testing",
         { algorithm: "HS256", expiresIn: "-1s" },
       );
-      const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${expiredToken}`);
+      const ws = authenticatedWebSocket(port, expiredToken);
       const { code, reason } = await waitForClose(ws);
       expect(code).toBe(4001);
       expect(reason).toBe("Invalid token");
@@ -185,7 +219,7 @@ describe("WsServer Authentication", () => {
         role: "admin",
         groupId: null,
       });
-      const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${token}`);
+      const ws = authenticatedWebSocket(port, token);
       const collector = collectMessages(ws);
       await waitForOpen(ws);
 
@@ -221,11 +255,12 @@ describe("WsServer Authentication", () => {
         "test-ws-secret-key-for-testing",
         { algorithm: "HS256" },
       );
-      const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${shortToken}`);
+      const ws = authenticatedWebSocket(port, shortToken);
       // Subscribe to `close` before awaiting `open` so an early expiry cannot
       // fire in the gap between the two and strand the promise.
       const closed = waitForClose(ws);
       await waitForOpen(ws);
+      await waitUntil(() => wsServer.clientCount, 1);
       expect(wsServer.clientCount).toBe(1);
 
       // The server should close the socket at the token's expiry.
@@ -241,7 +276,7 @@ describe("WsServer Authentication", () => {
         role: "user",
         groupId: "group-1",
       });
-      const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${token}`);
+      const ws = authenticatedWebSocket(port, token);
       const collector = collectMessages(ws);
       await waitForOpen(ws);
       await collector.waitForCount(1); // consume snapshot
@@ -260,7 +295,7 @@ describe("WsServer Authentication", () => {
         role: "admin",
         groupId: null,
       });
-      const adminWs = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${adminToken}`);
+      const adminWs = authenticatedWebSocket(port, adminToken);
       const adminCollector = collectMessages(adminWs);
       await waitForOpen(adminWs);
       await adminCollector.waitForCount(1); // snapshot
@@ -271,7 +306,7 @@ describe("WsServer Authentication", () => {
         role: "user",
         groupId: "group-1",
       });
-      const userWs = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${userToken}`);
+      const userWs = authenticatedWebSocket(port, userToken);
       const userCollector = collectMessages(userWs);
       await waitForOpen(userWs);
       await userCollector.waitForCount(1); // snapshot
@@ -297,7 +332,7 @@ describe("WsServer Authentication", () => {
         role: "user",
         groupId: "group-1",
       });
-      const userWs = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${userToken}`);
+      const userWs = authenticatedWebSocket(port, userToken);
       const userCollector = collectMessages(userWs);
       await waitForOpen(userWs);
       await userCollector.waitForCount(1); // snapshot
@@ -317,7 +352,7 @@ describe("WsServer Authentication", () => {
         role: "user",
         groupId: "group-1",
       });
-      const userWs = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${userToken}`);
+      const userWs = authenticatedWebSocket(port, userToken);
       const userCollector = collectMessages(userWs);
       await waitForOpen(userWs);
       await userCollector.waitForCount(1); // snapshot
@@ -347,7 +382,7 @@ describe("WsServer Authentication", () => {
         role: "admin",
         groupId: null,
       });
-      const adminWs = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${adminToken}`);
+      const adminWs = authenticatedWebSocket(port, adminToken);
       const adminCollector = collectMessages(adminWs);
       await waitForOpen(adminWs);
       await adminCollector.waitForCount(1); // snapshot
@@ -421,7 +456,7 @@ describe("WsServer initial snapshot scoping", () => {
 
   it("sends only the devices a non-admin may observe", async () => {
     const token = generateAccessToken({ userId: "user-1", username: "user1", role: "user", groupId: "group-1" });
-    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${token}`);
+    const ws = authenticatedWebSocket(port, token);
     const collector = collectMessages(ws);
     await waitForOpen(ws);
 
@@ -434,7 +469,7 @@ describe("WsServer initial snapshot scoping", () => {
 
   it("sends every device to an admin", async () => {
     const token = generateAccessToken({ userId: "admin-1", username: "admin", role: "admin", groupId: null });
-    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${token}`);
+    const ws = authenticatedWebSocket(port, token);
     const collector = collectMessages(ws);
     await waitForOpen(ws);
 

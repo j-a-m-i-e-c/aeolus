@@ -41,11 +41,9 @@ const SYSTEM_INFO = {
 };
 
 const VERSION_INFO = {
+  version: "1.2.3",
   commit: "abc1234",
   buildDate: "unknown",
-  updateAvailable: false,
-  latestCommit: null,
-  commitsBehind: 0,
 };
 
 function jsonResponse(data: unknown, ok = true, status = 200) {
@@ -73,7 +71,10 @@ describe("SystemPage", () => {
   });
 
   function routeAuthFetch(systemResponse = () => jsonResponse(SYSTEM_INFO)) {
-    mockAuthFetch.mockImplementation((url: string) => {
+    mockAuthFetch.mockImplementation((url: string, options?: RequestInit) => {
+      if (url.includes("/api/system/version/check") && options?.method === "POST") {
+        return jsonResponse({ ...VERSION_INFO, latestVersion: "v1.2.3", updateAvailable: false, checkedAt: "now" });
+      }
       if (url.includes("/api/system/version")) return jsonResponse(VERSION_INFO);
       if (url.includes("/api/system/logs")) return jsonResponse([]);
       if (url.includes("/api/system")) return systemResponse();

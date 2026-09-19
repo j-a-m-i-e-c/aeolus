@@ -15,7 +15,6 @@ Exact request schemas are defined under `src/api/schemas/` and tested with the r
 | Method | Path | Purpose |
 |---|---|---|
 | `GET`, `HEAD` | `/api/health` | Health check |
-| `GET` | `/api/system/version` | Build and update information |
 | `GET` | `/api/auth/status` | Whether first-run setup is required |
 | `POST` | `/api/auth/setup` | Create the initial admin |
 | `POST` | `/api/auth/login` | Sign in |
@@ -167,7 +166,8 @@ keeping its own id, payload and timestamp — not synthesised bucket averages.
 |---|---|---|
 | `GET` | `/api/system` | Host diagnostics |
 | `GET` | `/api/system/logs` | Recent structured logs |
-| `GET` | `/api/system/version` | Build and update information |
+| `GET` | `/api/system/version` | Local build information, without any network request |
+| `POST` | `/api/system/version/check` | Admin-only; compares the installed version against the latest published release |
 | `GET` | `/api/health` | Service health |
 | `GET` | `/api/metrics/summary` | Dashboard metrics summary |
 | `GET`, `PUT` | `/api/layout` | Read or replace dashboard layout |

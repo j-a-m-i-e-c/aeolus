@@ -87,19 +87,12 @@ export class WsServer {
     this.deviceExposureResolver = deviceExposureResolver;
     this.wss = new WebSocketServer({ server, path: "/ws" });
 
-    this.wss.on("connection", (ws, req) => {
-      // --- Backward-compatibility: accept token in query string (deprecation path) ---
-      // This allows rolling deploys where the frontend still sends ?token=...
-      // Remove once all clients are updated to first-message auth.
-      const url = new URL(req.url || "", `http://${req.headers.host || "localhost"}`);
-      const queryToken = url.searchParams.get("token");
+    this.wss.on("connection", (ws) => {
+      // Authentication is deliberately first-message only. Access tokens never
+      // appear in the WebSocket URL, where reverse proxies and access logs may
+      // persist them. A ?token= query parameter is ignored.
 
-      if (queryToken) {
-        this.authenticateAndSetup(ws, queryToken, registry);
-        return;
-      }
-
-      // --- First-message authentication (preferred) ---
+      // --- First-message authentication ---
       // Client connects without a token in the URL, then sends
       // { type: "auth", token: "..." } as its first message.
       const authTimer = setTimeout(() => {
