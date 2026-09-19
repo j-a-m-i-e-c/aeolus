@@ -33,7 +33,10 @@ services:
   # to the Mosquitto process when it changes. Shares the PID namespace with the
   # mosquitto container so it can signal PID 1 directly — no Docker socket needed.
   mosquitto-reloader:
-    image: alpine:3
+    build:
+      context: .
+      dockerfile: mosquitto/reloader.Dockerfile
+    image: aeolus-mosquitto-reloader:local
     container_name: aeolus-mosquitto-reloader
     restart: unless-stopped
     pid: "service:mosquitto"
@@ -44,7 +47,6 @@ services:
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
-        apk add --no-cache inotify-tools > /dev/null 2>&1
         echo "mosquitto-reloader: waiting for /watch/password_file to appear"
         while [ ! -f /watch/password_file ]; do sleep 2; done
         echo "mosquitto-reloader: watching /watch directory for config changes"

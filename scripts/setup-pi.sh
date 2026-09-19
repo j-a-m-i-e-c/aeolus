@@ -5,6 +5,11 @@
 
 set -e
 
+# Pin installs to a release tag/branch/commit when desired:
+#   AEOLUS_REF=v0.1.0 ./scripts/setup-pi.sh
+# Defaults to main for source/development installs.
+AEOLUS_REF="${AEOLUS_REF:-main}"
+
 echo "🌬️  Aeolus — Raspberry Pi Setup"
 echo "================================"
 
@@ -78,16 +83,30 @@ else
   echo "✓ Docker Compose already installed"
 fi
 
-# 5. Clone Aeolus
+# 5. Clone/update Aeolus at the requested immutable release/branch/commit.
 INSTALL_DIR="$HOME/aeolus"
-if [ -d "$INSTALL_DIR" ]; then
-  echo "📂 Updating existing installation..."
+if [ -d "$INSTALL_DIR/.git" ]; then
+  echo "📂 Updating existing installation metadata..."
   cd "$INSTALL_DIR"
-  git pull
+  git fetch --tags --prune origin
 else
   echo "📂 Cloning Aeolus..."
   git clone https://github.com/j-a-m-i-e-c/aeolus.git "$INSTALL_DIR"
   cd "$INSTALL_DIR"
+  git fetch --tags --prune origin
+fi
+
+if [ "$AEOLUS_REF" = "main" ]; then
+  git checkout main
+  git pull --ff-only origin main
+else
+  echo "📌 Installing Aeolus ref: $AEOLUS_REF"
+  if git rev-parse --verify --quiet "${AEOLUS_REF}^{commit}" >/dev/null; then
+    git checkout --detach "$AEOLUS_REF"
+  else
+    git fetch --depth=1 origin "$AEOLUS_REF"
+    git checkout --detach FETCH_HEAD
+  fi
 fi
 
 # 6. Create .env from example if not exists
@@ -112,6 +131,7 @@ echo "  MQTT:       aeolus.local:1883"
 echo ""
 echo "  IP address: $(hostname -I | awk '{print $1}')"
 echo ""
+echo "  Source ref:  $AEOLUS_REF"
 echo "  Logs:       docker compose logs -f"
 echo "  Stop:       docker compose down"
 echo "  Restart:    docker compose restart"

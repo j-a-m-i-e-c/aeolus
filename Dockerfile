@@ -13,22 +13,23 @@ RUN npm ci
 COPY tsconfig.json ./
 COPY src/ ./src/
 
-RUN echo "{\"commit\":\"${BUILD_COMMIT}\",\"buildDate\":\"${BUILD_DATE}\"}" > /tmp/build-info.json
+RUN VERSION=$(node -p "require('./package.json').version") \
+    && echo "{\"version\":\"${VERSION}\",\"commit\":\"${BUILD_COMMIT}\",\"buildDate\":\"${BUILD_DATE}\"}" > /tmp/build-info.json
 RUN npm run build
+RUN npm pkg delete scripts.prepare && npm prune --omit=dev && npm cache clean --force
 
 # Production stage
 FROM node:24.20.0-slim AS production
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ wget curl ca-certificates gosu \
+RUN apt-get update && apt-get install -y --no-install-recommends wget ca-certificates gosu \
     && rm -rf /var/lib/apt/lists/*
 
 # Non-root user
 RUN groupadd -r aeolus && useradd -r -g aeolus -d /app -s /sbin/nologin aeolus
 
 COPY package.json package-lock.json ./
-RUN npm pkg delete scripts.prepare && npm ci --omit=dev && npm cache clean --force
-
+COPY --from=builder /app/node_modules ./node_modules/
 COPY --from=builder /app/dist ./dist/
 COPY --from=builder /tmp/build-info.json ./dist/build-info.json
 COPY src/automations/sandbox-types.d.ts ./dist/automations/sandbox-types.d.ts
