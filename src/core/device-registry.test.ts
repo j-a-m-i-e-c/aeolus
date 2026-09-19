@@ -148,7 +148,7 @@ describe("DeviceRegistry — unit tests", () => {
       expect(registry.size).toBe(1);
     });
 
-    it("persists registered device to database", () => {
+    it("persists registered device synchronously before returning", () => {
       const device: Device = {
         id: "persist-device",
         name: "Persist Device",
@@ -158,8 +158,12 @@ describe("DeviceRegistry — unit tests", () => {
         integration: "mqtt",
         lastSeen: Date.now(),
       };
+
       registry.registerDevice(device);
-      registry.flushPendingWrites();
+
+      // Registration is configuration, not disposable telemetry. A successful
+      // return must mean the device is already durable even if the process
+      // exits before the write-behind timer could fire.
       const row = db.prepare("SELECT * FROM devices WHERE id = ?").get("persist-device");
       expect(row).toBeDefined();
     });
@@ -352,6 +356,37 @@ describe("DeviceRegistry — unit tests", () => {
   });
 
   describe("MQTT command profile serialization (phase-1 Req 2.9)", () => {
+    it("persists command-profile changes synchronously before returning", () => {
+      registry.registerDevice({
+        id: "profile-sync",
+        name: "Profile Sync",
+        type: "switch",
+        capabilities: ["on/off"],
+        state: {},
+        integration: "mqtt",
+        lastSeen: Date.now(),
+        topic: "profile-sync/state",
+        commandTopic: "profile-sync/set",
+      });
+
+      const profile = {
+        qos: 1 as const,
+        acknowledgement: {
+          supported: true,
+          responseTopic: "profile-sync/ack",
+        },
+      };
+
+      registry.setMqttCommandProfile("profile-sync", profile);
+
+      // Command profiles are operator configuration. They must already be in
+      // SQLite when the setter returns, without relying on a later batch flush.
+      const stored = db
+        .prepare("SELECT mqtt_command_profile FROM devices WHERE id = ?")
+        .get("profile-sync") as { mqtt_command_profile: string | null };
+      expect(JSON.parse(stored.mqtt_command_profile!)).toEqual(profile);
+    });
+
     it("round-trips an ack-capable profile across a reload", () => {
       registry.registerDevice({
         id: "esp32-relay",

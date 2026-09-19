@@ -31,6 +31,7 @@ This is especially useful for decisions that are easy to misunderstand from code
 | [0012](0012-automation-project-portability.md) | Automation Project packages, library projects and logical device binding | Proposed |
 | [0013](0013-simulated-physical-transitions.md) | Timed physical transitions as a simulator primitive | Accepted |
 | [0014](0014-fixed-command-proof-scaffold.md) | A fixed four-stage command proof, explained from a snapshot | Accepted |
+| [0015](0015-first-run-trust-and-mqtt-security.md) | First run trust and MQTT security model | Accepted |
 
 ## Writing a new ADR
 
