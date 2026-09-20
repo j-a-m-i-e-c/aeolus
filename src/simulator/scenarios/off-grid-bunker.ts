@@ -88,12 +88,31 @@ const POWER_TICK_MS = 2_000;
  * Simulated seconds per real second for the POWER model only.
  *
  * The battery and the fuel tank are the things a short demo needs to see move, so
- * their integration runs fast. This scale deliberately does NOT reach the cistern:
- * accelerating drinking water made an ~80 day supply fall by a litre every few
- * seconds, which published `sensor/bunker/supplies` continuously and taught the
- * visitor that Aeolus is noisy rather than that the bunker is well provisioned.
+ * their integration runs faster than real time. This scale deliberately does NOT
+ * reach the cistern: accelerating drinking water made an ~80 day supply fall by a
+ * litre every few seconds, which published `sensor/bunker/supplies` continuously and
+ * taught the visitor that Aeolus is noisy rather than that the bunker is well
+ * provisioned. See {@link waterDrawnLitres}.
+ *
+ * It was 300x, which was chosen to make the WRONG thing visible. The passive balance
+ * is a ~20 W deficit against a 9.6 kWh bank — around 480 real hours to empty — so
+ * showing that drift required a multiplier that then applied to everything else. At
+ * 300x a full fuel tank lasted 108 seconds of wall time, which made
+ * {@link GENERATOR_RUN_HOURS} decoration: the gauge read nine hours and behaved like
+ * one minute.
+ *
+ * The demo does not need the passive drift to carry it. The interesting states are
+ * injected — `lowPower()` puts the bank at 27% directly — and the generator ramp runs
+ * on its own wall clock ({@link GENERATOR_RAMP_MS}), independent of this scale. So
+ * this is sized for the two things that genuinely have to be watchable:
+ *
+ *   recharge from a low-power scenario   ~10 minutes
+ *   a full tank at full output           18 minutes, against 9 simulated hours
+ *
+ * The passive drift is then background texture at roughly 1% per 10 minutes, rather
+ * than a battery reading published every minute for nothing.
  */
-const POWER_TIME_SCALE = 300;
+const POWER_TIME_SCALE = 30;
 /** What one occupant drinks, washes and cooks with per day, in litres. */
 const WATER_LITRES_PER_PERSON_DAY = 26;
 
@@ -277,7 +296,8 @@ class Env {
     if (p) {
       // Two clocks, deliberately. `powerSimSeconds` is accelerated so a visitor can
       // watch the bank charge and the tank empty inside a short demo; `wallSeconds` is
-      // real time, and is what the people in the bunker drink on.
+      // real time, and is what the people in the bunker drink on. The scale is modest
+      // on purpose — see POWER_TIME_SCALE for why a large one flattered nothing.
       const wallSeconds = POWER_TICK_MS / 1000;
       const powerSimSeconds = wallSeconds * POWER_TIME_SCALE;
       const { load, net } = this.balance();

@@ -191,7 +191,11 @@ describe("bunker simulator", () => {
     const cloudedSolar = Number(state(BUNKER_DEVICE_KEYS.power).solarW);
     // Cloud cover leaves the site running at a deficit, so the bank drains.
     expect(Number(state(BUNKER_DEVICE_KEYS.power).netW)).toBeLessThan(0);
-    vi.advanceTimersByTime(6000);
+    // Long enough for the integrator to cross a whole percent at the current time
+    // scale. A shorter window passed only while the scale was 300x, where a single
+    // tick moved the gauge — the assertion is about integration happening, not about
+    // it happening fast.
+    vi.advanceTimersByTime(12_000);
     const drained = Number(state(BUNKER_DEVICE_KEYS.power).battery);
     expect(drained).toBeLessThan(27);
 
@@ -202,7 +206,7 @@ describe("bunker simulator", () => {
     // ...and the sun is exactly where it was. A generator does not move it.
     expect(Number(state(BUNKER_DEVICE_KEYS.power).solarW)).toBe(cloudedSolar);
 
-    vi.advanceTimersByTime(6000);
+    vi.advanceTimersByTime(12_000);
     expect(Number(state(BUNKER_DEVICE_KEYS.power).battery)).toBeGreaterThan(drained);
   });
 
@@ -293,8 +297,14 @@ describe("bunker simulator", () => {
     });
 
     it("is not multiplied by the power time scale", () => {
-      // If POWER_TIME_SCALE (300) still reached the water model, one 2 s tick would
-      // consume ~0.72 L and a rounded litre would disappear roughly every other tick.
+      // The original defect, kept as a number rather than a memory: the water model
+      // ran at the power clock, which was 300x at the time. One 2 s tick then consumed
+      // ~0.72 L, so a rounded litre vanished roughly every other tick and the level
+      // sensor republished continuously.
+      //
+      // 300 is deliberately a literal. It is the historical rate this guards against,
+      // not the current constant — reading POWER_TIME_SCALE here would let the test
+      // quietly weaken if the scale were ever lowered again.
       const perTick = waterDrawnLitres(4, 2);
       expect(perTick * 300).toBeGreaterThan(0.5);
       expect(perTick).toBeLessThan(0.5);
@@ -305,15 +315,16 @@ describe("bunker simulator", () => {
       const litresBefore = Number(state(BUNKER_DEVICE_KEYS.supplies).waterLitres);
 
       // Force a large power deficit so the battery is guaranteed to move, then run
-      // 30 s of wall time — 15 power ticks.
+      // 60 s of wall time — 30 power ticks.
       await send(BUNKER_COMMAND_TOPICS.lights, { on: true });
       await send(BUNKER_COMMAND_TOPICS.filter, { sealed: true });
       const batteryBefore = Number(state(BUNKER_DEVICE_KEYS.power).battery);
-      vi.advanceTimersByTime(30_000);
+      vi.advanceTimersByTime(60_000);
 
-      // Accelerated: 30 s of wall time is 2.5 simulated hours, so the bank moves.
+      // Accelerated: 60 s of wall time is 30 simulated minutes, so the bank moves.
       expect(Number(state(BUNKER_DEVICE_KEYS.power).battery)).not.toBe(batteryBefore);
-      // Wall time: 30 s buys 0.036 L, so the published integer cannot have changed.
+      // Wall time: 60 s buys 0.072 L, so the published integer cannot have changed.
+      // This is the whole point — the two clocks in one tick, moving at their own rates.
       expect(Number(state(BUNKER_DEVICE_KEYS.supplies).waterLitres)).toBe(litresBefore);
     });
 

@@ -55,6 +55,12 @@ simulator advanced human water consumption on the 300× accelerated clock built 
 battery movement visible in a short demo, which made an 80-day water supply fall
 visibly every few seconds.
 
+> The power scale was lowered to 30× shortly afterwards, once separating the clocks
+> made it obvious that 300× had been sized by the least interesting process in the
+> scenario — a ~20 W passive deficit — and that it left a nine-hour fuel tank lasting
+> 108 seconds. Splitting the clocks is the decision here; the multiplier on the power
+> clock is a scenario-tuning matter, not an architectural one.
+
 ## Decision
 
 Aeolus distinguishes five concepts, and each has exactly one mechanism.
