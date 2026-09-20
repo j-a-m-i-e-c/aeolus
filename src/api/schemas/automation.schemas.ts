@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { AUTOMATION_TRIGGER_TYPES } from "../../core/types.js";
 
 const automationProjectFileSchema = z.object({
   path: z.string().min(1).max(240),
@@ -20,7 +21,7 @@ export const createAutomationBodySchema = z.object({
   tabId: z.string().max(100).optional(),
   triggerTopic: z.string().max(500).optional(),
   ruleType: z.enum(["form", "script"]).optional(),
-  triggerType: z.enum(["mqtt", "cron", "none"]).optional(),
+  triggerType: z.enum(AUTOMATION_TRIGGER_TYPES).optional(),
   cronExpression: z.string().max(200).optional(),
   conditionType: z.string().max(100).optional().nullable(),
   conditionValue: z.string().max(500).optional().nullable(),
@@ -35,7 +36,7 @@ export const createAutomationBodySchema = z.object({
 export const updateAutomationBodySchema = z.object({
   name: z.string().min(1).max(200).optional(),
   triggerTopic: z.string().max(500).optional(),
-  triggerType: z.enum(["mqtt", "cron", "none"]).optional(),
+  triggerType: z.enum(AUTOMATION_TRIGGER_TYPES).optional(),
   cronExpression: z.string().max(200).optional().nullable(),
   conditionType: z.string().max(100).optional().nullable(),
   conditionValue: z.string().max(500).optional().nullable(),

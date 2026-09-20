@@ -7,7 +7,7 @@ import path from "node:path";
 import { config } from "./config.js";
 import logger from "./logger.js";
 import { getDatabase, closeDatabase } from "./db/database.js";
-import { eventBus, DEVICE_STATE_CHANGE, AUTOMATION_STATE_CHANGE, WS_STATE_CHANGE, MQTT_RAW_MESSAGE, AUTOMATION_FIRED, AUTOMATION_COMPLETED, DATA_STORE_WRITE, DATA_STORE_COLLECTION_DELETED, COMMAND_LIFECYCLE_TRANSITION, AUTOMATION_EVENT } from "./core/event-bus.js";
+import { eventBus, DEVICE_STATE_CHANGE, AUTOMATION_STATE_CHANGE, WS_STATE_CHANGE, MQTT_RAW_MESSAGE, AUTOMATION_FIRED, AUTOMATION_COMPLETED, DATA_STORE_WRITE, DATA_STORE_COLLECTION_DELETED, COMMAND_LIFECYCLE_TRANSITION, AUTOMATION_EVENT, SHARED_STATE_CHANGE } from "./core/event-bus.js";
 import { DeviceRegistry } from "./core/device-registry.js";
 import { MqttService } from "./mqtt/mqtt-service.js";
 import { createPrivateTopicStore } from "./mqtt/private-topic-store.js";
@@ -62,9 +62,11 @@ import { ensureBackendCredential } from "./auth/mqtt-credential-service.js";
 import { createSystemRoutes } from "./api/routes/system.routes.js";
 import { createLayoutRoutes } from "./api/routes/layout.routes.js";
 import { createDataStoreRoutes } from "./api/routes/data-store.routes.js";
+import { createSharedStateRoutes } from "./api/routes/shared-state.routes.js";
 import { createProvisioningRoutes } from "./api/routes/provisioning.routes.js";
 import { StateHistory } from "./core/state-history.js";
 import { DataStore } from "./data-store/data-store.js";
+import { SharedStateStore } from "./shared-state/shared-state-store.js";
 import { MosquittoConfigWriter } from "./mqtt/mosquitto-config-writer.js";
 import { MosquittoReloader } from "./mqtt/mosquitto-reloader.js";
 import { BrokerVerifier } from "./mqtt/broker-verifier.js";
@@ -285,8 +287,16 @@ async function main(): Promise<void> {
   const stateStore = new AutomationStateStore(db);
   stateStore.loadFromDb();
 
-  // 6b. Data Store
-  const dataStore = new DataStore(db, eventBus);
+  // 6b. Shared State — durable current values shared between automations
+  // (ADR-0016). Constructed BEFORE the Data Store and independently of it: Shared
+  // State is a core state facility, so it must be available whether or not the
+  // operator has enabled historical Collections.
+  const sharedStateStore = new SharedStateStore(db, eventBus);
+
+  // 6c. Data Store — optional historical Collections. Receives the Shared State
+  // store so its deprecated bucket aliases delegate to the one authoritative
+  // implementation instead of holding a second copy.
+  const dataStore = new DataStore(db, eventBus, undefined, sharedStateStore);
   if (dataStore.isEnabled()) {
     dataStore.startRetentionTimer();
   }
@@ -300,7 +310,7 @@ async function main(): Promise<void> {
   // Verified Command.
   const automationEventService = new AutomationEventService({ mqttService, logger });
 
-  const sandbox = new Sandbox({ commandService, deviceRegistry: registry, stateStore, dataStore, collector, scopeResolver: automationScopeResolver, automationEventService, commandHistoryStore, onStateChange: (ruleId, key, value) => {
+  const sandbox = new Sandbox({ commandService, deviceRegistry: registry, stateStore, dataStore, sharedStateStore, collector, scopeResolver: automationScopeResolver, automationEventService, commandHistoryStore, onStateChange: (ruleId, key, value) => {
     eventBus.emit(AUTOMATION_STATE_CHANGE, { ruleId, key, value });
   } });
 
@@ -455,6 +465,10 @@ async function main(): Promise<void> {
   app.use("/api/system", createSystemRoutes());
   app.use("/api/layout", createLayoutRoutes(db, permissionResolver));
   app.use("/api/data-store", createDataStoreRoutes(dataStore, permissionResolver, collectionOwnershipStore));
+  // Shared State is mounted separately from the historical Data Store because it
+  // is a separate concept, not a storage mode of it (ADR-0016). The older
+  // /api/data-store/buckets/* paths remain as deprecated aliases over this store.
+  app.use("/api/shared-state", createSharedStateRoutes(sharedStateStore));
 
   app.use(errorHandler);
 
@@ -536,6 +550,14 @@ async function main(): Promise<void> {
     // Still admin-only: no consumer, so scoping it would be speculative work on a
     // security-sensitive path.
     { eventName: AUTOMATION_EVENT, messageType: "automation-event" },
+    // Shared State changes reach the dashboard so the Shared State browser shows
+    // current values live. Admin-only by omitting a visibility resolver, matching
+    // the Shared State REST surface: it is global state with no bucket-to-tab
+    // ownership model, so there is no scope at which to expose it to a non-admin.
+    //
+    // This is a WebSocket broadcast to authorised dashboard clients, NOT an MQTT
+    // publish. Shared State never reaches the broker (ADR-0016).
+    { eventName: SHARED_STATE_CHANGE, messageType: "shared-state-change" },
   ];
 
   const wsServer = new WsServer(server, registry, eventBus, WS_MAPPINGS, deviceExposureResolver);

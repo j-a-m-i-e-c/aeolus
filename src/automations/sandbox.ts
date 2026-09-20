@@ -15,6 +15,10 @@ import {
 import type { AutomationStateStore } from "./automation-state-store.js";
 import type { DeviceRegistry } from "../core/device-registry.js";
 import type { DataStore } from "../data-store/data-store.js";
+import type {
+  SharedStateStoreContract,
+  SharedStateWriteContext,
+} from "../shared-state/shared-state-types.js";
 import type { Device, ActionResult, BulkActionResult, ConfirmOptions, EventMetadata } from "../core/types.js";
 import logger from "../logger.js";
 import { requestPublicHttp } from "../security/outbound-http.js";
@@ -337,6 +341,15 @@ export interface SandboxDeps {
   deviceRegistry: DeviceRegistry;
   stateStore?: AutomationStateStore;
   dataStore?: DataStore;
+  /**
+   * Durable current values shared between automations, backing the `shared.*`
+   * sandbox global (ADR-0016).
+   *
+   * Independent of `dataStore`: Shared State is a core facility and stays
+   * available when historical Collections are disabled. When absent, `shared` is
+   * not exposed at all rather than exposed as a silent no-op.
+   */
+  sharedStateStore?: SharedStateStoreContract;
   collector?: CommandResultCollector;
   onStateChange?: (ruleId: string, key: string, value: unknown) => void;
   /**
@@ -493,6 +506,9 @@ const BOOTSTRAP_SCRIPT = `
   var dbSetRef = typeof __dbSetRef !== "undefined" ? __dbSetRef : undefined;
   var dbDeleteRef = typeof __dbDeleteRef !== "undefined" ? __dbDeleteRef : undefined;
   var dbCollectionsRef = typeof __dbCollectionsRef !== "undefined" ? __dbCollectionsRef : undefined;
+  var sharedGetRef = typeof __sharedGetRef !== "undefined" ? __sharedGetRef : undefined;
+  var sharedSetRef = typeof __sharedSetRef !== "undefined" ? __sharedSetRef : undefined;
+  var sharedDeleteRef = typeof __sharedDeleteRef !== "undefined" ? __sharedDeleteRef : undefined;
   var eventsEmitRef = typeof __eventsEmitRef !== "undefined" ? __eventsEmitRef : undefined;
   var commandEvidenceRef = typeof __commandEvidenceRef !== "undefined" ? __commandEvidenceRef : undefined;
   var executionEvidenceRef = typeof __executionEvidenceRef !== "undefined" ? __executionEvidenceRef : undefined;
@@ -636,6 +652,24 @@ const BOOTSTRAP_SCRIPT = `
     delete: function(key) { stateDeleteRef.applySync(undefined, [key]); }
   };
 
+  // Shared State — durable current values shared between automations. Wired
+  // independently of \`db\`, because Shared State does not depend on the historical
+  // Data Store being enabled.
+  if (sharedGetRef) {
+    globalThis.shared = {
+      get: function(bucket, key) {
+        var result = sharedGetRef.applySync(undefined, [bucket, key]);
+        return result === undefined ? undefined : JSON.parse(result);
+      },
+      set: function(bucket, key, value) {
+        return sharedSetRef.applySync(undefined, [bucket, key, JSON.stringify(value)]);
+      },
+      delete: function(bucket, key) {
+        return sharedDeleteRef.applySync(undefined, [bucket, key]);
+      }
+    };
+  }
+
   if (dbWriteRef) {
     globalThis.db = {
       write: function(collection, payload, options) {
@@ -650,10 +684,10 @@ const BOOTSTRAP_SCRIPT = `
         return result === undefined ? undefined : JSON.parse(result);
       },
       set: function(bucket, key, value) {
-        dbSetRef.applySync(undefined, [bucket, key, JSON.stringify(value)]);
+        return dbSetRef.applySync(undefined, [bucket, key, JSON.stringify(value)]);
       },
       delete: function(bucket, key) {
-        dbDeleteRef.applySync(undefined, [bucket, key]);
+        return dbDeleteRef.applySync(undefined, [bucket, key]);
       },
       collections: function() {
         var result = dbCollectionsRef.applySync(undefined, []);
@@ -743,6 +777,9 @@ const BOOTSTRAP_SCRIPT = `
   delete globalThis.__dbSetRef;
   delete globalThis.__dbDeleteRef;
   delete globalThis.__dbCollectionsRef;
+  delete globalThis.__sharedGetRef;
+  delete globalThis.__sharedSetRef;
+  delete globalThis.__sharedDeleteRef;
   delete globalThis.__eventsEmitRef;
   delete globalThis.__commandEvidenceRef;
   delete globalThis.__executionEvidenceRef;
@@ -763,6 +800,7 @@ export class Sandbox {
   private deviceRegistry: DeviceRegistry;
   private stateStore?: AutomationStateStore;
   private dataStore?: DataStore;
+  private sharedStateStore?: SharedStateStoreContract;
   private collector?: CommandResultCollector;
   private onStateChange?: (ruleId: string, key: string, value: unknown) => void;
   private scopeResolver?: AutomationScopeResolver;
@@ -774,6 +812,7 @@ export class Sandbox {
     this.deviceRegistry = deps.deviceRegistry;
     this.stateStore = deps.stateStore;
     this.dataStore = deps.dataStore;
+    this.sharedStateStore = deps.sharedStateStore;
     this.collector = deps.collector;
     this.onStateChange = deps.onStateChange;
     this.scopeResolver = deps.scopeResolver;
@@ -868,6 +907,7 @@ export class Sandbox {
       await this.setContextData(jail, context);
       await this.setHttpRefs(jail, ruleId);
       await this.setStateRefs(jail, ruleId, executionContext);
+      await this.setSharedStateRefs(jail, ruleId, scope, executionContext);
       await this.setDataStoreRefs(jail, ruleId, scope);
 
       // Run bootstrap to wire up the clean API from the raw refs
@@ -1411,8 +1451,12 @@ export class Sandbox {
           logger.warn({ ruleId, key, error: (err as Error).message }, "Cannot parse state value from sandbox");
           return;
         }
-        stateStore.set(ruleId, key, parsed);
-        if (onStateChange) {
+        // Broadcast only when the persisted representation actually moved. A
+        // projection that recomputes the same value every tick is the normal
+        // shape of authored Logic, and telling every dashboard client about a
+        // write that changed nothing is pure noise.
+        const changed = stateStore.set(ruleId, key, parsed);
+        if (changed && onStateChange) {
           onStateChange(ruleId, key, parsed);
         }
       }),
@@ -1439,9 +1483,131 @@ export class Sandbox {
   }
 
   /**
+   * Set Shared State references on the jail for the bootstrap script.
+   * Provides `shared.get()`, `shared.set()` and `shared.delete()` (ADR-0016).
+   *
+   * Wired whenever a SharedStateStore is present, INDEPENDENTLY of whether the
+   * historical Data Store is enabled. Shared State is a core state facility: an
+   * automation keeping a handful of durable shared current values must not have to
+   * wait for an operator to configure historical storage limits first.
+   *
+   * Scoped automations are refused, matching the boundary the bucket API has always
+   * enforced. There is no bucket-to-tab ownership model, so a scoped automation
+   * cannot be granted a slice of Shared State without inferring authority from a
+   * matching string prefix — which is not authority. Until an explicit ownership
+   * model exists, global Shared State stays unrestricted/admin-authored territory.
+   */
+  private async setSharedStateRefs(
+    jail: IvmGlobal,
+    ruleId: string,
+    scope: AuthorizationScope = { kind: "unrestricted" },
+    executionContext?: ActiveExecutionContext,
+  ): Promise<void> {
+    if (!ivm) return;
+
+    const sharedState = this.sharedStateStore;
+    if (!sharedState) return;
+
+    const scoped = scope.kind === "scoped";
+
+    // Provenance is captured on the HOST stack. These callbacks are invoked from
+    // inside the isolate across a native boundary that async_hooks does not
+    // track, so reading the AsyncLocalStorage inside them would find it empty and
+    // every automation write would look sourceless.
+    const writeContext = (): SharedStateWriteContext => ({
+      source: {
+        kind: "automation",
+        id: ruleId,
+        ...(executionContext?.executionId ? { executionId: executionContext.executionId } : {}),
+      },
+      ...(executionContext?.triggerMeta?.traceId
+        ? { traceId: executionContext.triggerMeta.traceId }
+        : {}),
+      ...(executionContext?.executionId ? { causationId: executionContext.executionId } : {}),
+      // One deeper than the change that triggered this execution, so a
+      // shared-state → shared-state chain terminates instead of running forever.
+      depth: (executionContext?.triggerMeta?.depth ?? 0) + 1,
+    });
+
+    await jail.set(
+      "__sharedGetRef",
+      new ivm.Reference(function (bucket: string, key: string) {
+        if (scoped) {
+          logger.warn(
+            { ruleId },
+            "[sandbox] shared.get refused — global Shared State is not available to scoped automations",
+          );
+          return undefined;
+        }
+        try {
+          const result = sharedState.get(bucket, key);
+          // Crosses as JSON text: isolated-vm transfers only primitives, and
+          // `undefined` distinguishes "not set" from a stored null.
+          return result === undefined ? undefined : JSON.stringify(result);
+        } catch (err) {
+          logger.error({ ruleId, error: (err as Error).message }, "[sandbox] shared.get failed");
+          return undefined;
+        }
+      }),
+    );
+
+    await jail.set(
+      "__sharedSetRef",
+      new ivm.Reference(function (bucket: string, key: string, valueJson: string) {
+        if (scoped) {
+          logger.warn(
+            { ruleId },
+            "[sandbox] shared.set refused — global Shared State is not available to scoped automations",
+          );
+          return false;
+        }
+        try {
+          const value = JSON.parse(valueJson);
+          // Returns whether anything changed, so authored Logic can tell a real
+          // update from a no-op rewrite of the value already held.
+          return sharedState.set(bucket, key, value, writeContext());
+        } catch (err) {
+          // A refused bound (oversized value, invalid name) is logged as an error
+          // rather than swallowed: the producer believes it published a snapshot,
+          // and a silent drop would leave consumers on a stale value.
+          logger.error(
+            { ruleId, bucket, key, error: (err as Error).message },
+            "[sandbox] shared.set failed",
+          );
+          return false;
+        }
+      }),
+    );
+
+    await jail.set(
+      "__sharedDeleteRef",
+      new ivm.Reference(function (bucket: string, key: string) {
+        if (scoped) {
+          logger.warn(
+            { ruleId },
+            "[sandbox] shared.delete refused — global Shared State is not available to scoped automations",
+          );
+          return false;
+        }
+        try {
+          return sharedState.delete(bucket, key, writeContext());
+        } catch (err) {
+          logger.error({ ruleId, error: (err as Error).message }, "[sandbox] shared.delete failed");
+          return false;
+        }
+      }),
+    );
+  }
+
+  /**
    * Set Data Store references on the jail for the bootstrap script.
    * Provides `db.write()`, `db.query()`, `db.get()`, `db.set()`, `db.delete()`, `db.collections()`
    * via host-side callbacks. Only wired when dataStore is provided and enabled.
+   *
+   * `db.get/set/delete` are the DEPRECATED bucket aliases. They now delegate to
+   * Shared State (ADR-0016) and remain only so existing authored Logic keeps
+   * working; new code uses `shared.*`, which does not depend on historical Data
+   * Store enablement.
    */
   private async setDataStoreRefs(
     jail: IvmGlobal,
@@ -1507,12 +1673,12 @@ export class Sandbox {
       }),
     );
 
-    // Host-side callback for db.get(bucket, key)
+    // Host-side callback for db.get(bucket, key) — DEPRECATED Shared State alias.
     await jail.set(
       "__dbGetRef",
       new ivm.Reference(function (bucket: string, key: string) {
         if (scoped) {
-          logger.warn({ ruleId }, "[sandbox] db.get refused — shared buckets are not available to scoped automations");
+          logger.warn({ ruleId }, "[sandbox] db.get refused — global Shared State is not available to scoped automations");
           return undefined;
         }
         try {
@@ -1525,35 +1691,39 @@ export class Sandbox {
       }),
     );
 
-    // Host-side callback for db.set(bucket, key, valueJson)
+    // Host-side callback for db.set(bucket, key, valueJson) — DEPRECATED Shared
+    // State alias. Returns whether anything changed, so the alias tells the same
+    // truth as `shared.set()` rather than implying every call did work.
     await jail.set(
       "__dbSetRef",
       new ivm.Reference(function (bucket: string, key: string, valueJson: string) {
         if (scoped) {
-          logger.warn({ ruleId }, "[sandbox] db.set refused — shared buckets are not available to scoped automations");
-          return;
+          logger.warn({ ruleId }, "[sandbox] db.set refused — global Shared State is not available to scoped automations");
+          return false;
         }
         try {
           const value = JSON.parse(valueJson);
-          dataStore.set(bucket, key, value);
+          return dataStore.set(bucket, key, value);
         } catch (err) {
-          logger.error({ ruleId, error: (err as Error).message }, "[sandbox] db.set failed");
+          logger.error({ ruleId, bucket, key, error: (err as Error).message }, "[sandbox] db.set failed");
+          return false;
         }
       }),
     );
 
-    // Host-side callback for db.delete(bucket, key)
+    // Host-side callback for db.delete(bucket, key) — DEPRECATED Shared State alias.
     await jail.set(
       "__dbDeleteRef",
       new ivm.Reference(function (bucket: string, key: string) {
         if (scoped) {
-          logger.warn({ ruleId }, "[sandbox] db.delete refused — shared buckets are not available to scoped automations");
-          return;
+          logger.warn({ ruleId }, "[sandbox] db.delete refused — global Shared State is not available to scoped automations");
+          return false;
         }
         try {
-          dataStore.delete(bucket, key);
+          return dataStore.delete(bucket, key);
         } catch (err) {
           logger.error({ ruleId, error: (err as Error).message }, "[sandbox] db.delete failed");
+          return false;
         }
       }),
     );

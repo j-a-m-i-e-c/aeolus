@@ -10,7 +10,9 @@ import type { DeviceRegistry } from "../../core/device-registry.js";
 import type { CommandService, ActionDescriptor } from "../../automations/command-service.js";
 import type { ExecutionLog } from "../../automations/execution-log.js";
 import type { CommandHistoryStore } from "../../automations/command-history-store.js";
-import type { EventContext, NormalizedEvent, Rule } from "../../core/types.js";
+import type { AutomationTriggerType, EventContext, NormalizedEvent, Rule } from "../../core/types.js";
+import { AUTOMATION_TRIGGER_TYPES } from "../../core/types.js";
+import { validateSharedStatePattern } from "../../shared-state/shared-state-limits.js";
 import type { ConditionRegistry } from "../../automations/condition-registry.js";
 import { transpileUi } from "../../automations/transpiler.js";
 import { compileAutomationProject, readAutomationProject, saveAutomationProject, AutomationProjectCompileError, type AutomationProject } from "../../automations/automation-project.js";
@@ -699,9 +701,13 @@ export function createAutomationRoutes(
     if (!stateStore) {
       throw new BadRequestError("State store not available");
     }
-    stateStore.set(id, key, value);
-    eventBus.emit(AUTOMATION_STATE_CHANGE, { ruleId: id, key, value });
-    res.json({ success: true });
+    // Broadcast only a real change, matching the sandbox `state.set()` path. A
+    // UI that re-submits the value it is already showing is not a state change.
+    const changed = stateStore.set(id, key, value);
+    if (changed) {
+      eventBus.emit(AUTOMATION_STATE_CHANGE, { ruleId: id, key, value });
+    }
+    res.json({ success: true, changed });
   }));
 
   /** DELETE /api/automations/:id/state/:key — remove a single key-value pair */
@@ -775,8 +781,10 @@ function resolveTriggerConfig(
   existing?: StoredRule,
 ): ResolvedTrigger {
   const triggerType = (input.rawTriggerType as string) || existing?.trigger_type || "mqtt";
-  if (!["mqtt", "cron", "none"].includes(triggerType)) {
-    throw new BadRequestError("triggerType must be 'mqtt', 'cron', or 'none'");
+  if (!(AUTOMATION_TRIGGER_TYPES as readonly string[]).includes(triggerType)) {
+    throw new BadRequestError(
+      `triggerType must be one of: ${AUTOMATION_TRIGGER_TYPES.map((t) => `'${t}'`).join(", ")}`,
+    );
   }
 
   const rawCron = input.cronExpression;
@@ -805,11 +813,26 @@ function resolveTriggerConfig(
     return { triggerType, effectiveTriggerTopic: "", effectiveCronExpression: null };
   }
 
-  // mqtt — use provided triggerTopic, else keep existing (update) or default to "" (create)
+  // mqtt and shared-state both carry a pattern in `trigger_topic`. The column
+  // name is historical: for shared-state it holds a `<bucket>/<key>` Shared State
+  // path pattern, not an MQTT topic. Reusing the column avoids a migration purely
+  // to rename a field, and the trigger type is what gives the pattern its meaning.
   const rawTopic = input.triggerTopic;
   const effectiveTriggerTopic = existing
     ? (rawTopic !== undefined ? (rawTopic as string) : existing.trigger_topic)
     : ((rawTopic && typeof rawTopic === "string") ? rawTopic.trim() : "");
+
+  if (triggerType === "shared-state") {
+    const pattern = effectiveTriggerTopic.trim();
+    if (!pattern) {
+      throw new BadRequestError(
+        "triggerTopic is required when triggerType is 'shared-state' — give a Shared State path pattern such as 'bunker-summary/#'",
+      );
+    }
+    const rejection = validateSharedStatePattern(pattern);
+    if (rejection) throw new BadRequestError(rejection);
+    return { triggerType, effectiveTriggerTopic: pattern, effectiveCronExpression: null };
+  }
 
   return { triggerType, effectiveTriggerTopic, effectiveCronExpression: null };
 }
@@ -859,7 +882,7 @@ function registerUiRule(
   const effectiveTopic = stored.trigger_topic || "";
 
   // Determine trigger type and cron expression
-  const triggerType = (stored.trigger_type as "mqtt" | "cron" | "none") || "mqtt";
+  const triggerType = (stored.trigger_type as AutomationTriggerType) || "mqtt";
   const cronExpression = stored.cron_expression || undefined;
 
   // Build condition via the registry (falls back to undefined if type/value are null or unregistered)

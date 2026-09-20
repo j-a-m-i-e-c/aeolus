@@ -449,6 +449,38 @@ interface EventMetadata {
   executionId?: string;
   traceId?: string;
   depth?: number;
+  /**
+   * Present only when a `shared-state` trigger fired, naming the durable value
+   * that changed.
+   *
+   * A Shared State trigger deliberately does not impersonate device state:
+   * `context.deviceId` is empty and `context.topic` is the `<bucket>/<key>` path,
+   * so this is where the bucket and key are stated plainly.
+   *
+   * Check `deleted` rather than testing `context.state` for emptiness — `null` is a
+   * perfectly legitimate Shared State value, so a removed key and a key holding
+   * `null` are different facts.
+   *
+   * ```typescript
+   * const changed = context.meta?.sharedState;
+   * if (changed?.deleted) {
+   *   log.info(`${changed.bucket}/${changed.key} was removed`);
+   * }
+   * ```
+   */
+  sharedState?: {
+    /** The bucket (namespace) the changed value lives in. */
+    bucket: string;
+    /** The key within that bucket. */
+    key: string;
+    /** `true` when the value was removed rather than written. */
+    deleted: boolean;
+    /** Who wrote it: an automation, the admin API, or Aeolus itself. */
+    source:
+      | { kind: "automation"; id: string; executionId?: string }
+      | { kind: "api"; userId?: string }
+      | { kind: "system"; id: string };
+  };
 }
 
 interface EventContext {
@@ -683,14 +715,98 @@ interface DataStoreAggregateResult {
 }
 
 /**
- * Persistent time-series and key-value storage for automation scripts.
+ * Durable current values intentionally shared between automations.
+ *
+ * Shared State is how one automation tells the others what is true *now*. A
+ * subsystem writes its current summary; whoever composes an overview reads it, or
+ * is triggered by it. Values survive a backend restart.
+ *
+ * Use Shared State when the newest value is what matters:
+ *
+ * ```text
+ * shared.set("bunker-summary", "power", { battery, solar, load, net })
+ * ```
+ *
+ * Do NOT use `events.emit()` for that. An Automation Event means "this happened" —
+ * every occurrence matters, it cannot be safely collapsed, and it is visible on
+ * MQTT. A current snapshot sent as an event gives it occurrence semantics it does
+ * not have and puts internal composition traffic on the broker.
+ *
+ * Three properties worth knowing:
+ *
+ * - **Identical writes are free.** Setting the value a key already holds performs
+ *   no write and triggers nothing. `set()` returns whether anything changed, so a
+ *   projection can recompute on every tick without cost.
+ * - **A change can trigger automations.** Pick the `shared-state` trigger type and
+ *   a path pattern such as `bunker-summary/#`. Pending work for one key is
+ *   coalesced keep-latest, because the durable value already holds the newest
+ *   truth.
+ * - **It is not history.** Writing 72, 73, 74 leaves 74. If you need the series,
+ *   write a Data Store Collection record alongside.
+ *
+ * Bucket and key names address a value reactively as `<bucket>/<key>`, so they may
+ * not contain `/`, `+` or `#`.
+ *
+ * **Note:** `shared` is available to unrestricted (admin-authored) automations.
+ * A tab-scoped automation cannot reach global Shared State — there is no
+ * bucket-to-tab ownership model yet — and `shared` is `undefined` if no Shared
+ * State store is wired.
+ *
+ * @example
+ * ```typescript
+ * // A subsystem publishes its current summary.
+ * shared.set("bunker-summary", "power", {
+ *   battery, solar, load, net, generatorOn,
+ * });
+ *
+ * // An overview reads every subsystem's current value, whichever one woke it.
+ * const power = shared.get("bunker-summary", "power");
+ * const air = shared.get("bunker-summary", "air");
+ *
+ * // Keep the history separately, when you actually want it.
+ * db?.write("bunker-power-history", { battery, solar });
+ * ```
+ */
+declare const shared: {
+  /**
+   * Read the current shared value.
+   * @param bucket - The bucket (namespace) name.
+   * @param key - The key within that bucket.
+   * @returns The stored value, or `undefined` when the key is not set. A stored
+   * `null` is returned as `null`, which is distinct from not being set.
+   */
+  get(bucket: string, key: string): unknown;
+
+  /**
+   * Write the current shared value. Creates the bucket implicitly.
+   *
+   * @param bucket - The bucket (namespace) name. No `/`, `+` or `#`.
+   * @param key - The key within that bucket. No `/`, `+` or `#`.
+   * @param value - A JSON-serializable value, up to 64 KiB serialized.
+   * @returns `true` when the stored value actually changed — and therefore when
+   * interested `shared-state` automations were triggered. `false` means the value
+   * was already exactly this, so nothing was written and nothing ran.
+   */
+  set(bucket: string, key: string, value: unknown): boolean;
+
+  /**
+   * Remove a shared value.
+   * @returns `true` when an entry was actually removed.
+   */
+  delete(bucket: string, key: string): boolean;
+} | undefined;
+
+/**
+ * Persistent historical time-series storage for automation scripts.
  *
  * The `db` global provides access to the Aeolus Data Store — a SQLite-backed
- * storage system for accumulating structured data over time, sharing computed
- * values across automations, and querying historical records with aggregation.
+ * store for accumulating structured observations over time and querying them with
+ * ranges and aggregation.
  *
  * **Note:** The `db` global is only available when the Data Store is enabled.
- * If the Data Store has not been set up yet, `db` will be `undefined`.
+ * If the Data Store has not been set up yet, `db` will be `undefined`. Historical
+ * accumulation is optional because it grows without bound; use `shared` for
+ * durable current values, which is always available.
  *
  * @example
  * ```typescript
@@ -711,9 +827,8 @@ interface DataStoreAggregateResult {
  * });
  * log.info(`Average: ${avg.value} kWh`);
  *
- * // Use key-value buckets for cross-automation shared state
- * db.set("computed", "dailyAvgKwh", avg.value);
- * const stored = db.get("computed", "dailyAvgKwh"); // avg.value
+ * // Cross-automation shared state belongs in `shared`, not here.
+ * shared.set("computed", "dailyAvgKwh", avg.value);
  *
  * // List all collections
  * const collections = db.collections();
@@ -738,7 +853,11 @@ declare const db: {
   query(collection: string, options?: DataStoreQueryOptions): DataStoreQueryResult | DataStoreAggregateResult;
 
   /**
-   * Get a value from a key-value bucket.
+   * Read a Shared State value.
+   *
+   * @deprecated Use `shared.get(bucket, key)`. This alias reads the same durable
+   * Shared State, but it is only present while the historical Data Store is
+   * enabled — which has nothing to do with whether a shared current value exists.
    * @param bucket - The bucket name.
    * @param key - The key to look up.
    * @returns The stored value, or `undefined` if the key does not exist.
@@ -746,19 +865,25 @@ declare const db: {
   get(bucket: string, key: string): unknown;
 
   /**
-   * Set a value in a key-value bucket. Creates the bucket implicitly if needed.
+   * Write a Shared State value.
+   *
+   * @deprecated Use `shared.set(bucket, key, value)`.
    * @param bucket - The bucket name.
    * @param key - The key to store under.
    * @param value - A JSON-serializable value.
+   * @returns `true` when the stored value actually changed.
    */
-  set(bucket: string, key: string, value: unknown): void;
+  set(bucket: string, key: string, value: unknown): boolean;
 
   /**
-   * Delete a key from a key-value bucket.
+   * Remove a Shared State value.
+   *
+   * @deprecated Use `shared.delete(bucket, key)`.
    * @param bucket - The bucket name.
    * @param key - The key to remove.
+   * @returns `true` when an entry was actually removed.
    */
-  delete(bucket: string, key: string): void;
+  delete(bucket: string, key: string): boolean;
 
   /**
    * List all existing collections with their metadata.

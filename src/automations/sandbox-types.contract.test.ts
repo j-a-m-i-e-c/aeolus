@@ -56,4 +56,62 @@ describe("automation sandbox authoring types", () => {
       expect(source).not.toContain(removed);
     }
   });
+
+  describe("Shared State (ADR-0016)", () => {
+    it("declares `shared` as a first-class global, not a mode of `db`", () => {
+      expect(source).toContain("declare const shared: {");
+      expect(source).toMatch(/get\(bucket: string, key: string\): unknown;/);
+      expect(source).toMatch(/set\(bucket: string, key: string, value: unknown\): boolean;/);
+      expect(source).toMatch(/delete\(bucket: string, key: string\): boolean;/);
+    });
+
+    it("marks it optional, because a scoped automation cannot reach global Shared State", () => {
+      expect(source).toMatch(/declare const shared: \{[\s\S]*?\} \| undefined;/);
+    });
+
+    it("tells an author a write reports whether anything changed", () => {
+      // The whole point of the idempotency work is invisible unless the authoring
+      // surface says an identical write costs nothing and triggers nothing.
+      expect(source).toMatch(/Identical writes are free/);
+      expect(source).toMatch(/shared-state.{0,20}trigger/is);
+    });
+
+    it("tells an author Shared State is not history", () => {
+      expect(source).toMatch(/not history/i);
+      expect(source).toMatch(/Collection record/);
+    });
+
+    it("steers current snapshots away from events.emit()", () => {
+      // The mistake ADR-0016 exists to stop: publishing "what is true now" as an
+      // occurrence, which gives it semantics it does not have and puts internal
+      // composition traffic on the broker.
+      expect(source).toMatch(/Do NOT use `events\.emit\(\)` for that/);
+    });
+
+    it("marks the legacy db bucket aliases deprecated and points at `shared`", () => {
+      expect(source).toMatch(/@deprecated Use `shared\.get\(bucket, key\)`/);
+      expect(source).toMatch(/@deprecated Use `shared\.set\(bucket, key, value\)`/);
+      expect(source).toMatch(/@deprecated Use `shared\.delete\(bucket, key\)`/);
+    });
+
+    it("stops describing buckets as cross-automation state living inside `db`", () => {
+      // The old example taught `db.set("computed", …)` as the way to share state,
+      // which is what produced two overlapping abstractions in the first place.
+      expect(source).not.toContain('db.set("computed"');
+      expect(source).not.toContain("key-value buckets for cross-automation shared state");
+    });
+
+    it("declares `meta.sharedState`, so a trigger can say which key changed", () => {
+      // The engine populates this on every `shared-state` trigger. Without it on the
+      // authoring surface, an overview composing several keys has no typed way to ask
+      // what woke it, and would be pushed back towards reading `context.topic`.
+      expect(source).toMatch(/sharedState\?: \{/);
+      expect(source).toMatch(/deleted: boolean;/);
+    });
+
+    it("tells an author to read `deleted` rather than guess from a null value", () => {
+      // `null` is a legitimate stored value, so emptiness is not evidence of removal.
+      expect(source).toMatch(/`null` is a\s+\* perfectly legitimate Shared State value/);
+    });
+  });
 });

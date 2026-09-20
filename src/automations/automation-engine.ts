@@ -8,9 +8,12 @@ import {
   AUTOMATION_RULE_REGISTERED,
   AUTOMATION_RULE_UNREGISTERED,
   AUTOMATION_EVENT,
+  SHARED_STATE_CHANGE,
 } from "../core/event-bus.js";
-import type { NormalizedEvent, EventContext, Rule } from "../core/types.js";
-import type { AutomationEventEnvelopeV1 } from "./automation-event-service.js";
+import type { NormalizedEvent, EventContext, EventSourceKind, Rule } from "../core/types.js";
+import type { SharedStateChange, SharedStateSource } from "../shared-state/shared-state-types.js";
+import { sharedStatePath } from "../shared-state/shared-state-store.js";
+import { MAX_EVENT_DEPTH, type AutomationEventEnvelopeV1 } from "./automation-event-service.js";
 import type { Sandbox, SandboxContext } from "./sandbox.js";
 import type { CommandService } from "./command-service.js";
 import type { AutomationScopeResolver } from "./automation-scope-resolver.js";
@@ -51,6 +54,36 @@ export interface AutomationEngineDeps {
   executionLog?: ExecutionLog;
   /** Concurrency gate configuration. Partial — omitted fields use defaults. */
   gateConfig?: Partial<GateConfig>;
+}
+
+/**
+ * Map a Shared State write's source onto the provenance envelope every
+ * EventContext carries.
+ *
+ * The two vocabularies overlap but are not identical: Shared State says `api`
+ * where event provenance says `rest`. Translating rather than widening
+ * `EventSourceKind` keeps one meaning per value, and the untranslated
+ * `SharedStateSource` stays available verbatim on `meta.sharedState.source`.
+ */
+function sharedStateEventSource(source: SharedStateSource): {
+  kind: EventSourceKind;
+  id?: string;
+} {
+  switch (source.kind) {
+    case "automation":
+      return { kind: "automation", id: source.id };
+    case "api":
+      return { kind: "rest", ...(source.userId ? { id: source.userId } : {}) };
+    case "system":
+      return { kind: "system", id: source.id };
+    default: {
+      // Unreachable: the switch covers every `SharedStateSource` kind. Assigning to
+      // `never` makes adding a kind without a translation a compile error rather
+      // than a silently untranslated provenance envelope.
+      const unhandled: never = source;
+      throw new Error(`Unhandled Shared State source: ${JSON.stringify(unhandled)}`);
+    }
+  }
 }
 
 /** Runtime guard: is the value a Command_Result (has a boolean `success`)? */
@@ -110,6 +143,12 @@ export class AutomationEngine {
     // 6.11), and never carry a hidden device id.
     this.eventBus.on(AUTOMATION_EVENT, (event: { topic: string; envelope: AutomationEventEnvelopeV1 }) => {
       this.evaluateAutomationEvent(event.topic, event.envelope);
+    });
+    // A durable Shared State value changed (ADR-0016). Internal, latest-value
+    // semantics: only `shared-state` rules see it, and pending work per
+    // bucket/key is coalesced keep-latest.
+    this.eventBus.on(SHARED_STATE_CHANGE, (change: SharedStateChange) => {
+      this.evaluateSharedStateChange(change);
     });
   }
 
@@ -235,6 +274,11 @@ export class AutomationEngine {
     const rules = this.registry.listRules();
 
     for (const rule of rules) {
+      // A `shared-state` rule watches an internal `<bucket>/<key>` path, not a
+      // broker topic. Without this, an MQTT publish on `bunker-summary/power`
+      // would impersonate a Shared State write and drive the overview from
+      // whatever a device chose to send.
+      if (!this.wakesOnTopics(rule)) continue;
       if (!this.topicMatches(rule.topic, event.topic)) continue;
 
       // Scope-aware event admission (audit Critical 2): a scoped automation is
@@ -295,6 +339,9 @@ export class AutomationEngine {
     };
 
     for (const rule of this.registry.listRules()) {
+      // Same partitioning as the device-state path: an Automation Event must not
+      // be able to masquerade as a Shared State change.
+      if (!this.wakesOnTopics(rule)) continue;
       if (!this.topicMatches(rule.topic, topic)) continue;
       // NOTE: no admitDeviceEvent() here — automation events are not gated by the
       // device-scope admission check (Req 6.11).
@@ -320,6 +367,134 @@ export class AutomationEngine {
         logger.debug({ ruleId: rule.id, status: result.status }, "Execution gate: rule not admitted");
       }
     }
+  }
+
+  /**
+   * Evaluate `shared-state` rules against a durable Shared State change
+   * (ADR-0016).
+   *
+   * Three things distinguish this from the device-state and Automation Event
+   * paths:
+   *
+   * 1. **Only `shared-state` rules are eligible.** Shared State is internal, and
+   *    its `<bucket>/<key>` path is not a broker topic. An `mqtt` rule whose
+   *    pattern happens to match must not fire, or the two namespaces would be
+   *    interchangeable.
+   * 2. **The context does not impersonate a device.** `deviceId` is empty and the
+   *    bucket/key are named in `meta.sharedState`, rather than inventing a device
+   *    id that no registry would recognise.
+   * 3. **Keep-latest coalescing per bucket/key.** A Shared State change is a
+   *    level, not an occurrence: while a consumer is busy, intermediate values for
+   *    the SAME key may be replaced, because the durable store already holds the
+   *    newest one. Different keys stay independent.
+   */
+  private evaluateSharedStateChange(change: SharedStateChange): void {
+    const path = sharedStatePath(change.bucket, change.key);
+
+    // Causal-depth protection. A `shared-state` rule that writes Shared State can
+    // wake itself or a peer, so an unbounded chain would run forever. The ceiling
+    // is shared with Automation Events so one causal budget covers a mixed chain.
+    const depth = change.depth ?? 0;
+    if (depth > MAX_EVENT_DEPTH) {
+      logger.warn(
+        { bucket: change.bucket, key: change.key, depth, maxDepth: MAX_EVENT_DEPTH },
+        "Shared State change not dispatched: maximum causal depth reached",
+      );
+      return;
+    }
+
+    // A primitive is wrapped so `context.state` stays a record, matching the
+    // convention the Automation Event path already uses. A deletion carries no
+    // value at all — `meta.sharedState.deleted` is how an author learns that,
+    // because `null` is a legitimate stored value.
+    const value = change.value;
+    const state: Record<string, unknown> =
+      typeof value === "object" && value !== null && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : { value };
+
+    const context: EventContext = {
+      topic: path,
+      // Not a device. Fabricating an id here would make a Shared State trigger
+      // indistinguishable from device state inside authored Logic.
+      deviceId: "",
+      state,
+      timestamp: change.timestamp,
+      meta: {
+        eventId: randomUUID(),
+        timestamp: change.timestamp,
+        source: sharedStateEventSource(change.source),
+        ...(change.traceId ? { traceId: change.traceId } : {}),
+        ...(change.causationId ? { causationId: change.causationId } : {}),
+        depth,
+        sharedState: {
+          bucket: change.bucket,
+          key: change.key,
+          deleted: change.deleted,
+          source: change.source,
+        },
+      },
+    };
+
+    for (const rule of this.registry.listRules()) {
+      if (rule.triggerType !== "shared-state") continue;
+      if (!this.topicMatches(rule.topic, path)) continue;
+
+      // The existing trust boundary: global Shared State is unrestricted /
+      // admin-authored territory until there is an explicit bucket ownership
+      // model. A scoped automation cannot READ Shared State through the sandbox,
+      // so waking it with a Shared State value in its context would hand it the
+      // very data that boundary withholds.
+      if (!this.admitSharedStateChange(rule.id)) continue;
+
+      try {
+        if (rule.condition && !rule.condition(context)) continue;
+      } catch (err) {
+        logger.error(
+          { ruleId: rule.id, path, error: (err as Error).message },
+          "Rule condition threw error on Shared State change",
+        );
+        continue;
+      }
+
+      const result = this.gate.submit({
+        ruleId: rule.id,
+        // The gate's own dedup key is built from ruleId:deviceId:topic. Passing the
+        // path as `deviceId` keeps two different keys of the same bucket from
+        // sharing a dedup identity and suppressing one another as "duplicates".
+        deviceId: path,
+        topic: context.topic,
+        // Stable per consumer and per key, and deliberately NOT derived from the
+        // change's event id: a unique id per change would make every change its
+        // own coalescing group, which is the same as no coalescing at all.
+        coalesceKey: `shared-state:${rule.id}:${change.bucket}:${change.key}`,
+        execute: () => this.executeRule(rule, context),
+      });
+      if (result.status === "dropped" || result.status === "suppressed") {
+        logger.debug({ ruleId: rule.id, path, status: result.status }, "Execution gate: rule not admitted");
+      }
+    }
+  }
+
+  /**
+   * Whether a rule is woken by topic-matched transport (device state, Automation
+   * Events) as opposed to an internal Shared State path.
+   *
+   * `cron` and `none` rules carry no usable pattern and never matched anyway;
+   * `shared-state` rules carry one that must not be matched against a topic.
+   */
+  private wakesOnTopics(rule: Rule): boolean {
+    return rule.triggerType !== "shared-state";
+  }
+
+  /**
+   * Admit a Shared State change to a rule, respecting the Shared State trust
+   * boundary. Mirrors {@link admitDeviceEvent}: with no resolver wired (legacy /
+   * test composition) nothing is filtered.
+   */
+  private admitSharedStateChange(ruleId: string): boolean {
+    if (!this.scopeResolver) return true;
+    return this.scopeResolver.resolve(ruleId).kind === "unrestricted";
   }
 
   /** Route a rule to the script or form execution path. Never rejects. */
