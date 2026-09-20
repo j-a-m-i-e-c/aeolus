@@ -2,11 +2,26 @@
 
 import { useState, useEffect, useCallback, useId } from "react";
 import { CRON_PRESETS, CUSTOM_PICKER_OPTION, CUSTOM_CRON_OPTION, isValidCron, describeCron } from "../lib/cron-utils";
+import {
+  describeSharedStatePatternProblem,
+  type AutomationTriggerType,
+} from "./automation-authoring";
 
-type TriggerType = "mqtt" | "cron" | "none";
+/**
+ * The trigger vocabulary is defined once in `automation-authoring`, so a new
+ * trigger type cannot be added to the backend and silently render here as MQTT.
+ */
+type TriggerType = AutomationTriggerType;
 
 export interface TriggerSelectorProps {
   triggerType: TriggerType;
+  /**
+   * The pattern field, shared by the `mqtt` and `shared-state` types.
+   *
+   * For `mqtt` it is a broker topic; for `shared-state` it is a `<bucket>/<key>`
+   * Shared State path. One field because the backend stores one column, and the
+   * trigger type is what gives the pattern its meaning.
+   */
   mqttTopic: string;
   cronExpression: string;
   onTriggerTypeChange: (type: TriggerType) => void;
@@ -17,6 +32,7 @@ export interface TriggerSelectorProps {
 
 const TRIGGER_OPTIONS: { value: TriggerType; label: string }[] = [
   { value: "mqtt", label: "MQTT Topic" },
+  { value: "shared-state", label: "Shared State" },
   { value: "cron", label: "Schedule" },
   { value: "none", label: "None" },
 ];
@@ -264,15 +280,25 @@ export function TriggerSelector({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cronExpression]);
 
-  // Validate cron expression and report validity
+  // Validate the configured trigger and report validity.
   useEffect(() => {
-    if (triggerType !== "cron") {
-      onValidityChange(true);
+    if (triggerType === "cron") {
+      onValidityChange(cronExpression.trim() !== "" && isValidCron(cronExpression));
       return;
     }
-    const valid = cronExpression.trim() !== "" && isValidCron(cronExpression);
-    onValidityChange(valid);
-  }, [triggerType, cronExpression, onValidityChange]);
+    // A Shared State path has a shape, so an unusable one is caught before the
+    // save rather than by the server. `mqtt` and `none` stay permissive as before.
+    if (triggerType === "shared-state") {
+      onValidityChange(describeSharedStatePatternProblem(mqttTopic) === null);
+      return;
+    }
+    onValidityChange(true);
+  }, [triggerType, cronExpression, mqttTopic, onValidityChange]);
+
+  const sharedStateProblem =
+    triggerType === "shared-state" && mqttTopic.trim() !== ""
+      ? describeSharedStatePatternProblem(mqttTopic)
+      : null;
 
   const handlePresetChange = (value: string) => {
     setSelectedPreset(value);
@@ -320,6 +346,38 @@ export function TriggerSelector({
           placeholder="e.g. sensor/+/temperature"
           className="w-full px-3 py-2 text-sm rounded-lg bg-[#0B0F14] border border-[#2A3441] text-[#E6EDF3] placeholder-[#6B7785] focus:outline-none focus:border-primary transition-colors font-mono"
         />
+      )}
+
+      {/* Shared State path. Deliberately worded so nobody reads it as MQTT: a
+          Shared State change is internal and never reaches the broker. */}
+      {triggerType === "shared-state" && (
+        <div className="space-y-2">
+          <input
+            type="text"
+            aria-label="Shared State Path"
+            value={mqttTopic}
+            onChange={(e) => onMqttTopicChange(e.target.value)}
+            placeholder="e.g. bunker-summary/#"
+            className={`w-full px-3 py-2 text-sm rounded-lg bg-[#0B0F14] border text-[#E6EDF3] placeholder-[#6B7785] focus:outline-none transition-colors font-mono ${
+              sharedStateProblem
+                ? "border-[#EF4444] focus:border-[#EF4444]"
+                : "border-[#2A3441] focus:border-primary"
+            }`}
+          />
+          {sharedStateProblem ? (
+            <div className="text-[11px] text-[#EF4444]">{sharedStateProblem}</div>
+          ) : (
+            <div className="text-[11px] text-[#9AA6B2]">
+              Runs when a shared value changes. Use{" "}
+              <code className="text-[#E6EDF3]">bucket/key</code> for one value or{" "}
+              <code className="text-[#E6EDF3]">bucket/#</code> for every key in a bucket.
+            </div>
+          )}
+          <div className="text-[11px] text-[#6B7785]">
+            Shared State is internal to Aeolus. Identical writes change nothing, so this
+            runs only when a value actually moves.
+          </div>
+        </div>
       )}
 
       {/* Schedule (cron) configuration */}

@@ -1,7 +1,7 @@
 // frontend/src/pages/data-store/SetupWizard.tsx — Setup wizard for enabling the Data Store
 
 import { useState, useEffect } from "react";
-import { Database, HardDrive, Settings, Check, Info, Cpu } from "lucide-react";
+import { Database, HardDrive, Settings, Check, Info, Cpu, Share2 } from "lucide-react";
 import { useDataStoreStore } from "../../store/data-store-store";
 import { authFetch } from "../../lib/auth-fetch";
 
@@ -129,35 +129,37 @@ export function SetupWizard() {
         <div className="w-14 h-14 rounded-xl bg-primary/10 flex items-center justify-center mx-auto">
           <Database size={28} className="text-primary" />
         </div>
-        <h1 className="text-2xl font-bold text-[#E6EDF3]">Enable Data Store</h1>
+        <h1 className="text-2xl font-bold text-[#E6EDF3]">Record historical observations</h1>
         <p className="text-sm text-[#6B7785] max-w-md mx-auto">
-          Set up persistent time-series and key-value storage for your automations.
+          Set storage limits, then Aeolus can keep time-series Collections on this device.
         </p>
       </div>
 
-      {/* Explanation card */}
+      {/* Explanation card. This is deliberately about history ONLY: Shared State is
+          a separate, core facility that is already available and needs no setup. */}
       <div className="bg-[#161B22] border border-[#30363D] rounded-xl p-5 space-y-3">
         <div className="flex items-center gap-2">
           <Info size={16} className="text-primary" />
-          <h2 className="text-sm font-semibold text-[#E6EDF3]">What is the Data Store?</h2>
+          <h2 className="text-sm font-semibold text-[#E6EDF3]">What this enables</h2>
         </div>
         <p className="text-xs text-[#9AA6B2] leading-relaxed">
-          The Data Store lets your automations accumulate structured data over time — energy readings,
-          irrigation logs, sensor history, and more. It provides two storage modes:
+          Collections record observations over time — energy readings, irrigation logs, sensor
+          history — with timestamps, tags, aggregation queries and charts. Because history
+          accumulates without bound, it needs retention and storage limits before it starts, which
+          is why it is off until you configure it.
         </p>
-        <ul className="text-xs text-[#9AA6B2] space-y-1.5 ml-4 list-disc">
-          <li>
-            <span className="text-[#E6EDF3] font-medium">Collections</span> — time-series records
-            with timestamps, tags, and aggregation queries
-          </li>
-          <li>
-            <span className="text-[#E6EDF3] font-medium">Buckets</span> — key-value storage shared
-            across automations for computed values and state
-          </li>
-        </ul>
+        <div className="rounded-lg border border-[#30363D] bg-[#0D1117] px-3 py-2.5">
+          <div className="flex items-center gap-2 text-xs font-semibold text-[#E6EDF3]">
+            <Share2 size={13} className="text-[#3BA4FF]" /> Shared State is already available
+          </div>
+          <p className="mt-1 text-xs leading-relaxed text-[#6B7785]">
+            Durable current values that automations share need no setup and are not affected by
+            this. Use Collections when you want the history as well as the latest value.
+          </p>
+        </div>
         <p className="text-xs text-[#6B7785] leading-relaxed">
-          Retention policies automatically prune old data to keep storage manageable on your device.
-          You can configure per-collection retention or rely on the global storage limit.
+          Retention policies automatically prune old records to keep storage manageable. You can
+          configure per-collection retention or rely on the global storage limit.
         </p>
       </div>
 
@@ -224,7 +226,7 @@ export function SetupWizard() {
               className="w-full text-sm bg-[#0D1117] border border-[#30363D] rounded-lg px-3 py-2 text-[#E6EDF3] font-mono focus:outline-none focus:border-primary transition-colors"
             />
             <p className="text-[10px] text-[#6B7785]">
-              Total disk space the Data Store can use. Writes are rejected when this limit is reached.
+              Total disk space historical records can use. Writes are rejected when this limit is reached.
             </p>
           </div>
 
@@ -294,7 +296,7 @@ export function SetupWizard() {
         ) : (
           <>
             <Check size={16} />
-            Enable Data Store
+            Enable historical Collections
           </>
         )}
       </button>

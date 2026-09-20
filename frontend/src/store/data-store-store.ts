@@ -40,12 +40,19 @@ export interface DataRecord {
   timestamp: number;
 }
 
-export interface BucketSummary {
+/**
+ * One Shared State bucket — a namespace grouping related current values.
+ *
+ * "Bucket" is the container term inside Shared State; "Shared State" is the
+ * concept. It is not a storage mode of the historical Data Store (ADR-0016).
+ */
+export interface SharedStateBucket {
   bucket: string;
   keyCount: number;
 }
 
-export interface BucketEntry {
+/** One durable current value inside a Shared State bucket. */
+export interface SharedStateEntry {
   key: string;
   value: unknown;
   updatedAt: number;
@@ -178,10 +185,11 @@ interface DataStoreState {
   // selected-collection `records` array used by the Data Explorer page.
   latestRecordByCollection: Record<string, DataRecord>;
 
-  // Buckets
-  buckets: BucketSummary[];
-  selectedBucket: string | null;
-  bucketEntries: BucketEntry[];
+  // Shared State — durable current values shared between automations. Always
+  // available, independent of whether historical Collections are enabled.
+  sharedStateBuckets: SharedStateBucket[];
+  selectedSharedStateBucket: string | null;
+  sharedStateEntries: SharedStateEntry[];
 
   // Query state
   timeRange: string;
@@ -192,14 +200,22 @@ interface DataStoreState {
   fetchCollections: () => Promise<void>;
   fetchRecords: (collection: string, options?: QueryOptions) => Promise<void>;
   fetchChartRecords: (collection: string, options?: QueryOptions) => Promise<void>;
-  fetchBuckets: () => Promise<void>;
-  fetchBucketEntries: (bucket: string) => Promise<void>;
+  fetchSharedStateBuckets: () => Promise<void>;
+  fetchSharedStateEntries: (bucket: string) => Promise<void>;
   fetchStats: () => Promise<void>;
   selectCollection: (name: string | null) => void;
-  selectBucket: (name: string | null) => void;
+  selectSharedStateBucket: (name: string | null) => void;
   setTimeRange: (range: string) => void;
   setRecordsPage: (page: number) => void;
   addRealtimeRecord: (collection: string, record: DataRecord) => void;
+  /** Apply a live Shared State change pushed over the WebSocket. */
+  applySharedStateChange: (change: {
+    bucket: string;
+    key: string;
+    value?: unknown;
+    deleted: boolean;
+    timestamp: number;
+  }) => void;
   removeCollection: (name: string) => void;
 }
 
@@ -221,9 +237,9 @@ export const useDataStoreStore = create<DataStoreState>((set, get) => ({
   chartLoading: false,
   chartSampling: null,
   latestRecordByCollection: {},
-  buckets: [],
-  selectedBucket: null,
-  bucketEntries: [],
+  sharedStateBuckets: [],
+  selectedSharedStateBucket: null,
+  sharedStateEntries: [],
   timeRange: "24h",
   queryTags: {},
 
@@ -282,24 +298,27 @@ export const useDataStoreStore = create<DataStoreState>((set, get) => ({
     }
   },
 
-  fetchBuckets: async () => {
+  // Shared State reads go to /api/shared-state, not the deprecated
+  // /api/data-store/buckets aliases: Shared State is a core facility, so its API
+  // must not read as a corner of historical storage (ADR-0016).
+  fetchSharedStateBuckets: async () => {
     try {
-      const buckets = await request<BucketSummary[]>("/api/data-store/buckets");
-      set({ buckets });
+      const sharedStateBuckets = await request<SharedStateBucket[]>("/api/shared-state");
+      set({ sharedStateBuckets });
     } catch (err) {
-      console.warn("[data-store-store] Failed to fetch buckets:", err);
+      console.warn("[data-store-store] Failed to fetch Shared State buckets:", err);
     }
   },
 
-  fetchBucketEntries: async (bucket) => {
+  fetchSharedStateEntries: async (bucket) => {
     try {
-      const bucketEntries = await request<BucketEntry[]>(
-        `/api/data-store/buckets/${encodeURIComponent(bucket)}`,
+      const sharedStateEntries = await request<SharedStateEntry[]>(
+        `/api/shared-state/${encodeURIComponent(bucket)}`,
       );
-      set({ bucketEntries });
+      set({ sharedStateEntries });
     } catch (err) {
-      console.warn("[data-store-store] Failed to fetch bucket entries:", err);
-      set({ bucketEntries: [] });
+      console.warn("[data-store-store] Failed to fetch Shared State entries:", err);
+      set({ sharedStateEntries: [] });
     }
   },
 
@@ -324,8 +343,56 @@ export const useDataStoreStore = create<DataStoreState>((set, get) => ({
     });
   },
 
-  selectBucket: (name) => {
-    set({ selectedBucket: name, bucketEntries: [] });
+  selectSharedStateBucket: (name) => {
+    set({ selectedSharedStateBucket: name, sharedStateEntries: [] });
+  },
+
+  /**
+   * Fold a live Shared State change into the browsed view.
+   *
+   * Only a REAL change arrives here — an identical write performs no work and
+   * emits nothing — so every call moves something. The expanded bucket's entries
+   * and the bucket key counts are both updated, because a new key changes the
+   * count the collapsed row is showing.
+   */
+  applySharedStateChange: ({ bucket, key, value, deleted, timestamp }) => {
+    set((prev) => {
+      const isExpanded = prev.selectedSharedStateBucket === bucket;
+      const existing = isExpanded ? prev.sharedStateEntries.find((e) => e.key === key) : undefined;
+
+      const sharedStateEntries = !isExpanded
+        ? prev.sharedStateEntries
+        : deleted
+          ? prev.sharedStateEntries.filter((e) => e.key !== key)
+          : existing
+            ? prev.sharedStateEntries.map((e) => (e.key === key ? { key, value, updatedAt: timestamp } : e))
+            // Keep the list key-ordered, matching how the server returns it, so a
+            // new key does not appear in an arbitrary position.
+            : [...prev.sharedStateEntries, { key, value, updatedAt: timestamp }].sort((a, b) =>
+                a.key.localeCompare(b.key),
+              );
+
+      // The key count only moves when a key appears or disappears, not when a
+      // value is overwritten. Without the expanded entries to compare against, a
+      // write to a collapsed bucket cannot be told apart from a create — so the
+      // count is left alone and corrected by the next fetch, rather than guessed.
+      const keyDelta = deleted ? -1 : isExpanded && !existing ? 1 : 0;
+      const known = prev.sharedStateBuckets.some((b) => b.bucket === bucket);
+
+      let sharedStateBuckets = prev.sharedStateBuckets;
+      if (keyDelta !== 0 && known) {
+        sharedStateBuckets = prev.sharedStateBuckets
+          .map((b) => (b.bucket === bucket ? { ...b, keyCount: Math.max(0, b.keyCount + keyDelta) } : b))
+          // A bucket with no keys left no longer exists, matching the server's view.
+          .filter((b) => b.keyCount > 0);
+      } else if (!known && !deleted) {
+        sharedStateBuckets = [...prev.sharedStateBuckets, { bucket, keyCount: 1 }].sort((a, b) =>
+          a.bucket.localeCompare(b.bucket),
+        );
+      }
+
+      return { sharedStateEntries, sharedStateBuckets };
+    });
   },
 
   /**

@@ -241,11 +241,16 @@ describe("Sidebar", () => {
     expect(dashboardState.deleteTab).not.toHaveBeenCalled();
   });
 
-  it("shows the disabled dot on the Data Store tab when data store is off", () => {
+  it("marks the Data tab when historical Collections are off, not the whole area", () => {
+    // The dot means one thing now: history is not being recorded. It used to read
+    // "Data Store is disabled", which implied the whole area was unavailable — and
+    // Shared State on that page is always available regardless of this setting
+    // (ADR-0016).
     dataStoreState.config = { enabled: false };
     dataStoreState.enabled = false;
     render(<Sidebar />);
-    expect(screen.getByTitle("Data Store is disabled")).toBeInTheDocument();
+    expect(screen.getByTitle("Historical Collections are not enabled")).toBeInTheDocument();
+    expect(screen.queryByTitle(/Data Store is disabled/i)).not.toBeInTheDocument();
   });
 
   it("renders the current user and triggers logout", () => {

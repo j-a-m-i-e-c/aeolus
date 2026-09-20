@@ -63,6 +63,10 @@ export function connectWebSocket(): void {
       } else if (msg.type === "data-store-collection-deleted") {
         const { collection } = msg.data;
         useDataStoreStore.getState().removeCollection(collection);
+      } else if (msg.type === "shared-state-change") {
+        // Only real changes are broadcast — an identical write performs no work and
+        // emits nothing — so the Shared State browser can apply each one directly.
+        useDataStoreStore.getState().applySharedStateChange(msg.data);
       }
     } catch {
       // Ignore malformed messages

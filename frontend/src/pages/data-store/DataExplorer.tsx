@@ -1,36 +1,48 @@
-// frontend/src/pages/data-store/DataExplorer.tsx — Main Data Explorer with SummaryBar and tab switcher
+// frontend/src/pages/data-store/DataExplorer.tsx — The Data page: Shared State, Collections, Storage
+//
+// Two distinct concepts live here, and the tab order says which is which
+// (ADR-0016):
+//
+//   Shared State  durable current values shared between automations — always available
+//   Collections   optional historical observations, with retention and storage limits
+//   Storage       configuration for that historical accumulation
+//
+// Shared State is NOT a storage mode of the Data Store. It is core state that
+// happens to be persisted in the same database.
 
 import { useEffect, useState } from "react";
 import {
   Database,
   Layers,
-  Archive,
   Settings,
+  Share2,
   AlertTriangle,
   AlertCircle,
   LockKeyhole,
 } from "lucide-react";
 import { useDataStoreStore } from "../../store/data-store-store";
-import { CollectionList } from "./CollectionList";
-import { CollectionDetail } from "./CollectionDetail";
-import { BucketList } from "./BucketList";
+import { CollectionsTab } from "./CollectionsTab";
+import { SharedStateExplorer } from "./SharedStateExplorer";
 import { SettingsPanel } from "./SettingsPanel";
+import { SetupWizard } from "./SetupWizard";
 import { useReadOnlyDemo } from "../../hooks/useReadOnlyDemo";
 
-type Tab = "collections" | "buckets" | "settings";
+type Tab = "shared-state" | "collections" | "storage";
 
 export function DataExplorer() {
   const readOnly = useReadOnlyDemo();
-  const [activeTab, setActiveTab] = useState<Tab>("collections");
+  // Lands on Shared State: it is the always-available concept, so it is the one
+  // view guaranteed to have something to show.
+  const [activeTab, setActiveTab] = useState<Tab>("shared-state");
 
   const fetchStats = useDataStoreStore((s) => s.fetchStats);
   const fetchCollections = useDataStoreStore((s) => s.fetchCollections);
-  const fetchBuckets = useDataStoreStore((s) => s.fetchBuckets);
+  const fetchSharedStateBuckets = useDataStoreStore((s) => s.fetchSharedStateBuckets);
   const selectCollection = useDataStoreStore((s) => s.selectCollection);
   const stats = useDataStoreStore((s) => s.stats);
-  const selectedCollection = useDataStoreStore((s) => s.selectedCollection);
+  const enabled = useDataStoreStore((s) => s.enabled);
 
-  // Entering the Data Store always lands on its home view. `selectedCollection`
+  // Entering the Data page always lands on its home view. `selectedCollection`
   // lives in a module-level store that outlives this route, so without an
   // explicit reset, navigating to another tab and back would silently restore
   // the last-viewed collection detail instead of the collections list.
@@ -38,8 +50,8 @@ export function DataExplorer() {
     selectCollection(null);
     fetchStats();
     fetchCollections();
-    fetchBuckets();
-  }, [selectCollection, fetchStats, fetchCollections, fetchBuckets]);
+    fetchSharedStateBuckets();
+  }, [selectCollection, fetchStats, fetchCollections, fetchSharedStateBuckets]);
 
   // Determine storage warning level
   const storagePercent = stats?.storagePercent ?? 0;
@@ -51,16 +63,21 @@ export function DataExplorer() {
         : "normal";
 
   const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
+    { id: "shared-state", label: "Shared State", icon: <Share2 size={14} /> },
     { id: "collections", label: "Collections", icon: <Layers size={14} /> },
-    { id: "buckets", label: "Buckets", icon: <Archive size={14} /> },
-    { id: "settings", label: "Configuration", icon: <Settings size={14} /> },
+    { id: "storage", label: "Storage", icon: <Settings size={14} /> },
   ];
 
   return (
     <div className="space-y-5">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-[#E6EDF3]">Data Store</h1>
+        <div>
+          <h1 className="text-2xl font-bold text-[#E6EDF3]">Data</h1>
+          <p className="mt-1 text-sm text-[#6B7785]">
+            Shared current values automations coordinate through, and the optional history they record.
+          </p>
+        </div>
       </div>
 
       {readOnly && (
@@ -71,9 +88,10 @@ export function DataExplorer() {
               Public demo · read only
             </div>
             <p className="mt-1 text-xs leading-relaxed text-[#8B9AAA]">
-              Aeolus keeps time-series measurements and shared key/value state locally on the edge device.
-              Browse the showcase data, then open Configuration to see the storage limits that prevent a small
-              device from silently filling its disk. This public demo lets you inspect the real controls without saving changes.
+              Aeolus keeps shared current values and historical measurements locally on the edge device.
+              Browse the showcase data, then open Storage to see the limits that prevent a small device
+              from silently filling its disk. This public demo lets you inspect the real controls without
+              saving changes.
             </p>
           </div>
         </div>
@@ -82,6 +100,19 @@ export function DataExplorer() {
       {/* Summary Bar */}
       <div className="bg-[#161B22] border border-[#30363D] rounded-xl p-4">
         <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+          {/* Shared values */}
+          <div className="space-y-1">
+            <div className="flex items-center gap-1.5">
+              <Share2 size={12} className="text-[#6B7785]" />
+              <span className="text-[10px] text-[#6B7785] uppercase tracking-wider">
+                Shared Values
+              </span>
+            </div>
+            <p className="text-lg font-semibold text-[#E6EDF3]">
+              {stats?.totalBucketEntries ?? 0}
+            </p>
+          </div>
+
           {/* Collections */}
           <div className="space-y-1">
             <div className="flex items-center gap-1.5">
@@ -108,20 +139,9 @@ export function DataExplorer() {
             </p>
           </div>
 
-          {/* Buckets */}
-          <div className="space-y-1">
-            <div className="flex items-center gap-1.5">
-              <Archive size={12} className="text-[#6B7785]" />
-              <span className="text-[10px] text-[#6B7785] uppercase tracking-wider">
-                Buckets
-              </span>
-            </div>
-            <p className="text-lg font-semibold text-[#E6EDF3]">
-              {stats?.totalBucketEntries ?? 0}
-            </p>
-          </div>
-
-          {/* Storage Usage */}
+          {/* Historical storage usage. Shared State is bounded by its own
+              per-value and total-entry limits, not by this budget, so it is
+              deliberately not counted here. */}
           <div className="col-span-2 space-y-1.5">
             <div className="flex items-center gap-1.5">
               {storageWarning === "critical" ? (
@@ -132,34 +152,30 @@ export function DataExplorer() {
                 <Database size={12} className="text-[#6B7785]" />
               )}
               <span className="text-[10px] text-[#6B7785] uppercase tracking-wider">
-                Storage
-              </span>
-              <span
-                className={`text-[10px] font-medium ml-auto ${
-                  storageWarning === "critical"
-                    ? "text-[#EF4444]"
-                    : storageWarning === "warning"
-                      ? "text-[#F59E0B]"
-                      : "text-[#9AA6B2]"
-                }`}
-              >
-                {stats?.estimatedStorageMb?.toFixed(1) ?? 0} /{" "}
-                {stats?.maxStorageMb ?? 0} MB
+                History Storage
               </span>
             </div>
-            {/* Progress bar */}
-            <div className="w-full h-2 bg-[#0D1117] rounded-full overflow-hidden">
-              <div
-                className={`h-full rounded-full transition-all duration-300 ${
-                  storageWarning === "critical"
-                    ? "bg-[#EF4444]"
-                    : storageWarning === "warning"
-                      ? "bg-[#F59E0B]"
-                      : "bg-primary"
-                }`}
-                style={{ width: `${Math.min(storagePercent, 100)}%` }}
-              />
-            </div>
+            {enabled ? (
+              <>
+                <div className="h-1.5 w-full overflow-hidden rounded-full bg-[#0D1117]">
+                  <div
+                    className={`h-full rounded-full transition-all ${
+                      storageWarning === "critical"
+                        ? "bg-[#EF4444]"
+                        : storageWarning === "warning"
+                          ? "bg-[#F59E0B]"
+                          : "bg-primary"
+                    }`}
+                    style={{ width: `${Math.min(100, storagePercent)}%` }}
+                  />
+                </div>
+                <p className="text-[10px] text-[#6B7785]">
+                  {(stats?.estimatedStorageMb ?? 0).toFixed(1)} MB of {stats?.maxStorageMb ?? 0} MB
+                </p>
+              </>
+            ) : (
+              <p className="text-[10px] text-[#6B7785]">Not recording history</p>
+            )}
           </div>
         </div>
       </div>
@@ -178,22 +194,23 @@ export function DataExplorer() {
           >
             {tab.icon}
             {tab.label}
+            {/* An amber dot marks the optional feature that is switched off, so the
+                empty Collections tab reads as a choice rather than a fault. */}
+            {tab.id === "collections" && !enabled && (
+              <span className="ml-0.5 h-1.5 w-1.5 rounded-full bg-[#F59E0B]" title="Historical Collections are not enabled" />
+            )}
           </button>
         ))}
       </div>
 
       {/* Tab Content */}
+      {activeTab === "shared-state" && <SharedStateExplorer />}
       {activeTab === "collections" && (
-        <>
-          {selectedCollection ? (
-            <CollectionDetail />
-          ) : (
-            <CollectionList />
-          )}
-        </>
+        <CollectionsTab onConfigure={() => setActiveTab("storage")} />
       )}
-      {activeTab === "buckets" && <BucketList />}
-      {activeTab === "settings" && <SettingsPanel />}
+      {/* Storage is where historical accumulation is configured: the setup flow
+          before it is enabled, the live limits afterwards. */}
+      {activeTab === "storage" && (enabled ? <SettingsPanel /> : <SetupWizard />)}
     </div>
   );
 }

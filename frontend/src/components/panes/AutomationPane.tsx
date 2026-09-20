@@ -19,7 +19,7 @@ import { FlowDiagram } from "../FlowDiagram";
 import { ActivityFeed } from "../ActivityFeed";
 import { AutomationAuthoringFields } from "../AutomationAuthoringFields";
 import { CommandEvidenceInspector } from "../CommandEvidenceInspector";
-import { createDefaultAutomationProject, describeAutomationTrigger, triggerIsConfigured, type TranspileError } from "../automation-authoring";
+import { createDefaultAutomationProject, describeAutomationTrigger, isAutomationTriggerType, triggerCarriesPattern, triggerIsConfigured, type AutomationTriggerType, type TranspileError } from "../automation-authoring";
 import { SandboxHost } from "../../sandbox/SandboxHost";
 import type { PropsPayload } from "../../sandbox/rpc-types";
 import type { ExecutionEntry } from "./custom/types";
@@ -46,7 +46,7 @@ interface AutomationRule {
   ruleType: string;
   enabled: boolean;
   hasUi?: boolean;
-  triggerType?: "mqtt" | "cron" | "none";
+  triggerType?: AutomationTriggerType;
   cronExpression?: string | null;
   structured?: {
     trigger: string;
@@ -83,8 +83,8 @@ export function AutomationPane({ config, paneId }: Props) {
   // Setup / editing fields
   const [name, setName] = useState(() => isDemoDraft ? String(config.ruleName || "Demo Draft") : "");
   const [triggerTopic, setTriggerTopic] = useState(() => isDemoDraft ? String(config.draftTriggerTopic || "") : "");
-  const [triggerType, setTriggerType] = useState<"mqtt" | "cron" | "none">(() =>
-    isDemoDraft && (config.draftTriggerType === "mqtt" || config.draftTriggerType === "cron" || config.draftTriggerType === "none")
+  const [triggerType, setTriggerType] = useState<AutomationTriggerType>(() =>
+    isDemoDraft && isAutomationTriggerType(config.draftTriggerType)
       ? config.draftTriggerType
       : "mqtt",
   );
@@ -252,7 +252,7 @@ export function AutomationPane({ config, paneId }: Props) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: name.trim(),
-          triggerTopic: triggerType === "mqtt" ? triggerTopic.trim() : undefined,
+          triggerTopic: triggerCarriesPattern(triggerType) ? triggerTopic.trim() : undefined,
           triggerType,
           cronExpression: triggerType === "cron" ? cronExpression : undefined,
           ruleType: "script",
@@ -299,7 +299,7 @@ export function AutomationPane({ config, paneId }: Props) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: name.trim(),
-          triggerTopic: triggerType === "mqtt" ? triggerTopic.trim() : undefined,
+          triggerTopic: triggerCarriesPattern(triggerType) ? triggerTopic.trim() : undefined,
           triggerType,
           cronExpression: triggerType === "cron" ? cronExpression : undefined,
           ...(rule?.ruleType === "script" ? { project: projectSource } : {}),

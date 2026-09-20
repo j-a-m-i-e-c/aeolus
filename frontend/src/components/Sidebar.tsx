@@ -285,7 +285,7 @@ export function Sidebar({ mobileOpen = false, onClose }: SidebarProps) {
         <span className="relative shrink-0">
           <DynamicIcon name={tab.icon} size={16} />
           {showDisabledDot && (
-            <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-[#F59E0B]" title="Data Store is disabled" />
+            <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-[#F59E0B]" title="Historical Collections are not enabled" />
           )}
         </span>
 

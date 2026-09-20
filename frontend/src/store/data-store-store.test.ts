@@ -40,7 +40,7 @@ describe("data-store-store", () => {
       collections: [], selectedCollection: null,
       records: [], recordsTotal: 0, recordsLoading: false, recordsPage: 0,
       chartRecords: [], chartTotal: 0, chartLoading: false, chartSampling: null,
-      buckets: [], selectedBucket: null, bucketEntries: [],
+      sharedStateBuckets: [], selectedSharedStateBucket: null, sharedStateEntries: [],
       timeRange: "24h", queryTags: {},
     });
   });

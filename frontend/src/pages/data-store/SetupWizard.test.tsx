@@ -35,13 +35,24 @@ describe("SetupWizard", () => {
   it("renders the wizard header and recommended defaults", async () => {
     render(<SetupWizard />);
     expect(
-      screen.getByRole("heading", { name: "Enable Data Store" }),
+      screen.getByRole("heading", { name: "Record historical observations" }),
     ).toBeInTheDocument();
-    expect(screen.getByText("What is the Data Store?")).toBeInTheDocument();
+    expect(screen.getByText("What this enables")).toBeInTheDocument();
     // Default disk tier (16 GB) => Standard tier, maxStorageMb 500
     expect(screen.getByText("Standard (8–32 GB free)")).toBeInTheDocument();
     expect(screen.getByDisplayValue("500")).toBeInTheDocument();
     // Wait for the mount effect's stats probe to settle to avoid act warnings.
+    await waitFor(() => expect(mockAuthFetch).toHaveBeenCalled());
+  });
+
+  // The wizard used to describe the Data Store as offering "two storage modes:
+  // Collections and Buckets", which is the mental model ADR-0016 rejects. This
+  // asserts the replacement: the wizard governs history only, and says plainly
+  // that Shared State needs none of it.
+  it("scopes itself to history and says Shared State needs no setup", async () => {
+    render(<SetupWizard />);
+    expect(screen.getByText(/Shared State is already available/i)).toBeInTheDocument();
+    expect(screen.queryByText(/two storage modes/i)).not.toBeInTheDocument();
     await waitFor(() => expect(mockAuthFetch).toHaveBeenCalled());
   });
 
@@ -57,7 +68,7 @@ describe("SetupWizard", () => {
 
   it("enables the Data Store and refreshes config on success", async () => {
     render(<SetupWizard />);
-    fireEvent.click(screen.getByRole("button", { name: /Enable Data Store/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Enable historical Collections/i }));
 
     await waitFor(() =>
       expect(
@@ -86,7 +97,7 @@ describe("SetupWizard", () => {
         json: async () => ({ error: "Cannot enable" }),
       });
     render(<SetupWizard />);
-    fireEvent.click(screen.getByRole("button", { name: /Enable Data Store/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Enable historical Collections/i }));
     expect(await screen.findByText("Cannot enable")).toBeInTheDocument();
     expect(mockState.fetchConfig).not.toHaveBeenCalled();
   });

@@ -30,6 +30,7 @@ import { AutomationAuthoringFields } from "./AutomationAuthoringFields";
 import {
   createDefaultAutomationProject,
   describeAutomationTrigger,
+  triggerCarriesPattern,
   triggerIsConfigured,
   type AutomationTriggerType,
   type TranspileError,
@@ -139,7 +140,8 @@ export function AutomationsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: scriptName.trim(),
-          triggerTopic: triggerType === "mqtt" ? scriptTriggerTopic.trim() : undefined,
+          // `mqtt` and `shared-state` both carry a pattern; cron and manual do not.
+          triggerTopic: triggerCarriesPattern(triggerType) ? scriptTriggerTopic.trim() : undefined,
           triggerType,
           cronExpression: triggerType === "cron" ? cronExpression : undefined,
           ruleType: "script",

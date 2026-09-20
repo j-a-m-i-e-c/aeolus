@@ -1,22 +1,34 @@
-// frontend/src/pages/data-store/BucketList.tsx — Expandable list of buckets with key-value pairs
+// frontend/src/pages/data-store/SharedStateExplorer.tsx — Browse durable shared current values
+//
+// Shared State is a core Aeolus facility, not a storage mode of the historical
+// Data Store (ADR-0016). This view is therefore always available, whether or not
+// historical Collections are enabled.
 
 import { useEffect, useState } from "react";
-import { Archive, ChevronDown, ChevronRight, Key, Clock3 } from "lucide-react";
+import { Archive, ChevronDown, ChevronRight, Key, Share2 } from "lucide-react";
 import { useDataStoreStore } from "../../store/data-store-store";
 
+/**
+ * Notes for the showcase's own buckets, so a visitor reading the demo can tell
+ * what each namespace is for. Unknown buckets simply render without a note.
+ */
 const DEMO_BUCKET_NOTES: Record<string, string> = {
-  "demo-runtime": "Small values describing this showcase runtime. Useful as an example of durable application metadata.",
+  "demo-runtime": "Small values describing this showcase runtime. An example of durable application metadata.",
   "policy-snapshots": "Current control thresholds shared by automations, such as water, mine atmosphere and wildlife response policies.",
   "latest-checkpoints": "The latest useful outcome from longer-running workflows, without treating it like a time-series log.",
+  "bunker-summary": "Each bunker subsystem's current summary. The Bunker Overview is triggered by changes here and reads every key to compose its view.",
+  "mine-summary": "Each mine subsystem's current summary, composed by the Mine Operations Overview.",
+  "vessel-summary": "Each vessel subsystem's current summary, composed by the Mission Overview.",
+  "_showcase:seed-ledger": "Which automations and tabs the showcase seeder owns, so a reseed reclaims its own resources and leaves yours alone.",
 };
 
-export function BucketList() {
-  const buckets = useDataStoreStore((s) => s.buckets);
-  const fetchBuckets = useDataStoreStore((s) => s.fetchBuckets);
-  const fetchBucketEntries = useDataStoreStore((s) => s.fetchBucketEntries);
-  const bucketEntries = useDataStoreStore((s) => s.bucketEntries);
-  const selectedBucket = useDataStoreStore((s) => s.selectedBucket);
-  const selectBucket = useDataStoreStore((s) => s.selectBucket);
+export function SharedStateExplorer() {
+  const buckets = useDataStoreStore((s) => s.sharedStateBuckets);
+  const fetchBuckets = useDataStoreStore((s) => s.fetchSharedStateBuckets);
+  const fetchEntries = useDataStoreStore((s) => s.fetchSharedStateEntries);
+  const entries = useDataStoreStore((s) => s.sharedStateEntries);
+  const selectedBucket = useDataStoreStore((s) => s.selectedSharedStateBucket);
+  const selectBucket = useDataStoreStore((s) => s.selectSharedStateBucket);
 
   const [expandedBucket, setExpandedBucket] = useState<string | null>(null);
 
@@ -31,7 +43,7 @@ export function BucketList() {
     } else {
       setExpandedBucket(bucketName);
       selectBucket(bucketName);
-      fetchBucketEntries(bucketName);
+      fetchEntries(bucketName);
     }
   };
 
@@ -44,33 +56,41 @@ export function BucketList() {
     });
   }
 
+  /** What Shared State is for, shown above the list and in the empty state. */
+  const explainer = (
+    <div className="rounded-xl border border-[#30363D] bg-[#161B22] p-4">
+      <div className="mb-1 flex items-center gap-2 text-xs font-semibold text-[#E6EDF3]">
+        <Share2 size={13} className="text-[#3BA4FF]" /> Shared State
+      </div>
+      <p className="text-xs leading-relaxed text-[#6B7785]">
+        Small current values that automations intentionally share, grouped into buckets.
+        They survive restarts, and an automation can be triggered when one changes.
+        Shared State holds the latest value only — it is not a history.
+      </p>
+    </div>
+  );
+
   if (buckets.length === 0) {
     return (
-      <div className="bg-[#161B22] border border-[#30363D] rounded-xl p-8 text-center">
-        <Archive size={32} className="text-[#6B7785] mx-auto mb-3" />
-        <p className="text-sm text-[#6B7785]">
-          No buckets yet. Buckets are created automatically when automations use{" "}
-          <code className="text-[#9AA6B2] bg-[#0D1117] px-1 rounded">
-            db.set()
-          </code>
-          .
-        </p>
+      <div className="space-y-3">
+        {explainer}
+        <div className="bg-[#161B22] border border-[#30363D] rounded-xl p-8 text-center">
+          <Archive size={32} className="text-[#6B7785] mx-auto mb-3" />
+          <p className="text-sm text-[#6B7785]">
+            No shared values yet. A bucket appears here the first time an automation calls{" "}
+            <code className="text-[#9AA6B2] bg-[#0D1117] px-1 rounded">
+              shared.set()
+            </code>
+            .
+          </p>
+        </div>
       </div>
     );
   }
 
   return (
     <div className="space-y-2">
-      <div className="grid gap-3 md:grid-cols-2">
-        <div className="rounded-xl border border-[#30363D] bg-[#161B22] p-4">
-          <div className="mb-1 flex items-center gap-2 text-xs font-semibold text-[#E6EDF3]"><Clock3 size={13} className="text-[#5CE1E6]" /> Collections</div>
-          <p className="text-xs leading-relaxed text-[#6B7785]">History: many timestamped measurements or events that you query over a time window and chart.</p>
-        </div>
-        <div className="rounded-xl border border-[#30363D] bg-[#161B22] p-4">
-          <div className="mb-1 flex items-center gap-2 text-xs font-semibold text-[#E6EDF3]"><Key size={13} className="text-[#3BA4FF]" /> Buckets</div>
-          <p className="text-xs leading-relaxed text-[#6B7785]">Current shared values: named configuration, checkpoints or computed state that should survive restarts.</p>
-        </div>
-      </div>
+      {explainer}
 
       {buckets.map((bucket) => {
         const isExpanded = expandedBucket === bucket.bucket;
@@ -94,24 +114,28 @@ export function BucketList() {
                 <Archive size={14} className="text-primary" />
                 <div className="text-left">
                   <span className="text-sm font-medium text-[#E6EDF3]">{bucket.bucket}</span>
-                  {DEMO_BUCKET_NOTES[bucket.bucket] && <p className="mt-0.5 max-w-2xl text-[10px] leading-relaxed text-[#6B7785]">{DEMO_BUCKET_NOTES[bucket.bucket]}</p>}
+                  {DEMO_BUCKET_NOTES[bucket.bucket] && (
+                    <p className="mt-0.5 max-w-2xl text-[10px] leading-relaxed text-[#6B7785]">
+                      {DEMO_BUCKET_NOTES[bucket.bucket]}
+                    </p>
+                  )}
                 </div>
               </div>
               <span className="text-xs text-[#6B7785]">
-                {bucket.keyCount} {bucket.keyCount === 1 ? "key" : "keys"}
+                {bucket.keyCount} {bucket.keyCount === 1 ? "value" : "values"}
               </span>
             </button>
 
             {/* Expanded entries */}
             {isExpanded && selectedBucket === bucket.bucket && (
               <div className="border-t border-[#30363D]">
-                {bucketEntries.length === 0 ? (
+                {entries.length === 0 ? (
                   <div className="px-4 py-3 text-xs text-[#6B7785]">
-                    No entries
+                    No values
                   </div>
                 ) : (
                   <div className="divide-y divide-[#30363D]/50">
-                    {bucketEntries.map((entry) => (
+                    {entries.map((entry) => (
                       <div
                         key={entry.key}
                         className="px-4 py-2.5 flex items-start justify-between gap-4"
@@ -123,10 +147,13 @@ export function BucketList() {
                           />
                           <div className="min-w-0">
                             <p className="text-xs font-medium text-[#E6EDF3] truncate">
+                              {/* The canonical reactive path, which is also what a
+                                  shared-state trigger pattern matches against. */}
+                              <span className="text-[#6B7785]">{bucket.bucket}/</span>
                               {entry.key}
                             </p>
                             <p className="text-xs text-[#9AA6B2] font-mono mt-0.5 break-all">
-                              {typeof entry.value === "object"
+                              {typeof entry.value === "object" && entry.value !== null
                                 ? JSON.stringify(entry.value)
                                 : String(entry.value)}
                             </p>

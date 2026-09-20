@@ -23,7 +23,7 @@ describe("data-store-store — uncovered functions", () => {
       collections: [], selectedCollection: null,
       records: [], recordsTotal: 0, recordsLoading: false, recordsPage: 0,
       chartRecords: [], chartTotal: 0, chartLoading: false,
-      buckets: [], selectedBucket: null, bucketEntries: [],
+      sharedStateBuckets: [], selectedSharedStateBucket: null, sharedStateEntries: [],
       timeRange: "24h", queryTags: {},
     });
   });
@@ -45,40 +45,54 @@ describe("data-store-store — uncovered functions", () => {
     });
   });
 
-  describe("fetchBuckets", () => {
+  describe("fetchSharedStateBuckets", () => {
     it("stores fetched buckets", async () => {
       mockAuthFetch.mockResolvedValue(jsonOk([
         { bucket: "settings", keyCount: 5 },
         { bucket: "cache", keyCount: 3 },
       ]));
-      await s().fetchBuckets();
-      expect(s().buckets).toHaveLength(2);
-      expect(s().buckets[0].bucket).toBe("settings");
+      await s().fetchSharedStateBuckets();
+      expect(s().sharedStateBuckets).toHaveLength(2);
+      expect(s().sharedStateBuckets[0].bucket).toBe("settings");
+    });
+
+    it("reads from the Shared State API, not the deprecated bucket aliases", async () => {
+      // Shared State is a core facility, so its API must not read as a corner of
+      // historical storage (ADR-0016).
+      mockAuthFetch.mockResolvedValue(jsonOk([]));
+      await s().fetchSharedStateBuckets();
+      expect(mockAuthFetch.mock.calls[0][0]).toMatch(/\/api\/shared-state$/);
     });
 
     it("handles fetch error gracefully", async () => {
       mockAuthFetch.mockRejectedValue(new Error("offline"));
-      await s().fetchBuckets();
-      expect(s().buckets).toEqual([]);
+      await s().fetchSharedStateBuckets();
+      expect(s().sharedStateBuckets).toEqual([]);
     });
   });
 
-  describe("fetchBucketEntries", () => {
+  describe("fetchSharedStateEntries", () => {
     it("stores fetched entries for the given bucket", async () => {
       mockAuthFetch.mockResolvedValue(jsonOk([
         { key: "theme", value: "dark", updatedAt: 1000 },
         { key: "lang", value: "en", updatedAt: 2000 },
       ]));
-      await s().fetchBucketEntries("settings");
-      expect(s().bucketEntries).toHaveLength(2);
-      expect(s().bucketEntries[0].key).toBe("theme");
+      await s().fetchSharedStateEntries("settings");
+      expect(s().sharedStateEntries).toHaveLength(2);
+      expect(s().sharedStateEntries[0].key).toBe("theme");
+    });
+
+    it("requests the bucket from the Shared State API, URL-encoded", async () => {
+      mockAuthFetch.mockResolvedValue(jsonOk([]));
+      await s().fetchSharedStateEntries("_showcase:seed-ledger");
+      expect(mockAuthFetch.mock.calls[0][0]).toContain("/api/shared-state/_showcase%3Aseed-ledger");
     });
 
     it("clears entries on error", async () => {
-      useDataStoreStore.setState({ bucketEntries: [{ key: "old", value: "x", updatedAt: 0 }] });
+      useDataStoreStore.setState({ sharedStateEntries: [{ key: "old", value: "x", updatedAt: 0 }] });
       mockAuthFetch.mockRejectedValue(new Error("offline"));
-      await s().fetchBucketEntries("settings");
-      expect(s().bucketEntries).toEqual([]);
+      await s().fetchSharedStateEntries("settings");
+      expect(s().sharedStateEntries).toEqual([]);
     });
   });
 
@@ -100,18 +114,117 @@ describe("data-store-store — uncovered functions", () => {
     });
   });
 
-  describe("selectBucket", () => {
+  describe("selectSharedStateBucket", () => {
     it("sets selected bucket and clears entries", () => {
-      useDataStoreStore.setState({ bucketEntries: [{ key: "old", value: "x", updatedAt: 0 }] });
-      s().selectBucket("new-bucket");
-      expect(s().selectedBucket).toBe("new-bucket");
-      expect(s().bucketEntries).toEqual([]);
+      useDataStoreStore.setState({ sharedStateEntries: [{ key: "old", value: "x", updatedAt: 0 }] });
+      s().selectSharedStateBucket("new-bucket");
+      expect(s().selectedSharedStateBucket).toBe("new-bucket");
+      expect(s().sharedStateEntries).toEqual([]);
     });
 
     it("sets null to deselect", () => {
-      useDataStoreStore.setState({ selectedBucket: "x" });
-      s().selectBucket(null);
-      expect(s().selectedBucket).toBeNull();
+      useDataStoreStore.setState({ selectedSharedStateBucket: "x" });
+      s().selectSharedStateBucket(null);
+      expect(s().selectedSharedStateBucket).toBeNull();
+    });
+  });
+
+  describe("applySharedStateChange", () => {
+    it("updates an existing value in the expanded bucket", () => {
+      useDataStoreStore.setState({
+        sharedStateBuckets: [{ bucket: "bunker-summary", keyCount: 1 }],
+        selectedSharedStateBucket: "bunker-summary",
+        sharedStateEntries: [{ key: "power", value: { battery: 74 }, updatedAt: 1000 }],
+      });
+
+      s().applySharedStateChange({
+        bucket: "bunker-summary", key: "power", value: { battery: 73 }, deleted: false, timestamp: 2000,
+      });
+
+      expect(s().sharedStateEntries).toEqual([{ key: "power", value: { battery: 73 }, updatedAt: 2000 }]);
+      // Overwriting a value does not change how many keys the bucket holds.
+      expect(s().sharedStateBuckets[0].keyCount).toBe(1);
+    });
+
+    it("inserts a new key in key order and increments the count", () => {
+      useDataStoreStore.setState({
+        sharedStateBuckets: [{ bucket: "bunker-summary", keyCount: 1 }],
+        selectedSharedStateBucket: "bunker-summary",
+        sharedStateEntries: [{ key: "power", value: 1, updatedAt: 1000 }],
+      });
+
+      s().applySharedStateChange({
+        bucket: "bunker-summary", key: "air", value: 2, deleted: false, timestamp: 2000,
+      });
+
+      expect(s().sharedStateEntries.map((e) => e.key)).toEqual(["air", "power"]);
+      expect(s().sharedStateBuckets[0].keyCount).toBe(2);
+    });
+
+    it("removes a deleted key and decrements the count", () => {
+      useDataStoreStore.setState({
+        sharedStateBuckets: [{ bucket: "bunker-summary", keyCount: 2 }],
+        selectedSharedStateBucket: "bunker-summary",
+        sharedStateEntries: [
+          { key: "air", value: 2, updatedAt: 1000 },
+          { key: "power", value: 1, updatedAt: 1000 },
+        ],
+      });
+
+      s().applySharedStateChange({
+        bucket: "bunker-summary", key: "air", deleted: true, timestamp: 2000,
+      });
+
+      expect(s().sharedStateEntries.map((e) => e.key)).toEqual(["power"]);
+      expect(s().sharedStateBuckets[0].keyCount).toBe(1);
+    });
+
+    it("drops a bucket once its last value is removed", () => {
+      useDataStoreStore.setState({
+        sharedStateBuckets: [{ bucket: "bunker-summary", keyCount: 1 }],
+        selectedSharedStateBucket: "bunker-summary",
+        sharedStateEntries: [{ key: "power", value: 1, updatedAt: 1000 }],
+      });
+
+      s().applySharedStateChange({
+        bucket: "bunker-summary", key: "power", deleted: true, timestamp: 2000,
+      });
+
+      // Matches the server's view: a bucket is only a grouping of the keys it holds.
+      expect(s().sharedStateBuckets).toEqual([]);
+    });
+
+    it("adds a previously unseen bucket in bucket order", () => {
+      useDataStoreStore.setState({
+        sharedStateBuckets: [{ bucket: "mine-summary", keyCount: 1 }],
+        selectedSharedStateBucket: null,
+        sharedStateEntries: [],
+      });
+
+      s().applySharedStateChange({
+        bucket: "bunker-summary", key: "power", value: 1, deleted: false, timestamp: 2000,
+      });
+
+      expect(s().sharedStateBuckets.map((b) => b.bucket)).toEqual(["bunker-summary", "mine-summary"]);
+    });
+
+    it("leaves a collapsed bucket's entry list alone", () => {
+      // Entries belong to whichever bucket is expanded; a change elsewhere must not
+      // leak into that list.
+      useDataStoreStore.setState({
+        sharedStateBuckets: [
+          { bucket: "bunker-summary", keyCount: 1 },
+          { bucket: "mine-summary", keyCount: 1 },
+        ],
+        selectedSharedStateBucket: "bunker-summary",
+        sharedStateEntries: [{ key: "power", value: 1, updatedAt: 1000 }],
+      });
+
+      s().applySharedStateChange({
+        bucket: "mine-summary", key: "atmosphere", value: 5, deleted: false, timestamp: 2000,
+      });
+
+      expect(s().sharedStateEntries).toEqual([{ key: "power", value: 1, updatedAt: 1000 }]);
     });
   });
 

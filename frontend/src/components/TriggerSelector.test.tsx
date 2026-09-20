@@ -22,11 +22,15 @@ function setup(overrides: Partial<TriggerSelectorProps> = {}) {
 describe("TriggerSelector", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("renders the three trigger type options", () => {
+  it("renders every trigger type option", () => {
     setup();
     expect(screen.getByText("MQTT Topic")).toBeInTheDocument();
+    expect(screen.getByText("Shared State")).toBeInTheDocument();
     expect(screen.getByText("Schedule")).toBeInTheDocument();
     expect(screen.getByText("None")).toBeInTheDocument();
+    // Counted so adding a backend trigger type without a control here is a failure
+    // rather than a silently unreachable feature.
+    expect(screen.getByRole("group", { name: /Trigger/i }).querySelectorAll("button")).toHaveLength(4);
   });
 
   it("emits a trigger type change when an option is clicked", () => {
@@ -72,6 +76,61 @@ describe("TriggerSelector", () => {
   it("shows the manual-only hint for the none trigger", () => {
     setup({ triggerType: "none" });
     expect(screen.getByText("Runs only when manually triggered")).toBeInTheDocument();
+  });
+
+  describe("shared-state trigger", () => {
+    it("selects the shared-state type", () => {
+      const props = setup();
+      fireEvent.click(screen.getByText("Shared State"));
+      expect(props.onTriggerTypeChange).toHaveBeenCalledWith("shared-state");
+    });
+
+    it("shows a Shared State path input rather than the MQTT topic input", () => {
+      const props = setup({ triggerType: "shared-state" });
+      // A distinct label, because this is not a broker topic.
+      const input = screen.getByLabelText("Shared State Path");
+      expect(screen.queryByLabelText("Trigger Topic")).not.toBeInTheDocument();
+      fireEvent.change(input, { target: { value: "bunker-summary/#" } });
+      expect(props.onMqttTopicChange).toHaveBeenCalledWith("bunker-summary/#");
+    });
+
+    it("explains the bucket/key syntax without implying MQTT", () => {
+      setup({ triggerType: "shared-state", mqttTopic: "bunker-summary/#" });
+      expect(screen.getByText(/Runs when a shared value changes/)).toBeInTheDocument();
+      expect(screen.getByText(/Shared State is internal to Aeolus/)).toBeInTheDocument();
+    });
+
+    it("reports valid=false for an empty path", () => {
+      const props = setup({ triggerType: "shared-state", mqttTopic: "" });
+      expect(props.onValidityChange).toHaveBeenLastCalledWith(false);
+    });
+
+    it("reports valid=true for a well-formed path and wildcard", () => {
+      for (const pattern of ["bunker-summary/power", "bunker-summary/#", "+/power", "#"]) {
+        vi.clearAllMocks();
+        const props = setup({ triggerType: "shared-state", mqttTopic: pattern });
+        expect(props.onValidityChange, pattern).toHaveBeenLastCalledWith(true);
+      }
+    });
+
+    it("shows an inline error and reports invalid for a three-part path", () => {
+      // A stored value's path is exactly bucket/key, so a third part could never
+      // match — catching it here beats a server round-trip that says the same.
+      const props = setup({ triggerType: "shared-state", mqttTopic: "a/b/c" });
+      expect(screen.getByText("A Shared State path has two parts: bucket/key")).toBeInTheDocument();
+      expect(props.onValidityChange).toHaveBeenLastCalledWith(false);
+    });
+
+    it("rejects a partial wildcard", () => {
+      const props = setup({ triggerType: "shared-state", mqttTopic: "bunker+/power" });
+      expect(screen.getByText(/must be a whole part/)).toBeInTheDocument();
+      expect(props.onValidityChange).toHaveBeenLastCalledWith(false);
+    });
+
+    it("rejects '#' anywhere but the end", () => {
+      setup({ triggerType: "shared-state", mqttTopic: "#/power" });
+      expect(screen.getByText("'#' may only be the last part")).toBeInTheDocument();
+    });
   });
 });
 
