@@ -1,9 +1,15 @@
-// src/data-store/data-store.ts — Persistent time-series and key-value storage on better-sqlite3
+// src/data-store/data-store.ts — Persistent historical time-series storage on better-sqlite3
+//
+// Collections are this module's subject: many timestamped records, queried over a
+// range, bounded by retention and storage limits. The key/value side that used to
+// live here is now Shared State (see src/shared-state/, ADR-0016); the bucket
+// methods below survive only as deprecated delegations.
 
 import type { Database as DatabaseType } from "better-sqlite3";
 import type { EventEmitter } from "node:events";
 import logger from "../logger.js";
 import { DATA_STORE_QUERY } from "../core/event-bus.js";
+import { SharedStateStore } from "../shared-state/shared-state-store.js";
 import { parseDuration } from "./duration.js";
 
 // ─── Interfaces ──────────────────────────────────────────────────────────────
@@ -114,15 +120,26 @@ function bucketWidthMs(rangeFrom: number, rangeTo: number, maxPoints: number): n
 export class DataStore {
   private config: DataStoreConfig;
   private retentionTimer: ReturnType<typeof setInterval> | null = null;
+  /**
+   * Backs the deprecated bucket aliases below.
+   *
+   * Injected when the composition root has already built one, so the whole
+   * process shares a single Shared State implementation and a single change-event
+   * source. Constructed locally otherwise (tests, tooling) so `DataStore` remains
+   * usable on its own.
+   */
+  private readonly sharedState: SharedStateStore;
 
   constructor(
     private readonly db: DatabaseType,
     private readonly eventBus: EventEmitter,
     config?: Partial<DataStoreConfig>,
+    sharedState?: SharedStateStore,
   ) {
     this.initSchema();
     this.config = { ...DEFAULT_CONFIG, ...config };
     this.loadConfig();
+    this.sharedState = sharedState ?? new SharedStateStore(db, eventBus);
   }
 
   // ─── Schema Initialization ───────────────────────────────────────────────
@@ -587,53 +604,47 @@ export class DataStore {
     }));
   }
 
-  // ─── Key-Value Bucket Operations ─────────────────────────────────────────
+  // ─── Shared State (deprecated aliases) ───────────────────────────────────
+  //
+  // These were the key/value "Bucket" API. Buckets have been promoted out of the
+  // historical Data Store into first-class Shared State (ADR-0016), because a
+  // durable current value shared between automations is a different thing from a
+  // collection of timestamped observations — and it must not disappear merely
+  // because an operator has not enabled historical storage.
+  //
+  // They remain as thin delegations so existing callers keep working, and they
+  // delegate rather than reimplement so there is exactly ONE authoritative
+  // Shared State persistence path. New code uses SharedStateStore directly.
 
+  /** @deprecated Use `SharedStateStore.get()`. */
   get(bucket: string, key: string): unknown | undefined {
-    const row = this.db.prepare(
-      "SELECT value FROM ds_buckets WHERE bucket = ? AND key = ?"
-    ).get(bucket, key) as { value: string } | undefined;
-    if (!row) {
-      return undefined;
-    }
-    return JSON.parse(row.value);
+    return this.sharedState.get(bucket, key);
   }
 
-  set(bucket: string, key: string, value: unknown): void {
-    const valueJson = JSON.stringify(value);
-    const now = Date.now();
-    this.db.prepare(
-      "INSERT OR REPLACE INTO ds_buckets (bucket, key, value, updated_at) VALUES (?, ?, ?, ?)"
-    ).run(bucket, key, valueJson, now);
+  /**
+   * @deprecated Use `SharedStateStore.set()`.
+   * @returns whether the stored value actually changed.
+   */
+  set(bucket: string, key: string, value: unknown): boolean {
+    return this.sharedState.set(bucket, key, value);
   }
 
-  delete(bucket: string, key: string): void {
-    this.db.prepare(
-      "DELETE FROM ds_buckets WHERE bucket = ? AND key = ?"
-    ).run(bucket, key);
+  /**
+   * @deprecated Use `SharedStateStore.delete()`.
+   * @returns whether an entry was actually removed.
+   */
+  delete(bucket: string, key: string): boolean {
+    return this.sharedState.delete(bucket, key);
   }
 
+  /** @deprecated Use `SharedStateStore.listBucket()`. */
   listBucket(bucket: string): Array<{ key: string; value: unknown; updatedAt: number }> {
-    const rows = this.db.prepare(
-      "SELECT key, value, updated_at FROM ds_buckets WHERE bucket = ?"
-    ).all(bucket) as Array<{ key: string; value: string; updated_at: number }>;
-
-    return rows.map((row) => ({
-      key: row.key,
-      value: JSON.parse(row.value),
-      updatedAt: row.updated_at,
-    }));
+    return this.sharedState.listBucket(bucket);
   }
 
+  /** @deprecated Use `SharedStateStore.listBuckets()`. */
   listBuckets(): Array<{ bucket: string; keyCount: number }> {
-    const rows = this.db.prepare(
-      "SELECT bucket, COUNT(*) as key_count FROM ds_buckets GROUP BY bucket"
-    ).all() as Array<{ bucket: string; key_count: number }>;
-
-    return rows.map((row) => ({
-      bucket: row.bucket,
-      keyCount: row.key_count,
-    }));
+    return this.sharedState.listBuckets();
   }
 
   // ─── Collection Management ─────────────────────────────────────────────────
@@ -748,8 +759,13 @@ export class DataStore {
     const recordsRow = this.db.prepare("SELECT COUNT(*) as cnt FROM ds_records").get() as { cnt: number };
     const totalRecords = recordsRow.cnt;
 
-    const bucketsRow = this.db.prepare("SELECT COUNT(*) as cnt FROM ds_buckets").get() as { cnt: number };
-    const totalBucketEntries = bucketsRow.cnt;
+    // Reported for continuity of the existing stats shape, but read through the
+    // authoritative Shared State store. It is deliberately NOT folded into
+    // `estimatedStorageMb`/`storagePercent` below: Shared State is bounded by its
+    // own per-value and total-entry limits, not by the historical storage budget,
+    // and charging bounded current state against the history budget would let a
+    // full history silently refuse a subsystem's summary write.
+    const totalBucketEntries = this.sharedState.countEntries();
 
     const collectionsRow = this.db.prepare("SELECT COUNT(*) as cnt FROM ds_collections").get() as { cnt: number };
     const totalCollections = collectionsRow.cnt;

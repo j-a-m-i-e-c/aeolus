@@ -26,6 +26,15 @@ export const WS_BROADCAST = "ws:broadcast" as const;
 export const MQTT_MESSAGE_PUBLISHED = "mqtt:message-published" as const;
 /** A domain event emitted by an automation over the reserved Aeolus event namespace (phase-1 Req 6). */
 export const AUTOMATION_EVENT = "automation:event" as const;
+/**
+ * A durable Shared State value actually changed (ADR-0016).
+ *
+ * Internal only. This is NOT an Automation Event: it carries latest-value
+ * semantics, it is safely coalescible per bucket/key, and it is never published
+ * to MQTT under any namespace. It is emitted only when the stored JSON moved,
+ * so an identical write produces nothing at all.
+ */
+export const SHARED_STATE_CHANGE = "shared-state:change" as const;
 /** Emitted after a command lifecycle transition is durably recorded (phase-1 Req 7.5). */
 export const COMMAND_LIFECYCLE_TRANSITION = "command:lifecycle-transition" as const;
 

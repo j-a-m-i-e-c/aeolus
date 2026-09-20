@@ -6,6 +6,7 @@ import type { DataStore } from "../../data-store/data-store.js";
 import type { QueryOptions } from "../../data-store/data-store.js";
 import type { PermissionResolver } from "../../auth/permission-resolver.js";
 import type { CollectionOwnershipStore } from "../../auth/collection-ownership-store.js";
+import { SharedStateLimitError } from "../../shared-state/shared-state-store.js";
 import { requireAdmin } from "../../auth/auth-middleware.js";
 import { BadRequestError, NotFoundError, ConflictError, AppError } from "../middleware/error-handler.js";
 import { asyncHandler } from "../middleware/async-handler.js";
@@ -281,25 +282,29 @@ export function createDataStoreRoutes(
     res.json(result);
   }));
 
-  // ─── Bucket Endpoints ──────────────────────────────────────────────────────
+  // ─── Bucket Endpoints (deprecated — see /api/shared-state) ─────────────────
 
-  // Shared key/value buckets have no tab-ownership mapping, so they are treated
-  // as admin/trusted state (admin-only) until a bucket→tab model exists.
+  // These are Shared State, not historical Data Store storage (ADR-0016). They
+  // remain here as compatibility aliases over the same authoritative store while
+  // callers migrate to /api/shared-state; there is no second implementation.
+  //
+  // Admin-only, unchanged: Shared State is global and has no bucket→tab ownership
+  // model, so there is no basis on which to grant a non-admin partial authority.
 
-  /** GET /buckets — list all buckets with key counts (admin-only) */
+  /** @deprecated GET /buckets — use GET /api/shared-state */
   router.get("/buckets", requireAdmin, (_req, res) => {
     const buckets = dataStore.listBuckets();
     res.json(buckets);
   });
 
-  /** GET /buckets/:bucket — list all entries in a bucket (admin-only) */
+  /** @deprecated GET /buckets/:bucket — use GET /api/shared-state/:bucket */
   router.get("/buckets/:bucket", requireAdmin, (req, res) => {
     const bucket = req.params.bucket as string;
     const entries = dataStore.listBucket(bucket);
     res.json(entries);
   });
 
-  /** PUT /buckets/:bucket/:key — set a key-value pair (admin-only) */
+  /** @deprecated PUT /buckets/:bucket/:key — use PUT /api/shared-state/:bucket/:key */
   router.put("/buckets/:bucket/:key", requireAdmin, validate({ body: setBucketValueBodySchema, params: bucketKeyParamsSchema }), asyncHandler((req, res) => {
     const bucket = req.params.bucket as string;
     const key = req.params.key as string;
@@ -309,16 +314,25 @@ export function createDataStoreRoutes(
       throw new BadRequestError("Request body must include a 'value' field");
     }
 
-    dataStore.set(bucket, key, value);
-    res.json({ success: true });
+    try {
+      // `changed` is reported so the alias tells the same truth as the new route:
+      // an identical write performs no SQLite write and triggers nothing.
+      const changed = dataStore.set(bucket, key, value);
+      res.json({ success: true, changed });
+    } catch (err) {
+      if (err instanceof SharedStateLimitError) {
+        throw new BadRequestError(err.message);
+      }
+      throw err;
+    }
   }));
 
-  /** DELETE /buckets/:bucket/:key — delete a key from a bucket (admin-only) */
+  /** @deprecated DELETE /buckets/:bucket/:key — use DELETE /api/shared-state/:bucket/:key */
   router.delete("/buckets/:bucket/:key", requireAdmin, asyncHandler((req, res) => {
     const bucket = req.params.bucket as string;
     const key = req.params.key as string;
-    dataStore.delete(bucket, key);
-    res.json({ success: true });
+    const changed = dataStore.delete(bucket, key);
+    res.json({ success: true, changed });
   }));
 
   // ─── Config, Stats, Enable/Disable Endpoints ────────────────────────────────

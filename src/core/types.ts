@@ -1,5 +1,6 @@
 // src/core/types.ts — Shared TypeScript interfaces for Aeolus
 
+import type { SharedStateSource } from "../shared-state/shared-state-types.js";
 
 /** Device type — open string, not restricted to a fixed set */
 export type DeviceType = string;
@@ -98,6 +99,21 @@ export interface EventMetadata {
   traceId?: string;
   /** Causal hop count from the chain root; incremented per descendant. */
   depth?: number;
+  /**
+   * Present only on a `shared-state` trigger, describing which durable value
+   * changed (ADR-0016).
+   *
+   * Carried here rather than faked into `deviceId`/`state` so a Shared State
+   * trigger never impersonates device state: the bucket and key are named
+   * explicitly, and `deleted` distinguishes a removed key from one holding
+   * `null`.
+   */
+  sharedState?: {
+    bucket: string;
+    key: string;
+    deleted: boolean;
+    source: SharedStateSource;
+  };
 }
 
 /** Internal event emitted after MQTT message normalization */
@@ -128,11 +144,32 @@ export interface Rule {
   condition?: (context: EventContext) => boolean;
   action: (context: EventContext) => void | ActionResult | Promise<void | ActionResult>;
   name?: string;
-  triggerType?: "mqtt" | "cron" | "none";
+  /**
+   * What wakes this rule.
+   *
+   * - `mqtt` — a device/integration state publish, or an Automation Event, whose
+   *   topic matches `topic`.
+   * - `cron` — a schedule.
+   * - `none` — manual only.
+   * - `shared-state` — a durable Shared State value changed, and its canonical
+   *   `<bucket>/<key>` path matches `topic` (ADR-0016).
+   *
+   * The trigger types partition the rule set: a `shared-state` rule is never
+   * woken by MQTT, and an `mqtt` rule is never woken by a Shared State change,
+   * even when the pattern would match both. Otherwise an MQTT publish on
+   * `bunker-summary/power` could impersonate a Shared State write.
+   */
+  triggerType?: AutomationTriggerType;
   cronExpression?: string;
   /** Compiled JavaScript for script rules; when present the engine dispatches through the sandbox. */
   compiled_js?: string;
 }
+
+/** Every way an automation can be triggered. */
+export type AutomationTriggerType = "mqtt" | "cron" | "none" | "shared-state";
+
+/** The trigger types accepted by the API, in one place so validation cannot drift. */
+export const AUTOMATION_TRIGGER_TYPES = ["mqtt", "cron", "none", "shared-state"] as const;
 
 /** Context passed to rule condition and action functions */
 export interface EventContext {
