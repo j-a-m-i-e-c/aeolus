@@ -491,7 +491,7 @@ The Data Store provides:
 * tag-based filtering
 * time-window queries
 * basic aggregation (`sum`, `avg`, `min`, `max`, `count`)
-* key/value buckets shared across automations
+* durable current values shared between automations (Shared State, separate from history)
 * retention, collection and record limits.
 
 It is disabled until storage limits are configured, reducing the risk of silently filling a Raspberry Pi storage device.

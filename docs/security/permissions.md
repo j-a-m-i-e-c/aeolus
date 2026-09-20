@@ -69,12 +69,20 @@ cannot exceed the authority of whoever wrote it. Scope is two columns on
 
 - **Admin-authored automations are unrestricted** (`authored_unrestricted = 1`):
   they run with system-wide authority — all devices, any MQTT topic, all Data
-  Store collections and buckets, HTTP per the sandbox SSRF policy.
+  Store collections, all Shared State, HTTP per the sandbox SSRF policy.
 - **Non-admin-authored automations are scoped** (`authored_unrestricted = 0`) to
   a single owning tab chosen at creation. The author must hold `write` on that
   tab. At runtime the automation may act only on the devices that tab exposes and
   the Data Store collections it surfaces; it may not publish raw MQTT, may not use
-  shared key-value buckets, and its outbound HTTP is limited to the SSRF policy.
+  Shared State, and its outbound HTTP is limited to the SSRF policy.
+
+  Shared State is withheld in both directions: `shared` is `undefined` in a scoped
+  automation's sandbox, **and** a scoped automation is never woken by a `shared-state`
+  trigger. Waking it would hand it, in `context.state`, the value the read boundary
+  withholds. Shared State is global with no bucket-to-tab ownership model, so there is
+  nothing to scope it against — widening this needs an explicit ownership design rather
+  than authority inferred from a name prefix. See
+  [ADR-0016](../adr/0016-shared-state-and-automation-events.md).
   Form-rule webhook actions are refused for scoped automations.
 
 Scope is bound at creation from the caller's server-side role, never from a body

@@ -31,11 +31,53 @@ The compiler registers the exported function with Aeolus' completion wrapper int
 A rule can use:
 
 - an MQTT topic pattern, including `+` and `#` wildcards;
+- a Shared State path pattern (`shared-state`);
 - a five-field cron schedule;
 - manual-only mode;
 - a UI event fired by its paired custom component.
 
 Cron rules are managed by `CronTimerManager`. The engine creates a normal event context when the schedule fires, so scheduled and MQTT rules use the same execution pipeline.
+
+### Shared State triggers
+
+A `shared-state` rule is woken when a durable shared value actually changes. The pattern
+is a `<bucket>/<key>` path, matched with the same `+` and `#` wildcards as a topic:
+
+```text
+bunker-summary/power    one value
+bunker-summary/+        every key in that bucket
+bunker-summary/#        every key in that bucket
++/power                 the `power` key of every bucket
+```
+
+This is pattern syntax only. Shared State never reaches MQTT, and the two namespaces do
+not mix: an MQTT publish on `bunker-summary/power` cannot wake a `shared-state` rule, and
+a Shared State change cannot wake an `mqtt` rule whose pattern would match.
+
+Three behaviours follow from Shared State being current truth rather than an occurrence:
+
+- **An unchanged write triggers nothing.** `shared.set()` with the value already stored is
+  a complete no-op.
+- **Pending work is coalesced keep-latest, per bucket and key.** If a consumer is busy
+  while values 2, 3 and 4 arrive, it runs for 1 and then for 4 — the durable key already
+  holds 4, so 2 and 3 have nothing left to say. Different keys never displace each other.
+- **The context does not impersonate a device.** `context.deviceId` is empty,
+  `context.topic` is the path, and `context.meta.sharedState` names the bucket and key.
+
+```ts
+export default async function run(context: EventContext) {
+  const changed = context.meta?.sharedState;
+  if (changed?.deleted) return;          // `null` is a legitimate value, so check this
+  const power = shared.get("bunker-summary", "power");
+}
+```
+
+An overview composing several keys should read each one's current value rather than
+relying on the payload that woke it. That is what makes it correct after a restart, after
+a coalesced burst, and after a wake-up it never saw.
+
+See [ADR-0016](../adr/0016-shared-state-and-automation-events.md) for why summaries are
+Shared State rather than Automation Events.
 
 ## Event context
 
@@ -65,8 +107,9 @@ The exposed API includes:
 
 - `devices`
 - `mqtt`
-- `state`
-- `db` when Data Store is available
+- `state` — this automation's own durable state
+- `shared` — durable current values shared between automations
+- `db` for historical Collections, when the Data Store is enabled
 - `events` when the automation-event service is available
 - `http`
 - `log`
@@ -85,6 +128,10 @@ Inside a normal `run(context)` function, `devices.action()` returns an `ActionRe
 ## Logic and UI state
 
 Each script automation has private persistent state.
+
+`state` is private to one automation. To share a current value deliberately, use `shared`;
+to keep a history of observations, write a Collection record with `db`. See
+[Data and storage](data-and-storage.md).
 
 ### Logic to UI
 
@@ -394,6 +441,19 @@ being granted arbitrary MQTT publish authority:
 ```javascript
 events.emit("tank.low", { level: 18, tankId: "header-tank" });
 ```
+
+An Automation Event answers **"what happened?"** — an alarm, a transition, a command
+outcome, an operator action. Every occurrence matters, so Aeolus does not coalesce them:
+two `perimeter-breached` events are two breaches.
+
+It is the wrong mechanism for **"what is true now?"**. A current snapshot sent as an event
+gets occurrence semantics it does not have, cannot be safely coalesced, and puts internal
+composition traffic on the broker under `aeolus/events/...`. Use `shared.set()` for that.
+The distinction and the eleven publishers it was applied to are recorded in
+[ADR-0016](../adr/0016-shared-state-and-automation-events.md).
+
+Emit an event when all of these hold: it is an occurrence rather than a level; a consumer
+needs to see every one; and discarding an intermediate value would lose a fact.
 
 Aeolus publishes a versioned envelope to a reserved namespace it owns:
 

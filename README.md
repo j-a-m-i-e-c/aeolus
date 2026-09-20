@@ -136,7 +136,7 @@ The setup script installs Docker, clones the repository, starts the services, en
 | **Unified event model** | MQTT and connector events flow through the same internal event bus and device registry |
 | **Command outcomes** | Structured action results, with dispatch, acknowledgement and observed-state confirmation available where the integration and automation support them |
 | **Dashboard** | Custom tabs, drag-and-drop panes, device controls, automation editors and monitoring tools |
-| **State and data** | Automation-local state, device history, time series collections and shared key/value buckets |
+| **State and data** | Automation-local state, reactive Shared State between automations, device history and optional time series collections |
 | **Security** | Local authentication, user groups, dashboard permissions, MQTT credential modes and isolated user written code |
 | **Operations** | Structured logs, Prometheus metrics, optional built-in metric history when the Data Store is enabled, health checks and versioned database migrations |
 | **Deployment** | Docker Compose on Linux, with Raspberry Pi installation and no mandatory hosted service |
@@ -280,7 +280,8 @@ The project editor uses Monaco with a real file tree and Aeolus-specific definit
 | `devices` | Query the registry and request device actions |
 | `mqtt` | Publish MQTT messages |
 | `state` | Read and write the automation’s private persistent state |
-| `db` | Write/query time series collections and key/value buckets when enabled |
+| `shared` | Read and write durable current values shared between automations |
+| `db` | Write/query historical time series collections when enabled |
 | `http` | Make bounded HTTP(S) requests to public services; localhost/LAN/private destinations and redirects are blocked |
 | `log` | Emit structured application logs |
 | `automation()` | Optional conditions/actions helper used for flow visualisation |
@@ -402,21 +403,31 @@ const average = db.query("ctd-casts", {
 });
 ```
 
-### Key-value buckets
+Historical Collections are disabled by default. Enabling them through the Data setup flow applies explicit storage, collection and record limits. Safeguards include a configured estimated-storage limit, per-collection FIFO eviction and optional retention policies.
 
-Buckets store configuration or computed values shared across automations:
+### Shared State
+
+Separate from history, and always available: durable current values that automations
+intentionally share.
 
 ```javascript
-db.set("show-config", "defaultFadeMs", 1200);
-const fadeMs = db.get("show-config", "defaultFadeMs");
+shared.set("bunker-summary", "power", { battery: 74, solarW: 1800 });
+const power = shared.get("bunker-summary", "power");
 ```
 
-The Data Store is disabled by default. Enabling it through the Data setup flow applies explicit storage, collection and record limits. Safeguards include a configured estimated-storage limit, per-collection FIFO eviction and optional retention policies.
+Writing the value a key already holds is a complete no-op — no write, no trigger — so a
+projection can recompute on every tick for free. A real change can wake other automations
+through the `shared-state` trigger type, with pending work coalesced keep-latest per key.
+Shared State is internal and never published to MQTT.
+
+Current value and history are different questions, so they have different homes: `shared`
+keeps the latest, a Collection keeps the series. See
+[ADR-0016](docs/adr/0016-shared-state-and-automation-events.md).
 
 <!--
 MEDIA TODO: Data explorer screenshot
 File: docs/media/data-explorer.png
-Show: one collection with a meaningful chart and filters, plus the collection/bucket navigation. Use a signal with a story behind it, such as a CTD depth cast, mine gas reading, game session timeline or real site sensor history.
+Show: one collection with a meaningful chart and filters, plus the Shared State / Collections navigation. Use a signal with a story behind it, such as a CTD depth cast, mine gas reading, game session timeline or real site sensor history.
 -->
 <!-- ![Aeolus Data Store explorer](docs/media/data-explorer.png) -->
 

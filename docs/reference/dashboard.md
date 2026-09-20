@@ -22,7 +22,15 @@ The Connectors area lists available and configured connector instances. It provi
 
 ### Data
 
-The Data area manages Data Store setup, collections, records, buckets, usage and export.
+The Data area covers two separate things:
+
+- **Shared State** — durable current values automations share. Always browseable; needs no
+  setup.
+- **Collections** and **Storage** — optional historical records, with setup, retention,
+  usage limits and export.
+
+Disabling the historical Data Store removes Collections, not Shared State. See
+[Data and storage](data-and-storage.md).
 
 ### Automations
 

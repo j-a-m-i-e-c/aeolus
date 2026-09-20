@@ -175,7 +175,7 @@ The platform already includes:
 * Automation Project Logic plus retained form-rule runtime compatibility;
 * paired sandboxed React UI;
 * persistent automation state;
-* Data Store collections and buckets;
+* reactive Shared State and optional Data Store collections;
 * authentication, groups and the MQTT provisioning framework;
 * versioned SQLite migrations and checkpoints;
 * logs, metrics, history and health views;

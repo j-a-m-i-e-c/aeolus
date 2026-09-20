@@ -40,7 +40,7 @@ are nullable with no backfill, so an absent value means *not recorded* rather th
 `false`. See [Automations](automations.md) and
 [ADR-0014](../adr/0014-fixed-command-proof-scaffold.md).
 
-The Data Store creates its own configuration, collection, record and bucket tables when initialised.
+The Data Store creates its own configuration, collection and record tables when initialised. The Shared State table is created unconditionally, because Shared State is a core facility rather than part of optional historical storage.
 
 ## Migrations
 
@@ -82,15 +82,108 @@ Configuration:
 
 These variables are shown in `.env.example` and are read by the backend configuration.
 
+## What stores what
+
+Aeolus keeps five kinds of information, and each has one mechanism. Choosing between
+them is the decision that matters; the rest of this page is mechanics.
+
+| You have | It lives in | Because |
+|---|---|---|
+| Current truth about a device | Device State | Latest value matters; it comes from MQTT or a connector |
+| Durable state private to one automation | Automation State | Nothing else should read it |
+| Durable current value shared between automations | Shared State | Latest value matters, and a change can wake a consumer |
+| Timestamped observations you want to query later | Data Store Collections | History matters, and it accumulates |
+| Something happened | Automation Events | Every occurrence matters |
+
+Shared State and Collections are separate facilities, not two modes of one store.
+Shared State is always available; Collections are optional because unbounded history can
+fill a constrained device. See [ADR-0016](../adr/0016-shared-state-and-automation-events.md).
+
 ## Automation state
 
 Each automation has a private key-value namespace stored in `automation_state`.
 
 Logic uses synchronous `state.get()` and `state.set()` calls inside the sandbox. State changes are pushed to the paired UI over WebSocket.
 
+Writes are idempotent. `state.set()` with the value a key already holds performs no
+SQLite write and sends no WebSocket broadcast, so a projection that recomputes the same
+value on every device publish costs nothing. Change detection is exact serialized-JSON
+equality, so two objects with the same entries in a different key order count as
+different.
+
+## Shared State
+
+Durable current values that automations intentionally share. This is where one automation
+tells the others what is true *now*.
+
+```ts
+shared.set("bunker-summary", "power", { battery, solar, load, net });
+
+const power = shared.get("bunker-summary", "power");
+shared.delete("bunker-summary", "power");
+```
+
+A **bucket** is a namespace inside Shared State. Entries survive a backend restart.
+
+Four properties define it:
+
+- **Always available.** Shared State does not wait on the historical Data Store being
+  enabled. Disabling the Data Store removes Collections, not shared values.
+- **Idempotent.** `set()` returns whether the stored value actually changed. An identical
+  write performs no SQLite write, does not move `updated_at`, and triggers nothing.
+- **Reactive.** A real change can wake automations using the `shared-state` trigger type
+  with a `<bucket>/<key>` path pattern. Pending work for one key is coalesced
+  keep-latest, because the durable value already holds the newest state. See
+  [Automations](automations.md).
+- **Internal.** Shared State is never published to MQTT, under any namespace.
+
+It is **not history**. Writing 72, then 73, then 74 leaves 74 and no record of the
+others. When you want both, write both:
+
+```ts
+shared.set("bunker-summary", "power", current);
+db?.write("bunker-power-history", { battery: current.battery });
+```
+
+### Bounds
+
+Shared State is small current state, not a document or blob store. It has its own limits
+and is deliberately not governed by the Data Store's `maxStorageMb`:
+
+| Bound | Value |
+|---|---:|
+| Serialized value size | 64 KiB |
+| Bucket or key name length | 200 characters |
+| Total entries | 5,000 |
+
+Bucket and key names may not contain `/`, `+` or `#`, so one stored value has exactly one
+unambiguous reactive path. A refused write throws rather than failing quietly, because a
+silently dropped write would leave a consumer reading a stale value with no sign the
+producer had tried to update it.
+
+Entries are stored in the `ds_buckets` table, which keeps its name from when Shared State
+lived inside the Data Store. That is a storage detail, not the product model.
+
+### Access
+
+Shared State is global and has no bucket-to-tab ownership model, so:
+
+- unrestricted (admin-authored) automations may use `shared.*`;
+- tab-scoped automations cannot reach it, and are not woken by changes to it;
+- REST management under `/api/shared-state` is admin-only.
+
+See [Permissions](../security/permissions.md).
+
+### Deprecated aliases
+
+`db.get()`, `db.set()` and `db.delete()` still read and write the same Shared State, and
+`/api/data-store/buckets/*` still works. Both are deprecated: they are only present when
+the historical Data Store is enabled, which has nothing to do with whether a shared
+current value exists. Use `shared.*` and `/api/shared-state`.
+
 ## Data Store
 
-The Data Store provides two storage styles.
+The Data Store records historical observations in Collections.
 
 ### Collections
 
@@ -117,21 +210,13 @@ the whole window rather than clustered at its newest edge, and reporting the buc
 width it used so the chart can state the spacing it is drawing. The points remain
 real observations; nothing is averaged into a value the site never recorded.
 
-### Buckets
-
-Persistent key-value storage for application data that is not naturally a time series.
-
-A bucket is useful for:
-
-- calibration values;
-- counters;
-- user preferences;
-- last processed identifiers;
-- small lookup tables.
-
 ## Retention and safeguards
 
-The Data Store is disabled until configured. It supports:
+Historical Collections are disabled until configured, because history accumulates without
+bound and a constrained edge device has to be told how much of it to keep. Shared State is
+unaffected by this setting.
+
+It supports:
 
 - global size limits;
 - per-collection capacity;

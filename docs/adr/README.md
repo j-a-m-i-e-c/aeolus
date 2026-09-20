@@ -32,6 +32,7 @@ This is especially useful for decisions that are easy to misunderstand from code
 | [0013](0013-simulated-physical-transitions.md) | Timed physical transitions as a simulator primitive | Accepted |
 | [0014](0014-fixed-command-proof-scaffold.md) | A fixed four-stage command proof, explained from a snapshot | Accepted |
 | [0015](0015-first-run-trust-and-mqtt-security.md) | First run trust and MQTT security model | Accepted |
+| [0016](0016-shared-state-and-automation-events.md) | Shared State for current truth, Automation Events for occurrences | Accepted |
 
 ## Writing a new ADR
 

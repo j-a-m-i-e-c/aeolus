@@ -121,6 +121,31 @@ clamped to a maximum of 200.
 | `POST` | `/api/connectors/:id/search-lights` | Start Hue light search |
 | `GET` | `/api/connectors/:id/search-lights/status` | Read Hue search status |
 
+## Shared State
+
+Durable current values shared between automations. Admin-only, and available whether or
+not the historical Data Store is enabled.
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/api/shared-state` | List buckets |
+| `GET` | `/api/shared-state/:bucket` | Read every entry in a bucket |
+| `GET` | `/api/shared-state/:bucket/:key` | Read one value |
+| `PUT` | `/api/shared-state/:bucket/:key` | Write one value |
+| `DELETE` | `/api/shared-state/:bucket/:key` | Remove one value |
+
+`PUT` and `DELETE` answer `{ "success": true, "changed": <boolean> }`. `changed: false`
+means the value was already exactly this, so nothing was written and no reactive
+automation ran. `DELETE` is idempotent and reports `changed: false` for a key that was not
+set, rather than 404.
+
+`GET /api/shared-state/:bucket/:key` returns 404 when the key is not set, which is how a
+caller distinguishes a missing key from one deliberately holding `null`.
+
+A write is refused with 400 when it exceeds a bound: 64 KiB serialized value, 200-character
+names, 5,000 total entries, or a name containing `/`, `+` or `#`. See
+[Data and storage](data-and-storage.md).
+
 ## Data Store
 
 | Method | Path | Purpose |
@@ -129,13 +154,15 @@ clamped to a maximum of 200.
 | `PATCH`, `DELETE` | `/api/data-store/collections/:name` | Update or remove a collection |
 | `GET`, `POST` | `/api/data-store/collections/:name/records` | Query or write records |
 | `GET` | `/api/data-store/collections/:name/export` | Export a collection |
-| `GET` | `/api/data-store/buckets` | List buckets |
-| `GET` | `/api/data-store/buckets/:bucket` | Read a bucket |
-| `PUT`, `DELETE` | `/api/data-store/buckets/:bucket/:key` | Set or remove a key |
 | `GET`, `PUT` | `/api/data-store/config` | Read or update configuration |
 | `GET` | `/api/data-store/stats` | Usage statistics |
-| `POST` | `/api/data-store/enable` | Enable and configure the store |
-| `POST` | `/api/data-store/disable` | Disable the store |
+| `POST` | `/api/data-store/enable` | Enable and configure historical Collections |
+| `POST` | `/api/data-store/disable` | Disable historical Collections |
+
+`/api/data-store/buckets`, `/api/data-store/buckets/:bucket` and
+`/api/data-store/buckets/:bucket/:key` remain as **deprecated** aliases over the same
+Shared State store. They are only reachable while the Data Store is enabled, which has
+nothing to do with whether a shared current value exists. Use `/api/shared-state`.
 
 A record query accepts `from` (duration string such as `24h`, or epoch ms), `to`,
 `limit`, `offset`, `maxPoints`, `tags`, and `aggregate` with `field`.
