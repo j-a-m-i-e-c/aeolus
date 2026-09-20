@@ -84,10 +84,30 @@ const BATTERY_CAPACITY_WH = 9600;
 const GENERATOR_RUN_HOURS = 9;
 /** How often the power balance is integrated, in ms of wall time. */
 const POWER_TICK_MS = 2_000;
-/** Simulated seconds per real second, so a demo can watch the battery move. */
+/**
+ * Simulated seconds per real second for the POWER model only.
+ *
+ * The battery and the fuel tank are the things a short demo needs to see move, so
+ * their integration runs fast. This scale deliberately does NOT reach the cistern:
+ * accelerating drinking water made an ~80 day supply fall by a litre every few
+ * seconds, which published `sensor/bunker/supplies` continuously and taught the
+ * visitor that Aeolus is noisy rather than that the bunker is well provisioned.
+ */
 const POWER_TIME_SCALE = 300;
 /** What one occupant drinks, washes and cooks with per day, in litres. */
 const WATER_LITRES_PER_PERSON_DAY = 26;
+
+/**
+ * Litres drawn from the cistern by `occupants` people over `wallSeconds` of REAL time.
+ *
+ * Pure, and exported, so the consumption rate can be asserted directly instead of by
+ * advancing thousands of timer ticks and inferring it. This is the function that must
+ * not see {@link POWER_TIME_SCALE}: water is consumed by people living at normal speed,
+ * whatever rate the power model is being integrated at.
+ */
+export function waterDrawnLitres(occupants: number, wallSeconds: number): number {
+  return (occupants * WATER_LITRES_PER_PERSON_DAY * wallSeconds) / 86400;
+}
 /** How far out the perimeter classifier can track movement, in metres. */
 const PERIMETER_TRACK_M = 140;
 /** Inside this range a tracked object is raised as a contact, in metres. */
@@ -255,18 +275,24 @@ class Env {
     const p = this.get(BUNKER_DEVICE_KEYS.power);
     const g = this.get(BUNKER_DEVICE_KEYS.generator);
     if (p) {
-      const simSeconds = (POWER_TICK_MS / 1000) * POWER_TIME_SCALE;
+      // Two clocks, deliberately. `powerSimSeconds` is accelerated so a visitor can
+      // watch the bank charge and the tank empty inside a short demo; `wallSeconds` is
+      // real time, and is what the people in the bunker drink on.
+      const wallSeconds = POWER_TICK_MS / 1000;
+      const powerSimSeconds = wallSeconds * POWER_TIME_SCALE;
       const { load, net } = this.balance();
       const before = Math.round((this.socWh / BATTERY_CAPACITY_WH) * 100);
-      this.socWh = Math.max(0, Math.min(BATTERY_CAPACITY_WH, this.socWh + net * (simSeconds / 3600)));
+      this.socWh = Math.max(0, Math.min(BATTERY_CAPACITY_WH, this.socWh + net * (powerSimSeconds / 3600)));
       const battery = Math.round((this.socWh / BATTERY_CAPACITY_WH) * 100);
 
       // Fuel is spent in proportion to how hard the generator is working, so a ramping
-      // machine does not bill for output it is not producing yet.
+      // machine does not bill for output it is not producing yet. It burns on the same
+      // accelerated clock as the battery it is charging — the two have to agree or the
+      // demo would show a tank that outlasts the run it is paying for.
       if (g && Boolean(g.read().on)) {
         const output = Number(g.read().outputW ?? 0);
         const burnPctPerSimSecond = 100 / (GENERATOR_RUN_HOURS * 3600);
-        this.fuelPct = Math.max(0, this.fuelPct - burnPctPerSimSecond * simSeconds * (output / GENERATOR_OUTPUT_W));
+        this.fuelPct = Math.max(0, this.fuelPct - burnPctPerSimSecond * powerSimSeconds * (output / GENERATOR_OUTPUT_W));
         const fuel = Math.round(this.fuelPct);
         if (Number(g.read().fuel) !== fuel) g.update({ fuel });
         // An empty tank stops the machine. Running on nothing would make the fuel
@@ -276,14 +302,15 @@ class Env {
 
       if (battery !== before) p.update({ battery, loadW: load, netW: net });
 
-      // The cistern is genuinely being drawn down, by the people living here. It moves
-      // slowly, which is the honest speed for eighty days of water — the useful number
-      // is the runway derived from it, not the litres ticking over.
+      // The cistern is genuinely being drawn down, by the people living here — at their
+      // pace, not the power model's. Four occupants at 26 L/day is 104 L/day, about one
+      // litre every fourteen minutes of real time, so the level sensor publishes when a
+      // whole litre has actually gone rather than every couple of seconds. The useful
+      // number was always the runway derived from it, not the litres ticking over.
       const s = this.get(BUNKER_DEVICE_KEYS.supplies);
       if (s) {
         const occupants = Number(s.read().occupants ?? I.supplies.occupants);
-        const litresPerSimSecond = (occupants * WATER_LITRES_PER_PERSON_DAY) / 86400;
-        this.waterL = Math.max(0, this.waterL - litresPerSimSecond * simSeconds);
+        this.waterL = Math.max(0, this.waterL - waterDrawnLitres(occupants, wallSeconds));
         const waterLitres = Math.round(this.waterL);
         if (Number(s.read().waterLitres) !== waterLitres) s.update({ waterLitres });
       }

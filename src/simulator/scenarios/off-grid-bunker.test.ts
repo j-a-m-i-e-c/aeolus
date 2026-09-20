@@ -6,8 +6,10 @@ import type { ScenarioStimulusContext, SimulatedInboundCommand } from "../types.
 import {
   BUNKER_COMMAND_TOPICS,
   BUNKER_DEVICE_KEYS,
+  BUNKER_STATE_TOPICS,
   BUNKER_STIMULUS,
   createOffGridBunkerScenario,
+  waterDrawnLitres,
 } from "./off-grid-bunker.js";
 
 function logger(): Logger {
@@ -259,9 +261,74 @@ describe("bunker simulator", () => {
 
     // Slowly, because eighty days of water is slow. The point is that it moves at all:
     // the level used to be a constant, so the runway derived from it never changed.
-    vi.advanceTimersByTime(400_000);
+    // One litre takes ~13m51s of wall time at four occupants, so this has to span
+    // more than that to observe a whole litre leaving.
+    vi.advanceTimersByTime(900_000);
 
     expect(Number(state(BUNKER_DEVICE_KEYS.supplies).waterLitres)).toBeLessThan(before);
+  });
+
+  describe("water consumption runs on wall time, not the accelerated power clock", () => {
+    // The bug this covers: the cistern was integrated with POWER_TIME_SCALE (300x),
+    // the factor that exists so a visitor can watch the battery move. That made an
+    // ~80 day water supply fall by a litre every few seconds and published
+    // sensor/bunker/supplies continuously. Asserted against the pure helper rather
+    // than by advancing a day of timers, so the rate itself is the thing under test.
+
+    it("draws 104 litres per day for four occupants", () => {
+      expect(waterDrawnLitres(4, 86_400)).toBeCloseTo(104, 10);
+    });
+
+    it("scales with occupancy at 26 litres per person per day", () => {
+      expect(waterDrawnLitres(1, 86_400)).toBeCloseTo(26, 10);
+      expect(waterDrawnLitres(6, 86_400)).toBeCloseTo(156, 10);
+      expect(waterDrawnLitres(0, 86_400)).toBe(0);
+    });
+
+    it("takes about fourteen minutes of real time to use one litre", () => {
+      // 86400 / 104 ≈ 830.8 s ≈ 13m51s. A power tick is 2 s, so the level sensor
+      // stays quiet for hundreds of ticks between publishes.
+      expect(waterDrawnLitres(4, 831)).toBeCloseTo(1, 2);
+      expect(waterDrawnLitres(4, 2)).toBeLessThan(0.01);
+    });
+
+    it("is not multiplied by the power time scale", () => {
+      // If POWER_TIME_SCALE (300) still reached the water model, one 2 s tick would
+      // consume ~0.72 L and a rounded litre would disappear roughly every other tick.
+      const perTick = waterDrawnLitres(4, 2);
+      expect(perTick * 300).toBeGreaterThan(0.5);
+      expect(perTick).toBeLessThan(0.5);
+    });
+
+    it("keeps whole litres in place over a short interval while the battery still moves", async () => {
+      const { state, send } = setup();
+      const litresBefore = Number(state(BUNKER_DEVICE_KEYS.supplies).waterLitres);
+
+      // Force a large power deficit so the battery is guaranteed to move, then run
+      // 30 s of wall time — 15 power ticks.
+      await send(BUNKER_COMMAND_TOPICS.lights, { on: true });
+      await send(BUNKER_COMMAND_TOPICS.filter, { sealed: true });
+      const batteryBefore = Number(state(BUNKER_DEVICE_KEYS.power).battery);
+      vi.advanceTimersByTime(30_000);
+
+      // Accelerated: 30 s of wall time is 2.5 simulated hours, so the bank moves.
+      expect(Number(state(BUNKER_DEVICE_KEYS.power).battery)).not.toBe(batteryBefore);
+      // Wall time: 30 s buys 0.036 L, so the published integer cannot have changed.
+      expect(Number(state(BUNKER_DEVICE_KEYS.supplies).waterLitres)).toBe(litresBefore);
+    });
+
+    it("publishes no supplies message while no whole litre has been used", () => {
+      const { published } = setup();
+      const suppliesPublishes = () =>
+        published.filter((p) => p.topic === BUNKER_STATE_TOPICS.supplies).length;
+      const before = suppliesPublishes();
+
+      vi.advanceTimersByTime(60_000);
+
+      // The level sensor reports a rounded litre reading, and at 104 L/day a minute
+      // has not produced one. This is the MQTT spam the spec set out to remove.
+      expect(suppliesPublishes()).toBe(before);
+    });
   });
 
   it("radio transmission is bounded", async () => {
