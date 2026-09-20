@@ -1,12 +1,30 @@
 services:
+  mosquitto-config-init:
+    image: alpine:3.22
+    restart: "no"
+    volumes:
+      - ./mosquitto/mosquitto.conf:/seed/mosquitto.conf:ro
+      - mosquitto_config:/mosquitto/config
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        if [ ! -s /mosquitto/config/mosquitto.conf ]; then
+          cp /seed/mosquitto.conf /mosquitto/config/mosquitto.conf
+        fi
+        chmod 0644 /mosquitto/config/mosquitto.conf
+
   mosquitto:
     image: eclipse-mosquitto:2
     container_name: aeolus-mosquitto
     restart: unless-stopped
     ports:
       - "${MQTT_PORT:-1883}:1883"
+    depends_on:
+      mosquitto-config-init:
+        condition: service_completed_successfully
     volumes:
-      - ./mosquitto:/mosquitto/config
+      - mosquitto_config:/mosquitto/config
       - mosquitto_data:/mosquitto/data
       - mosquitto_log:/mosquitto/log
     # Broker reachability probe using the client shipped in the image. Reflects
@@ -43,7 +61,7 @@ services:
     depends_on:
       - mosquitto
     volumes:
-      - ./mosquitto:/watch:ro
+      - mosquitto_config:/watch:ro
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
@@ -89,7 +107,11 @@ services:
       # the dev scripts; override with NODE_ENV=development if needed.
       NODE_ENV: ${NODE_ENV:-production}
       PORT: ${API_PORT:-3001}
-      MQTT_BROKER_URL: mqtt://localhost:1883
+      # Interpolated so a deployment can point the backend at an authenticated
+      # broker from .env. The manual broker-security procedure in
+      # docs/production-deployment.md relies on this: without interpolation the
+      # base value would win and the backend would keep connecting anonymously.
+      MQTT_BROKER_URL: ${MQTT_BROKER_URL:-mqtt://localhost:1883}
       MQTT_TOPICS: "${MQTT_TOPICS:-#}"
       DB_PATH: /app/data/aeolus.db
       LOG_LEVEL: ${LOG_LEVEL:-info}
@@ -106,7 +128,7 @@ services:
         condition: service_started
     volumes:
       - backend_data:/app/data
-      - ./mosquitto:/mosquitto/config
+      - mosquitto_config:/mosquitto/config
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3001/api/health"]
       interval: 30s
@@ -161,6 +183,7 @@ services:
       - backend
 
 volumes:
+  mosquitto_config:
   mosquitto_data:
   mosquitto_log:
   backend_data:

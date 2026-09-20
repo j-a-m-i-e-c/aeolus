@@ -451,7 +451,7 @@ Aeolus includes dashboard controls and APIs for three broker security modes:
 | **Shared password** | One credential for all external MQTT clients |
 | **Per-device** | Separate credentials for individual devices |
 
-Applying those settings automatically requires a provisioning-enabled deployment with scoped access to the Mosquitto files and reload mechanism. The default Docker Compose stack provides that plumbing through the shared `./mosquitto` directory and a dedicated reload sidecar without mounting the Docker socket, but dashboard-managed provisioning remains opt-in behind `MQTT_MANAGED_PROVISIONING_ENABLED=true`. See [MQTT security](docs/security/mqtt.md).
+Applying those settings automatically requires a provisioning-enabled deployment with scoped access to the Mosquitto files and reload mechanism. The default Docker Compose stack provides that plumbing through a Docker-managed Mosquitto runtime-config volume and a dedicated reload sidecar without mounting the Docker socket. The committed `mosquitto/` directory remains source-only, so a running container cannot change its ownership or rewrite tracked files. Dashboard-managed provisioning remains opt-in behind `MQTT_MANAGED_PROVISIONING_ENABLED=true`. See [MQTT security](docs/security/mqtt.md).
 
 Aeolus should still be deployed on a segmented or otherwise trusted network when it controls meaningful physical equipment.
 

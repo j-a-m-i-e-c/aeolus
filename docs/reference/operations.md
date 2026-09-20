@@ -66,7 +66,7 @@ driver error.
 
 ## MQTT provisioning deployment boundary
 
-The provisioning service needs writable access to the Mosquitto configuration and password file, plus a way to reload the broker. The default `docker-compose.yml` provides that plumbing without a Docker socket: `./mosquitto` is shared with the backend and broker, and the `mosquitto-reloader` sidecar watches that directory and sends Mosquitto `SIGHUP` after atomic config changes. Dashboard-managed Shared Password / Per-Device provisioning is still deliberately opt-in behind `MQTT_MANAGED_PROVISIONING_ENABLED=true`; with the default `false` setting, manage broker credentials through the deployment instead. See [MQTT security](../security/mqtt.md).
+The provisioning service needs writable access to the live Mosquitto configuration and password file, plus a way to reload the broker. The default `docker-compose.yml` provides that plumbing without a Docker socket: a Docker-managed `mosquitto_config` volume is shared with the backend and broker, and the `mosquitto-reloader` sidecar watches that volume and sends Mosquitto `SIGHUP` after atomic config changes. A one-shot init service seeds the volume from the committed `mosquitto/mosquitto.conf` on first creation. The tracked `mosquitto/` directory is never used as mutable runtime storage. Dashboard-managed Shared Password / Per-Device provisioning is still deliberately opt-in behind `MQTT_MANAGED_PROVISIONING_ENABLED=true`; with the default `false` setting, manage broker credentials through the deployment instead. See [MQTT security](../security/mqtt.md).
 
 ## Demo simulator (Phase 2)
 

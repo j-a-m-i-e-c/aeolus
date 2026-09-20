@@ -81,10 +81,9 @@ Aeolus hashes device passwords into Mosquitto's native sha512-pbkdf2 (`$7$`) for
 
 ### Shared-volume wiring
 
-The implementation bind-mounts `./mosquitto` into both the backend and the broker at `/mosquitto/config`, then uses a
-sidecar to signal Mosquitto after a change. The sidecar watches the config **directory** (not a single file path) for
-move/create events, so the backend's atomic temp-file-plus-rename password-file writes are reliably observed and the
-broker is sent `SIGHUP` for each one.
+The default Compose deployment keeps live broker configuration in the Docker-managed `mosquitto_config` volume, mounted into both the backend and broker at `/mosquitto/config`. A one-shot init service copies the committed `mosquitto/mosquitto.conf` into that volume only when the live config does not yet exist. This keeps tracked source files separate from mutable runtime state and prevents container ownership changes from breaking Git operations on the host.
+
+The reload sidecar mounts the same runtime volume read-only and watches the config **directory** (not a single file path) for move/create events. The backend's atomic temp-file-plus-rename writes are therefore observed reliably and the broker is sent `SIGHUP` for each one.
 
 ### Change verification
 

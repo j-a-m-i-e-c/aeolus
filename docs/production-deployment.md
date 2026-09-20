@@ -2,10 +2,11 @@
 
 A practical guide for running Aeolus on a Raspberry Pi in production. Covers authentication, MQTT security, TLS, firewalling, backups, monitoring, and updates.
 
-Aeolus runs as four long-running services defined in `docker-compose.yml`:
+Aeolus runs as four long-running services defined in `docker-compose.yml`, plus a one-shot Mosquitto config initializer:
 
 | Service | Network | Port | Description |
 |---------|---------|------|-------------|
+| `mosquitto-config-init` | one-shot | — | Seeds the Docker-managed live Mosquitto config volume from the committed baseline on first creation |
 | `aeolus-mosquitto` | bridge | `1883` | Eclipse Mosquitto MQTT broker |
 | `aeolus-mosquitto-reloader` | shares Mosquitto's PID namespace | — | Sidecar that watches the shared Mosquitto config volume and sends `SIGHUP` to the broker when the password file or config changes |
 | `aeolus-backend` | **host** | `3001` | Express API + automation engine + WebSocket |
@@ -13,7 +14,7 @@ Aeolus runs as four long-running services defined in `docker-compose.yml`:
 
 > The backend uses `network_mode: host` so it can do UDP-broadcast discovery (Kasa) and reach LAN devices (Hue bridge) directly. That means the backend binds port `3001` straight onto the host rather than through Docker port mapping.
 
-> A fifth service, `seed`, is defined behind the `seed` Compose profile for one-shot demo seeding. It is **not** started by `docker compose up` — run it on demand (`make seed PASS=...`).
+> The `seed` service is defined behind the `seed` Compose profile for one-shot demo seeding. It is **not** started by `docker compose up` — run it on demand (`make seed PASS=...`).
 
 ---
 
@@ -48,7 +49,7 @@ The **Security → MQTT Security** screen supports three modes:
 | **Shared Password** | One credential shared by external devices |
 | **Per-Device** | A separate username and password for each device |
 
-The backend provisioning service can write the Mosquitto configuration and password file, then reload the broker. The default Compose stack wires this up: it mounts `./mosquitto` into the backend (`MQTT_PASSWORD_FILE` / `MQTT_CONFIG_FILE`) and runs the `aeolus-mosquitto-reloader` sidecar, which `SIGHUP`s Mosquitto when the files change (`MQTT_RELOAD_STRATEGY=none` — the backend writes files and lets the sidecar reload). No Docker socket is mounted; the reload happens over a shared PID namespace, not the Docker API.
+The backend provisioning service can write the Mosquitto configuration and password file, then reload the broker. The default Compose stack wires this up through the Docker-managed `mosquitto_config` volume (`MQTT_PASSWORD_FILE` / `MQTT_CONFIG_FILE`) and the `aeolus-mosquitto-reloader` sidecar, which `SIGHUP`s Mosquitto when the files change (`MQTT_RELOAD_STRATEGY=none`; the backend writes files and lets the sidecar reload). A one-shot init service seeds the runtime volume from the committed `mosquitto/mosquitto.conf` when the volume is first created. The tracked `mosquitto/` directory is source-only and is never recursively owned by a running container. No Docker socket is mounted; the reload happens over a shared PID namespace, not the Docker API.
 
 > **Opt-in by default:** dashboard-managed provisioning (Shared Password / Per-Device) is gated behind `MQTT_MANAGED_PROVISIONING_ENABLED`, which defaults to `false`. The plumbing above is present, but the managed security levels stay disabled until you set `MQTT_MANAGED_PROVISIONING_ENABLED=true`. With it disabled, use the manual procedure below. The Docker socket is deliberately never mounted — do not expose it to make this feature work.
 
@@ -56,30 +57,33 @@ See [MQTT security](security/mqtt.md) for the credential model and provisioning 
 
 ### Manual broker configuration
 
-The default Compose deployment is easiest to secure with a host-managed password file and a small override file.
-
-1. Create the password file on the host:
+If dashboard-managed provisioning is disabled, manage the live Docker volume directly rather than editing the tracked `mosquitto/` source directory. Start the broker once so the config volume is created and seeded:
 
 ```bash
-mkdir -p mosquitto
-touch mosquitto/password_file
+docker compose up -d mosquitto
+```
 
-docker run --rm \
-  -v "$PWD/mosquitto:/work" \
-  eclipse-mosquitto:2 \
-  mosquitto_passwd -b -c /work/password_file aeolus 'replace-this-password'
+Create or update a broker password inside the live config volume:
+
+```bash
+docker compose exec -u 0 mosquitto \
+  mosquitto_passwd -b -c /mosquitto/config/password_file aeolus 'replace-this-password'
 ```
 
 Add more users without `-c`, because `-c` recreates the file:
 
 ```bash
-docker run --rm \
-  -v "$PWD/mosquitto:/work" \
-  eclipse-mosquitto:2 \
-  mosquitto_passwd -b /work/password_file another-user 'another-password'
+docker compose exec -u 0 mosquitto \
+  mosquitto_passwd -b /mosquitto/config/password_file another-user 'another-password'
 ```
 
-2. Update `mosquitto/mosquitto.conf`:
+Copy the current live config out, edit it locally, then copy it back. This deliberately operates on runtime state rather than the committed template:
+
+```bash
+docker compose cp mosquitto:/mosquitto/config/mosquitto.conf ./mosquitto.runtime.conf
+```
+
+Set the relevant lines to:
 
 ```conf
 listener 1883
@@ -90,34 +94,29 @@ persistence_location /mosquitto/data/
 log_dest stdout
 ```
 
-3. Create a named override file — for example `docker-compose.broker.yml` — so the broker can read the file and the backend uses its own broker credential. Use an explicitly named override (loaded with `-f`) rather than `docker-compose.override.yml`, which Compose would auto-load and apply silently:
+Then install it into the live volume and reload the broker:
 
-```yaml
-services:
-  mosquitto:
-    volumes:
-      - ./mosquitto/password_file:/mosquitto/config/password_file:ro
-
-  backend:
-    environment:
-      MQTT_BROKER_URL: ${MQTT_BROKER_URL}
+```bash
+docker compose cp ./mosquitto.runtime.conf mosquitto:/mosquitto/config/mosquitto.conf
+docker compose exec -u 0 mosquitto kill -HUP 1
+rm ./mosquitto.runtime.conf
 ```
 
-4. Add the URL to `.env`. URL-encode any reserved characters in the password.
+Configure the backend credential in `.env`, URL-encoding reserved password characters:
 
 ```env
 MQTT_BROKER_URL=mqtt://aeolus:replace-this-password@localhost:1883
 ```
 
-5. Recreate the services with the broker override loaded explicitly and inspect the logs:
+Recreate the backend and inspect the logs:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.broker.yml up -d --force-recreate
+docker compose up -d --force-recreate backend
 docker logs aeolus-mosquitto --tail 50
 docker logs aeolus-backend --tail 50
 ```
 
-The host password file is ignored by Git. Back it up securely with the rest of the deployment configuration.
+Back up the `mosquitto_config` Docker volume with the rest of the deployment state if you manage broker credentials manually.
 
 ---
 
@@ -371,13 +370,13 @@ Or run [Uptime Kuma](https://github.com/louislam/uptime-kuma) on the same Pi for
 
 ## 7. Environment Variables
 
-`docker-compose.yml` sets the core backend variables. Compose-level values such as `API_PORT`, `FRONTEND_PORT` and `MQTT_PORT` can be placed in the project `.env` file. Backend variables that are hard-coded in the base Compose file require an override file, as shown in the MQTT example above.
+`docker-compose.yml` sets the core backend variables. Compose-level values such as `API_PORT`, `FRONTEND_PORT`, `MQTT_PORT` and `MQTT_BROKER_URL` can be placed in the project `.env` file. Backend variables that the base Compose file sets to a fixed value still require a named override file loaded with `-f`.
 
 | Variable | Default | Production value | Description |
 |----------|---------|------------------|-------------|
 | `NODE_ENV` | `development` | `production` | Suppresses stack traces in error responses, enables optimizations |
 | `PORT` | `3001` | `3001` | Backend API port (set via `API_PORT` in compose) |
-| `MQTT_BROKER_URL` | `mqtt://localhost:1883` | deployment-specific | Broker URL; override the base Compose environment when credentials are required |
+| `MQTT_BROKER_URL` | `mqtt://localhost:1883` | deployment-specific | Broker URL; set it in `.env` when the broker requires credentials |
 | `MQTT_TOPICS` | `#` | `#` | MQTT subscription filter |
 | `DB_PATH` | `./data/aeolus.db` | `/app/data/aeolus.db` | Database path (the Docker volume path) |
 | `LOG_LEVEL` | `debug` | `info` | Log verbosity (`debug`, `info`, `warn`, `error`) |
