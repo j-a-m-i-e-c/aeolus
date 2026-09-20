@@ -26,12 +26,19 @@ function setAction(label: string) {
 /**
  * Report the crew's distribution to whoever is aggregating it.
  *
- * Emitted from this automation's own state rather than from a device read, so a caller
+ * Written from this automation's own state rather than from a device read, so a caller
  * that has just commanded a muster reports the muster it commanded. See commandMuster
  * for why reading the devices there would report the crew still at their working levels.
+ *
+ * Shared State rather than an Automation Event (ADR-0016): current truth, latest value
+ * wins, and an unchanged recomputation writes nothing.
+ *
+ * Note this is the crew's current DISTRIBUTION. A muster being ordered, or the alarm
+ * being raised, stays an Automation Event — those are occurrences, and every one of
+ * them matters.
  */
 export function publishPersonnelSummary() {
-    events.emit("mine/summary/personnel", {
+    shared.set("mine-summary", "personnel", {
         underground: Number(state.get("underground") || 0),
         l1: Number(state.get("l1") || 0),
         l2: Number(state.get("l2") || 0),

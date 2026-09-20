@@ -8,14 +8,33 @@ import {
   projectPowerSummary,
 } from "./bunker-summary";
 
-export default async function run(context: EventContext) {
-  const topic = String(context.topic || "");
-  const summary = context.state && typeof context.state === "object"
-    ? context.state as Record<string, unknown>
-    : {};
+/** The Shared State bucket every bunker subsystem writes its current summary into. */
+const BUCKET = "bunker-summary";
 
-  if (topic.includes("/bunker/summary/perimeter")) projectPerimeterSummary(summary);
-  else if (topic.includes("/bunker/summary/air")) projectAirSummary(summary);
-  else if (topic.includes("/bunker/summary/power")) projectPowerSummary(summary);
-  else if (topic.includes("/bunker/summary/comms")) projectCommsSummary(summary);
+/**
+ * The durable current value of one subsystem summary.
+ *
+ * Answers `{}` when a subsystem has not reported yet, which the projections treat as
+ * "nothing to copy" rather than as zeroes.
+ */
+function currentSummary(key: string): Record<string, unknown> {
+  const value = shared?.get(BUCKET, key);
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+export default async function run(_context: EventContext) {
+  // Composed from every subsystem's DURABLE current value, not from the single payload
+  // that happened to wake this run (ADR-0016).
+  //
+  // While each summary arrived as an Automation Event, the overview could only refresh
+  // the subsystem it had just been handed, and depended on seeing every event to stay
+  // complete. Reading Shared State instead means a restart, a coalesced burst or a
+  // missed wake-up all land in the same place: the overview reflects whatever each
+  // subsystem currently reports. Which key woke this run stops mattering.
+  projectPerimeterSummary(currentSummary("perimeter"));
+  projectAirSummary(currentSummary("air"));
+  projectPowerSummary(currentSummary("power"));
+  projectCommsSummary(currentSummary("comms"));
 }

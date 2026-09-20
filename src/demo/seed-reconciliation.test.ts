@@ -61,7 +61,10 @@ interface Pane {
   h?: number;
 }
 
-const LEDGER_PATH = `/api/data-store/buckets/${encodeURIComponent(SHOWCASE_LEDGER_BUCKET)}`;
+// The ledger lives in Shared State (ADR-0016), not in the historical Data Store. That
+// is what lets it be read on a pristine install, before any decision about historical
+// storage has been made.
+const LEDGER_PATH = `/api/shared-state/${encodeURIComponent(SHOWCASE_LEDGER_BUCKET)}`;
 
 /**
  * A fake Aeolus that holds real state: automations, one bucket per name, and a layout.
@@ -89,8 +92,8 @@ function fakeAeolus(
     calls.push({ method, path: reqPath, body, ...(opts?.tolerate ? { tolerate: opts.tolerate } : {}) });
     const tolerate = opts?.tolerate ?? [];
 
-    const bucketEntry = /^\/api\/data-store\/buckets\/([^/]+)\/([^/]+)$/.exec(reqPath);
-    const bucketList = /^\/api\/data-store\/buckets\/([^/]+)$/.exec(reqPath);
+    const bucketEntry = /^\/api\/shared-state\/([^/]+)\/([^/]+)$/.exec(reqPath);
+    const bucketList = /^\/api\/shared-state\/([^/]+)$/.exec(reqPath);
     const automation = /^\/api\/automations\/(.+)$/.exec(reqPath);
 
     if (method === "GET" && bucketList) {
@@ -514,12 +517,25 @@ describe("seeder wiring", () => {
     expect(typeof lib.reconcileShowcaseAutomations).toBe("function");
   });
 
-  it("keeps the ledger bucket out of the declared showcase buckets", async () => {
-    // seedBucket clears every key in a bucket it declares. If the ledger were declared,
-    // seeding would erase the record of what it owns on the way past.
-    const { demoBuckets } = (await import("../../demo/seed/data-store-buckets.mjs")) as {
-      demoBuckets: { name: string }[];
+  it("keeps the ledger bucket out of the declared showcase Shared State", async () => {
+    // seedSharedStateBucket clears every key in a bucket it declares. If the ledger were
+    // declared, seeding would erase the record of what it owns on the way past.
+    const { sharedStateBuckets } = (await import("../../demo/seed/shared-state.mjs")) as {
+      sharedStateBuckets: { name: string }[];
     };
-    expect(demoBuckets.map((b) => b.name)).not.toContain(SHOWCASE_LEDGER_BUCKET);
+    expect(sharedStateBuckets.map((b) => b.name)).not.toContain(SHOWCASE_LEDGER_BUCKET);
+  });
+
+  it("declares no summary bucket as a seed fixture", async () => {
+    // The `*-summary` buckets are written at runtime by the subsystem automations
+    // (ADR-0016). Seeding them would plant a snapshot that looks like a live reading and
+    // would be cleared on the next reseed.
+    const { sharedStateBuckets } = (await import("../../demo/seed/shared-state.mjs")) as {
+      sharedStateBuckets: { name: string }[];
+    };
+    const names = sharedStateBuckets.map((b) => b.name);
+    expect(names).not.toContain("bunker-summary");
+    expect(names).not.toContain("mine-summary");
+    expect(names).not.toContain("vessel-summary");
   });
 });

@@ -14,7 +14,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { seedCollection, seedBucket } from "../../demo/seed/lib.mjs";
+import { seedCollection, seedSharedStateBucket } from "../../demo/seed/lib.mjs";
 import { tabModules } from "../../demo/seed/tabs/index.mjs";
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "..", "..");
@@ -48,7 +48,9 @@ function fakeApi(options: { existingCollections?: string[]; bucketKeys?: Record<
     const tolerate = opts?.tolerate ?? [];
 
     const collectionMatch = /^\/api\/data-store\/collections\/([^/]+)$/.exec(reqPath);
-    const bucketMatch = /^\/api\/data-store\/buckets\/([^/]+)$/.exec(reqPath);
+    // Shared State has its own API (ADR-0016). It is not a mode of the Data Store, so
+    // the seeder must not be reaching it through `/api/data-store/buckets`.
+    const bucketMatch = /^\/api\/shared-state\/([^/]+)$/.exec(reqPath);
 
     if (method === "DELETE" && collectionMatch) {
       const name = decodeURIComponent(collectionMatch[1]!);
@@ -175,31 +177,41 @@ describe("seedCollection — rerunnable", () => {
   });
 });
 
-describe("seedBucket — rerunnable", () => {
+describe("seedSharedStateBucket — rerunnable", () => {
   it("clears the bucket's existing keys before writing the declared set", async () => {
     // PUT upserts, so without this a key from an older showcase revision would
     // survive: present, stale, and indistinguishable from a current one.
     const { api, calls } = fakeApi({ bucketKeys: { "showcase-config": ["retired-key", "another"] } });
-    await seedBucket(api, { name: "showcase-config", entries: { live: 1 } });
+    await seedSharedStateBucket(api, { name: "showcase-config", entries: { live: 1 } });
 
     expect(pathsFor(calls, "DELETE")).toEqual([
-      "/api/data-store/buckets/showcase-config/retired-key",
-      "/api/data-store/buckets/showcase-config/another",
+      "/api/shared-state/showcase-config/retired-key",
+      "/api/shared-state/showcase-config/another",
     ]);
-    expect(pathsFor(calls, "PUT")).toEqual(["/api/data-store/buckets/showcase-config/live"]);
+    expect(pathsFor(calls, "PUT")).toEqual(["/api/shared-state/showcase-config/live"]);
   });
 
   it("touches only its own bucket", async () => {
     const { api, calls } = fakeApi({ bucketKeys: { "showcase-config": ["k"], "operator-bucket": ["secret"] } });
-    await seedBucket(api, { name: "showcase-config", entries: { live: 1 } });
+    await seedSharedStateBucket(api, { name: "showcase-config", entries: { live: 1 } });
 
     expect(calls.every((call) => !call.path.includes("operator-bucket"))).toBe(true);
-    expect(pathsFor(calls, "GET")).not.toContain("/api/data-store/buckets");
+    expect(pathsFor(calls, "GET")).not.toContain("/api/shared-state");
   });
 
   it("survives a bucket that does not exist yet", async () => {
     const { api } = fakeApi();
-    await expect(seedBucket(api, { name: "fresh", entries: { a: 1 } })).resolves.toBeUndefined();
+    await expect(seedSharedStateBucket(api, { name: "fresh", entries: { a: 1 } })).resolves.toBeUndefined();
+  });
+
+  it("seeds through the Shared State API, never the deprecated Data Store bucket alias", async () => {
+    // The whole point of the split: Shared State does not wait on historical storage
+    // being configured. Going through `/api/data-store/buckets` would still work, but
+    // it would keep teaching that Shared State is a Data Store feature.
+    const { api, calls } = fakeApi({ bucketKeys: { "showcase-config": ["stale"] } });
+    await seedSharedStateBucket(api, { name: "showcase-config", entries: { live: 1 } });
+
+    expect(calls.every((call) => !call.path.includes("/api/data-store/buckets"))).toBe(true);
   });
 });
 

@@ -2,6 +2,11 @@
 export const bunkerOverviewAutomation = {
   "key": "bunker-overview",
   "name": "Bunker Overview",
-  "triggerTopic": "aeolus/events/+/bunker/summary/#",
+  // Woken by a durable Shared State change, not by a broker topic (ADR-0016). The
+  // subsystems write `bunker-summary/power`, `/air`, `/perimeter` and `/comms`; this
+  // pattern is the internal path, so internal overview composition no longer travels
+  // through `aeolus/events/...`.
+  "triggerType": "shared-state",
+  "triggerTopic": "bunker-summary/#",
   "projectDir": "bunker-overview"
 };

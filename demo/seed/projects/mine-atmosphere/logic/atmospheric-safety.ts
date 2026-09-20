@@ -62,7 +62,11 @@ export function projectAtmosphere(publishDemand: boolean) {
     // The gas record is written by the separate scheduled Atmospheric History
     // automation. This path must react to every reading; the record only needs a
     // regular one, and how often it is written is a retention decision.
-    events.emit("mine/summary/atmosphere", {
+    // Shared State rather than an Automation Event (ADR-0016). This is the current
+    // atmosphere, recomputed on every gas reading, so only the newest value matters and
+    // an unchanged one costs nothing. The vent-demand emit above stays an event: a band
+    // change is a transition, and the ventilation automation must see every one.
+    shared.set("mine-summary", "atmosphere", {
         l3Ch4,
         d7Ch4,
         co,

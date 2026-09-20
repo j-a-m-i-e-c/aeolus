@@ -182,8 +182,8 @@ export async function backendPublicDemoEnabled(baseUrl) {
 // ─── Showcase ownership ledger ───────────────────────────────────────────────
 
 /**
- * The bucket recording what this seeder created, so a rerun can reclaim its own
- * resources and nothing else (Req §12.1, §12.2).
+ * The Shared State bucket recording what this seeder created, so a rerun can reclaim
+ * its own resources and nothing else (Req §12.1, §12.2).
  *
  * Why a ledger is needed at all. Automations get server-generated ids and carry no
  * ownership column, so once `POST /api/automations` returns there is nothing on the
@@ -193,19 +193,24 @@ export async function backendPublicDemoEnabled(baseUrl) {
  * had authored yourself.
  *
  * §12.2 offers two ways out: seed metadata on each resource, or a ledger keyed by
- * stable id. The ledger is the one that needs no migration and no new API surface —
- * the Data Store already exists, the seeder already owns fixtures in it, and a bucket
- * is precisely a map of `stable module key → server-generated id`.
+ * stable id. The ledger is the one that needs no migration and no new API surface, and
+ * a Shared State bucket is precisely a map of `stable module key → server-generated
+ * id`: durable current truth about what the showcase owns, shared between runs.
  *
- * It is deliberately visible in the Data Store UI, next to the platform's own
- * `_metrics:*` collections. Anyone wondering what the showcase claims can read it.
+ * It belongs in Shared State rather than the historical Data Store, and not only on
+ * naming grounds (ADR-0016). Reading it used to require the Data Store to be enabled,
+ * which forced the seeder to enable historical storage BEFORE it could work out what
+ * it owned. Shared State is always available, so that ordering constraint is gone.
+ *
+ * It is deliberately visible in the Shared State UI. Anyone wondering what the
+ * showcase claims can read it.
  */
 export const SHOWCASE_LEDGER_BUCKET = "_showcase:seed-ledger";
 
 const LEDGER_AUTOMATION_PREFIX = "automation:";
 const LEDGER_TAB_PREFIX = "tab:";
 
-const ledgerBucketPath = () => `/api/data-store/buckets/${encodeURIComponent(SHOWCASE_LEDGER_BUCKET)}`;
+const ledgerBucketPath = () => `/api/shared-state/${encodeURIComponent(SHOWCASE_LEDGER_BUCKET)}`;
 const ledgerKeyPath = (key) => `${ledgerBucketPath()}/${encodeURIComponent(key)}`;
 
 /**
@@ -217,8 +222,9 @@ const ledgerKeyPath = (key) => `${ledgerBucketPath()}/${encodeURIComponent(key)}
  * behind without recording them. Both are handled the same way, by the one-time
  * adoption pass in `reconcileShowcaseAutomations`.
  *
- * Requires the Data Store to be enabled, which is why the seeder enables it before
- * reconciling rather than as part of seeding fixtures.
+ * Needs nothing enabled first. Shared State is a core facility, so the ledger is
+ * readable on a pristine install; it no longer depends on the historical Data Store
+ * having been configured.
  */
 export async function readShowcaseLedger(api) {
   const entries = await api("GET", ledgerBucketPath(), undefined, { tolerate: [404] });
@@ -390,10 +396,15 @@ export async function createAutomations(api, automations) {
       body.triggerType = "cron";
       body.cronExpression = a.cron;
     } else if (a.triggerTopic) {
-      body.triggerType = "mqtt";
+      // `triggerTopic` used to imply `mqtt`, because a pattern could only ever have
+      // meant a broker topic. A `shared-state` rule's pattern is an internal
+      // `<bucket>/<key>` path stored in the same field (ADR-0016), so the descriptor
+      // has to be able to say which of the two it means. Defaulting to `mqtt` keeps
+      // every existing descriptor reading exactly as it did.
+      body.triggerType = a.triggerType || "mqtt";
       body.triggerTopic = a.triggerTopic;
     } else {
-      body.triggerType = "none";
+      body.triggerType = a.triggerType || "none";
     }
     const created = await api("POST", "/api/automations", body);
     if (created) {
@@ -425,7 +436,7 @@ export async function fireAutomations(api, ruleIds, times = 4) {
 // EVERY bucket entry on the box, which on a real install meant a reseed of the
 // showcase silently destroyed the operator's own data (Req §12.1: do not delete
 // unrelated user-created collections). Each showcase collection and bucket now resets
-// only itself, in `seedCollection` / `seedBucket`, so the seeder's blast radius is
+// only itself, in `seedCollection` / `seedSharedStateBucket`, so the seeder's blast radius is
 // exactly the fixture set it declares.
 
 /** Enable the Data Store with generous demo limits (idempotent). */
@@ -499,24 +510,33 @@ export async function seedCollection(api, collection) {
 }
 
 /**
- * Seed a key/value bucket. Buckets are shared persistent state, so demo buckets
- * are defined globally rather than pretending they belong to one dashboard tab.
+ * Seed one Shared State bucket to its declared entries.
+ *
+ * Shared State is durable current values shared between automations (ADR-0016). It is
+ * global — no tab owns a bucket — so showcase fixtures are declared globally rather
+ * than pretending they belong to one dashboard tab.
+ *
+ * Seeded through `/api/shared-state`, which is available whether or not the historical
+ * Data Store is enabled. That is the point of the split: a handful of durable shared
+ * values should not wait on an operator configuring storage limits for history.
+ *
  * @param {{name:string, entries:Record<string, unknown>}} bucket
  */
-export async function seedBucket(api, bucket) {
+export async function seedSharedStateBucket(api, bucket) {
   const name = encodeURIComponent(bucket.name);
 
   // Drop the keys this bucket already holds before writing the declared set.
   // `PUT` upserts, so a rerun would otherwise leave behind keys from an older
   // showcase revision — present, stale, and indistinguishable from current ones.
-  // Scoped to this bucket, so buckets the showcase does not declare are untouched.
-  const existing = await api("GET", `/api/data-store/buckets/${name}`, undefined, { tolerate: [404] });
+  // Scoped to this bucket, so Shared State the showcase does not declare — including
+  // an operator's own — is untouched.
+  const existing = await api("GET", `/api/shared-state/${name}`, undefined, { tolerate: [404] });
   if (Array.isArray(existing)) {
     for (const entry of existing) {
       if (!entry || typeof entry.key !== "string") continue;
       await api(
         "DELETE",
-        `/api/data-store/buckets/${name}/${encodeURIComponent(entry.key)}`,
+        `/api/shared-state/${name}/${encodeURIComponent(entry.key)}`,
         undefined,
         { tolerate: [404] },
       );
@@ -525,10 +545,10 @@ export async function seedBucket(api, bucket) {
 
   let count = 0;
   for (const [key, value] of Object.entries(bucket.entries || {})) {
-    const result = await api("PUT", `/api/data-store/buckets/${name}/${encodeURIComponent(key)}`, { value });
+    const result = await api("PUT", `/api/shared-state/${name}/${encodeURIComponent(key)}`, { value });
     if (result) count += 1;
   }
-  console.log(`  ✓ ${bucket.name}: ${count} bucket entries`);
+  console.log(`  ✓ ${bucket.name}: ${count} Shared State entries`);
 }
 
 /**

@@ -8,12 +8,15 @@ function setAction(label: string) {
 /**
  * Report the vehicle's state to whoever is aggregating it.
  *
- * Emitted from this automation's own state rather than from a device read, so a caller
+ * Written from this automation's own state rather than from a device read, so a caller
  * that has just commanded the ROV reports the ROV it commanded. See commandRov for why
  * reading the devices there would report the previous phase of the dive.
+ *
+ * Shared State rather than an Automation Event (ADR-0016): current truth, latest value
+ * wins, and an unchanged recomputation writes nothing.
  */
 export function publishRovSummary() {
-    events.emit("vessel/summary/rov", {
+    shared.set("vessel-summary", "rov", {
         rovDepth: Number(state.get("depth") || 0),
         rovMode: String(state.get("mode") || "at-surface"),
         rovBattery: Number(state.get("battery") || 0),

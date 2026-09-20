@@ -8,12 +8,15 @@ function setAction(label: string) {
 /**
  * Report the fan's state to whoever is aggregating it.
  *
- * Emitted from this automation's own state rather than from a device read, so a caller
+ * Written from this automation's own state rather than from a device read, so a caller
  * that has just changed the fan mode reports the mode it asked for. See
  * commandVentilation for why reading the device there would report the previous one.
+ *
+ * Shared State rather than an Automation Event (ADR-0016): current truth, latest value
+ * wins, and an unchanged recomputation writes nothing.
  */
 export function publishVentilationSummary() {
-    events.emit("mine/summary/ventilation", {
+    shared.set("mine-summary", "ventilation", {
         mode: String(state.get("mode") || "auto"),
         demand: Number(state.get("demand") || 0),
         primaryRpm: Number(state.get("primaryRpm") || 0),

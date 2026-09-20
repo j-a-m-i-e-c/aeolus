@@ -70,6 +70,15 @@ function makeWorld(options?: { lightsOn?: boolean; withLights?: boolean }) {
     /** Evidence the fake command boundary recorded, keyed by command id. */
     evidence: {} as Record<string, Record<string, unknown>>,
     emitted: [] as Array<{ topic: string; payload: Record<string, unknown> }>,
+    /**
+     * Every `shared.set()` the Logic performed, in order.
+     *
+     * The perimeter summary is Shared State rather than an Automation Event (ADR-0016),
+     * so this is where a claim about the approach now lands. Every call is recorded,
+     * including one the real store would report as unchanged, because what is asserted
+     * below is what the automation claimed and how often it claimed it.
+     */
+    sharedWrites: [] as Array<{ bucket: string; key: string; value: Record<string, unknown> }>,
     devices: {
       list: () =>
         Object.entries(deviceState).map(([topic, state]) => ({ id: `dev:${topic}`, topic, state })),
@@ -136,11 +145,32 @@ function makeWorld(options?: { lightsOn?: boolean; withLights?: boolean }) {
     events: {
       emit: (topic: string, payload: Record<string, unknown>) => void world.emitted.push({ topic, payload }),
     },
+    shared: {
+      get: (bucket: string, key: string) =>
+        world.sharedWrites.filter((w) => w.bucket === bucket && w.key === key).at(-1)?.value,
+      set: (bucket: string, key: string, value: Record<string, unknown>) => {
+        world.sharedWrites.push({ bucket, key, value });
+        return true;
+      },
+      delete: () => false,
+    },
   };
   return world;
 }
 
 type World = ReturnType<typeof makeWorld>;
+
+/**
+ * The perimeter summaries this run wrote to Shared State, oldest first.
+ *
+ * @param from - Index into `world.sharedWrites` to start from, so a test can ask what a
+ * single `run()` claimed rather than everything since the world was built.
+ */
+function perimeterSummaries(world: World, from = 0): Record<string, unknown>[] {
+  return world.sharedWrites
+    .filter((write, i) => i >= from && write.bucket === "bunker-summary" && write.key === "perimeter")
+    .map((write) => write.value);
+}
 
 /** Run the automation's single action once, for one event topic. */
 async function run(world: World, topic: string): Promise<void> {
@@ -153,8 +183,8 @@ async function run(world: World, topic: string): Promise<void> {
   // own default export via `automation({ actions: [...] })`, so evaluating it here
   // exercises exactly the code a deployment runs — just without isolated-vm, which
   // is unavailable on a Windows dev machine.
-  const load = new Function("automation", "devices", "state", "events", `${await compiledLogic()}\nreturn null;`);
-  load(automation, world.devices, world.state, world.events);
+  const load = new Function("automation", "devices", "state", "events", "shared", `${await compiledLogic()}\nreturn null;`);
+  load(automation, world.devices, world.state, world.events, world.shared);
   expect(actions).toHaveLength(1);
   await actions[0]({ topic, state: {}, deviceId: "test", timestamp: Date.now() });
 }
@@ -406,20 +436,29 @@ describe("Bunker Perimeter Security — floodlight projection", () => {
     expect(world.commands[0].condition).toEqual({ field: "brightness", op: "lte", value: 5 });
   });
 
-  it("mirrors the projection into the overview summary event", async () => {
+  it("mirrors the projection into the overview's Shared State", async () => {
     const world = makeWorld();
     await run(world, PERIMETER_TOPIC);
     await run(world, "ui/rule/toggle-lights");
-    const summary = world.emitted.filter((e) => e.topic === "bunker/summary/perimeter").pop();
-    expect(summary?.payload).toMatchObject({ lightsOn: true, autoLights: false });
+    expect(perimeterSummaries(world).at(-1)).toMatchObject({ lightsOn: true, autoLights: false });
   });
 
-  it("emits at most one summary per run", async () => {
-    // evaluateAutomationEvent submits to the ExecutionGate with an empty deviceId
-    // and a fixed topic, so two summaries in flight together share a dedup key and
-    // the LATER one is suppressed as a duplicate — which would leave the overview
-    // holding the pre-command value. For a boolean that reads as the exact
-    // opposite of the truth, which is the bug this guards.
+  it("reports the summary as Shared State, never as an Automation Event", async () => {
+    // The approach's current state is not an occurrence. As an event it got semantics it
+    // does not have and put internal overview composition on the broker under
+    // `aeolus/events/...` (ADR-0016). Demo stimulus events are a different thing and stay.
+    const world = makeWorld();
+    await run(world, PERIMETER_TOPIC);
+    await run(world, "ui/rule/toggle-lights");
+
+    expect(perimeterSummaries(world).length).toBeGreaterThan(0);
+    expect(world.emitted.some((e) => e.topic.includes("summary"))).toBe(false);
+  });
+
+  it("writes at most one summary per run", async () => {
+    // Shared State coalesces keep-latest per bucket/key, so two writes in one run is no
+    // longer a correctness hazard the way two gated events were. It is still wasteful and
+    // still a sign the Logic has two paths reporting the same thing, so the bound stays.
     const world = makeWorld();
     for (const topic of [
       PERIMETER_TOPIC,
@@ -429,10 +468,10 @@ describe("Bunker Perimeter Security — floodlight projection", () => {
       "sensor/bunker/power",
       "ui/rule/simulate-contacts",
     ]) {
-      const before = world.emitted.length;
+      const before = world.sharedWrites.length;
       await run(world, topic);
-      const emitted = world.emitted.filter((e, i) => i >= before && e.topic === "bunker/summary/perimeter");
-      expect(emitted.length, `run for "${topic}" emitted ${emitted.length} summaries`).toBeLessThanOrEqual(1);
+      const written = perimeterSummaries(world, before);
+      expect(written.length, `run for "${topic}" wrote ${written.length} summaries`).toBeLessThanOrEqual(1);
     }
   });
 
@@ -442,23 +481,20 @@ describe("Bunker Perimeter Security — floodlight projection", () => {
     // observed truth onward to the Continuity Overview.
     const world = makeWorld();
     await run(world, PERIMETER_TOPIC);
-    const before = world.emitted.length;
+    const before = world.sharedWrites.length;
 
     world.deviceState[LIGHTS_TOPIC] = { on: true, brightness: 100, mode: "auto" };
     await run(world, LIGHTS_TOPIC);
 
-    const summary = world.emitted
-      .filter((e, i) => i >= before && e.topic === "bunker/summary/perimeter")
-      .pop();
-    expect(summary?.payload).toMatchObject({ lightsOn: true });
+    expect(perimeterSummaries(world, before).at(-1)).toMatchObject({ lightsOn: true });
   });
 
   it("stays silent on an unrelated bunker publish that changes nothing", async () => {
     const world = makeWorld();
     await run(world, PERIMETER_TOPIC);
-    const before = world.emitted.length;
+    const before = world.sharedWrites.length;
     await run(world, "sensor/bunker/power");
-    expect(world.emitted.filter((e, i) => i >= before && e.topic === "bunker/summary/perimeter")).toHaveLength(0);
+    expect(perimeterSummaries(world, before)).toHaveLength(0);
   });
 
   describe("when the command boundary returns a result the script cannot read", () => {
@@ -485,13 +521,10 @@ describe("Bunker Perimeter Security — floodlight projection", () => {
       expect(pane(world).footer).toContain("not verified");
 
       // The floodlight state publish must carry the truth to both panes.
-      const before = world.emitted.length;
+      const before = world.sharedWrites.length;
       await run(world, LIGHTS_TOPIC);
       expect(pane(world).lights).toBe(true);
-      const summary = world.emitted
-        .filter((e, i) => i >= before && e.topic === "bunker/summary/perimeter")
-        .pop();
-      expect(summary?.payload).toMatchObject({ lightsOn: true });
+      expect(perimeterSummaries(world, before).at(-1)).toMatchObject({ lightsOn: true });
     });
 
     it("reports a missing result explicitly rather than as 'unknown'", async () => {

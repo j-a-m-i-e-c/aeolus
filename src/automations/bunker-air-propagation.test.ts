@@ -1,6 +1,8 @@
 // showcase-cleanup §9.1 — sealing the bunker must reach the Bunker Overview.
 //
-// The intended flow is Air & Filtration -> physical filter state -> bunker/summary/air
+// The intended flow is Air & Filtration -> physical filter state -> Shared State
+// `bunker-summary/air` (ADR-0016; this was an Automation Event until the summaries were
+// recognised as current state rather than occurrences)
 // -> Bunker Overview -> the AIRLOCK visual. In practice the overview only sometimes
 // followed a seal, and the cause is worth stating precisely because it is a trap the
 // whole showcase can fall into:
@@ -28,6 +30,14 @@ const FILTER_TOPIC = "switch/bunker/filter/state";
 
 const store = new Map<string, unknown>();
 const emitted: Array<{ topic: string; payload: Record<string, unknown> }> = [];
+/**
+ * Every `shared.set()` the Logic performed, in order.
+ *
+ * Every call is recorded, including one the real store would answer `false` to for being
+ * identical. What is under test here is what the automation CLAIMED, and "no summary may
+ * say the bunker is open after a successful seal" needs every claim visible.
+ */
+const sharedWrites: Array<{ bucket: string; key: string; value: Record<string, unknown> }> = [];
 
 /**
  * Install the sandbox globals with a device snapshot the caller controls.
@@ -53,15 +63,38 @@ function installSandbox(snapshot: Record<string, unknown>, commandSucceeds = tru
   globals.events = {
     emit: (topic: string, payload: Record<string, unknown>) => { emitted.push({ topic, payload }); },
   };
+  globals.shared = {
+    get: () => undefined,
+    set: (bucket: string, key: string, value: Record<string, unknown>) => {
+      sharedWrites.push({ bucket, key, value });
+      return true;
+    },
+    delete: () => false,
+  };
 }
 
 const airSummaries = (): Record<string, unknown>[] =>
-  emitted.filter((entry) => entry.topic === "bunker/summary/air").map((entry) => entry.payload);
+  sharedWrites
+    .filter((write) => write.bucket === "bunker-summary" && write.key === "air")
+    .map((write) => write.value);
 
 describe("bunker air propagation", () => {
   beforeEach(() => {
     store.clear();
     emitted.length = 0;
+    sharedWrites.length = 0;
+  });
+
+  it("reports the air summary as Shared State, never as an Automation Event", async () => {
+    // A current snapshot published as an event gets occurrence semantics it does not
+    // have, cannot be safely coalesced, and puts internal overview composition on the
+    // broker under `aeolus/events/...` (ADR-0016).
+    installSandbox({ on: true, sealed: false, overpressure: 8, filterLife: 78, tempC: 19.4 });
+
+    projectAirState();
+
+    expect(airSummaries().length).toBeGreaterThan(0);
+    expect(emitted.some((entry) => entry.topic.includes("summary"))).toBe(false);
   });
 
   it("reports the seal it just achieved, not the state it started from", async () => {
@@ -128,7 +161,7 @@ describe("bunker air propagation", () => {
     // summary missing one of them propagates nothing for that field.
     installSandbox({ on: true, sealed: false, overpressure: 8, filterLife: 78, tempC: 19.4 });
     projectAirState();
-    emitted.length = 0;
+    sharedWrites.length = 0;
 
     publishAirSummary();
 
@@ -175,7 +208,7 @@ describe("bunker air propagation", () => {
     // The state a sealed bunker leaves behind, including the raised pressure the
     // controller last published.
     projectAirState();
-    emitted.length = 0;
+    sharedWrites.length = 0;
 
     await setBunkerSeal(false);
 

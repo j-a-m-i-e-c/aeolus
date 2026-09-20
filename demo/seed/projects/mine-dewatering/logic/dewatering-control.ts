@@ -12,12 +12,15 @@ export function initialiseDewatering() {
 /**
  * Report the sump's state to whoever is aggregating it.
  *
- * Emitted from this automation's own state rather than from a device read, so a caller
+ * Written from this automation's own state rather than from a device read, so a caller
  * that has just commanded the pump reports the pump it commanded. See
  * commandSumpPump for why reading the device there would report the opposite.
+ *
+ * Shared State rather than an Automation Event (ADR-0016): current truth, latest value
+ * wins, and an unchanged recomputation writes nothing.
  */
 export function publishDewateringSummary() {
-    events.emit("mine/summary/dewatering", {
+    shared.set("mine-summary", "dewatering", {
         levelM: Number(state.get("levelM") || 0),
         inflowLps: Number(state.get("inflowLps") || 0),
         dischargeLps: Number(state.get("dischargeLps") || 0),

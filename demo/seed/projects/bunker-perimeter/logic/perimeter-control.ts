@@ -34,8 +34,15 @@ export function projectFloodlightState() {
         drifted: previous === undefined || Boolean(previous) !== observed,
     };
 }
+/**
+ * Report the perimeter's current state to whoever is aggregating it.
+ *
+ * Shared State rather than an Automation Event (ADR-0016): this is the answer to
+ * "what is true now", so the newest value is the only one that matters and an
+ * unchanged recomputation is free.
+ */
 export function publishPerimeterSummary() {
-    events.emit("bunker/summary/perimeter", {
+    shared.set("bunker-summary", "perimeter", {
         contacts: Number(state.get("contacts") || 0),
         sector: String(state.get("sector") || "east"),
         classification: String(state.get("classification") || "none"),

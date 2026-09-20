@@ -15,13 +15,15 @@ function setAction(label: string) {
 /**
  * Report the air system's state to whoever is aggregating it.
  *
- * Emitted from this automation's own state rather than from a device read, so every
+ * Written from this automation's own state rather than from a device read, so every
  * caller reports the same thing and no caller has to be careful about when it runs.
  */
 export function publishAirSummary() {
     const sealed = Boolean(state.get("sealed"));
     const overpressure = Number(state.get("overpressure") ?? AMBIENT_PA);
-    events.emit("bunker/summary/air", {
+    // Shared State rather than an Automation Event (ADR-0016): current truth, so the
+    // newest value wins and an unchanged republish costs nothing.
+    shared.set("bunker-summary", "air", {
         sealed,
         overpressure,
         // Whether the pressure this automation is holding actually backs up the seal it is

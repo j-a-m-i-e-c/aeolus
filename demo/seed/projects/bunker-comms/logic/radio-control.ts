@@ -60,5 +60,7 @@ export function projectRadioState() {
     const transmitter = byTopic("switch/bunker/radio/state");
     const transmitting = Boolean(transmitter && transmitter.state && transmitter.state.tx);
     state.set("transmitting", transmitting);
-    events.emit("bunker/summary/comms", { frequency, signal, contactsToday, transmitting });
+    // Shared State rather than an Automation Event (ADR-0016): the overview wants the
+    // radio's current state, not a record that it was looked at again.
+    shared.set("bunker-summary", "comms", { frequency, signal, contactsToday, transmitting });
 }

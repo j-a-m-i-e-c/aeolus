@@ -31,7 +31,7 @@ import {
   publishDevices,
   createAutomations,
   seedCollection,
-  seedBucket,
+  seedSharedStateBucket,
   buildLayout,
   fireAutomations,
   applyDemoAccess,
@@ -40,7 +40,7 @@ import {
   backendPublicDemoEnabled,
 } from "./lib.mjs";
 import { tabModules } from "./tabs/index.mjs";
-import { demoBuckets } from "./data-store-buckets.mjs";
+import { sharedStateBuckets } from "./shared-state.mjs";
 import {
   createBootstrapClient,
   configureSimulatedCommandProfiles,
@@ -142,11 +142,13 @@ for (const mod of tabModules) {
   }
 }
 
-// Buckets are intentionally global in the current Data Store model, so showcase
-// buckets are examples rather than tab-owned coordination state.
-console.log("\n3b. Seeding Data Store buckets...");
-for (const bucket of demoBuckets) {
-  await seedBucket(api, bucket);
+// Shared State is global by design — no tab owns a bucket (ADR-0016) — so these
+// fixtures are declared globally rather than as tab-owned state. They are illustrative;
+// the showcase's real coordination state is the `*-summary` buckets the subsystem
+// automations write at runtime, plus the seeder's own ledger.
+console.log("\n3b. Seeding Shared State...");
+for (const bucket of sharedStateBuckets) {
+  await seedSharedStateBucket(api, bucket);
 }
 
 // 4. Create automations (must exist before devices publish so state populates).

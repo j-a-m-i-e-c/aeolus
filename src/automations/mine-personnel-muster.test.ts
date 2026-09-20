@@ -21,6 +21,8 @@ const MUSTER_TOPIC = "switch/mine/muster/state";
 
 const store = new Map<string, unknown>();
 const emitted: Array<{ topic: string; payload: Record<string, unknown> }> = [];
+/** Every `shared.set()` the Logic performed, in order. */
+const sharedWrites: Array<{ bucket: string; key: string; value: Record<string, unknown> }> = [];
 const conditions: unknown[] = [];
 let commandsIssued = 0;
 
@@ -52,6 +54,17 @@ function installSandbox(personnel: Record<string, unknown>): void {
   globals.events = {
     emit: (topic: string, payload: Record<string, unknown>) => { emitted.push({ topic, payload }); },
   };
+  // The crew's current distribution is Shared State, not an Automation Event (ADR-0016).
+  // A muster being ordered stays an event; where everyone currently is does not.
+  globals.shared = {
+    get: (bucket: string, key: string) =>
+      sharedWrites.filter((w) => w.bucket === bucket && w.key === key).at(-1)?.value,
+    set: (bucket: string, key: string, value: Record<string, unknown>) => {
+      sharedWrites.push({ bucket, key, value });
+      return true;
+    },
+    delete: () => false,
+  };
 }
 
 /** The refuge occupancy the muster's observation waited for. */
@@ -62,6 +75,7 @@ describe("mine personnel muster", () => {
   beforeEach(() => {
     store.clear();
     emitted.length = 0;
+    sharedWrites.length = 0;
     conditions.length = 0;
     commandsIssued = 0;
   });

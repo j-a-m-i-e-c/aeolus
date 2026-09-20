@@ -107,8 +107,25 @@ describe("Research Vessel demo architecture", () => {
     expect(automation.uiSource).not.toMatch(/\{\s*(?:model|aeolus\.read\([^)]*\))[^}]*\}\s*%/);
   });
 
-  it("the hero receives summaries only over Automation Events", () => {
-    for (const automation of commandAutomations) expect(automation.scriptSource).toContain('events.emit("vessel/summary/');
-    expect(missionOverviewAutomation.triggerTopic).toBe("aeolus/events/+/vessel/summary/#");
+  it("the hero composes current science state from Shared State, not Automation Events", () => {
+    // CTD depth, ROV mode and the surface stream are all "what is true now" (ADR-0016).
+    // Sent as Automation Events they took occurrence semantics they do not have, could
+    // not be safely coalesced, and put internal overview composition on the broker as
+    // `aeolus/events/.../vessel/summary/ctd`.
+    for (const automation of commandAutomations) {
+      expect(automation.scriptSource).toContain('shared.set("vessel-summary"');
+      expect(automation.scriptSource).not.toContain('events.emit("vessel/summary/');
+    }
+    expect(missionOverviewAutomation.triggerType).toBe("shared-state");
+    expect(missionOverviewAutomation.triggerTopic).toBe("vessel-summary/#");
+  });
+
+  it("the hero reads every science system's current value, not just the one that woke it", () => {
+    // Restart behaviour: the durable value of each system is there to be read whenever
+    // the overview next runs, so it does not depend on having seen every update.
+    for (const key of ["ctd", "rov", "underway"]) {
+      expect(missionOverviewAutomation.scriptSource).toContain(`"${key}"`);
+    }
+    expect(missionOverviewAutomation.scriptSource).toContain("shared?.get(BUCKET, key)");
   });
 });

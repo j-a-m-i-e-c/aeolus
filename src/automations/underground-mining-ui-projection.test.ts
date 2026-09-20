@@ -17,7 +17,12 @@ function readKeys(source:string):string[]{return [...source.matchAll(/aeolus\.re
 function setKeys(source:string):Set<string>{return new Set([...source.matchAll(/state\.set\(\s*["']([^"']+)["']/g)].map(m=>m[1]).concat([...source.matchAll(/init\(\s*["']([^"']+)["']/g)].map(m=>m[1])));}
 
 describe("Underground Mining demo architecture",()=>{
-  it("keeps the mine hero read-only",()=>{expect(mineOverviewAutomation.demoAccess).toBeUndefined();expect(mineOverviewAutomation.scriptSource).not.toContain("devices.action(");expect(mineOverviewAutomation.triggerTopic).toBe("aeolus/events/+/mine/summary/#");});
+  it("keeps the mine hero read-only",()=>{expect(mineOverviewAutomation.demoAccess).toBeUndefined();expect(mineOverviewAutomation.scriptSource).not.toContain("devices.action(");});
+  // The operating picture is current state, so it travels as Shared State rather than as
+  // Automation Events (ADR-0016). The vent-demand signal below is the counter-example that
+  // must NOT move: a demand band change is a transition, and ventilation needs every one.
+  it("the mine hero composes current state from Shared State",()=>{expect(mineOverviewAutomation.triggerType).toBe("shared-state");expect(mineOverviewAutomation.triggerTopic).toBe("mine-summary/#");for(const a of owning){expect(a.scriptSource).toContain('shared.set("mine-summary"');expect(a.scriptSource).not.toContain('events.emit("mine/summary/');}});
+  it("the mine hero reads every subsystem's current value, not just the one that woke it",()=>{for(const key of ["atmosphere","ventilation","personnel","dewatering"])expect(mineOverviewAutomation.scriptSource).toContain(`"${key}"`);expect(mineOverviewAutomation.scriptSource).toContain("shared?.get(BUCKET, key)");});
   it.each(all.map(a=>[a.name,a] as const))("%s UI reads automation projection state, not direct devices",(_name,a)=>{expect(a.uiSource).not.toContain("aeolus.devices");expect(a.uiSource).toContain("aeolus.read(");});
   it.each(all.map(a=>[a.name,a] as const))("%s writes every UI projection key",(_name,a)=>{const written=setKeys(a.scriptSource);for(const key of readKeys(a.uiSource))expect(written,`UI reads ${key} but Logic never state.set()s it`).toContain(key);});
   it("Atmospheric Safety communicates ventilation demand over Automation Events",()=>{expect(atmosphereAutomation.scriptSource).toContain('events.emit("mine/atmosphere/vent-demand"');expect(ventilationAutomation.triggerTopic).toContain("mine/atmosphere/#");});

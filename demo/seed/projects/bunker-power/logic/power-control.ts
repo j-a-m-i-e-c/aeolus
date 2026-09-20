@@ -112,7 +112,12 @@ export function projectPowerAndSupplies() {
     state.set("medicalCheckedDaysAgo", Number(supplyState.medicalCheckedDaysAgo ?? 12));
     state.set("occupants", occupants);
     state.set("bunks", Number(supplyState.bunks ?? 6));
-    events.emit("bunker/summary/power", {
+    // Shared State, not an Automation Event (ADR-0016). This answers "what is true
+    // now" for the overview, so only the newest value matters — and it is recomputed
+    // on every power publish, which as an event meant a `bunker/summary/power`
+    // message on the broker per tick saying nothing had changed. `shared.set()`
+    // writes nothing and wakes nobody when the snapshot is identical.
+    shared.set("bunker-summary", "power", {
         battery,
         solar,
         load,

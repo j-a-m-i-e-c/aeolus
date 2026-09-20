@@ -8,12 +8,16 @@ function setAction(label: string) {
 /**
  * Report the surface-water stream to whoever is aggregating it.
  *
- * Emitted from this automation's own state rather than from a device read, so a caller
+ * Written from this automation's own state rather than from a device read, so a caller
  * that has just commanded the intake pump reports the pump it commanded. See
  * setSamplingPump for why reading the devices there would report the opposite.
+ *
+ * Shared State rather than an Automation Event (ADR-0016): current truth, latest value
+ * wins, and an unchanged recomputation writes nothing. `frontDetected` is carried here
+ * as the current condition; the front being CROSSED stays an Automation Event.
  */
 export function publishUnderwaySummary() {
-    events.emit("vessel/summary/underway", {
+    shared.set("vessel-summary", "underway", {
         tsgPumpOn: Boolean(state.get("pumpOn")),
         tsgFlow: Number(state.get("flow") || 0),
         sst: Number(state.get("sst") || 0),
