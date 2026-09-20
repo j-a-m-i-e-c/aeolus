@@ -115,6 +115,15 @@ add migration risk without changing behaviour, and a storage schema name is an
 implementation detail rather than the product model. **Bucket** survives as the
 user-facing word for a namespace *inside* Shared State.
 
+**The user-facing name is "Shared Automation State".** Amended shortly after this ADR was
+accepted: the dashboard originally said "Shared State", which never answered *shared
+between what* — it could as easily have meant session or cluster state. Aeolus already has
+Automation State, the private per-automation store, so naming the two as siblings is what
+makes the distinction legible: one is private to an automation, the other is shared between
+them. "Shared State" remains the shorthand in code and prose, and `shared`,
+`/api/shared-state` and `SharedStateStore` are unchanged — the same reasoning as the table
+name above applies, so this is one decision applied consistently rather than a new one.
+
 The simulator fix is the same principle applied to time: accelerated simulation seconds
 drive battery integration and generator fuel burn, wall-clock seconds drive human water
 consumption. One clock per physical process it actually describes.

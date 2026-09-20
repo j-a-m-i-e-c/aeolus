@@ -49,9 +49,9 @@ describe("SetupWizard", () => {
   // Collections and Buckets", which is the mental model ADR-0016 rejects. This
   // asserts the replacement: the wizard governs history only, and says plainly
   // that Shared State needs none of it.
-  it("scopes itself to history and says Shared State needs no setup", async () => {
+  it("scopes itself to history and says the shared store needs no setup", async () => {
     render(<SetupWizard />);
-    expect(screen.getByText(/Shared State is already available/i)).toBeInTheDocument();
+    expect(screen.getByText(/Shared Automation State is already available/i)).toBeInTheDocument();
     expect(screen.queryByText(/two storage modes/i)).not.toBeInTheDocument();
     await waitFor(() => expect(mockAuthFetch).toHaveBeenCalled());
   });

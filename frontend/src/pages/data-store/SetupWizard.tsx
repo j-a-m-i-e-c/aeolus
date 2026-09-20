@@ -135,8 +135,8 @@ export function SetupWizard() {
         </p>
       </div>
 
-      {/* Explanation card. This is deliberately about history ONLY: Shared State is
-          a separate, core facility that is already available and needs no setup. */}
+      {/* Explanation card. This is deliberately about history ONLY: Shared Automation
+          State is a separate, core facility already available and needing no setup. */}
       <div className="bg-[#161B22] border border-[#30363D] rounded-xl p-5 space-y-3">
         <div className="flex items-center gap-2">
           <Info size={16} className="text-primary" />
@@ -150,7 +150,7 @@ export function SetupWizard() {
         </p>
         <div className="rounded-lg border border-[#30363D] bg-[#0D1117] px-3 py-2.5">
           <div className="flex items-center gap-2 text-xs font-semibold text-[#E6EDF3]">
-            <Share2 size={13} className="text-[#3BA4FF]" /> Shared State is already available
+            <Share2 size={13} className="text-[#3BA4FF]" /> Shared Automation State is already available
           </div>
           <p className="mt-1 text-xs leading-relaxed text-[#6B7785]">
             Durable current values that automations share need no setup and are not affected by

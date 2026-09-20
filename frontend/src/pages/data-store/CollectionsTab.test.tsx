@@ -48,9 +48,11 @@ describe("CollectionsTab", () => {
       expect(screen.queryByTestId("collection-list")).not.toBeInTheDocument();
     });
 
-    it("says Shared State is unaffected, so the page does not read as broken", () => {
+    it("says the shared store is unaffected, so the page does not read as broken", () => {
       render(<CollectionsTab onConfigure={vi.fn()} />);
-      expect(screen.getByText(/Shared State needs none of that and is\s+available now/i)).toBeInTheDocument();
+      expect(
+        screen.getByText(/Shared Automation State needs none of that\s+and is available now/i),
+      ).toBeInTheDocument();
     });
 
     it("offers a route to the storage configuration", () => {

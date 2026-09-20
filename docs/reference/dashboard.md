@@ -22,14 +22,15 @@ The Connectors area lists available and configured connector instances. It provi
 
 ### Data
 
-The Data area covers two separate things:
+The Data area covers two separate things, in three tabs:
 
-- **Shared State** — durable current values automations share. Always browseable; needs no
-  setup.
-- **Collections** and **Storage** — optional historical records, with setup, retention,
-  usage limits and export.
+- **Collections** — optional historical records, with retention, limits and export. The
+  landing tab, and the reason most operators open the page.
+- **Shared Automation State** — durable current values automations share with each other.
+  Always browseable; needs no setup.
+- **Storage Settings** — configuration for historical accumulation.
 
-Disabling the historical Data Store removes Collections, not Shared State. See
+Disabling the historical Data Store removes Collections, not Shared Automation State. See
 [Data and storage](data-and-storage.md).
 
 ### Automations

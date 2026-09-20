@@ -1,14 +1,26 @@
-// frontend/src/pages/data-store/DataExplorer.tsx — The Data page: Shared State, Collections, Storage
+// frontend/src/pages/data-store/DataExplorer.tsx — The Data page: Collections,
+// Shared Automation State, Storage Settings
 //
-// Two distinct concepts live here, and the tab order says which is which
-// (ADR-0016):
+// Two distinct concepts live here (ADR-0016):
 //
-//   Shared State  durable current values shared between automations — always available
-//   Collections   optional historical observations, with retention and storage limits
-//   Storage       configuration for that historical accumulation
+//   Collections               optional historical observations, retention-bounded
+//   Shared Automation State   durable current values automations share — always available
+//   Storage Settings          configuration for that historical accumulation
 //
-// Shared State is NOT a storage mode of the Data Store. It is core state that
-// happens to be persisted in the same database.
+// Collections leads because it is what an operator usually came for: records,
+// charts, exports. Shared Automation State is mostly machine-to-machine
+// coordination that a human inspects occasionally rather than browses.
+//
+// It is called "Shared Automation State" rather than "Shared State" because
+// Aeolus already has Automation State — the private per-automation store — and
+// naming them as siblings is what makes the distinction legible: one is private
+// to an automation, the other is shared between them. "Shared State" alone never
+// said shared between what. The sandbox global stays `shared` and the route stays
+// `/api/shared-state`; ADR-0016 §4.2 already settled that code and storage names
+// need not drive the product vocabulary.
+//
+// Shared Automation State is NOT a storage mode of the Data Store. It is core
+// state that happens to be persisted in the same database.
 
 import { useEffect, useState } from "react";
 import {
@@ -27,13 +39,14 @@ import { SettingsPanel } from "./SettingsPanel";
 import { SetupWizard } from "./SetupWizard";
 import { useReadOnlyDemo } from "../../hooks/useReadOnlyDemo";
 
-type Tab = "shared-state" | "collections" | "storage";
+type Tab = "collections" | "shared-state" | "storage";
 
 export function DataExplorer() {
   const readOnly = useReadOnlyDemo();
-  // Lands on Shared State: it is the always-available concept, so it is the one
-  // view guaranteed to have something to show.
-  const [activeTab, setActiveTab] = useState<Tab>("shared-state");
+  // Lands on Collections, the reason most operators opened this page. When history
+  // is off this shows its own enable prompt, which is a useful first thing to see
+  // rather than a dead end — and the amber dot on the tab says so before you click.
+  const [activeTab, setActiveTab] = useState<Tab>("collections");
 
   const fetchStats = useDataStoreStore((s) => s.fetchStats);
   const fetchCollections = useDataStoreStore((s) => s.fetchCollections);
@@ -63,9 +76,9 @@ export function DataExplorer() {
         : "normal";
 
   const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
-    { id: "shared-state", label: "Shared State", icon: <Share2 size={14} /> },
     { id: "collections", label: "Collections", icon: <Layers size={14} /> },
-    { id: "storage", label: "Storage", icon: <Settings size={14} /> },
+    { id: "shared-state", label: "Shared Automation State", icon: <Share2 size={14} /> },
+    { id: "storage", label: "Storage Settings", icon: <Settings size={14} /> },
   ];
 
   return (
@@ -75,7 +88,7 @@ export function DataExplorer() {
         <div>
           <h1 className="text-2xl font-bold text-[#E6EDF3]">Data</h1>
           <p className="mt-1 text-sm text-[#6B7785]">
-            Shared current values automations coordinate through, and the optional history they record.
+            The history your automations record, and the current values they share with each other.
           </p>
         </div>
       </div>
@@ -88,10 +101,10 @@ export function DataExplorer() {
               Public demo · read only
             </div>
             <p className="mt-1 text-xs leading-relaxed text-[#8B9AAA]">
-              Aeolus keeps shared current values and historical measurements locally on the edge device.
-              Browse the showcase data, then open Storage to see the limits that prevent a small device
-              from silently filling its disk. This public demo lets you inspect the real controls without
-              saving changes.
+              Aeolus keeps historical measurements and shared current values locally on the edge device.
+              Browse the showcase data, then open Storage Settings to see the limits that prevent a small
+              device from silently filling its disk. This public demo lets you inspect the real controls
+              without saving changes.
             </p>
           </div>
         </div>
@@ -99,20 +112,8 @@ export function DataExplorer() {
 
       {/* Summary Bar */}
       <div className="bg-[#161B22] border border-[#30363D] rounded-xl p-4">
+        {/* Ordered to match the tabs: the history figures, then the shared values. */}
         <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-          {/* Shared values */}
-          <div className="space-y-1">
-            <div className="flex items-center gap-1.5">
-              <Share2 size={12} className="text-[#6B7785]" />
-              <span className="text-[10px] text-[#6B7785] uppercase tracking-wider">
-                Shared Values
-              </span>
-            </div>
-            <p className="text-lg font-semibold text-[#E6EDF3]">
-              {stats?.totalBucketEntries ?? 0}
-            </p>
-          </div>
-
           {/* Collections */}
           <div className="space-y-1">
             <div className="flex items-center gap-1.5">
@@ -139,8 +140,21 @@ export function DataExplorer() {
             </p>
           </div>
 
-          {/* Historical storage usage. Shared State is bounded by its own
-              per-value and total-entry limits, not by this budget, so it is
+          {/* Shared values */}
+          <div className="space-y-1">
+            <div className="flex items-center gap-1.5">
+              <Share2 size={12} className="text-[#6B7785]" />
+              <span className="text-[10px] text-[#6B7785] uppercase tracking-wider">
+                Shared Values
+              </span>
+            </div>
+            <p className="text-lg font-semibold text-[#E6EDF3]">
+              {stats?.totalBucketEntries ?? 0}
+            </p>
+          </div>
+
+          {/* Historical storage usage. Shared Automation State is bounded by its
+              own per-value and total-entry limits, not by this budget, so it is
               deliberately not counted here. */}
           <div className="col-span-2 space-y-1.5">
             <div className="flex items-center gap-1.5">
@@ -204,10 +218,10 @@ export function DataExplorer() {
       </div>
 
       {/* Tab Content */}
-      {activeTab === "shared-state" && <SharedStateExplorer />}
       {activeTab === "collections" && (
         <CollectionsTab onConfigure={() => setActiveTab("storage")} />
       )}
+      {activeTab === "shared-state" && <SharedStateExplorer />}
       {/* Storage is where historical accumulation is configured: the setup flow
           before it is enabled, the live limits afterwards. */}
       {activeTab === "storage" && (enabled ? <SettingsPanel /> : <SetupWizard />)}

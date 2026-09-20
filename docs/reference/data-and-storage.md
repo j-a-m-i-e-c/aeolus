@@ -91,13 +91,14 @@ them is the decision that matters; the rest of this page is mechanics.
 |---|---|---|
 | Current truth about a device | Device State | Latest value matters; it comes from MQTT or a connector |
 | Durable state private to one automation | Automation State | Nothing else should read it |
-| Durable current value shared between automations | Shared State | Latest value matters, and a change can wake a consumer |
+| Durable current value shared between automations | Shared Automation State | Latest value matters, and a change can wake a consumer |
 | Timestamped observations you want to query later | Data Store Collections | History matters, and it accumulates |
 | Something happened | Automation Events | Every occurrence matters |
 
-Shared State and Collections are separate facilities, not two modes of one store.
-Shared State is always available; Collections are optional because unbounded history can
-fill a constrained device. See [ADR-0016](../adr/0016-shared-state-and-automation-events.md).
+Shared Automation State and Collections are separate facilities, not two modes of one
+store. The shared store is always available; Collections are optional because unbounded
+history can fill a constrained device. See
+[ADR-0016](../adr/0016-shared-state-and-automation-events.md).
 
 ## Automation state
 
@@ -111,10 +112,16 @@ value on every device publish costs nothing. Change detection is exact serialize
 equality, so two objects with the same entries in a different key order count as
 different.
 
-## Shared State
+## Shared Automation State
 
 Durable current values that automations intentionally share. This is where one automation
 tells the others what is true *now*.
+
+The dashboard calls this **Shared Automation State**, to pair it with the private
+[Automation state](#automation-state) above: one is private to a single automation, the
+other is deliberately shared between them. **Shared State** is the shorthand used in code
+and in the rest of this page — the sandbox global is `shared`, the routes are
+`/api/shared-state`, and the class is `SharedStateStore`.
 
 ```ts
 shared.set("bunker-summary", "power", { battery, solar, load, net });

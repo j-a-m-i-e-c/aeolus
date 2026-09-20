@@ -56,16 +56,23 @@ export function SharedStateExplorer() {
     });
   }
 
-  /** What Shared State is for, shown above the list and in the empty state. */
+  /**
+   * What this is for, shown above the list and in the empty state.
+   *
+   * The contrast with the private per-automation store is drawn explicitly, because
+   * that is the distinction the name is carrying: Automation State belongs to one
+   * automation, this is the part deliberately shared.
+   */
   const explainer = (
     <div className="rounded-xl border border-[#30363D] bg-[#161B22] p-4">
       <div className="mb-1 flex items-center gap-2 text-xs font-semibold text-[#E6EDF3]">
-        <Share2 size={13} className="text-[#3BA4FF]" /> Shared State
+        <Share2 size={13} className="text-[#3BA4FF]" /> Shared Automation State
       </div>
       <p className="text-xs leading-relaxed text-[#6B7785]">
-        Small current values that automations intentionally share, grouped into buckets.
-        They survive restarts, and an automation can be triggered when one changes.
-        Shared State holds the latest value only — it is not a history.
+        Small current values that automations intentionally share with each other, grouped
+        into buckets. Unlike an automation's own private state, anything here is readable by
+        every automation. Values survive restarts, and an automation can be triggered when
+        one changes. This holds the latest value only — it is not a history.
       </p>
     </div>
   );

@@ -2,8 +2,8 @@
 //
 // Historical accumulation is optional because it grows without bound and can fill
 // a constrained edge device, so it stays behind an explicit enable step. That gate
-// lives HERE rather than in front of the whole Data page: Shared State is core and
-// must remain browseable whether or not history is being recorded (ADR-0016).
+// lives HERE rather than in front of the whole Data page: Shared Automation State is
+// core and must remain browseable whether or not history is being recorded (ADR-0016).
 
 import { Clock3, Layers } from "lucide-react";
 import { useDataStoreStore } from "../../store/data-store-store";
@@ -33,8 +33,8 @@ export function CollectionsTab({ onConfigure }: { onConfigure: () => void }) {
           </h2>
           <p className="mx-auto mt-2 max-w-md text-xs leading-relaxed text-[#6B7785]">
             Recording observations over time accumulates without bound, so it needs storage
-            limits and retention before it starts. Shared State needs none of that and is
-            available now.
+            limits and retention before it starts. Shared Automation State needs none of that
+            and is available now.
           </p>
           <button
             onClick={onConfigure}

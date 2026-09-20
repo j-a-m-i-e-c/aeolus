@@ -1,8 +1,8 @@
 // frontend/src/pages/data-store/DataExplorer.test.tsx — the Data page's three concepts
 //
-// The tabs are the product model: Shared State (always available), Collections
-// (optional history) and Storage (history configuration). Several tests below
-// exist to stop Shared State being re-absorbed into the historical Data Store
+// The tabs are the product model: Collections (optional history), Shared Automation
+// State (always available) and Storage Settings (history configuration). Several
+// tests below exist to stop shared state being re-absorbed into the Data Store
 // (ADR-0016).
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -60,14 +60,16 @@ describe("DataExplorer", () => {
 
   it("names both concepts in the page subtitle", () => {
     render(<DataExplorer />);
-    expect(screen.getByText(/Shared current values automations coordinate through/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/The history your automations record, and the current values they share/i),
+    ).toBeInTheDocument();
   });
 
   it("explains the read-only seeded data in the public demo", () => {
     demoState.readOnly = true;
     render(<DataExplorer />);
     expect(screen.getByText(/Public demo · read only/i)).toBeInTheDocument();
-    expect(screen.getByText(/shared current values and historical measurements/i)).toBeInTheDocument();
+    expect(screen.getByText(/historical measurements and shared current values/i)).toBeInTheDocument();
   });
 
   it("fetches stats, collections, and Shared State buckets on mount", () => {
@@ -91,18 +93,30 @@ describe("DataExplorer", () => {
     expect(screen.queryByText("Buckets")).not.toBeInTheDocument();
   });
 
-  it("lands on Shared State, the always-available view", () => {
+  it("lands on Collections, the view most operators came for", () => {
     render(<DataExplorer />);
-    expect(screen.getByTestId("shared-state-explorer")).toBeInTheDocument();
-    expect(screen.queryByTestId("collections-tab")).not.toBeInTheDocument();
+    expect(screen.getByTestId("collections-tab")).toBeInTheDocument();
+    expect(screen.queryByTestId("shared-state-explorer")).not.toBeInTheDocument();
   });
 
-  it("offers Shared State, Collections and Storage tabs in that order", () => {
+  it("offers Collections, Shared Automation State and Storage Settings in that order", () => {
+    const TABS = ["Collections", "Shared Automation State", "Storage Settings"];
     render(<DataExplorer />);
     const labels = Array.from(document.querySelectorAll("button"))
       .map((b) => b.textContent?.trim())
-      .filter((t) => t === "Shared State" || t === "Collections" || t === "Storage");
-    expect(labels).toEqual(["Shared State", "Collections", "Storage"]);
+      .filter((t): t is string => TABS.includes(t ?? ""));
+    expect(labels).toEqual(TABS);
+  });
+
+  it("names the shared store as automation state, not bare 'Shared State'", () => {
+    // "Shared State" never said shared between what. Aeolus already has Automation
+    // State — the private per-automation store — so naming this as its sibling is
+    // what makes the distinction legible.
+    render(<DataExplorer />);
+    expect(screen.getByRole("button", { name: /Shared Automation State/ })).toBeInTheDocument();
+    expect(
+      Array.from(document.querySelectorAll("button")).map((b) => b.textContent?.trim()),
+    ).not.toContain("Shared State");
   });
 
   it("clears any stale collection selection on mount so re-entry lands on the home view", () => {
@@ -113,16 +127,16 @@ describe("DataExplorer", () => {
     expect(mockSelectCollection).toHaveBeenCalledWith(null);
   });
 
-  it("switches to the Collections tab", () => {
+  it("switches to the Shared Automation State tab", () => {
     render(<DataExplorer />);
-    fireEvent.click(screen.getByRole("button", { name: /^Collections$/i }));
-    expect(screen.getByTestId("collections-tab")).toBeInTheDocument();
-    expect(screen.queryByTestId("shared-state-explorer")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Shared Automation State/ }));
+    expect(screen.getByTestId("shared-state-explorer")).toBeInTheDocument();
+    expect(screen.queryByTestId("collections-tab")).not.toBeInTheDocument();
   });
 
-  it("shows the live storage settings on the Storage tab when history is enabled", () => {
+  it("shows the live storage settings on the Storage Settings tab when history is enabled", () => {
     render(<DataExplorer />);
-    fireEvent.click(screen.getByRole("button", { name: /Storage/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Storage Settings/ }));
     expect(screen.getByTestId("settings-panel")).toBeInTheDocument();
   });
 
@@ -131,16 +145,19 @@ describe("DataExplorer", () => {
       mockStoreState = { ...mockStoreState, enabled: false };
     });
 
-    it("keeps Shared State browseable", () => {
+    it("keeps Shared Automation State browseable", () => {
       // The whole point of the split: no storage configuration stands between an
       // operator and the shared values their automations are coordinating through.
+      // Reachable in one click even though history is off.
       render(<DataExplorer />);
+      fireEvent.click(screen.getByRole("button", { name: /Shared Automation State/ }));
       expect(screen.getByTestId("shared-state-explorer")).toBeInTheDocument();
+      expect(screen.queryByTestId("setup-wizard")).not.toBeInTheDocument();
     });
 
-    it("shows the setup flow on the Storage tab rather than in front of the page", () => {
+    it("shows the setup flow on the Storage Settings tab rather than in front of the page", () => {
       render(<DataExplorer />);
-      fireEvent.click(screen.getByRole("button", { name: /Storage/i }));
+      fireEvent.click(screen.getByRole("button", { name: /Storage Settings/ }));
       expect(screen.getByTestId("setup-wizard")).toBeInTheDocument();
       expect(screen.queryByTestId("settings-panel")).not.toBeInTheDocument();
     });
@@ -156,9 +173,9 @@ describe("DataExplorer", () => {
       expect(screen.getByText("Not recording history")).toBeInTheDocument();
     });
 
-    it("lets the Collections tab send the operator to Storage to configure it", () => {
+    it("lets the Collections tab send the operator to Storage Settings to configure it", () => {
+      // Collections is the landing tab, so no navigation is needed to get here.
       render(<DataExplorer />);
-      fireEvent.click(screen.getByRole("button", { name: /^Collections$/i }));
       // The stub calls the onConfigure prop when clicked.
       fireEvent.click(screen.getByTestId("collections-tab"));
       expect(screen.getByTestId("setup-wizard")).toBeInTheDocument();
