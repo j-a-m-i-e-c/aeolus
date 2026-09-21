@@ -13,8 +13,13 @@ export function handlePuzzleDemoEvent(event: string | undefined) {
     else if (event === "reset-puzzles") {
         events.emit("escape/sim/reset", {});
         // Keep the previous count so the physical reset is recognised as a decrease,
-        // not as a fictional "Puzzle 0 solved" event. `publishedInitial=false`
-        // guarantees the reset state is still emitted once even if it was already 0.
+        // not as a fictional "Puzzle 0 solved" event.
+        //
+        // `publishedInitial=false` re-arms the write for the next telemetry tick. It no
+        // longer guarantees a wake-up, and should not claim to: progress is Shared State
+        // now, so resetting a network already at zero writes the value the bucket already
+        // holds and is a complete no-op. That is the right outcome — there is nothing new
+        // to tell Game Master — but it is idempotence deciding it, not a forced republish.
         state.set("publishedInitial", false);
         setAction("Resetting physical puzzle network");
     }
@@ -60,11 +65,10 @@ export function publishPuzzleProgress(progress: ReturnType<typeof projectPuzzleN
     else if (changed && progress.solved < previous) {
         setAction("Puzzle network reset to start state");
     }
-    // `escape/observed/...` is the namespace for physical facts reported by whoever
-    // owns the hardware. Game Master subscribes to it and publishes its requests
-    // under `escape/game/...`, so the two directions never cross and no automation
-    // is triggered by its own event.
-    events.emit("escape/observed/puzzles", {
+    // Current puzzle progress is Shared State, not an occurrence. Game Master only
+    // needs the newest physical snapshot, so intermediate progress updates may safely
+    // coalesce while genuine game events keep occurrence semantics.
+    shared.set("escape-observed", "puzzles", {
         p1: progress.values[0],
         p2: progress.values[1],
         p3: progress.values[2],

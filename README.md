@@ -415,7 +415,7 @@ shared.set("bunker-summary", "power", { battery: 74, solarW: 1800 });
 const power = shared.get("bunker-summary", "power");
 ```
 
-Writing the value a key already holds is a complete no-op — no write, no trigger — so a
+Writing the value a key already holds is a complete no-op. It performs no write and fires no trigger, so a
 projection can recompute on every tick for free. A real change can wake other automations
 through the `shared-state` trigger type, with pending work coalesced keep-latest per key.
 Shared State is internal and never published to MQTT.

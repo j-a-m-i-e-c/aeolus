@@ -4,9 +4,9 @@
 import {
   handleGameMasterAction,
   initialiseGameSession,
+  projectObservedRoom,
   projectPuzzleStatus,
   projectRoomLook,
-  projectRoomLookOutcome,
   reconcileExitForCompletion,
   reconcileExpiry,
 } from "./game-master";
@@ -30,8 +30,8 @@ export default async function run(context: EventContext) {
   // the same values as the first. The repeat was harmless — identical values written
   // twice — but the reasoning was the same one that produced real misreports in nine
   // other projects, and a comment claiming a refresh that cannot happen is worse than
-  // no comment. Room Systems reports the applied scene back through
-  // `escape/observed/room-look`, which is what actually closes the loop.
+  // no comment. Room Systems writes the applied scene to Shared State, which is what
+  // actually closes the loop.
   projectRoomLook();
 
   if (topic.startsWith("ui/")) {
@@ -39,13 +39,13 @@ export default async function run(context: EventContext) {
     return;
   }
 
-  // Room Systems has finished with the controller, so the console can stop waiting.
-  if (topic.includes("/escape/observed/room-look")) {
-    projectRoomLookOutcome(payload);
+  // Room Systems reports a different room than before, so the console can stop waiting.
+  if (topic === "escape-observed/room") {
+    projectObservedRoom(payload);
     return;
   }
 
-  if (!topic.includes("/escape/observed/puzzles")) return;
+  if (topic !== "escape-observed/puzzles") return;
 
   const complete = projectPuzzleStatus(payload);
   await reconcileExitForCompletion(complete);

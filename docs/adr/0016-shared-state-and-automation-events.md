@@ -205,7 +205,7 @@ behavioural gain.
 ### Positive
 
 - Identical writes cost nothing: no SQLite write, no broadcast, no downstream execution.
-- A wildcard broker trace shows device telemetry and real events, and nothing else.
+- Snapshot-style overview composition no longer pollutes the broker; Shared State itself is never published to MQTT.
 - Overviews survive a restart: every subsystem's current value is durable and readable.
 - Shared State works on a pristine install, which also removed an ordering constraint in
   the showcase seeder — it can read its own ownership ledger before deciding anything
@@ -230,12 +230,16 @@ behavioural gain.
 - **Shared State can be filled up.** The 5,000-entry cap makes a runaway
   `shared.set(bucket, uuid(), …)` fail loudly instead of filling the disk, which is the
   right failure — but it is a failure an author can cause.
-- **Five showcase publishers were identified as current state and deliberately left as
-  events.** `wildlife/response/status` and `farm/energy/permission` have no subscriber at
-  all. `wildlife/detection/station`, `escape/observed/puzzles` and
-  `escape/observed/room-look` each share a consumer's single trigger pattern with a
-  genuine occurrence, so converting one would require splitting that automation in two.
-  Recorded rather than guessed at.
+- **One mixed wildlife bridge remains event-backed.** `wildlife/detection/station` is
+  current station state, but Predator Response also consumes the discrete
+  `wildlife/detection/classified` occurrence and an automation currently has one trigger
+  type. Converting only the station half would require multi-source triggers or a larger
+  pane/state ownership redesign. The two unused state-like publishers found by the audit
+  were removed. Escape Room puzzle progress and the room's current condition now use
+  Shared State, because both are latest-current inputs to Game Master. The room value
+  carries the look the controller could not reach as a *condition* rather than reporting
+  each attempt, which is what kept it honest under one trigger type: a value that needed
+  a timestamp before a consumer noticed it would have been an occurrence in disguise.
 
 ## Revisit when
 
@@ -248,8 +252,9 @@ behavioural gain.
 - A consumer needs to see a sequence of Shared State changes rather than the latest. That
   is a Collection, or an Automation Event, and wanting it from Shared State is a sign the
   value was modelled in the wrong place.
-- The single trigger pattern per rule becomes the thing blocking further migration, as it
-  does for the three publishers named above.
+- The single trigger type per rule becomes the thing blocking the remaining mixed
+  wildlife bridge. Revisit multi-source triggers only when there is a broader product
+  need, rather than adding them solely for one showcase path.
 
 ## Implementation anchors
 

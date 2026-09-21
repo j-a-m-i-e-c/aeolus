@@ -42,15 +42,36 @@ describe("Escape Room showcase",()=>{
   // which could only see the room as it was before Room Systems commanded it — and
   // nothing triggered Game Master again afterwards. A requested look therefore sat at
   // PENDING until an unrelated puzzle event happened to re-run the automation.
-  it("re-runs Game Master when the room reports the look it actually applied",()=>{
-    expect(roomFxAutomation.scriptSource).toContain('events.emit("escape/observed/room-look"');
-    expect(gameMasterAutomation.triggerTopic).toBe("aeolus/events/+/escape/observed/#");
-    expect(gameMasterAutomation.scriptSource).toContain("/escape/observed/room-look");
+  it("re-runs Game Master from current physical puzzle and room Shared State",()=>{
+    expect(roomFxAutomation.scriptSource).toContain('shared.set("escape-observed", "room"');
+    expect(puzzleProgressAutomation.scriptSource).toContain('shared.set("escape-observed", "puzzles"');
+    expect(gameMasterAutomation.triggerType).toBe("shared-state");
+    expect(gameMasterAutomation.triggerTopic).toBe("escape-observed/#");
+    expect(gameMasterAutomation.scriptSource).toContain('topic === "escape-observed/room"');
+    expect(gameMasterAutomation.scriptSource).toContain('topic !== "escape-observed/puzzles"');
   });
 
-  // Observed physical facts and operator requests travel in separate namespaces, so
-  // widening Game Master's subscription to hear Room Systems does not also subscribe
-  // it to its own look requests.
+  // A look the room could not reach has to be IN the value, because it is invisible in
+  // telemetry: the room simply stayed where it was. Carried as a condition — the look
+  // currently unreached — it stays legible for as long as it is true and costs nothing
+  // when a retry fails the same way. Carried as a settle timestamp instead, every write
+  // would differ, which is an event queue of depth one wearing a state value's clothes.
+  it("describes the room as a condition, not as a stream of look attempts",()=>{
+    const value=/shared\.set\("escape-observed", "room", \{([^}]*)\}/.exec(String(roomFxAutomation.scriptSource));
+    expect(value,"Room Systems no longer writes the observed room").not.toBeNull();
+    const fields=String(value?.[1]);
+    expect(fields).toContain("unreached");
+    expect(fields).not.toContain("Date.now()");
+    expect(gameMasterAutomation.scriptSource).toContain("payload.unreached");
+  });
+
+  // Current observed physical facts use Shared State while operator requests remain
+  // domain events, so Game Master cannot trigger itself through its own look requests.
+  //
+  // Note what this covers now: the loop below compares an emitted topic against a
+  // trigger pattern, so it skips Game Master entirely — its trigger is no longer a
+  // topic. The equivalent check for a `shared-state` rule (writing into a bucket its own
+  // pattern matches) is in showcase-shared-state.test.ts, across every tab.
   it("never triggers an automation on the events it emits itself",()=>{
     const emitted=(source: string)=>[...String(source).matchAll(/events\.emit\("([^"]+)"/g)].map((m)=>m[1]);
     // An MQTT `+` matches one level and `#` the rest, so a trigger claims an event

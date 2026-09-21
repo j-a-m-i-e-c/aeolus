@@ -10,11 +10,12 @@ attachSeedProjectSource(wildlifeDetectionAutomation, predatorResponseAutomation,
 const rules=[wildlifeDetectionAutomation,predatorResponseAutomation,nestMonitoringAutomation];
 describe("Wildlife showcase architecture",()=>{
  it("has three first-class automations and no direct device reads in UIs",()=>{expect(rules).toHaveLength(3);for(const rule of rules)expect(rule.uiSource).not.toContain("aeolus.devices");});
- it("routes classification and physical station updates to Predator Response over Automation Events",()=>{
+ it("keeps classification discrete while retaining the one mixed station bridge",()=>{
    expect(wildlifeDetectionAutomation.scriptSource).toContain('events.emit("wildlife/detection/classified"');
    expect(wildlifeDetectionAutomation.scriptSource).toContain('events.emit("wildlife/detection/station"');
    expect(predatorResponseAutomation.triggerTopic).toBe("aeolus/events/+/wildlife/detection/#");
    expect(predatorResponseAutomation.scriptSource).toContain("/wildlife/detection/station");
+   expect(predatorResponseAutomation.scriptSource).not.toContain('events.emit("wildlife/response/status"');
  });
  // Each actuator has exactly one owner. Detection observes and classifies only;
  // the deterrent belongs to Predator Response and the den fan to Sugar Glider Den,

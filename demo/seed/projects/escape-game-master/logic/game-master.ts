@@ -93,25 +93,25 @@ export function projectRoomLook() {
     state.set("roomHaze", Boolean(fx && fx.state && fx.state.smoke));
 }
 /**
- * Reconcile a look request that Room Systems has finished acting on.
+ * Report the room Room Systems says it is now in.
  *
- * Publishing the request and reading the controller in the same execution could
+ * Publishing a look request and reading the controller in the same execution could
  * only ever see the room as it was *before* Room Systems commanded it, and nothing
  * ran this automation again afterwards — so a request stayed PENDING until an
- * unrelated puzzle event happened to re-run it. The observed-completion event is
- * what closes that loop.
+ * unrelated puzzle event happened to re-run it. The room's current condition being
+ * Shared State is what closes that loop: reaching a new look changes it, which wakes
+ * this automation.
  *
- * The event is treated as a trigger, not as truth: the scene still comes from the
- * controller's own telemetry, so a command that failed verification leaves the
- * console showing the request outstanding instead of adopting a look the room never
- * reached.
+ * The scene itself still comes from the controller's own telemetry via
+ * projectRoomLook(), already called for this execution. `unreached` is the only thing
+ * read from the payload, because a look the room could not reach is not visible in
+ * telemetry — the room simply stayed where it was.
  */
-export function projectRoomLookOutcome(payload: Record<string, unknown>) {
-    projectRoomLook();
-    const requested = String(payload.requested || state.get("requestedLook") || "puzzle");
-    setAction(Boolean(payload.verified)
-        ? "Room systems applied the " + requested + " look"
-        : "Room did not reach the " + requested + " look · request still outstanding");
+export function projectObservedRoom(payload: Record<string, unknown>) {
+    const unreached = payload.unreached ? String(payload.unreached) : "";
+    setAction(unreached
+        ? "Room did not reach the " + unreached + " look · request still outstanding"
+        : "Room systems applied the " + String(state.get("appliedLook") || "puzzle") + " look");
 }
 const HINTS: Record<string, string[]> = {
     Library: [
@@ -243,7 +243,8 @@ async function setIntercom(tx: boolean) {
  *
  * The physical room goes back through its own reset path: the props return to their
  * start positions, the puzzle network republishes, Puzzle Progress projects it and
- * reports `escape/observed/puzzles` back here — the same route a real solve takes. This
+ * writes `escape-observed/puzzles` Shared State back here, so the current physical
+ * puzzle snapshot wakes Game Master without turning state into an Automation Event. This
  * automation does not reach into the puzzle automation's state to do it.
  */
 export async function startGame() {

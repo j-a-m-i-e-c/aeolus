@@ -29,7 +29,7 @@ flowchart TB
         Engine[Automation engine]
         Logic[Isolated Logic runtime]
         Commands[Action and command execution]
-        State[Automation state · history · Data Store]
+        State[Automation state · Shared State · history · Collections]
     end
 
     subgraph Interface[Authoring and operator layer]
@@ -72,7 +72,7 @@ flowchart TB
 2. The event bus feeds the device registry, state history, WebSocket broadcasts and matching automations.
 3. Script automations execute inside isolated V8 contexts. Form rules use the same action layer without user-authored code.
 4. Device commands leave through the transport that owns the device.
-5. SQLite stores platform configuration, users, layouts, automations, automation state, history and Data Store records.
+5. SQLite stores platform configuration, users, layouts, automations, private Automation State, Shared Automation State, device history and historical Collection records.
 6. The dashboard reads through the REST API and receives live changes over WebSocket.
 7. Custom automation UI runs in a sandboxed iframe and communicates with the host through a restricted message-based SDK.
 
@@ -91,7 +91,7 @@ The Node.js backend owns:
 - MQTT ingestion;
 - connector lifecycle;
 - automation execution;
-- platform state and Data Store;
+- private Automation State, Shared Automation State, device history and historical Collections;
 - REST and WebSocket APIs;
 - metrics and structured logging.
 
@@ -103,7 +103,7 @@ The React application provides:
 - connector setup;
 - automation Logic and UI editors;
 - draggable dashboard panes;
-- Data Store exploration;
+- Shared Automation State and historical Collection exploration;
 - user and MQTT security administration;
 - logs, metrics and diagnostics.
 
@@ -119,7 +119,7 @@ The internal event bus decouples input transports from platform behaviour. Curre
 - raw MQTT traffic;
 - automation execution and automation state;
 - WebSocket state changes;
-- Data Store writes and collection deletion.
+- Shared State changes, historical Collection writes and collection deletion.
 
 An MQTT device and a Hue light enter through different adapters, but both become devices and events inside the same platform model.
 

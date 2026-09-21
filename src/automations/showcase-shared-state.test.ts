@@ -24,6 +24,7 @@
 
 import { describe, expect, it } from "vitest";
 import { readSeedProjectSource } from "../__test-helpers__/seed-project-source.js";
+import { tabModules } from "../../demo/seed/tabs/index.mjs";
 import { bunkerOverviewAutomation } from "../../demo/seed/tabs/off-grid-bunker/overview.mjs";
 import { mineOverviewAutomation } from "../../demo/seed/tabs/underground-mining/mine-overview.mjs";
 import { missionOverviewAutomation } from "../../demo/seed/tabs/research-vessel/mission-overview.mjs";
@@ -33,6 +34,10 @@ interface OverviewManifest {
   triggerType?: string;
   triggerTopic?: string;
   projectDir: string;
+}
+
+interface SeedTabModule {
+  automations?: OverviewManifest[];
 }
 
 /** One domain: the subsystems that report, and the overview that composes them. */
@@ -192,6 +197,56 @@ describe("showcase information model (ADR-0016)", () => {
         expect(domain.overview.triggerTopic).not.toContain("aeolus/events");
       }
     });
+  });
+
+  describe("a shared-state rule is never woken by its own write", () => {
+    // The event-side version of this invariant lives in escape-room-architecture.test.ts,
+    // where a trigger and an emitted topic can be compared as strings. It cannot see the
+    // shared-state form of the same hazard, and skips any rule whose trigger is not an
+    // `aeolus/events/...` topic — which is now every rule checked here. The loop looks
+    // different too: a `<bucket>/<key>` pattern that matches a bucket the rule writes
+    // itself. Nothing would break loudly; the causal-depth ceiling would absorb it
+    // sixteen executions later, having run the rule sixteen times per change.
+    //
+    // Enumerated from the tab registry rather than from a list in this file, so a new
+    // shared-state automation on any tab is covered the moment it is declared.
+    const sharedStateRules = (tabModules as SeedTabModule[])
+      .flatMap((module) => module.automations ?? [])
+      .filter((automation) => automation.triggerType === "shared-state");
+
+    // A floor, not an exact count: unlike the eleven producers above, the number is not
+    // the claim — it only proves the enumeration still finds the rules, so a refactor
+    // that empties it fails here instead of passing vacuously. The four are the three
+    // domain overviews and Game Master.
+    it("finds every shared-state automation the showcase declares", () => {
+      expect(sharedStateRules.length).toBeGreaterThanOrEqual(4);
+    });
+
+    it.each(sharedStateRules.map((rule) => [rule.key, rule] as const))(
+      "%s writes no bucket its own trigger pattern matches",
+      (_key, rule) => {
+        // A pattern is at most `<bucket>/<key>`, so the first segment decides which
+        // buckets wake the rule: a literal name, `+` (any single bucket) or `#` (all).
+        const first = String(rule.triggerTopic).split("/")[0];
+        const wakesOnBucket = (bucket: string) =>
+          first === "#" || first === "+" || first === bucket;
+
+        const logic = readSeedProjectSource(rule.projectDir).scriptSource;
+        // Today every one of these rules is a pure reader, so the loop below is empty by
+        // design — this is a guard against a future write, not a description of one. That
+        // makes it worth proving the source was actually read: a `projectDir` that
+        // resolved to nothing would satisfy the loop without checking anything.
+        expect(logic.length, `${rule.key} has no readable Logic source`).toBeGreaterThan(0);
+
+        for (const match of logic.matchAll(/shared\.set\(\s*["']([^"']+)["']/g)) {
+          const bucket = match[1]!;
+          expect(
+            wakesOnBucket(bucket),
+            `${rule.key} writes "${bucket}" and is triggered by "${rule.triggerTopic}"`,
+          ).toBe(false);
+        }
+      },
+    );
   });
 
   describe("Shared State is not history", () => {

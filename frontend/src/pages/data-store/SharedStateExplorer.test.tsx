@@ -38,7 +38,8 @@ describe("SharedStateExplorer", () => {
     // The distinction ADR-0016 exists to make. Without it the view reads as a
     // second kind of storage rather than a different kind of fact.
     render(<SharedStateExplorer />);
-    expect(screen.getByText(/latest value only — it is not a history/i)).toBeInTheDocument();
+    expect(screen.getByText(/latest value only; it is not a history/i)).toBeInTheDocument();
+    expect(screen.getByText(/only to automations allowed to use global Shared State/i)).toBeInTheDocument();
     expect(screen.getByText(/survive restarts/i)).toBeInTheDocument();
   });
 

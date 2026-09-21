@@ -81,7 +81,7 @@ export function projectEnergyTelemetry(context: EventContext): EnergySnapshot {
     state.set("solarMarginKw", headroomBeforeCharger);
     return { soc, solarKw, loadKw, chargerKw, allowed, chargerOn: chargerIsOn, pumpActive, netKw, headroomBeforeCharger };
 }
-export function publishEnergyPolicy(snapshot: EnergySnapshot) {
+export function projectEnergyPolicy(snapshot: EnergySnapshot) {
     const mode = !snapshot.allowed
         ? "reserve-protection"
         : snapshot.pumpActive && !snapshot.chargerOn
@@ -112,13 +112,6 @@ export function publishEnergyPolicy(snapshot: EnergySnapshot) {
     else if (previousAllowed === undefined) {
         setAction("Energy policy online · priorities: essential > water > charging");
     }
-    events.emit("farm/energy/permission", {
-        allowed: snapshot.allowed,
-        soc: isNaN(snapshot.soc) ? null : snapshot.soc,
-        solarKw: isNaN(snapshot.solarKw) ? null : snapshot.solarKw,
-        loadKw: isNaN(snapshot.loadKw) ? null : snapshot.loadKw,
-        mode,
-    });
 }
 export async function reconcileOpportunityLoad(snapshot: EnergySnapshot) {
     const automatic = Boolean(state.get("autoOpportunity"));

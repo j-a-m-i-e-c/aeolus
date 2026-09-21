@@ -69,16 +69,6 @@ export function projectStationSummary(payload: Record<string, unknown>) {
     }
 }
 
-export function publishResponseStatus() {
-    events.emit("wildlife/response/status", {
-        armed: Boolean(state.get("armed")),
-        activeUntil: Number(state.get("activeUntil") || 0),
-        lastSpecies: String(state.get("lastSpecies") || "none"),
-        responsesToday: Number(state.get("responsesToday") || 3),
-        lastOutcome: String(state.get("lastOutcome") || "idle"),
-        lastVerifiedAt: Number(state.get("lastVerifiedAt") || 0),
-    });
-}
 export async function stopDeterrent() {
     const deterrent = byTopic("switch/wildlife/deterrent/state");
     if (!deterrent)
@@ -112,7 +102,6 @@ export async function stopDeterrent() {
         state.set("lastOutcome", "Deterrent stop not verified");
         setAction("Deterrent stop not verified: " + String(result.error || result.lifecycleState || "unknown"));
     }
-    publishResponseStatus();
 }
 export async function handlePredatorOperatorEvent(event: string | undefined) {
     if (event === "toggle-armed") {
@@ -121,7 +110,6 @@ export async function handlePredatorOperatorEvent(event: string | undefined) {
         if (!next)
             await stopDeterrent();
         setAction(next ? "Predator response armed" : "Predator response disarmed");
-        publishResponseStatus();
     }
     else if (event === "stop-deterrent") {
         await stopDeterrent();
@@ -148,20 +136,17 @@ export async function applyPredatorPolicy(classification: {
     if (classification.category !== "predator") {
         state.set("lastOutcome", classification.label + " classified native · no actuation");
         setAction(classification.label + " ignored by predator policy · native fauna");
-        publishResponseStatus();
         return;
     }
     if (!Boolean(state.get("armed"))) {
         state.set("lastOutcome", classification.label + " detected while response disarmed");
         setAction(classification.label + " detected · response disarmed");
-        publishResponseStatus();
         return;
     }
     const deterrent = byTopic("switch/wildlife/deterrent/state");
     if (!deterrent) {
         state.set("lastOutcome", "Predator detected · deterrent unavailable");
         setAction("Predator detected · deterrent unavailable");
-        publishResponseStatus();
         return;
     }
     const pulseMs = 6200;
@@ -203,5 +188,4 @@ export async function applyPredatorPolicy(classification: {
         state.set("lastOutcome", "Command failed verification");
         setAction("Deterrent command not verified: " + String(result.error || result.lifecycleState || "unknown"));
     }
-    publishResponseStatus();
 }

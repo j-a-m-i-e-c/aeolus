@@ -239,6 +239,9 @@ describe("Agriculture demo UI projection contract", () => {
   it("Site Energy explicitly gives water transfer priority over opportunity charging", () => {
     expect(energyAutomation.scriptSource).toContain("water transfer given priority");
     expect(energyAutomation.uiSource).toContain("essential loads → water transfer → opportunity charging");
+    // The policy is private/current state for this pane. The old permission event had
+    // no subscriber and only polluted the broker.
+    expect(energyAutomation.scriptSource).not.toContain('events.emit("farm/energy/permission"');
   });
 
   it.each(commandAutomations.map((a) => [a.name, a] as const))(

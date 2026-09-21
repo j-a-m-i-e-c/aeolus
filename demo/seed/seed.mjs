@@ -8,11 +8,11 @@
  * domain-agnostic without forcing every use case into the same UI shape.
  *
  * Each tab lives in its own module under demo/seed/tabs/. This orchestrator
- * wires them together: reconcile → data store → automations → devices → layout.
+ * wires them together: reconcile → data/history + shared state → automations → devices → layout.
  *
  * Rerunnable, and scoped to its own fixture set. It reclaims what a previous run
- * created via a ledger in the Data Store and leaves automations, tabs, collections
- * and buckets you authored alone, so seeding again is not a reason to wipe a
+ * created via a Shared State ledger and leaves resources outside the showcase-owned
+ * namespaces alone, so seeding again is not a reason to wipe a
  * database (Req §12.1).
  *
  * Usage:
@@ -105,10 +105,10 @@ if (WANT_PUBLIC_DEMO) {
   console.log("  ✓ Backend confirms public-demo mode is live");
 }
 
-// 1. Enable the Data Store.
+// 1. Enable historical Collections.
 //
-// First, because the showcase ownership ledger lives in it and step 2 cannot reconcile
-// without reading that. Enabling is idempotent.
+// Shared State and the ownership ledger are already available. Collections are enabled
+// separately because the showcase also seeds bounded historical fixtures.
 console.log("\n1. Preparing Data Store...");
 await enableDataStore(api);
 
@@ -133,8 +133,8 @@ await reconcileShowcaseAutomations(api, allAutomations);
 // Pi. With the previous showcase automations reclaimed in step 2 and the new ones not
 // yet created, nothing is registered that could auto-create anything.
 //
-// Each collection and bucket resets only itself, so a reseed replaces the showcase
-// fixture set without touching collections an operator created.
+// Each declared Collection and showcase-owned Shared State bucket resets only its own
+// namespace, so a reseed replaces the fixture set without touching unrelated resources.
 console.log("\n3. Seeding Data Store collections...");
 for (const mod of tabModules) {
   for (const collection of mod.dataStore || []) {
@@ -144,8 +144,8 @@ for (const mod of tabModules) {
 
 // Shared State is global by design — no tab owns a bucket (ADR-0016) — so these
 // fixtures are declared globally rather than as tab-owned state. They are illustrative;
-// the showcase's real coordination state is the `*-summary` buckets the subsystem
-// automations write at runtime, plus the seeder's own ledger.
+// the showcase's real coordination state is written at runtime by the automations that
+// own it — the `*-summary` buckets and `escape-observed` — plus the seeder's own ledger.
 console.log("\n3b. Seeding Shared State...");
 for (const bucket of sharedStateBuckets) {
   await seedSharedStateBucket(api, bucket);

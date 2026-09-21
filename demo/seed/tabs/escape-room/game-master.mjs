@@ -2,7 +2,8 @@
 export const gameMasterAutomation = {
   "key": "escape-game-master",
   "name": "Game Master",
-  "triggerTopic": "aeolus/events/+/escape/observed/#",
+  "triggerType": "shared-state",
+  "triggerTopic": "escape-observed/#",
   "demoAccess": {
     "fireEvents": [
       "start-game",

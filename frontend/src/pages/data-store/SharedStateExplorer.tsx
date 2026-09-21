@@ -69,10 +69,11 @@ export function SharedStateExplorer() {
         <Share2 size={13} className="text-[#3BA4FF]" /> Shared Automation State
       </div>
       <p className="text-xs leading-relaxed text-[#6B7785]">
-        Small current values that automations intentionally share with each other, grouped
-        into buckets. Unlike an automation's own private state, anything here is readable by
-        every automation. Values survive restarts, and an automation can be triggered when
-        one changes. This holds the latest value only — it is not a history.
+        Small current values that unrestricted automations intentionally share with each other,
+        grouped into buckets. Unlike an automation's own private state, these values are available
+        only to automations allowed to use global Shared State. Values survive restarts, and an
+        automation can be triggered when one changes. This holds the latest value only; it is not
+        a history.
       </p>
     </div>
   );

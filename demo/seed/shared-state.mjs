@@ -6,10 +6,12 @@
 // fake owning tab for them.
 //
 // These particular buckets are illustrative: they show an operator what Shared
-// State looks like in the UI. The showcase's real coordination state lives in two
-// other places, both of them also Shared State: the subsystem summaries the
-// overview automations compose from (`bunker-summary`, `mine-summary`,
-// `vessel-summary`), and the seeder's own ledger (`_showcase:seed-ledger`).
+// State looks like in the UI. The showcase's real coordination state is written at
+// runtime and is not declared here: the subsystem summaries the overview automations
+// compose from (`bunker-summary`, `mine-summary`, `vessel-summary`), the physical
+// facts Game Master reads (`escape-observed`), and the seeder's own ledger
+// (`_showcase:seed-ledger`). Undeclared means a reseed leaves those buckets alone —
+// the automations that own them write them again as soon as the room reports.
 //
 // What does NOT belong here is history. Timestamped observations are Data Store
 // Collections, which accumulate and are separately bounded by retention limits.

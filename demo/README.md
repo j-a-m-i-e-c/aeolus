@@ -107,11 +107,11 @@ The seeder owns exactly what it declares and nothing else:
 
 | Resource | How a rerun reclaims it | Yours survives because |
 |---|---|---|
-| Collections, buckets | Each declared name resets only itself | The seeder never enumerates the store to decide what to remove |
+| Collections, showcase-owned Shared State buckets | Each declared name resets only its own namespace | Resources outside those declared namespaces are never selected for removal |
 | Automations | By id, recorded in a ledger when created | An id the ledger does not name is not touched |
 | Tabs, panes | Declared tab ids are replaced; ledger-known tabs it no longer declares are retired | A tab id in neither set is passed through |
 
-**The ledger.** Automations get server-generated ids and carry no ownership column, so nothing on the row connects it back to the `farm-water` key in `seed/tabs/`. The seeder therefore records `module key → rule id` in a Data Store bucket named `_showcase:seed-ledger` as each automation is created. It is visible in the Data Store UI next to the platform's own `_metrics:*` collections, so you can read what the showcase claims.
+**The ledger.** Automations get server-generated ids and carry no ownership column, so nothing on the row connects it back to the `farm-water` key in `seed/tabs/`. The seeder therefore records `module key → rule id` in the Shared Automation State bucket `_showcase:seed-ledger` as each automation is created. It is visible in the Shared Automation State explorer, so you can read exactly what the showcase claims without enabling historical Collections.
 
 **One-time adoption.** On an install seeded before the ledger existed there is nothing but the display name to go on, so the first ledger-aware reseed adopts automations whose name exactly matches one the showcase declares, and prints each one. After that, matching is by id only. The single exposure is an automation of yours named exactly e.g. `Water Management` on a pre-ledger install.
 

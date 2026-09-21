@@ -5,7 +5,7 @@ import {
   handleEnergyOperatorEvent,
   initialiseEnergyState,
   projectEnergyTelemetry,
-  publishEnergyPolicy,
+  projectEnergyPolicy,
   reconcileOpportunityLoad,
 } from "./energy-control";
 
@@ -23,7 +23,7 @@ export default async function run(context: EventContext) {
   if (topic !== "sensor/farm/energy/battery") return;
 
   const energy = projectEnergyTelemetry(context);
-  publishEnergyPolicy(energy);
+  projectEnergyPolicy(energy);
 
   // Charger-bank automation is intentionally lowest priority.
   await reconcileOpportunityLoad(energy);

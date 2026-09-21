@@ -483,20 +483,23 @@ Each automation has a private key/value namespace used for Logic/UI communicatio
 
 Selected device values can be retained for diagnosis and trend visualisation.
 
-### Data Store
+### Shared Automation State and Data Store Collections
 
-The Data Store provides:
+Aeolus separates current shared truth from historical records.
 
-* timestamped collections
+Shared Automation State provides small durable current values that unrestricted automations deliberately share. It is always available, survives restarts, can wake matching automations when a value changes, and keeps only the latest value for each bucket/key. It is internal to Aeolus and does not travel over MQTT.
+
+Historical Data Store Collections provide:
+
+* timestamped records
 * tag-based filtering
 * time-window queries
 * basic aggregation (`sum`, `avg`, `min`, `max`, `count`)
-* durable current values shared between automations (Shared State, separate from history)
 * retention, collection and record limits.
 
-It is disabled until storage limits are configured, reducing the risk of silently filling a Raspberry Pi storage device.
+Historical Collections are disabled until storage limits are configured, reducing the risk of silently filling a Raspberry Pi storage device. Shared Automation State does not depend on that switch.
 
-The Data Store is not intended to replace a specialised analytical database at large scale. It gives edge applications enough local persistence to calculate trends, retain operational context and continue working offline.
+Collections are not intended to replace a specialised analytical database at large scale. They give edge applications enough local history to calculate trends, retain operational context and continue working offline.
 
 ## Dashboard as an operating environment
 

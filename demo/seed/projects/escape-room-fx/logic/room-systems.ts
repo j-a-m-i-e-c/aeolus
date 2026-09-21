@@ -63,19 +63,21 @@ export async function setRoomScene(scene: string, smoke: boolean, label: string)
     else {
         setAction("Room systems command not verified");
     }
-    // Report that the observed command has settled.
+    // The room's current physical condition, for whoever needs to know what the room is
+    // actually doing. This automation owns the controller; the requester only reads.
     //
-    // Whoever asked for a look has no other way to learn the request finished: this
-    // automation owns the controller, and the requester only reads its telemetry.
-    // Without this event a request sat unresolved until something unrelated happened
-    // to run the requesting automation again. The payload deliberately carries the
-    // scene the controller is *now* in rather than the one that was asked for, so a
-    // command that was never verified reports the room it left behind.
-    events.emit("escape/observed/room-look", {
+    // Everything here is a condition rather than an occurrence, which is what lets it be
+    // Shared State honestly. `scene` and `smoke` are the room the controller is *now* in,
+    // never the one that was asked for. `unreached` is the look it was last asked for and
+    // could not reach, or null when the room is where it was asked to be — so a request
+    // that failed stays legible to the requester for as long as it is still true, without
+    // the value having to pretend a retry is a new fact. The attempts themselves are
+    // occurrences, and they stay here: `lastAction` and `lastCommand` record each one with
+    // its evidence, on the pane belonging to the automation that issued it.
+    shared.set("escape-observed", "room", {
         scene: String(state.get("scene") || "puzzle"),
         smoke: Boolean(state.get("smoke")),
-        requested: scene,
-        verified: Boolean(result.success),
+        unreached: result.success ? null : scene,
     });
 }
 export async function toggleHaze() {

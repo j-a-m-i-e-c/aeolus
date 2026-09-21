@@ -77,7 +77,8 @@ browser; auth cookie rotation needs real HTTP).
 | HTTP API → auth → Zod → SQLite | | | ✓ | |
 | Demo golden/checksum/reset/deploy invariants | ✓ | | ✓ | |
 | Shared outbound HTTP / SSRF policy | ✓ | | | |
-| Data Store (write/query/retention/KV) | ✓ | | ✓ | |
+| Shared Automation State (durable current values/reactive triggers) | ✓ | | ✓ | |
+| Data Store Collections (write/query/retention) | ✓ | | ✓ | |
 | Metrics sampling and aggregation | | | ✓ | |
 | Connector lifecycle (register/restore/discovery) | ✓ | | | ✓ |
 | WebSocket real-time delivery | | | | ✓ |
