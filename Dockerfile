@@ -1,4 +1,4 @@
-FROM node:24.20.0-slim AS builder
+FROM node:26.8.1-slim AS builder
 WORKDIR /app
 
 # Build info passed as build args instead of copying .git
@@ -19,7 +19,7 @@ RUN npm run build
 RUN npm pkg delete scripts.prepare && npm prune --omit=dev && npm cache clean --force
 
 # Production stage
-FROM node:24.20.0-slim AS production
+FROM node:26.8.1-slim AS production
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends wget ca-certificates gosu \
