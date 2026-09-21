@@ -155,10 +155,15 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
     const tab = state.tabs.find((t) => t.id === tabId);
     if (!tab || tab.pinned) return;
 
+    const remaining = state.tabs.filter((t) => t.id !== tabId);
+
     set({
-      tabs: state.tabs.filter((t) => t.id !== tabId),
+      tabs: remaining,
       panes: state.panes.filter((p) => p.tabId !== tabId),
-      activeTabId: state.activeTabId === tabId ? (state.tabs[0]?.id ?? null) : state.activeTabId,
+      // Fall back to the first REMAINING tab. Picking from the pre-delete list
+      // selected the tab just deleted whenever it happened to be first — masked
+      // today only because pinned system tabs sort ahead of deletable ones.
+      activeTabId: state.activeTabId === tabId ? (remaining[0]?.id ?? null) : state.activeTabId,
     });
     debouncedPersist(get);
   },
