@@ -9,11 +9,15 @@ vi.mock("../../logger.js", () => ({
 
 vi.mock("tplink-smarthome-api", () => ({
   default: {
-    Client: vi.fn().mockImplementation(() => ({
-      startDiscovery: vi.fn(),
-      stopDiscovery: vi.fn(),
-      on: vi.fn(),
-    })),
+    // Plain function, not an arrow: `new Client()` reaches the mock implementation
+    // through `Reflect.construct`, which an arrow function cannot serve.
+    Client: vi.fn().mockImplementation(function () {
+      return {
+        startDiscovery: vi.fn(),
+        stopDiscovery: vi.fn(),
+        on: vi.fn(),
+      };
+    }),
   },
 }));
 

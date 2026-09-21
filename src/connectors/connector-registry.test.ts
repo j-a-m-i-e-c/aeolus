@@ -1,8 +1,22 @@
 // src/connectors/connector-registry.test.ts — Unit tests for ConnectorRegistry
 
+import os from "node:os";
+import path from "node:path";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { ConnectorRegistry } from "./connector-registry.js";
 import type { ConnectorModule } from "./connector.interface.js";
+
+/**
+ * A fixture directory under the platform's real temp location.
+ *
+ * These cases used to hardcode `/tmp/...`, which on Windows is a drive-relative
+ * path: it resolves against the current drive rather than naming a root. Discovery
+ * imports the files it finds, and a specifier built from that path has no drive
+ * letter to carry, so the import fails for a reason that has nothing to do with the
+ * connector being tested — which is how "invalid exports" started reporting a failed
+ * import instead.
+ */
+const fixtureDir = (name: string) => path.join(os.tmpdir(), `aeolus-registry-test-${name}`);
 
 // Mock logger
 vi.mock("../logger.js", () => ({
@@ -150,10 +164,10 @@ describe("ConnectorRegistry", () => {
 
     it("should skip non-directory entries", async () => {
       const fs = await import("node:fs");
-      const tmpDir = "/tmp/aeolus-registry-test-files";
+      const tmpDir = fixtureDir("files");
       fs.mkdirSync(tmpDir, { recursive: true });
       // Create a file (not a directory)
-      fs.writeFileSync(`${tmpDir}/somefile.ts`, "export default {}");
+      fs.writeFileSync(path.join(tmpDir, "somefile.ts"), "export default {}");
       try {
         await registry.discoverFromDirectory(tmpDir);
         expect(registry.listAvailable()).toHaveLength(0);
@@ -164,10 +178,10 @@ describe("ConnectorRegistry", () => {
 
     it("should skip _template directory", async () => {
       const fs = await import("node:fs");
-      const tmpDir = "/tmp/aeolus-registry-test-template";
-      const templateDir = `${tmpDir}/_template`;
+      const tmpDir = fixtureDir("template");
+      const templateDir = path.join(tmpDir, "_template");
       fs.mkdirSync(templateDir, { recursive: true });
-      fs.writeFileSync(`${templateDir}/index.ts`, "export const metadata = { id: 'template' };");
+      fs.writeFileSync(path.join(templateDir, "index.ts"), "export const metadata = { id: 'template' };");
       try {
         await registry.discoverFromDirectory(tmpDir);
         expect(registry.listAvailable()).toHaveLength(0);
@@ -178,10 +192,10 @@ describe("ConnectorRegistry", () => {
 
     it("should skip directories starting with 'connector'", async () => {
       const fs = await import("node:fs");
-      const tmpDir = "/tmp/aeolus-registry-test-connector";
-      const connDir = `${tmpDir}/connector-utils`;
+      const tmpDir = fixtureDir("connector");
+      const connDir = path.join(tmpDir, "connector-utils");
       fs.mkdirSync(connDir, { recursive: true });
-      fs.writeFileSync(`${connDir}/index.ts`, "export const metadata = { id: 'utils' };");
+      fs.writeFileSync(path.join(connDir, "index.ts"), "export const metadata = { id: 'utils' };");
       try {
         await registry.discoverFromDirectory(tmpDir);
         expect(registry.listAvailable()).toHaveLength(0);
@@ -193,11 +207,11 @@ describe("ConnectorRegistry", () => {
     it("should warn when subdirectory has no index file", async () => {
       const fs = await import("node:fs");
       const logger = await import("../logger.js");
-      const tmpDir = "/tmp/aeolus-registry-test-noindex";
-      const subDir = `${tmpDir}/myconnector`;
+      const tmpDir = fixtureDir("noindex");
+      const subDir = path.join(tmpDir, "myconnector");
       fs.mkdirSync(subDir, { recursive: true });
       // No index.ts or index.js
-      fs.writeFileSync(`${subDir}/other.ts`, "export default {}");
+      fs.writeFileSync(path.join(subDir, "other.ts"), "export default {}");
       try {
         await registry.discoverFromDirectory(tmpDir);
         expect(logger.default.warn).toHaveBeenCalledWith(
@@ -213,11 +227,11 @@ describe("ConnectorRegistry", () => {
     it("should warn when module has invalid exports", async () => {
       const fs = await import("node:fs");
       const logger = await import("../logger.js");
-      const tmpDir = "/tmp/aeolus-registry-test-invalid";
-      const subDir = `${tmpDir}/badmod`;
+      const tmpDir = fixtureDir("invalid");
+      const subDir = path.join(tmpDir, "badmod");
       fs.mkdirSync(subDir, { recursive: true });
       // Create an index.ts that exports an invalid module (no metadata, no configSchema, no createConnector)
-      fs.writeFileSync(`${subDir}/index.ts`, "export const foo = 'bar';");
+      fs.writeFileSync(path.join(subDir, "index.ts"), "export const foo = 'bar';");
       try {
         await registry.discoverFromDirectory(tmpDir);
         expect(logger.default.warn).toHaveBeenCalledWith(

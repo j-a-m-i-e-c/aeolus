@@ -34,7 +34,11 @@ const fakeClient = new FakeClient();
 
 vi.mock("tplink-smarthome-api", () => ({
   default: {
-    Client: vi.fn().mockImplementation(() => fakeClient),
+    // Plain function, not an arrow: `new Client()` reaches the mock implementation
+    // through `Reflect.construct`, which an arrow function cannot serve.
+    Client: vi.fn().mockImplementation(function () {
+      return fakeClient;
+    }),
   },
 }));
 
