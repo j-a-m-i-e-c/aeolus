@@ -181,12 +181,18 @@ describe("WsServer — branch coverage", () => {
   });
 
   it("correctly handles short-lived token that expires while connected", async () => {
-    // Token expires in ~500ms - server should auto-close
+    // The token has to outlive the connection handshake and still expire inside the
+    // test budget. At 1s it raced the handshake: on a loaded machine (a full
+    // coverage run across every worker) the server closed the connection before
+    // `clientCount` was ever observed as 1, and the test failed on that reading
+    // rather than on the behaviour it is about. Several seconds is long enough for
+    // registration to win reliably and short enough to expire well inside the 10s
+    // timeout below.
     const jwt = await import("jsonwebtoken");
     const shortToken = jwt.default.sign(
       { userId: "admin-1", username: "admin", role: "admin", groupId: null },
       "test-ws-branch-secret",
-      { algorithm: "HS256", expiresIn: "1s" },
+      { algorithm: "HS256", expiresIn: "4s" },
     );
 
     const ws = authenticatedWebSocket(port, shortToken);
