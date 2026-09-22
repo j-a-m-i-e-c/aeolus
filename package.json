@@ -1,7 +1,7 @@
 {
   "name": "aeolus",
   "version": "0.1.0",
-  "description": "Local-first IoT automation platform",
+  "description": "Local-first edge automation platform for MQTT, physical devices, isolated TypeScript automation and custom operational UIs",
   "type": "module",
   "engines": {
     "node": ">=24.20.0 <25"
@@ -78,5 +78,23 @@
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.59.3",
     "vitest": "^5.0.1"
-  }
+  },
+  "private": true,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/j-a-m-i-e-c/aeolus.git"
+  },
+  "homepage": "https://aeolus.com.au",
+  "keywords": [
+    "edge-computing",
+    "iot",
+    "mqtt",
+    "raspberry-pi",
+    "automation",
+    "typescript",
+    "react",
+    "local-first",
+    "self-hosted"
+  ]
 }

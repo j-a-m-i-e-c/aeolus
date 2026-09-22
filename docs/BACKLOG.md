@@ -195,9 +195,6 @@ model, but should remain visible:
 - `/metrics` is deliberately open when `METRICS_TOKEN` is unset — fine on
   LAN-only installs; remotely reachable deployments should set a token or fail
   closed in production.
-- The Mosquitto reload sidecar installs `inotify-tools` via `apk add` at
-  container startup — bake it into a tiny pinned sidecar image for a
-  resilient/offline appliance instead of needing the Alpine repo at runtime.
 - The Mosquitto healthcheck probes anonymously, so it reports the broker
   unhealthy once managed provisioning switches it to `allow_anonymous false`.
   It is observability-only (the backend does not gate startup on it), but the
@@ -237,20 +234,12 @@ CA-validated code path itself is unreachable in tests — no fixture can chain t
 root whose private key Signify holds, so the modern-bridge branch is covered by
 reasoning and the legacy path only.
 
-### Production-composition command-path integration suite 🟠
-The remaining test blind spot: individual pieces are well covered, yet nothing
-exercised the real `src/index.ts` dependency graph, which is why the connector
-mismatches reached CI green. A production-composition integration suite that
-wires dependencies the same way `src/index.ts` does — proving authorized REST
-`toggle`/`brightness`/`off` reach the connector, MQTT publishes through the
-injected `MqttService`, out-of-scope actions are rejected before dispatch, and a
-scoped automation cannot fabricate a device id — is now owned by the
-**`connector-correctness-release-gates`** spec (Requirement 7), because the
-connector fixes there are the concrete example of why it is needed.
-
-The scoped `devices.actionAll()` tests and the completion-tier partial-update
-regression tests called for by the earlier release gates landed with those
-now-closed gates (see `git log`).
+### Coverage gates sit on the threshold, not above it 🟡
+Backend and frontend aggregate branch coverage are both at roughly 90.1% against
+a 90% floor. Because `release-validation.yml` runs the same coverage gate on a
+version tag, the next lightly tested module fails the release rather than a pull
+request. Either build headroom back into the aggregate or move the thresholds to
+per-directory floors that say something more specific than "90% overall".
 
 ### Adversarial end-to-end tests with a real non-admin user 📋
 Resource-level authorization, read-surface filtering, named-trigger

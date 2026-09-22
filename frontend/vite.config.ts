@@ -49,8 +49,8 @@ export default defineConfig({
         "src/vite-env.d.ts",
         "src/**/*.d.ts",
         "src/types/**",
-        // e2e territory — high-effort / low-jsdom-fit; exercised by Playwright, not
-        // unit tests.
+        // Browser/rendering-heavy support modules excluded from the aggregate threshold;
+        // critical behaviour is covered by focused tests and selected Playwright flows.
         "src/components/AutomationProjectEditor.tsx", // Monaco editor (multi-file project tree)
         "src/lib/monaco-setup.ts", // Monaco worker/env wiring
         "src/components/MetricSparkline.tsx", // SVG chart
@@ -58,9 +58,10 @@ export default defineConfig({
         "src/pages/data-store/TimeSeriesChart.tsx", // SVG chart
         "src/components/FlowDiagram.tsx", // node/edge flow diagram
         "src/components/panes/types.ts", // type-only module
-        // Complex interactive pages — exercised via Playwright e2e and manual testing.
-        // Their many event handlers (modals, forms, drag-and-drop) are not practical
-        // to unit-test in jsdom and provide minimal value over e2e coverage.
+        // Complex interactive pages are excluded from the aggregate threshold because
+        // jsdom is a poor fit for Monaco, drag-and-drop and browser-heavy workflows.
+        // Their logic is covered by focused component/unit tests where practical,
+        // with selected critical flows additionally exercised by Playwright.
         "src/components/SystemPage.tsx", // system diagnostics + Docker controls
         "src/components/ConnectorsPage.tsx", // multi-step setup wizards
         "src/components/AutomationsPage.tsx", // Monaco + script execution

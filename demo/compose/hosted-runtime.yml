@@ -178,7 +178,7 @@ services:
   # Provide the resulting tunnel token via CLOUDFLARE_TUNNEL_TOKEN.
   cloudflared:
     <<: *hardening
-    image: cloudflare/cloudflared:latest
+    image: cloudflare/cloudflared:2026.9.1
     container_name: aeolus-demo-cloudflared
     command: ["tunnel", "--no-autoupdate", "run"]
     environment:

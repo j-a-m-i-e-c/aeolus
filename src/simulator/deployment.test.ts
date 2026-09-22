@@ -90,6 +90,12 @@ describe("hardened public demo stack (demo/compose/hosted-runtime.yml)", () => {
     expect(simulator).not.toBe("");
   });
 
+  it("pins the Cloudflare Tunnel image instead of following latest", () => {
+    const tunnel = serviceBlock(publicDemoCompose, "cloudflared") ?? "";
+    expect(tunnel).toContain("cloudflare/cloudflared:2026.9.1");
+    expect(tunnel).not.toContain("cloudflare/cloudflared:latest");
+  });
+
   it("never uses host networking (bridge only — requirements §13, §21)", () => {
     expect(publicDemoCompose).not.toContain("network_mode: host");
   });

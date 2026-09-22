@@ -33,3 +33,5 @@ Aeolus follows semantic versioning for published releases. Until the first stabl
 * Raspberry Pi installs can pin `AEOLUS_REF` to a release tag or commit.
 * A repeatable MQTT load generator is available under `scripts/bench/` for Pi testing.
 * Release and multi architecture CI validation has been expanded.
+* Release-tag validation now repeats lint, coverage, broker-backed integration and Chromium sandbox-boundary gates before multi-architecture image validation.
+* Deployment pulls are fast-forward-only and the hosted Cloudflare Tunnel image is pinned instead of following `latest`.

@@ -6,7 +6,7 @@ The roadmap is organised by horizon rather than by every idea that has ever come
 
 ### Make the common command path boring and dependable
 
-Finish converging dashboard controls, custom UI, REST calls and automation actions on the same aware of results command service.
+Finish converging dashboard controls, custom UI, REST calls and automation actions on the same result-aware command service.
 
 The goal is consistent behaviour regardless of where a command starts:
 

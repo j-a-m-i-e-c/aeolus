@@ -23,19 +23,42 @@ jobs:
           echo "tag=$tag package.json=$pkg"
           test "$tag" = "$pkg"
       - run: npm ci
+      - name: Lint
+        run: npx eslint . --max-warnings 0
       - run: npx tsc --noEmit
-      - run: npx vitest run
+      - name: Backend tests with coverage gate
+        run: npx vitest run --coverage
       - run: npm run build
       - name: Frontend checks
         working-directory: frontend
         run: |
           npm ci
           npx tsc --noEmit -p tsconfig.json
-          npm test
+          npm run test:coverage
           npm run build
+      - name: Pre-pull MQTT broker image
+        run: docker pull eclipse-mosquitto:2
+      - name: Broker-backed integration tests
+        run: npx vitest run __integration__ --no-file-parallelism
+      - name: Install Chromium for sandbox boundary
+        run: npx playwright install --with-deps chromium
+      - name: Start release-candidate stack
+        run: docker compose up -d --build
+      - name: Verify custom UI iframe boundary in Chromium
+        run: npx playwright test e2e/sandbox-boundary.spec.ts --project=chromium
+      - name: Container logs
+        if: failure()
+        run: docker compose logs --no-color
+      - name: Tear down release-candidate stack
+        if: always()
+        run: docker compose down -v
       - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
       - name: Validate release images for amd64 and arm64
         run: |
-          docker buildx build --platform linux/amd64,linux/arm64 --output=type=cacheonly .
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            --build-arg BUILD_COMMIT=$(git rev-parse --short HEAD) \
+            --build-arg BUILD_DATE=$(git log -1 --format=%cI HEAD) \
+            --output=type=cacheonly .
           docker buildx build --platform linux/amd64,linux/arm64 --output=type=cacheonly ./frontend

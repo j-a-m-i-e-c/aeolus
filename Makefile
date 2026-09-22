@@ -28,7 +28,8 @@ HOSTED_DEMO_BUILD_COMPOSE := --project-directory . -f demo/compose/hosted-runtim
 # not on `down`. They are also resolved after `git pull`, so the stamp records the
 # commit actually being deployed rather than the one that was checked out before.
 deploy: ## Pull latest, rebuild, and deploy the BASE stack (run on Pi)
-	git pull && \
+	@test -z "$$(git status --porcelain)" || { echo "Refusing deploy: working tree has local changes"; exit 1; }
+	git pull --ff-only && \
 	docker compose down && \
 	BUILD_COMMIT=$$(git rev-parse --short HEAD) BUILD_DATE=$$(git log -1 --format=%cI HEAD) \
 	docker compose up -d --build && \
