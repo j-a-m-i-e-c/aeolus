@@ -55,8 +55,14 @@ export const toggleAutomationBodySchema = z.object({
   enabled: z.boolean(),
 });
 
+/**
+ * Maximum automation state key length. Shared so the atomic `stateSet` fire
+ * primitive enforces the same bound as `PUT /api/automations/:id/state`.
+ */
+export const AUTOMATION_STATE_KEY_MAX_LENGTH = 200;
+
 export const automationStateBodySchema = z.object({
-  key: z.string().min(1).max(200),
+  key: z.string().min(1).max(AUTOMATION_STATE_KEY_MAX_LENGTH),
   value: z.unknown(),
 });
 

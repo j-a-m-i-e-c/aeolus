@@ -51,20 +51,13 @@ export function sendStateUpdate(ruleId: string, key: string, value: unknown): vo
  * topic "ui/{ruleId}/state-set" and state { key, value }.
  */
 export function sendStateUpdateAndFire(ruleId: string, key: string, value: unknown): void {
-  // 1. Persist to state store
-  sendStateUpdate(ruleId, key, value);
-
-  // 2. Fire the Logic tab with context override
+  // The backend persists and emits this constrained state-set atomically. This
+  // avoids granting ordinary interact users the old arbitrary context override.
   authFetch(`${API_URL}/api/automations/${ruleId}/fire`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      context: {
-        topic: `ui/${ruleId}/state-set`,
-        state: { key, value },
-      },
-    }),
+    body: JSON.stringify({ stateSet: { key, value } }),
   }).catch(() => {
-    // Silently degrade
+    // Silently degrade — WebSocket state sync remains authoritative.
   });
 }

@@ -166,17 +166,6 @@ trigger-button pane can still be visible/clickable to a non-admin with
 non-admins, or migrate it toward resource-bound automation firing so the button
 maps to something the user is actually allowed to do.
 
-### Manual `/fire` accepts arbitrary full context from any interact user 🟡
-`POST /api/automations/:id/fire` lets any user with `interact` supply a full
-`{ context: { topic, state } }` override, so an operator can drive an
-admin-authored automation's Logic with synthetic topics/states its UI designer
-never intended. Restrict arbitrary `context` override to admins; give ordinary
-UI clients bounded primitives instead (an `eventName` + bounded payload, and a
-server-generated `state-set` event) so `interact` means "operate the exposed
-interface", not "fabricate arbitrary event contexts". Note the frontend
-`saveAndFire` currently depends on the full-context mode, so this needs a
-coordinated frontend change.
-
 ### Data Store storage accounting is approximate 🟡
 `DataStore.write()` estimates storage as `recordCount * 200 bytes` rather than
 actual serialized size, and ignores shared-bucket size, so large JSON records

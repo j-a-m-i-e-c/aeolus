@@ -770,6 +770,7 @@ describe("automation.routes — decision paths", () => {
 
   describe("POST /:id/fire", () => {
     beforeEach(() => {
+      user = { userId: "admin-1", role: "admin" };
       engine.getRule = vi.fn(() => ({ id: "rule-form", name: "Stored Name", topic: "sensor/stored" }) as any);
     });
 
@@ -791,12 +792,10 @@ describe("automation.routes — decision paths", () => {
       expect(engine.fire).toHaveBeenCalledWith("rule-form", expect.objectContaining({ state: {} }));
     });
 
-    it("ignores a context that names no topic and falls back to a manual fire", async () => {
-      await request(buildApp(), "POST", "/api/automations/rule-form/fire", { context: { state: { a: 1 } } });
-      expect(engine.fire).toHaveBeenCalledWith(
-        "rule-form",
-        expect.objectContaining({ topic: "sensor/stored", deviceId: "manual-fire" }),
-      );
+    it("rejects even an admin context override when no topic is supplied", async () => {
+      const res = await request(buildApp(), "POST", "/api/automations/rule-form/fire", { context: { state: { a: 1 } } });
+      expect(res.status).toBe(400);
+      expect(engine.fire).not.toHaveBeenCalled();
     });
 
     it("surfaces the failure reason when the execution did not succeed", async () => {

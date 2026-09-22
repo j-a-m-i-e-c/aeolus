@@ -91,6 +91,8 @@ or `TIMED_OUT` (504).
 | `PUT` | `/api/automations/:id/state` | Save a state value |
 | `DELETE` | `/api/automations/:id/state/:key` | Delete a state value |
 
+`POST /api/automations/:id/fire` exposes bounded interaction forms to ordinary `interact` users: `{ "eventName": "...", ...payload }` for a named UI event, or `{ "stateSet": { "key": "...", "value": ... } }` for an atomic persist-and-fire operation. `stateSet` applies the same key bound as `PUT /api/automations/:id/state`. Supplying an arbitrary `{ "context": { "topic": "...", "state": ... } }` envelope, or firing with no named UI event, is an admin-only authoring/debug capability.
+
 ## Command history
 
 Durable history for every verified physical command (see

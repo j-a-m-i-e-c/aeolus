@@ -158,6 +158,21 @@ describe("Public demo mode (integration)", () => {
         .send({ eventName: "pause" });
       expect(res.status).toBe(200);
     });
+
+    it("persist-and-fire a permitted key through the atomic stateSet primitive", async () => {
+      // This is the body `aeolus.saveAndFire()` sends. It must work in the demo,
+      // and it must land in the store.
+      const res = await request(app)
+        .post(`/api/automations/${ruleId}/fire`)
+        .set("Authorization", `Bearer ${demoToken()}`)
+        .send({ stateSet: { key: "master", value: "engaged" } });
+      expect(res.status).toBe(200);
+
+      const state = await request(app)
+        .get(`/api/automations/${ruleId}/state`)
+        .set("Authorization", `Bearer ${demoToken()}`);
+      expect(state.body.master).toBe("engaged");
+    });
   });
 
   // ── Read-only admin visibility (requirements §7.3) ──
@@ -281,6 +296,28 @@ describe("Public demo mode (integration)", () => {
         .set("Authorization", `Bearer ${demoToken()}`)
         .send({ context: { topic: "arbitrary/topic", deviceId: "x", state: {} } });
       expect(res.status).toBe(403);
+    });
+
+    it("reach a non-declared state key through the stateSet fire form", async () => {
+      // POST /fire must not be a looser door into the store than PUT /state.
+      const res = await request(app)
+        .post(`/api/automations/${ruleId}/fire`)
+        .set("Authorization", `Bearer ${demoToken()}`)
+        .send({ stateSet: { key: "secret", value: 1 } });
+      expect(res.status).toBe(403);
+
+      const state = await request(app)
+        .get(`/api/automations/${ruleId}/state`)
+        .set("Authorization", `Bearer ${demoToken()}`);
+      expect(state.body).not.toHaveProperty("secret");
+    });
+
+    it("write an oversized value through the stateSet fire form", async () => {
+      const res = await request(app)
+        .post(`/api/automations/${ruleId}/fire`)
+        .set("Authorization", `Bearer ${demoToken()}`)
+        .send({ stateSet: { key: "master", value: "x".repeat(9000) } });
+      expect(res.status).toBe(400);
     });
 
     it("set its own demo-access allowlist (admin-only, not allowlisted)", async () => {

@@ -60,17 +60,13 @@ describe("sendStateUpdate / sendStateUpdateAndFire", () => {
     expect(() => sendStateUpdate("r1", "k", "v")).not.toThrow();
   });
 
-  it("sendStateUpdateAndFire persists and then fires the rule", () => {
+  it("sendStateUpdateAndFire uses the constrained atomic stateSet fire primitive", () => {
     sendStateUpdateAndFire("r1", "k", 5);
 
-    expect(mockAuthFetch).toHaveBeenCalledTimes(2);
-    const urls = mockAuthFetch.mock.calls.map((c) => c[0]);
-    expect(urls).toContain("http://test.local:3001/api/automations/r1/state");
-    expect(urls).toContain("http://test.local:3001/api/automations/r1/fire");
-
-    const fireCall = mockAuthFetch.mock.calls.find((c) => String(c[0]).endsWith("/fire"));
-    const fireBody = JSON.parse(fireCall![1]?.body as string);
-    expect(fireBody.context.topic).toBe("ui/r1/state-set");
-    expect(fireBody.context.state).toEqual({ key: "k", value: 5 });
+    expect(mockAuthFetch).toHaveBeenCalledTimes(1);
+    const [url, init] = mockAuthFetch.mock.calls[0];
+    expect(url).toBe("http://test.local:3001/api/automations/r1/fire");
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(init?.body as string)).toEqual({ stateSet: { key: "k", value: 5 } });
   });
 });

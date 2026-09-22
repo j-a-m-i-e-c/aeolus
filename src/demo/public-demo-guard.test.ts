@@ -77,4 +77,23 @@ describe("createPublicDemoGuard", () => {
     expect(() => guard()(bad, {} as never, next)).toThrow();
     expect(next).not.toHaveBeenCalled();
   });
+
+  it("allows the atomic stateSet fire used by saveAndFire()", () => {
+    const next = vi.fn();
+    const body = { stateSet: { key: "master", value: true } };
+    guard()(req("POST", "/api/automations/rule-1/fire", demoUser, body), {} as never, next);
+    expect(next).toHaveBeenCalledOnce();
+  });
+
+  it("resolves the rule id from the path so a stateSet fire is allowlist-checked", () => {
+    // Proves the matcher-extracted :id reaches the writable-key allowlist: this
+    // guard runs before Express populates req.params for the matched route.
+    const getDemoRuleAccess = vi.fn().mockReturnValue({ writableStateKeys: ["master"] });
+    const next = vi.fn();
+    const bad = req("POST", "/api/automations/rule-7/fire", demoUser, { stateSet: { key: "secret", value: 1 } });
+    bad.params = {}; // Express has not matched a route yet at this point.
+    expect(() => guard(true, getDemoRuleAccess)(bad, {} as never, next)).toThrow();
+    expect(getDemoRuleAccess).toHaveBeenCalledWith("rule-7");
+    expect(next).not.toHaveBeenCalled();
+  });
 });

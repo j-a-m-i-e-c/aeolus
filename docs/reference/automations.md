@@ -165,7 +165,7 @@ await aeolus.fire("target-changed", { value: 25 });
 
 This runs the Logic immediately with the payload in `context.state`.
 
-`saveAndFire()` is a convenience that performs both operations. Logic handling the immediate event should use `context.state`; persisted state is available to later runs.
+`saveAndFire()` uses one constrained server operation that persists the key and immediately fires `ui/<ruleId>/state-set` with `{ key, value }`. Logic handling the immediate event should use `context.state`; persisted state is available to later runs.
 
 ## Custom UI sandbox
 

@@ -22,7 +22,7 @@ import type { ConnectorRegistry } from "../../connectors/connector-registry.js";
 import { BadRequestError, NotFoundError, ForbiddenError } from "../middleware/error-handler.js";
 import { validate } from "../middleware/validate.js";
 import { asyncHandler } from "../middleware/async-handler.js";
-import { createAutomationBodySchema, updateAutomationBodySchema, automationProjectSchema, automationIdParamsSchema, toggleAutomationBodySchema, automationStateBodySchema, demoAccessBodySchema } from "../schemas/automation.schemas.js";
+import { createAutomationBodySchema, updateAutomationBodySchema, automationProjectSchema, automationIdParamsSchema, toggleAutomationBodySchema, automationStateBodySchema, demoAccessBodySchema, AUTOMATION_STATE_KEY_MAX_LENGTH } from "../schemas/automation.schemas.js";
 import { requireTabPermission, requireAdmin } from "../../auth/auth-middleware.js";
 import type { RequestHandler } from "express";
 import type { PermissionLevel } from "../../auth/permission-service.js";
@@ -636,33 +636,80 @@ export function createAutomationRoutes(
       throw new NotFoundError(`Automation rule ${id} not found or not enabled`);
     }
 
-    // Build context — supports three modes:
-    // 1. body.context = { topic, state } — full context override (used by saveAndFire)
-    // 2. body.eventName — UI emit helper (topic = ui/{ruleId}/{eventName})
-    // 3. Default — synthetic manual-fire context
+    // Build context from constrained interaction primitives. An interact user may
+    // fire a named UI event or persist+fire a single state key, but cannot forge an
+    // arbitrary topic/state envelope. Full context injection is reserved for admins
+    // as an authoring/debug tool.
     const body = req.body ?? {};
 
     let context: EventContext;
 
-    if (body.context && typeof body.context === "object" && typeof body.context.topic === "string") {
-      // Mode 1: Full context override
+    if (body.stateSet && typeof body.stateSet === "object") {
+      const stateSet = body.stateSet as Record<string, unknown>;
+      const key = stateSet.key;
+      if (typeof key !== "string" || key.trim() === "") {
+        throw new BadRequestError("stateSet.key is required and must be a string");
+      }
+      // Same bound as PUT /:id/state (automationStateBodySchema): the atomic
+      // primitive must not be a looser way into the same store.
+      if (key.length > AUTOMATION_STATE_KEY_MAX_LENGTH) {
+        throw new BadRequestError(
+          `stateSet.key exceeds the ${AUTOMATION_STATE_KEY_MAX_LENGTH}-character limit`,
+        );
+      }
+      if (!Object.prototype.hasOwnProperty.call(stateSet, "value")) {
+        throw new BadRequestError("stateSet.value is required");
+      }
+      if (!stateStore) {
+        throw new BadRequestError("State store not available");
+      }
+      const value = stateSet.value;
+      const changed = stateStore.set(id, key, value);
+      if (changed) {
+        eventBus.emit(AUTOMATION_STATE_CHANGE, { ruleId: id, key, value });
+      }
       context = {
-        topic: body.context.topic,
+        topic: `ui/${id}/state-set`,
         deviceId: `ui-${id}`,
-        state: body.context.state ?? {},
+        state: { key, value },
         timestamp: Date.now(),
       };
     } else {
-      // Mode 2/3: eventName-based or default
-      const eventName = typeof body.eventName === "string" ? body.eventName : undefined;
-      const { eventName: _discarded, ...statePayload } = body;
-
-      context = {
-        topic: eventName ? `ui/${id}/${eventName}` : rule.topic,
-        deviceId: eventName ? `ui-${id}` : "manual-fire",
-        state: statePayload,
-        timestamp: Date.now(),
-      };
+      const eventName = typeof body.eventName === "string" ? body.eventName.trim() : "";
+      if (eventName) {
+        // A named UI event is the normal interact-user primitive. Any field named
+        // `context` here is ordinary payload data, never a trigger-context override.
+        const { eventName: _discarded, ...statePayload } = body;
+        context = {
+          topic: `ui/${id}/${eventName}`,
+          deviceId: `ui-${id}`,
+          state: statePayload,
+          timestamp: Date.now(),
+        };
+      } else if (body.context && typeof body.context === "object") {
+        if (req.user?.role !== "admin") {
+          throw new ForbiddenError("Arbitrary automation fire context requires admin access");
+        }
+        if (typeof body.context.topic !== "string" || body.context.topic.trim() === "") {
+          throw new BadRequestError("context.topic is required for an admin context override");
+        }
+        context = {
+          topic: body.context.topic,
+          deviceId: `ui-${id}`,
+          state: body.context.state ?? {},
+          timestamp: Date.now(),
+        };
+      } else {
+        if (req.user?.role !== "admin") {
+          throw new ForbiddenError("Manual automation fire without a named UI event requires admin access");
+        }
+        context = {
+          topic: rule.topic,
+          deviceId: "manual-fire",
+          state: body,
+          timestamp: Date.now(),
+        };
+      }
     }
 
     // Fire through the engine (routes script rules through sandbox)

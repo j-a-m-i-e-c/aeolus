@@ -750,6 +750,7 @@ describe("automation.routes", () => {
       });
 
       const res = await request(app, "POST", "/api/automations/fire-rule/fire", {
+        eventName: "run",
         value: 42,
       });
       expect(res.status).toBe(200);
@@ -758,9 +759,97 @@ describe("automation.routes", () => {
       expect(body.ruleId).toBe("fire-rule");
       expect(body.executionId).toBe("mock-exec-id");
       expect(mockEngine.fire).toHaveBeenCalledWith("fire-rule", expect.objectContaining({
-        topic: "sensors/temp",
-        deviceId: "manual-fire",
+        topic: "ui/fire-rule/run",
+        deviceId: "ui-fire-rule",
       }));
+    });
+
+    it("persists and fires a constrained stateSet without accepting an arbitrary topic", async () => {
+      mockEngine.getRule.mockReturnValue({
+        id: "fire-rule", topic: "sensors/temp", name: "Fire Me", action: vi.fn(),
+      });
+      mockStateStore.set.mockReturnValue(true);
+
+      const res = await request(app, "POST", "/api/automations/fire-rule/fire", {
+        stateSet: { key: "mode", value: "auto" },
+      });
+
+      expect(res.status).toBe(200);
+      expect(mockStateStore.set).toHaveBeenCalledWith("fire-rule", "mode", "auto");
+      expect(mockEngine.fire).toHaveBeenCalledWith("fire-rule", expect.objectContaining({
+        topic: "ui/fire-rule/state-set",
+        deviceId: "ui-fire-rule",
+        state: { key: "mode", value: "auto" },
+      }));
+    });
+
+    it("rejects an unqualified manual fire for a non-admin interact caller", async () => {
+      mockEngine.getRule.mockReturnValue({
+        id: "fire-rule", topic: "sensors/temp", name: "Fire Me", action: vi.fn(),
+      });
+
+      const res = await request(app, "POST", "/api/automations/fire-rule/fire", { value: 42 });
+
+      expect(res.status).toBe(403);
+      expect(mockEngine.fire).not.toHaveBeenCalled();
+    });
+
+    it("rejects arbitrary context override for a non-admin interact caller", async () => {
+      mockEngine.getRule.mockReturnValue({
+        id: "fire-rule", topic: "sensors/temp", name: "Fire Me", action: vi.fn(),
+      });
+
+      const res = await request(app, "POST", "/api/automations/fire-rule/fire", {
+        context: { topic: "forged/topic", state: { armed: true } },
+      });
+
+      expect(res.status).toBe(403);
+      expect(mockEngine.fire).not.toHaveBeenCalled();
+    });
+
+    it("treats a context-named field as payload when a safe eventName is present", async () => {
+      mockEngine.getRule.mockReturnValue({
+        id: "fire-rule", topic: "sensors/temp", name: "Fire Me", action: vi.fn(),
+      });
+
+      const res = await request(app, "POST", "/api/automations/fire-rule/fire", {
+        eventName: "inspect",
+        context: { note: "payload, not trigger context" },
+      });
+
+      expect(res.status).toBe(200);
+      expect(mockEngine.fire).toHaveBeenCalledWith("fire-rule", expect.objectContaining({
+        topic: "ui/fire-rule/inspect",
+        state: { context: { note: "payload, not trigger context" } },
+      }));
+    });
+
+    it("rejects a stateSet key longer than the state route allows", async () => {
+      mockEngine.getRule.mockReturnValue({
+        id: "fire-rule", topic: "sensors/temp", name: "Fire Me", action: vi.fn(),
+      });
+
+      const res = await request(app, "POST", "/api/automations/fire-rule/fire", {
+        stateSet: { key: "k".repeat(201), value: 1 },
+      });
+
+      expect(res.status).toBe(400);
+      expect(mockStateStore.set).not.toHaveBeenCalled();
+      expect(mockEngine.fire).not.toHaveBeenCalled();
+    });
+
+    it("rejects a stateSet that omits its value", async () => {
+      mockEngine.getRule.mockReturnValue({
+        id: "fire-rule", topic: "sensors/temp", name: "Fire Me", action: vi.fn(),
+      });
+
+      const res = await request(app, "POST", "/api/automations/fire-rule/fire", {
+        stateSet: { key: "mode" },
+      });
+
+      expect(res.status).toBe(400);
+      expect(mockStateStore.set).not.toHaveBeenCalled();
+      expect(mockEngine.fire).not.toHaveBeenCalled();
     });
   });
 

@@ -61,6 +61,10 @@ that no tab exposes is inaccessible to non-admins (fail-closed). Missing
 resources return `404` before any permission check. Destructive device-history
 routes remain admin-only.
 
+For automation firing, `interact` means operating the exposed UI contract, not fabricating an arbitrary trigger. Non-admins may fire a named `ui/<ruleId>/<eventName>` event or use the bounded atomic `stateSet` primitive used by `saveAndFire()`. A caller-supplied topic/state context and an unqualified manual fire are admin-only.
+
+Public-demo sessions accept the same two forms inside a tighter envelope. A named event must appear in the rule's declared `fireEvents`; a `stateSet` clears exactly the bounds a direct state write clears, including the rule's `writableStateKeys` allowlist, so firing is never a looser route into the automation state store than `PUT /api/automations/:id/state`. A `context` override is refused outright.
+
 ## Automation authoring scope
 
 Every automation carries a server-side authorization scope so authored Logic
