@@ -178,6 +178,8 @@ server {
         proxy_pass http://localhost:3001;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
     }
 
     location /ws {
@@ -185,6 +187,9 @@ server {
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
     }
 
     location / {
@@ -194,6 +199,8 @@ server {
 ```
 
 Public tunnels should point at the reverse proxy, not only at the frontend container, so `/api` and `/ws` share the same protected origin. Restrict public access with the tunnel provider's identity controls as well as Aeolus authentication.
+
+For either example, set `TRUST_PROXY_HOPS=1` in the project `.env` and recreate the backend. Caddy supplies the forwarded scheme/client address automatically; the nginx example above sets them explicitly. With exactly one trusted hop, `AUTH_COOKIE_SECURE=auto` sees the original HTTPS scheme and the rate limiter keys requests by the original client IP rather than by the proxy. Leave `TRUST_PROXY_HOPS=0` when clients connect to Aeolus directly.
 
 ---
 
@@ -370,18 +377,20 @@ Or run [Uptime Kuma](https://github.com/louislam/uptime-kuma) on the same Pi for
 
 ## 7. Environment Variables
 
-`docker-compose.yml` sets the core backend variables. Compose-level values such as `API_PORT`, `FRONTEND_PORT`, `MQTT_PORT` and `MQTT_BROKER_URL` can be placed in the project `.env` file. Backend variables that the base Compose file sets to a fixed value still require a named override file loaded with `-f`.
+`docker-compose.yml` explicitly allowlists the supported backend settings from the project `.env` file. This keeps normal configuration predictable without passing every ambient shell variable into the container. `AEOLUS_PUBLIC_DEMO` is intentionally excluded; only the dedicated public-demo overlays can enable that mode.
 
 | Variable | Default | Production value | Description |
 |----------|---------|------------------|-------------|
-| `NODE_ENV` | `development` | `production` | Suppresses stack traces in error responses, enables optimizations |
+| `NODE_ENV` | `production` in Compose | `production` | Suppresses stack traces in error responses; source development may override to `development` |
 | `PORT` | `3001` | `3001` | Backend API port (set via `API_PORT` in compose) |
 | `MQTT_BROKER_URL` | `mqtt://localhost:1883` | deployment-specific | Broker URL; set it in `.env` when the broker requires credentials |
 | `MQTT_TOPICS` | `#` | `#` | MQTT subscription filter |
 | `DB_PATH` | `./data/aeolus.db` | `/app/data/aeolus.db` | Database path (the Docker volume path) |
-| `LOG_LEVEL` | `debug` | `info` | Log verbosity (`debug`, `info`, `warn`, `error`) |
+| `LOG_LEVEL` | `info` in Compose | `info` | Log verbosity (`debug`, `info`, `warn`, `error`); source development may override to `debug` |
 | `RATE_LIMIT_RPM` | `1000` | `1000` | Max API requests per minute per IP |
 | `CORS_ORIGINS` | _(empty)_ | `https://aeolus.local` | Extra allowed CORS origins (comma-separated); LAN origins are allowed by default |
+| `TRUST_PROXY_HOPS` | `0` | `1` behind one Caddy/nginx proxy | Number of trusted reverse-proxy hops; keep 0 for direct/LAN access |
+| `AUTH_COOKIE_SECURE` | `auto` | `auto` behind a correctly trusted HTTPS proxy | Refresh-cookie Secure policy |
 | `STATE_HISTORY_MAX` | `100` | `100` | Max state-history records kept per device |
 | `HISTORY_RECORD_INTERVAL` | `5000` | `5000` | Minimum ms between recorded state-history points (throttle) |
 | `JWT_SECRET` | _(auto-generated)_ | _(your 256-bit key)_ | JWT signing key; auto-generated and stored in the DB if unset |
@@ -402,7 +411,12 @@ RATE_LIMIT_RPM=1000
 CORS_ORIGINS=https://aeolus.local
 JWT_SECRET=replace-with-a-long-random-string
 METRICS_TOKEN=replace-with-a-random-token
+# Set to 1 only when exactly one trusted reverse proxy terminates HTTPS.
+TRUST_PROXY_HOPS=1
+AUTH_COOKIE_SECURE=auto
 ```
+
+When Aeolus is behind one Caddy/nginx reverse proxy, `TRUST_PROXY_HOPS=1` lets Express use that hop's forwarded scheme/IP for secure-cookie detection and per-client rate limiting. Do not set a larger value than the actual trusted proxy chain, and never use an unrestricted `trust proxy=true`.
 
 ---
 
@@ -414,7 +428,7 @@ Aeolus does **not** self-update from the web UI (that feature, and the Docker so
 
 ```bash
 cd ~/aeolus
-git pull origin main
+git pull --ff-only origin main
 docker compose up --build -d
 ```
 

@@ -33,6 +33,8 @@ export interface Config {
   historyRecordInterval: number;
   rateLimitRpm: number;
   corsOrigins: string[];
+  /** Number of trusted reverse-proxy hops in front of Aeolus. 0 disables trust proxy. */
+  trustedProxyHops: number;
   /**
    * Maximum confirmation timeout the Command_Service can apply to a command
    * (ms). Acts as the inner bound the REST device-action timeout must exceed
@@ -98,6 +100,7 @@ export const config: Config = {
   historyRecordInterval: parseInt(process.env.HISTORY_RECORD_INTERVAL || "5000", 10),
   rateLimitRpm: parseInt(process.env.RATE_LIMIT_RPM || "1000", 10),
   corsOrigins: process.env.CORS_ORIGINS?.split(",").map((s) => s.trim()).filter(Boolean) || [],
+  trustedProxyHops: Math.max(0, parseInt(process.env.TRUST_PROXY_HOPS || "0", 10) || 0),
   maxConfirmTimeoutMs: parseInt(
     process.env.MAX_CONFIRM_TIMEOUT_MS || String(DEFAULT_CONFIRM_TIMEOUT_MS),
     10,

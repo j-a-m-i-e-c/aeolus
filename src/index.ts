@@ -356,13 +356,14 @@ async function main(): Promise<void> {
   const app = express();
   app.disable("x-powered-by"); // Don't advertise the framework
 
-  // The hosted public demo is reachable only through the adjacent Cloudflare
-  // Tunnel container. Trust exactly that single proxy hop so Express rate
-  // limiters key public-demo visitors by their forwarded client IP instead of
-  // collapsing every visitor onto the cloudflared container address. Normal
-  // Aeolus installs keep Express' default (trust proxy disabled).
-  if (config.publicDemo.enabled) {
-    app.set("trust proxy", 1);
+  // Trust only an explicitly configured number of reverse-proxy hops. The
+  // hosted public demo always has exactly one adjacent cloudflared hop. Normal
+  // installs default to 0; operators serving Aeolus through one local Caddy/nginx
+  // proxy can set TRUST_PROXY_HOPS=1 so secure-cookie detection and per-client
+  // rate limiting use the forwarded request metadata safely.
+  const trustedProxyHops = config.publicDemo.enabled ? 1 : config.trustedProxyHops;
+  if (trustedProxyHops > 0) {
+    app.set("trust proxy", trustedProxyHops);
   }
 
   // Prometheus metrics endpoint — BEFORE authenticate (uses its own bearer token auth)

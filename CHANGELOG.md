@@ -13,6 +13,8 @@ Aeolus follows semantic versioning for published releases. Until the first stabl
 * The dashboard host CSP no longer requires inline script execution.
 * Version information is local only until an administrator explicitly asks Aeolus to check GitHub releases.
 * The Mosquitto reload watcher is built with its dependencies instead of installing packages when the stack starts.
+* The standard Compose path now explicitly propagates documented security/runtime settings from `.env` while keeping public-demo mode overlay-only.
+* Reverse-proxy trust is explicit and hop-bounded so HTTPS scheme detection and per-client rate limiting work behind a known Caddy/nginx hop.
 * Ordinary `interact` users can fire only named UI events or the constrained atomic state-set primitive; arbitrary fire-context injection is admin-only.
 * The atomic state-set primitive clears the same key, value and allowlist bounds as a direct state write, in public-demo sessions as well, so firing is never a looser route into automation state. `saveAndFire()` now works inside the public demo.
 * Philips Hue local traffic uses HTTPS with bridge-certificate identity checks and treats Hue application-level error objects inside HTTP 2xx responses as failures.

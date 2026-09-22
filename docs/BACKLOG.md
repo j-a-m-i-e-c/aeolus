@@ -70,14 +70,6 @@ This is mostly an operational sign-off, with one code correction first:
   or rename the misleading "revoked credential rejected" assertion. (Not a
   default-path blocker — provisioning stays opt-in.)
 
-### General trusted-proxy configuration beyond the public demo 🟡
-The public-demo deployment deliberately configures Express to trust exactly one
-proxy hop, matching its Cloudflare Tunnel topology; normal/local installs keep
-Express' default `trust proxy` behaviour. If Aeolus later advertises additional
-reverse-proxy topologies (Caddy/nginx/multiple hops), make that trust model an
-explicit deployment setting and test client-IP/rate-limit behaviour for each
-supported topology rather than enabling `trust proxy = true` globally.
-
 ---
 
 ## Product truthfulness & connector capability

@@ -115,6 +115,27 @@ services:
       MQTT_TOPICS: "${MQTT_TOPICS:-#}"
       DB_PATH: /app/data/aeolus.db
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      # Application settings deliberately allowlisted from the project .env.
+      # AEOLUS_PUBLIC_DEMO is intentionally NOT propagated here; only the
+      # dedicated public-demo overlays may enable that capability envelope.
+      JWT_SECRET: "${JWT_SECRET:-}"
+      AUTH_COOKIE_SECURE: "${AUTH_COOKIE_SECURE:-auto}"
+      TRUST_PROXY_HOPS: "${TRUST_PROXY_HOPS:-0}"
+      CORS_ORIGINS: "${CORS_ORIGINS:-}"
+      RATE_LIMIT_RPM: "${RATE_LIMIT_RPM:-1000}"
+      METRICS_TOKEN: "${METRICS_TOKEN:-}"
+      STATE_HISTORY_MAX: "${STATE_HISTORY_MAX:-100}"
+      HISTORY_RECORD_INTERVAL: "${HISTORY_RECORD_INTERVAL:-5000}"
+      MAX_CONFIRM_TIMEOUT_MS: "${MAX_CONFIRM_TIMEOUT_MS:-5000}"
+      REST_ACTION_TIMEOUT_MS: "${REST_ACTION_TIMEOUT_MS:-7000}"
+      MQTT_DISCOVERY_IGNORED_TOPIC_SUFFIXES: "${MQTT_DISCOVERY_IGNORED_TOPIC_SUFFIXES:-set,command,cmd,heartbeat,availability}"
+      MQTT_MANAGED_PROVISIONING_ENABLED: "${MQTT_MANAGED_PROVISIONING_ENABLED:-false}"
+      MQTT_PROVISIONING_VERIFY_BUDGET_MS: "${MQTT_PROVISIONING_VERIFY_BUDGET_MS:-12000}"
+      MQTT_PROVISIONING_VERIFY_POLL_MS: "${MQTT_PROVISIONING_VERIFY_POLL_MS:-500}"
+      MQTT_PROVISIONING_VERIFY_TIMEOUT_MS: "${MQTT_PROVISIONING_VERIFY_TIMEOUT_MS:-3000}"
+      MQTT_PBKDF2_ITERATIONS: "${MQTT_PBKDF2_ITERATIONS:-100000}"
+      MQTT_PUBLISH_USER_NAMESPACE: "${MQTT_PUBLISH_USER_NAMESPACE:-aeolus/pub/}"
+      MQTT_PUBLISH_MAX_BYTES: "${MQTT_PUBLISH_MAX_BYTES:-262144}"
       # MQTT provisioning: shared config volume wiring
       MQTT_PASSWORD_FILE: /mosquitto/config/password_file
       MQTT_CONFIG_FILE: /mosquitto/config/mosquitto.conf

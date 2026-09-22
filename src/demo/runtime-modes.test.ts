@@ -50,6 +50,33 @@ describe("Mode A — real Aeolus (base compose)", () => {
     expect(code).not.toContain("AEOLUS_PUBLIC_DEMO");
     expect(code).not.toContain("VITE_PUBLIC_DEMO");
   });
+
+  it("passes the documented backend configuration allowlist without inheriting public-demo mode", () => {
+    const code = stripYamlComments(base);
+    for (const setting of [
+      "JWT_SECRET",
+      "AUTH_COOKIE_SECURE",
+      "TRUST_PROXY_HOPS",
+      "CORS_ORIGINS",
+      "RATE_LIMIT_RPM",
+      "METRICS_TOKEN",
+      "STATE_HISTORY_MAX",
+      "HISTORY_RECORD_INTERVAL",
+      "MAX_CONFIRM_TIMEOUT_MS",
+      "REST_ACTION_TIMEOUT_MS",
+      "MQTT_DISCOVERY_IGNORED_TOPIC_SUFFIXES",
+      "MQTT_MANAGED_PROVISIONING_ENABLED",
+      "MQTT_PROVISIONING_VERIFY_BUDGET_MS",
+      "MQTT_PROVISIONING_VERIFY_POLL_MS",
+      "MQTT_PROVISIONING_VERIFY_TIMEOUT_MS",
+      "MQTT_PBKDF2_ITERATIONS",
+      "MQTT_PUBLISH_USER_NAMESPACE",
+      "MQTT_PUBLISH_MAX_BYTES",
+    ]) {
+      expect(code, `${setting} must reach the backend container`).toContain(`${setting}:`);
+    }
+    expect(code).not.toContain("AEOLUS_PUBLIC_DEMO:");
+  });
 });
 
 describe("Mode B — Aeolus + Showcase (local-showcase overlay)", () => {

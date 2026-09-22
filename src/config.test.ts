@@ -33,6 +33,7 @@ describe("config", () => {
     delete process.env.HISTORY_RECORD_INTERVAL;
     delete process.env.RATE_LIMIT_RPM;
     delete process.env.CORS_ORIGINS;
+    delete process.env.TRUST_PROXY_HOPS;
 
     const { config } = await import("./config.js");
     expect(config.mqttBrokerUrl).toBe("mqtt://localhost:1883");
@@ -54,6 +55,7 @@ describe("config", () => {
     expect(config.historyRecordInterval).toBe(5000);
     expect(config.rateLimitRpm).toBe(1000);
     expect(config.corsOrigins).toEqual([]);
+    expect(config.trustedProxyHops).toBe(0);
   });
 
   it("reads values from env vars when they are set", async () => {
@@ -72,6 +74,7 @@ describe("config", () => {
     process.env.HISTORY_RECORD_INTERVAL = "10000";
     process.env.RATE_LIMIT_RPM = "500";
     process.env.CORS_ORIGINS = "https://app.example.com, https://admin.example.com";
+    process.env.TRUST_PROXY_HOPS = "1";
 
     const { config } = await import("./config.js");
     expect(config.mqttBrokerUrl).toBe("mqtt://broker.local:1884");
@@ -91,6 +94,7 @@ describe("config", () => {
     expect(config.historyRecordInterval).toBe(10000);
     expect(config.rateLimitRpm).toBe(500);
     expect(config.corsOrigins).toEqual(["https://app.example.com", "https://admin.example.com"]);
+    expect(config.trustedProxyHops).toBe(1);
   });
 
   it("handles a single MQTT topic without commas", async () => {

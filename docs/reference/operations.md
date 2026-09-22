@@ -18,18 +18,22 @@ The backend uses host networking in Docker so it can reach LAN products and perf
 | `MQTT_TOPICS` | `#` | Comma-separated subscription filters |
 | `PORT` | `3001` | Backend port |
 | `DB_PATH` | `./data/aeolus.db` | SQLite path |
-| `LOG_LEVEL` | `debug` outside Compose | pino level |
-| `NODE_ENV` | `development` | Runtime environment |
+| `LOG_LEVEL` | `info` (`.env.example` and Compose) | pino level; source development may set `debug` |
+| `NODE_ENV` | `production` (`.env.example` and Compose) | Runtime environment; source development may set `development` |
 | `STATE_HISTORY_MAX` | `100` | History entries per device |
 | `HISTORY_RECORD_INTERVAL` | `5000` | Minimum stored-history interval |
 | `RATE_LIMIT_RPM` | `1000` | Global requests per minute per IP |
 | `CORS_ORIGINS` | empty | Additional allowed origins |
+| `TRUST_PROXY_HOPS` | `0` | Trusted reverse-proxy hops; `1` behind exactly one local HTTPS proxy |
+| `AUTH_COOKIE_SECURE` | `auto` | Refresh-cookie `Secure` policy (`auto`, `true`, `false`) |
 | `JWT_SECRET` | generated and stored | Optional explicit JWT signing key |
 | `METRICS_TOKEN` | unset | Optional bearer token for `/metrics` |
 | `AEOLUS_PROJECT_DIR` | process working directory | Mosquitto config root for provisioning-enabled deployments |
 | `MQTT_PASSWORD_FILE` | `<project>/mosquitto/password_file` | Password-file path for provisioning-enabled deployments |
 
 Docker Compose also accepts deployment variables such as `API_PORT`, `FRONTEND_PORT`, `MQTT_PORT`, `BUILD_COMMIT` and `BUILD_DATE`. The browser endpoints `VITE_API_URL` and `VITE_WS_URL` are Vite build-time variables, not backend runtime variables.
+
+`docker-compose.yml` passes an explicit allowlist of backend settings from the project `.env` rather than forwarding the ambient environment. `AEOLUS_PUBLIC_DEMO` is deliberately excluded from that list — only the dedicated public-demo overlays under `demo/compose/` can enable public-demo mode. Reverse-proxy guidance for `TRUST_PROXY_HOPS` lives in [production deployment](../production-deployment.md#7-environment-variables).
 
 Use `.env.example` and `docker-compose.yml` as deployment starting points. `src/config.ts` defines backend runtime defaults, while `frontend/.env.example` documents build-time browser endpoints.
 
