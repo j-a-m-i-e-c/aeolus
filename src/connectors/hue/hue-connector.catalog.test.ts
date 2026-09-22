@@ -9,6 +9,12 @@ vi.mock("../../logger.js", () => ({
 }));
 
 import { HueConnector } from "./hue-connector.js";
+import type { HueFetch } from "./hue-local-transport.js";
+
+// These tests stub `fetch` per test case, so the injected local transport has to
+// resolve the global at call time rather than capture it at construction.
+const stubbedGlobalFetch: HueFetch = (url, init) =>
+  (globalThis.fetch as unknown as HueFetch)(url, init);
 
 const EXTENDED_COLOR_LIGHTS = {
   "1": {
@@ -49,7 +55,7 @@ describe("HueConnector — action catalog (H5)", () => {
 
   beforeEach(() => {
     vi.restoreAllMocks();
-    connector = new HueConnector({ bridgeIp: "1.2.3.4", apiKey: "key" });
+    connector = new HueConnector({ bridgeIp: "1.2.3.4", apiKey: "key" }, { localFetch: stubbedGlobalFetch });
   });
 
   afterEach(async () => {
@@ -109,7 +115,7 @@ describe("HueConnector — device identity (H7)", () => {
 
   beforeEach(() => {
     vi.restoreAllMocks();
-    connector = new HueConnector({ bridgeIp: "1.2.3.4", apiKey: "key" });
+    connector = new HueConnector({ bridgeIp: "1.2.3.4", apiKey: "key" }, { localFetch: stubbedGlobalFetch });
   });
 
   afterEach(async () => {
@@ -147,7 +153,7 @@ describe("HueConnector — explicit on/off execution", () => {
 
   beforeEach(() => {
     vi.restoreAllMocks();
-    connector = new HueConnector({ bridgeIp: "1.2.3.4", apiKey: "key" });
+    connector = new HueConnector({ bridgeIp: "1.2.3.4", apiKey: "key" }, { localFetch: stubbedGlobalFetch });
   });
 
   afterEach(async () => {

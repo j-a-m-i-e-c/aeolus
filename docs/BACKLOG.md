@@ -92,16 +92,6 @@ activation, native color-loop effect) so the actions become functional, or drop
 the two contributed handlers until the connector supports them. They are not
 surfaced in the dashboard UI today, so nothing depends on them yet.
 
-### Parse Hue application-level action errors 🟡
-The Hue state/rename/delete action paths check `response.ok` but do not inspect
-the returned Hue API body for application-level errors, even though Hue responses
-carry explicit `success`/`error` objects (the pairing flow already demonstrates
-this). For command truthfulness, parse the action response and turn a Hue error
-object into an execution failure rather than reporting a dispatch merely because
-HTTP returned 2xx. (Review M1, 2 Aug 2026 — strongly recommended, not a launch
-blocker. Companion to the `connector-correctness-release-gates` spec's Hue
-catalog work.)
-
 ### Reconcile devices that disappear from connector discovery 🟡
 `ConnectorManager.startPolling()` replaces the per-instance `devices` set after a
 successful non-empty discovery but never removes registry devices that were in
@@ -254,6 +244,17 @@ model, but should remain visible:
 ---
 
 ## Testing
+
+### Confirm the embedded Hue bridge root CA against Signify's published certificate 🟡
+`src/connectors/hue/hue-local-transport.ts` embeds the Hue Bridge root CA that
+current bridges chain to. It parses as the expected `C=NL, O=Philips Hue,
+CN=root-bridge` root (valid 2017-01-01 to 2038-01-19, SHA-256 fingerprint
+`F0:BD:8E:65:09:E8:2F:77:4D:63:BC:00:9D:53:88:C9:69:FE:3D:CF:7D:6D:54:1D:63:51:B7:2B:89:8D:8A:CF`),
+but the fingerprint has not been checked against Signify's own published copy.
+Do that before the first release that ships the Hue connector, and note that the
+CA-validated code path itself is unreachable in tests — no fixture can chain to a
+root whose private key Signify holds, so the modern-bridge branch is covered by
+reasoning and the legacy path only.
 
 ### Production-composition command-path integration suite 🟠
 The remaining test blind spot: individual pieces are well covered, yet nothing

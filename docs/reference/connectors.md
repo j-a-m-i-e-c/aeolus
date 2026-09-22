@@ -70,7 +70,7 @@ The fallback capability map provides common actions for standard capabilities. C
 
 ## Setup flows
 
-Connectors that require pairing can expose setup steps. Hue uses this for bridge discovery and link-button pairing.
+Connectors that require pairing can expose setup steps. Hue uses this for bridge discovery and link-button pairing. Hue local API traffic uses HTTPS. Current bridges validate against the Signify Hue Bridge CA and, when discovery supplied one, the certificate bridge ID must match. Older Bridge V2 firmware that still presents a self-signed Hue certificate uses a TLS-only identity probe before any API request is sent, then that exact certificate is pinned for the connector session. Hue API `error` objects returned inside HTTP 2xx responses are treated as command failures rather than successful dispatches.
 
 The dashboard asks the connector for step descriptors, submits each step through the connector API and closes the flow when the connector reports completion.
 

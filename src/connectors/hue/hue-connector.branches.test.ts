@@ -118,7 +118,7 @@ describe("HueConnector — light search loop", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     script = routeFetch();
-    connector = new HueConnector({ bridgeIp: "192.168.1.100", apiKey: "test-api-key" });
+    connector = new HueConnector({ bridgeIp: "192.168.1.100", apiKey: "test-api-key" }, { localFetch: mockFetch });
   });
 
   afterEach(async () => {
@@ -248,7 +248,7 @@ describe("HueConnector — action parameter defaults", () => {
 
   beforeEach(async () => {
     routeFetch();
-    connector = new HueConnector({ bridgeIp: "192.168.1.100", apiKey: "test-api-key" });
+    connector = new HueConnector({ bridgeIp: "192.168.1.100", apiKey: "test-api-key" }, { localFetch: mockFetch });
     await connector.connect();
     await connector.discoverDevices();
     mockFetch.mockClear();
@@ -302,7 +302,7 @@ describe("HueConnector — configuration updates", () => {
 
   beforeEach(() => {
     routeFetch();
-    connector = new HueConnector({ bridgeIp: "192.168.1.100", apiKey: "test-api-key" });
+    connector = new HueConnector({ bridgeIp: "192.168.1.100", apiKey: "test-api-key" }, { localFetch: mockFetch });
   });
 
   it("rotates the API key without being told the bridge address again", async () => {

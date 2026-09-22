@@ -13,6 +13,8 @@ Aeolus follows semantic versioning for published releases. Until the first stabl
 * The dashboard host CSP no longer requires inline script execution.
 * Version information is local only until an administrator explicitly asks Aeolus to check GitHub releases.
 * The Mosquitto reload watcher is built with its dependencies instead of installing packages when the stack starts.
+* Philips Hue local traffic uses HTTPS with bridge-certificate identity checks and treats Hue application-level error objects inside HTTP 2xx responses as failures.
+* Hue bridge exchanges are time-bounded, so a peer that accepts a connection and stalls the TLS handshake can no longer hold a command open indefinitely.
 
 ### Automation state and showcase
 

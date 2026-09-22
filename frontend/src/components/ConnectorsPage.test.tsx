@@ -225,6 +225,30 @@ describe("ConnectorsPage — SetupWizard", () => {
     expect(api.retryConnector).toHaveBeenCalledWith("new-1");
   });
 
+  it("lets a user override a value prefilled by an earlier discovery step", async () => {
+    api.executeConnectorSetupStep
+      .mockResolvedValueOnce({ success: true, complete: false, message: "found", data: { bridgeIp: "192.168.1.10", token: "t" } })
+      .mockResolvedValueOnce({ success: true, complete: true, message: "done", data: {} });
+
+    await openWizard([
+      { id: "discover", title: "Discover", description: "Find bridge", fields: [] },
+      { id: "choose", title: "Choose", description: "Choose bridge", fields: [{ id: "bridgeIp", label: "Bridge IP", type: "text", required: true }] },
+    ]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    // The visible label carries a trailing required marker, hence the regex.
+    const input = await screen.findByLabelText(/Bridge IP/);
+    expect(input).toHaveValue("192.168.1.10");
+    fireEvent.change(input, { target: { value: "192.168.1.20" } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+
+    await waitFor(() => expect(api.executeConnectorSetupStep).toHaveBeenLastCalledWith(
+      "new-1",
+      "choose",
+      expect.objectContaining({ bridgeIp: "192.168.1.20", token: "t" }),
+    ));
+  });
+
   it("surfaces an error message when a step fails", async () => {
     api.executeConnectorSetupStep.mockRejectedValueOnce(new Error("bad creds"));
     await openWizard([{ id: "credentials", title: "Credentials", description: "Enter creds", fields: [] }]);

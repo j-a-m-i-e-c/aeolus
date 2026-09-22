@@ -17,6 +17,7 @@ import {
   clampCt,
 } from "./capability-mapper.js";
 import type { RawHueLight, CapabilitySet } from "./capability-mapper.js";
+import { createHueLocalFetch, type HueFetch, type HueHttpResponse } from "./hue-local-transport.js";
 
 interface ZigbeeSearchState {
   active: boolean;
@@ -50,6 +51,8 @@ export function hueDeviceId(uniqueId: string | undefined, index: string): string
 export class HueConnector implements Connector {
   private bridgeIp: string;
   private apiKey: string;
+  private bridgeId: string;
+  private readonly localFetch: HueFetch;
   private deviceMap = new Map<string, string>(); // aeolus deviceId → hue light index
   private capabilityMap = new Map<string, CapabilitySet>(); // deviceId → CapabilitySet
   private deviceStateMap = new Map<string, Record<string, unknown>>(); // deviceId → last known state
@@ -68,26 +71,55 @@ export class HueConnector implements Connector {
   };
   private searchPollTimer: ReturnType<typeof setInterval> | null = null;
 
-  constructor(config: Record<string, unknown>) {
+  constructor(config: Record<string, unknown>, deps?: { localFetch?: HueFetch }) {
     this.bridgeIp = (config.bridgeIp as string) || "";
     this.apiKey = (config.apiKey as string) || "";
+    this.bridgeId = (config.bridgeId as string) || "";
+    this.localFetch = deps?.localFetch ?? createHueLocalFetch({
+      getExpectedBridgeId: () => this.bridgeId || undefined,
+      onObservedBridgeId: (bridgeId) => { this.bridgeId = bridgeId; },
+    });
   }
 
   private get baseUrl(): string {
-    return `http://${this.bridgeIp}/api/${this.apiKey}`;
+    return `https://${this.bridgeIp}/api/${this.apiKey}`;
+  }
+
+  private async readHueResponse<T>(response: HueHttpResponse, operation: string): Promise<T> {
+    if (!response.ok) {
+      throw new Error(`Hue API returned ${response.status} on ${operation}`);
+    }
+    const body = await response.json();
+    if (Array.isArray(body)) {
+      const errorEntry = body.find((entry) => {
+        if (!entry || typeof entry !== "object") return false;
+        return "error" in (entry as Record<string, unknown>);
+      }) as { error?: { type?: number; description?: string } } | undefined;
+      if (errorEntry?.error) {
+        const suffix = errorEntry.error.type !== undefined ? ` (type ${errorEntry.error.type})` : "";
+        throw new Error(`Hue API rejected ${operation}${suffix}: ${errorEntry.error.description ?? "unknown error"}`);
+      }
+    }
+    return body as T;
+  }
+
+  private async assertHueActionSuccess(response: HueHttpResponse, operation: string): Promise<void> {
+    await this.readHueResponse<unknown>(response, operation);
   }
 
   async connect(): Promise<void> {
     logger.info({ bridgeIp: this.bridgeIp }, "Connecting to Hue bridge");
-    const res = await fetch(`${this.baseUrl}/lights`);
-    if (!res.ok) {
-      const msg = `Hue bridge returned ${res.status}`;
+    const res = await this.localFetch(`${this.baseUrl}/lights`);
+    try {
+      await this.readHueResponse<unknown>(res, "connect");
+    } catch (err) {
+      const msg = (err as Error).message;
       this.healthStatus = {
         status: "disconnected",
         lastSeen: this.lastSuccessTimestamp,
         errorMessage: msg,
       };
-      throw new Error(msg);
+      throw err;
     }
     this.lastSuccessTimestamp = Date.now();
     this.healthStatus = {
@@ -103,15 +135,8 @@ export class HueConnector implements Connector {
 
   private async fetchFirmwareStatus(): Promise<void> {
     try {
-      const configRes = await fetch(`${this.baseUrl}/config`);
-      if (!configRes.ok) {
-        // Non-critical — treat as no updates
-        this.updatesAvailable = false;
-        this.updateType = undefined;
-        return;
-      }
-
-      const config = (await configRes.json()) as Record<string, unknown>;
+      const configRes = await this.localFetch(`${this.baseUrl}/config`);
+      const config = await this.readHueResponse<Record<string, unknown>>(configRes, "firmware status");
       const swupdate2 = config.swupdate2 as
         | {
             state?: string;
@@ -171,15 +196,18 @@ export class HueConnector implements Connector {
   }
 
   async discoverDevices(): Promise<Device[]> {
-    const res = await fetch(`${this.baseUrl}/lights`);
-    if (!res.ok) {
-      const msg = `Failed to discover Hue lights: ${res.status}`;
+    const res = await this.localFetch(`${this.baseUrl}/lights`);
+    let lights: Record<string, RawHueLight>;
+    try {
+      lights = await this.readHueResponse<Record<string, RawHueLight>>(res, "discover lights");
+    } catch (err) {
+      const msg = (err as Error).message;
       this.healthStatus = {
         status: "disconnected",
         lastSeen: this.lastSuccessTimestamp,
         errorMessage: msg,
       };
-      throw new Error(msg);
+      throw err;
     }
 
     this.lastSuccessTimestamp = Date.now();
@@ -188,7 +216,6 @@ export class HueConnector implements Connector {
       lastSeen: this.lastSuccessTimestamp,
     };
 
-    const lights = (await res.json()) as Record<string, RawHueLight>;
     const devices: Device[] = [];
 
     for (const [index, light] of Object.entries(lights)) {
@@ -234,8 +261,8 @@ export class HueConnector implements Connector {
     switch (action.type) {
       case "toggle": {
         // Toggle always works — on/off is always present
-        const stateRes = await fetch(`${this.baseUrl}/lights/${lightIndex}`);
-        const light = (await stateRes.json()) as RawHueLight;
+        const stateRes = await this.localFetch(`${this.baseUrl}/lights/${lightIndex}`);
+        const light = await this.readHueResponse<RawHueLight>(stateRes, "read light state");
         body = { on: !light.state.on };
         break;
       }
@@ -291,26 +318,22 @@ export class HueConnector implements Connector {
         if (!newName) {
           throw new Error("Rename requires a non-empty 'name' parameter");
         }
-        const renameRes = await fetch(`${this.baseUrl}/lights/${lightIndex}`, {
+        const renameRes = await this.localFetch(`${this.baseUrl}/lights/${lightIndex}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ name: newName }),
         });
-        if (!renameRes.ok) {
-          throw new Error(`Hue API returned ${renameRes.status} on rename`);
-        }
+        await this.assertHueActionSuccess(renameRes, "rename");
         this.lastSuccessTimestamp = Date.now();
         this.healthStatus = { status: "connected", lastSeen: this.lastSuccessTimestamp };
         logger.info({ deviceId: action.deviceId, newName }, "Hue light renamed");
         return; // Early return — rename doesn't use /state endpoint
       }
       case "delete": {
-        const deleteRes = await fetch(`${this.baseUrl}/lights/${lightIndex}`, {
+        const deleteRes = await this.localFetch(`${this.baseUrl}/lights/${lightIndex}`, {
           method: "DELETE",
         });
-        if (!deleteRes.ok) {
-          throw new Error(`Hue API returned ${deleteRes.status} on delete`);
-        }
+        await this.assertHueActionSuccess(deleteRes, "delete");
         this.deviceMap.delete(action.deviceId);
         this.capabilityMap.delete(action.deviceId);
         this.deviceStateMap.delete(action.deviceId);
@@ -323,15 +346,13 @@ export class HueConnector implements Connector {
         throw new Error(`Unsupported action type: ${action.type}`);
     }
 
-    const res = await fetch(url, {
+    const res = await this.localFetch(url, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
 
-    if (!res.ok) {
-      throw new Error(`Hue API returned ${res.status}`);
-    }
+    await this.assertHueActionSuccess(res, action.type);
 
     this.lastSuccessTimestamp = Date.now();
     this.healthStatus = {
@@ -462,20 +483,17 @@ export class HueConnector implements Connector {
 
     // Start the Zigbee scan
     try {
-      const res = await fetch(`${this.baseUrl}/lights`, {
+      const res = await this.localFetch(`${this.baseUrl}/lights`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({}),
       });
 
-      if (!res.ok) {
-        const error = `Could not start light search: HTTP ${res.status}`;
-        this.searchState = {
-          active: false,
-          startedAt: null,
-          newLights: [],
-          error,
-        };
+      try {
+        await this.assertHueActionSuccess(res, "light search");
+      } catch (err) {
+        const error = `Could not start light search: ${(err as Error).message}`;
+        this.searchState = { active: false, startedAt: null, newLights: [], error };
         return this.searchState;
       }
     } catch (err) {
@@ -504,9 +522,9 @@ export class HueConnector implements Connector {
       const elapsed = Date.now() - (this.searchState.startedAt ?? Date.now());
 
       try {
-        const pollRes = await fetch(`${this.baseUrl}/lights/new`);
+        const pollRes = await this.localFetch(`${this.baseUrl}/lights/new`);
         if (pollRes.ok) {
-          const data = (await pollRes.json()) as Record<string, unknown>;
+          const data = await this.readHueResponse<Record<string, unknown>>(pollRes, "poll light search");
           const newLights: Array<{ id: string; name: string }> = [];
 
           for (const [id, value] of Object.entries(data)) {
@@ -571,6 +589,9 @@ export class HueConnector implements Connector {
     }
     if (config.apiKey !== undefined) {
       this.apiKey = config.apiKey as string;
+    }
+    if (config.bridgeId !== undefined) {
+      this.bridgeId = config.bridgeId as string;
     }
     logger.info("Hue connector config updated");
   }
@@ -673,13 +694,14 @@ export class HueConnector implements Connector {
 
       // Auto-select the first bridge IP so step 2 is pre-filled
       const firstBridgeIp = bridges[0].internalipaddress;
+      const firstBridgeId = bridges[0].id;
 
       return {
         success: true,
         message: bridges.length === 1
           ? `Found your bridge at ${firstBridgeIp}. Press the link button on the bridge, then click Continue.`
           : `Found ${bridges.length} bridges. Using ${firstBridgeIp} — change the IP in the next step if needed.`,
-        data: { bridges, bridgeIp: firstBridgeIp },
+        data: { bridges, bridgeIp: firstBridgeIp, bridgeId: firstBridgeId },
       };
     } catch (err) {
       return {
@@ -693,16 +715,33 @@ export class HueConnector implements Connector {
     params: Record<string, unknown>,
   ): Promise<SetupStepResult> {
     const bridgeIp = params.bridgeIp as string;
+    const discoveredBridges = Array.isArray(params.bridges)
+      ? params.bridges as Array<{ id?: string; internalipaddress?: string }>
+      : [];
+    const selectedDiscoveredBridge = discoveredBridges.find(
+      (bridge) => bridge.internalipaddress === bridgeIp,
+    );
+    const bridgeId = selectedDiscoveredBridge?.id
+      ?? (params.bridgeId as string | undefined)
+      ?? this.bridgeId;
     if (!bridgeIp) {
       return { success: false, message: "bridgeIp is required" };
     }
 
     try {
-      const res = await fetch(`http://${bridgeIp}/api`, {
+      if (bridgeId) this.bridgeId = bridgeId;
+      // Pairing is also local bridge traffic and must use TLS on current Hue firmware.
+      // The transport is not bound to the configured IP; it validates the selected
+      // bridge's certificate identity for whatever HTTPS URL this setup step uses.
+      const res = await this.localFetch(`https://${bridgeIp}/api`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ devicetype: "aeolus#dashboard" }),
       });
+
+      if (!res.ok) {
+        return { success: false, message: `Pairing failed: HTTP ${res.status}` };
+      }
 
       const result = (await res.json()) as Record<string, unknown>[];
 
@@ -715,7 +754,7 @@ export class HueConnector implements Connector {
           return {
             success: true,
             message: "Bridge paired successfully",
-            data: { apiKey: success.username, bridgeIp },
+            data: { apiKey: success.username, bridgeIp, bridgeId: this.bridgeId || bridgeId },
             complete: true,
           };
         }

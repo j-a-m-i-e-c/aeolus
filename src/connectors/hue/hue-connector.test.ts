@@ -106,7 +106,7 @@ describe("HueConnector", () => {
     connector = new HueConnector({
       bridgeIp: "192.168.1.100",
       apiKey: "test-api-key",
-    });
+    }, { localFetch: mockFetch });
   });
 
   afterEach(async () => {
@@ -119,7 +119,7 @@ describe("HueConnector", () => {
     });
 
     it("handles missing config values gracefully", () => {
-      const c = new HueConnector({});
+      const c = new HueConnector({}, { localFetch: mockFetch });
       expect(c).toBeDefined();
     });
   });
@@ -131,6 +131,7 @@ describe("HueConnector", () => {
       const health = connector.getHealthStatus();
       expect(health.status).toBe("connected");
       expect(health.lastSeen).toBeGreaterThan(0);
+      expect(String(mockFetch.mock.calls[0]?.[0])).toBe("https://192.168.1.100/api/test-api-key/lights");
     });
 
     it("throws and sets disconnected health when bridge returns error", async () => {
@@ -139,6 +140,16 @@ describe("HueConnector", () => {
       const health = connector.getHealthStatus();
       expect(health.status).toBe("disconnected");
       expect(health.errorMessage).toContain("403");
+    });
+
+    it("rejects a Hue application error even when HTTP status is successful", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => [{ error: { type: 1, description: "unauthorized user" } }],
+      });
+      await expect(connector.connect()).rejects.toThrow(/unauthorized user/);
+      expect(connector.getHealthStatus().status).toBe("disconnected");
     });
 
     it("throws when bridge is unreachable", async () => {
@@ -409,6 +420,17 @@ describe("HueConnector", () => {
       ).rejects.toThrow("503");
     });
 
+    it("treats a Hue application-level error inside HTTP 200 as command failure", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => [{ error: { type: 201, description: "parameter not modifiable" } }],
+      });
+      await expect(
+        connector.execute({ type: "brightness", deviceId: ID1, params: { brightness: 50 } }),
+      ).rejects.toThrow("parameter not modifiable");
+    });
+
     it("uses default brightness when param is missing", async () => {
       mockFetch.mockResolvedValueOnce({ ok: true, json: async () => [{ success: {} }] });
       await connector.execute({ type: "brightness", deviceId: ID1, params: {} });
@@ -542,6 +564,7 @@ describe("HueConnector", () => {
       const result = await connector.executeSetupStep("discover-bridges", {});
       expect(result.success).toBe(true);
       expect(result.data?.bridgeIp).toBe("192.168.1.50");
+      expect(result.data?.bridgeId).toBe("bridge-1");
     });
 
     it("discover-bridges handles multiple bridges", async () => {
@@ -583,10 +606,41 @@ describe("HueConnector", () => {
         ok: true,
         json: async () => [{ success: { username: "generated-api-key" } }],
       });
-      const result = await connector.executeSetupStep("press-button", { bridgeIp: "192.168.1.50" });
+      const result = await connector.executeSetupStep("press-button", { bridgeIp: "192.168.1.50", bridgeId: "001788FFFE123456" });
       expect(result.success).toBe(true);
+      expect(String(mockFetch.mock.calls[mockFetch.mock.calls.length - 1]?.[0])).toBe("https://192.168.1.50/api");
       expect(result.data?.apiKey).toBe("generated-api-key");
       expect(result.complete).toBe(true);
+    });
+
+    it("uses the bridge id that matches a user-selected discovered bridge IP", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true, status: 200, json: async () => [{ success: { username: "new-key" } }],
+      });
+      const result = await connector.executeSetupStep("press-button", {
+        bridgeIp: "192.168.1.60",
+        bridgeId: "FIRST-BRIDGE",
+        bridges: [
+          { id: "FIRST-BRIDGE", internalipaddress: "192.168.1.50" },
+          { id: "SECOND-BRIDGE", internalipaddress: "192.168.1.60" },
+        ],
+      });
+      expect(result.success).toBe(true);
+      expect(result.data).toEqual(expect.objectContaining({
+        bridgeIp: "192.168.1.60",
+        bridgeId: "SECOND-BRIDGE",
+      }));
+    });
+
+    it("press-button reports a transport-level HTTP failure instead of parsing the body", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 502,
+        json: async () => { throw new Error("should not be parsed"); },
+      });
+      const result = await connector.executeSetupStep("press-button", { bridgeIp: "192.168.1.50" });
+      expect(result.success).toBe(false);
+      expect(result.message).toContain("Pairing failed: HTTP 502");
     });
 
     it("press-button returns error when button not pressed (type 101)", async () => {

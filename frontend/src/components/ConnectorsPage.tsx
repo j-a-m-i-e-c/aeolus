@@ -1,6 +1,6 @@
 // frontend/src/components/ConnectorsPage.tsx — Connector management dashboard
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useId, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import * as icons from "lucide-react";
 import { RefreshCw, Power, PowerOff, RotateCcw, ChevronRight, X, Loader2 } from "lucide-react";
@@ -98,6 +98,9 @@ function ConfigForm({
   values: Record<string, unknown>;
   onChange: (values: Record<string, unknown>) => void;
 }) {
+  const formId = useId();
+  const controlId = (fieldId: string) => `${formId}-${fieldId}`;
+
   const update = (fieldId: string, value: unknown) => {
     onChange({ ...values, [fieldId]: value });
   };
@@ -106,7 +109,13 @@ function ConfigForm({
     <div className="space-y-3">
       {schema.map((field) => (
         <div key={field.id}>
-          <label className="text-[10px] text-[#6B7785] uppercase tracking-wider block mb-1">
+          {/* The boolean toggle carries its own state text as its accessible
+              name, so only text/number/password/select controls are wired to
+              the visible label. */}
+          <label
+            htmlFor={field.type === "boolean" ? undefined : controlId(field.id)}
+            className="text-[10px] text-[#6B7785] uppercase tracking-wider block mb-1"
+          >
             {field.label}
             {field.required && <span className="text-[#EF4444] ml-0.5">*</span>}
           </label>
@@ -124,6 +133,7 @@ function ConfigForm({
             </button>
           ) : field.type === "select" ? (
             <select
+              id={controlId(field.id)}
               value={String(values[field.id] ?? field.default ?? "")}
               onChange={(e) => update(field.id, e.target.value)}
               className="w-full text-xs bg-background border border-[#2A3441] rounded px-2 py-1.5 text-[#E6EDF3] focus:outline-none focus:border-primary"
@@ -135,6 +145,7 @@ function ConfigForm({
             </select>
           ) : (
             <input
+              id={controlId(field.id)}
               type={field.type === "password" ? "password" : field.type === "number" ? "number" : "text"}
               placeholder={field.placeholder}
               value={String(values[field.id] ?? field.default ?? "")}
@@ -225,7 +236,7 @@ function SetupWizard({
       try {
         const result = await executeConnectorSetupStep(
           connectorId, currentStep.id,
-          { ...stepParamsRef.current, ...accumulatedRef.current },
+          { ...accumulatedRef.current, ...stepParamsRef.current },
         );
 
         if (result.complete) {
@@ -272,7 +283,7 @@ function SetupWizard({
           try {
             const result = await executeConnectorSetupStep(
               connectorId, currentStep.id,
-              { ...stepParamsRef.current, ...accumulatedRef.current },
+              { ...accumulatedRef.current, ...stepParamsRef.current },
             );
             if (result.complete) {
               if (result.data) {
@@ -290,7 +301,7 @@ function SetupWizard({
     setLoading(true);
     setMessage("");
     try {
-      const result = await executeConnectorSetupStep(connectorId, currentStep.id, { ...stepParams, ...accumulatedConfig });
+      const result = await executeConnectorSetupStep(connectorId, currentStep.id, { ...accumulatedConfig, ...stepParams });
       setMessage(String(result.message || ""));
 
       if (result.data) {
