@@ -113,8 +113,15 @@ Frontend thresholds from `frontend/vite.config.ts` are 90% for lines, statements
 # Backend tests
 npm test
 
-# Backend coverage
-npx vitest run --coverage
+# Backend coverage, everything including the Docker-gated suites
+npm run test:coverage
+
+# Backend coverage as CI's backend job runs it: the seven Docker-gated suites are
+# excluded because the dedicated serial integration job owns them
+npm run test:coverage:no-broker
+
+# Broker-backed integration suites, serially (needs Docker; self-skips without it)
+npm run test:integration
 
 # Frontend tests and coverage
 cd frontend
@@ -138,7 +145,8 @@ make e2e-fresh
 
 - repository-wide ESLint with zero warnings;
 - backend TypeScript check;
-- backend tests with coverage;
+- backend tests with coverage, excluding the seven Docker-gated suites from this parallel pass (the other `__integration__` suites stay in it, because the 90% branch threshold depends on them);
+- broker-backed integration and simulator vertical tests in a dedicated serial job;
 - frontend TypeScript check;
 - frontend tests with coverage.
 

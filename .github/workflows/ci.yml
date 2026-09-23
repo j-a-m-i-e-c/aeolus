@@ -39,7 +39,20 @@ jobs:
         run: npx tsc --noEmit
 
       - name: Run tests with coverage
-        run: npx vitest run --coverage
+        # Excludes ONLY the seven Docker-gated suites, which have their own serial
+        # `integration` job below. They were running twice, and the parallel copy is
+        # the one that breaks: with ~214 files in flight plus v8 coverage
+        # instrumentation, the per-test `createSimulatorE2E` hook gets starved of CPU
+        # and its MQTT client connects blow the 30s budget (run #637 on adad06a failed
+        # exactly this way while the serial job passed the same commit). It is CPU
+        # starvation, not container startup — the mosquitto container itself is started
+        # once per file in `beforeAll` on a 120s budget.
+        #
+        # The other 17 __integration__ suites are broker-free (Express routes, SQLite,
+        # Data Store, metrics history, isolated-vm) and MUST stay in this pass: they
+        # carry the branch coverage the global 90% threshold depends on. The exclusion
+        # list lives in package.json so it cannot drift from release-validation.yml.
+        run: npm run test:coverage:no-broker
 
   frontend:
     runs-on: ubuntu-latest
@@ -91,7 +104,11 @@ jobs:
         # Running files concurrently would still put several container startups in
         # flight at once, and container startup is the least reliable step here. The
         # whole job is ~30s serial, so this trades little wall-clock for reliability.
-        run: npx vitest run __integration__ --no-file-parallelism
+        #
+        # Runs the WHOLE __integration__ directory, including the broker-free suites
+        # already covered in the backend job. That overlap is cheap and deliberate:
+        # this job is the only place the Docker-gated files run.
+        run: npm run test:integration
 
   sandbox-browser-boundary:
     if: github.event_name == 'pull_request'

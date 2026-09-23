@@ -568,7 +568,8 @@ Longer term opportunities include:
 * more local device ecosystems
 * better provisioning and offline queues
 * exportable Aeolus applications
-* multiple nodes and fleet tooling
+* Published APIs for exposing selected automation data and capabilities to external software through narrow, authenticated HTTP interfaces
+* federated multi-site Aeolus deployments where each node remains locally autonomous
 * visual helpers that sit alongside code
 * local AI and on device inference as ordinary event sources
 

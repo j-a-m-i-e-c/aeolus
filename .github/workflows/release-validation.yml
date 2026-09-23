@@ -27,7 +27,12 @@ jobs:
         run: npx eslint . --max-warnings 0
       - run: npx tsc --noEmit
       - name: Backend tests with coverage gate
-        run: npx vitest run --coverage
+        # The seven Docker-gated suites run serially in the dedicated release step
+        # below; running them here too starves their setup hooks of CPU. The remaining
+        # broker-free __integration__ suites stay in this pass because the 90% branch
+        # threshold depends on them. See the longer note in ci.yml; the exclusion list
+        # is shared via package.json.
+        run: npm run test:coverage:no-broker
       - run: npm run build
       - name: Frontend checks
         working-directory: frontend
@@ -39,7 +44,7 @@ jobs:
       - name: Pre-pull MQTT broker image
         run: docker pull eclipse-mosquitto:2
       - name: Broker-backed integration tests
-        run: npx vitest run __integration__ --no-file-parallelism
+        run: npm run test:integration
       - name: Install Chromium for sandbox boundary
         run: npx playwright install --with-deps chromium
       - name: Start release-candidate stack

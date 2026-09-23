@@ -207,12 +207,14 @@ reset: ## Wipe database and restart fresh, BASE stack (deletes all data!)
 	@echo "     make showcase && make showcase-seed PASS=yourpass"
 
 test: ## Run backend + frontend suites WITH coverage (mirrors CI's coverage thresholds)
-	npx vitest run --coverage
+# Same command CI's backend job runs, so a green `make verify` means a green backend
+# job: the Docker-gated suites are excluded here too and belong to `test-integration`.
+	npm run test:coverage:no-broker
 	cd frontend && npm run test:coverage
 
 test-integration: ## Run broker-backed integration tests (needs Docker; self-skips without it)
 	docker pull eclipse-mosquitto:2
-	npx vitest run __integration__ --no-file-parallelism
+	npm run test:integration
 
 e2e: ## Run Playwright e2e against the running stack (adapts: sets up or logs in)
 	npm run test:e2e

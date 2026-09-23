@@ -245,11 +245,14 @@ GitHub Actions runs:
 
 - repository-wide ESLint;
 - backend typecheck;
-- backend tests with coverage;
+- backend tests with coverage (`npm run test:coverage:no-broker`), which excludes the
+  seven Docker-gated suites owned by the `integration` job below. The remaining
+  `__integration__` suites are broker-free and stay in this pass because the global
+  90% branch threshold depends on them;
 - broker-backed integration + vertical E2E tests (a dedicated `integration` job
-  on an ubuntu runner that pre-pulls `eclipse-mosquitto:2` and runs the
-  `__integration__` suite — the Docker-gated tests that self-skip on dev
-  machines without Docker);
+  on an ubuntu runner that pre-pulls `eclipse-mosquitto:2` and runs the whole
+  `__integration__` suite serially via `npm run test:integration` — the Docker-gated
+  tests self-skip on dev machines without Docker);
 - frontend typecheck;
 - frontend tests with coverage.
 
@@ -269,7 +272,7 @@ GitHub Actions runs:
 ```bash
 npm ci
 npx tsc --noEmit
-npx vitest run --coverage
+npm run test:coverage:no-broker
 npm run build
 
 cd frontend

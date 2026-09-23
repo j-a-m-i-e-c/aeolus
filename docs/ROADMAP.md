@@ -76,6 +76,22 @@ Package a Logic/UI pair, metadata, required capabilities and setup information a
 
 This should make it possible to move an application between installations without turning the project into a marketplace before the trust and permission model is ready.
 
+### Published APIs
+
+Let an Automation Project deliberately publish a narrow HTTP interface for selected data and capabilities, without requiring the author to run another web service or rebuild authentication, TLS, rate limiting and auditing from scratch.
+
+The platform should own the HTTP server and route requests into sandboxed automation handlers. Automation code should never open its own listening ports. A first version should stay intentionally small:
+
+* JSON request and response handlers for common HTTP methods;
+* local-only exposure by default, with remote exposure as an explicit choice;
+* scoped API credentials that can be limited to specific routes and methods;
+* request size, timeout and rate limits at the platform boundary;
+* audit history for external calls, especially routes that can cause physical actions;
+* physical commands continuing through the normal Command Service and Command Evidence path rather than bypassing Aeolus;
+* generated OpenAPI metadata where the route declaration already contains enough schema information.
+
+The goal is not to turn Aeolus into a generic API gateway. It is to make edge applications easy to integrate with other software while preserving the same security and truthful command semantics as the dashboard and automation runtime.
+
 ### Better device provisioning
 
 Keep low friction discovery for development, while adding optional stricter operation:
@@ -122,18 +138,21 @@ Extend the existing unit, property, integration and Playwright coverage with rep
 
 ## Later
 
-### Fleet and multiple nodes tooling
+### Aeolus federation and multi-site systems
 
-Possible capabilities include:
+Allow independent Aeolus installations to cooperate without making a central service part of their runtime dependency. Each site should remain authoritative for its own devices, automations and safety behaviour.
 
-* installation identity and health;
-* remote diagnostics;
-* staged upgrades;
-* configuration backup;
-* application deployment;
-* multiple sites views.
+A future federation layer can build on the same secure transport and capability model as Published APIs, but should remain a distinct Aeolus-to-Aeolus protocol rather than raw MQTT bridging or shared administrator credentials. Possible capabilities include:
 
-The local node should remain useful without the fleet service.
+* stable installation identity, health and version discovery;
+* machine credentials with explicit cross-site capabilities rather than full admin authority;
+* selective publication of current state, discrete events and callable operations;
+* remote state caching with latest-value semantics while occurrence events retain their event semantics;
+* cross-site commands that preserve causation and Command Evidence across both nodes;
+* multiple-site views, diagnostics, backups and staged application deployment;
+* graceful offline behaviour where loss of the WAN link removes coordination but never stops local control.
+
+The intended model is federation, not one cloud controller owning every node. A pump station, shed, laboratory or remote instrument should continue operating correctly when every other Aeolus deployment is unreachable.
 
 ### More connectors and transports
 

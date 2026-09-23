@@ -24,6 +24,9 @@
     "sim": "tsx src/simulator/index.ts",
     "sim:watch": "tsx watch src/simulator/index.ts",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:coverage:no-broker": "vitest run --coverage --exclude \"__integration__/simulator-*.integration.test.ts\" --exclude \"__integration__/mqtt-broker-provisioning.integration.test.ts\" --exclude \"__integration__/shared-state-broker-silence.integration.test.ts\" --exclude \"__integration__/demo-reset-permissions.integration.test.ts\"",
+    "test:integration": "vitest run __integration__ --no-file-parallelism",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "prepare": "husky"

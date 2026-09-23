@@ -3,8 +3,11 @@
 echo "→ pre-push: type checking (tsc --noEmit)..."
 npx tsc --noEmit || exit 1
 
-echo "→ pre-push: running tests with coverage (vitest run --coverage)..."
-npm test -- --coverage || exit 1
+echo "→ pre-push: running tests with coverage (same command as CI's backend job)..."
+# Deliberately the no-broker variant, matching CI's backend job: the Docker-gated
+# suites belong to the serial integration job and are flaky under a parallel coverage
+# run. Run them explicitly with `make test-integration` when you need them.
+npm run test:coverage:no-broker || exit 1
 
 echo "→ pre-push: frontend type check + tests with coverage..."
 # Run frontend tests WITH coverage so the local gate matches CI (which enforces

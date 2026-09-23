@@ -55,7 +55,9 @@ describeE2E("Phase 2 reference-water vertical E2E", () => {
   }, 30000);
 
   afterEach(async () => {
-    await env.stop();
+    // Setup can fail before `env` is assigned (for example if the broker is slow).
+    // Do not mask that primary failure with a secondary `env.stop()` TypeError.
+    if (env) await env.stop();
   });
 
   it("runs stimulus -> automation-sourced command -> OBSERVED with provenance metadata", async () => {
