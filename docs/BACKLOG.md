@@ -44,9 +44,12 @@ authorization model first, hardening against determined insiders second.
 
 ---
 
-## High — deployment & lifecycle correctness
+## Operational sign-off / opt-in features
 
-### Ungate dashboard-managed MQTT provisioning 🟠
+Items in this section gate a feature that is **off by default**. They are not
+pre-promotion blockers for the default product.
+
+### Ungate dashboard-managed MQTT provisioning 📋
 Broker-side verification is implemented: after writing credentials and
 triggering a reload, the backend probes the broker to confirm the new policy is
 actually enforced before reporting success (`BrokerVerifier`), and the Compose

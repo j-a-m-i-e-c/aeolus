@@ -432,7 +432,7 @@ git pull --ff-only origin main
 docker compose up --build -d
 ```
 
-This pulls the latest code, rebuilds images, and restarts containers. The dashboard's **System** tab shows the current build commit and an "update available" badge by comparing against the latest commit on `main` — it surfaces that an update exists, but applying it is a manual step.
+This pulls the latest code, rebuilds images, and restarts containers. The dashboard's **System** tab shows the current build information without making any network request. An administrator can explicitly run the version check, which compares the installed semantic version against the latest published GitHub Release and reports whether a newer one exists. It surfaces that an update exists; applying it is a manual step.
 
 ### Rollback
 
@@ -451,11 +451,11 @@ Or restore from a database backup if data was affected (Section 5).
 The default deployment removes several high-risk host-control paths, but it should still be treated as an edge service that needs ordinary network and host hardening:
 
 - **No Docker socket mount** — the backend container has no access to `/var/run/docker.sock`, so a compromised container cannot control the host's Docker daemon. Mosquitto reloads do not require that privilege: the default stack uses a narrowly scoped `mosquitto-reloader` sidecar sharing Mosquitto's PID namespace and watching the shared config directory. Dashboard-managed provisioning itself remains opt-in.
-- **Read-only system router** — `/api/system` is GET-only (diagnostics, logs, version check). There are no shutdown, reboot, update, or prune endpoints; host control is done via SSH/Docker, not the web app.
+- **No host control in the system router** — `/api/system` exposes diagnostics only: `GET /` (admin), `GET /logs` (admin) and `GET /version` (local build info, no network I/O). The one non-GET route, `POST /version/check`, is admin-only, changes nothing locally, and exists so an update check never runs merely because somebody opened the System page. There are no shutdown, reboot, update, or prune endpoints; host control is done via SSH/Docker, not the web app.
 - **No git or Docker CLI in the production image** — the build commit is baked into `dist/build-info.json` at build time, so no runtime git is needed.
 - **Backend runs as a non-root user** — the container starts as root only long enough for the entrypoint to repair data-volume ownership, then drops to the unprivileged `aeolus` user via `gosu` before running Node. The application process never runs as root.
 - **Authentication always on** — bcrypt (cost 12) password hashing, short-lived JWTs, httpOnly refresh cookies, and login rate-limiting (5 attempts/min per IP).
 - **Sandboxed automations** — user scripts run in `isolated-vm` V8 isolates (32 MB cap, 5 s timeout, no filesystem, no module imports).
 - **LAN-only by default** — combine with the firewall rules (Section 4) and a TLS reverse proxy (Section 3) for a hardened deployment.
 
-> The production image still includes `python3`, `make`, and `g++` — they're required to compile the native addons (`isolated-vm`, `better-sqlite3`, `bcrypt`) during install. They are build dependencies for those modules, not host-control tooling.
+> **Native build dependencies are confined to the builder stage.** `python3`, `make` and `g++` are needed to compile the native addons (`isolated-vm`, `better-sqlite3`, `bcrypt`), so the multi-stage `Dockerfile` installs them only in the builder and copies the compiled `node_modules` forward. The production stage installs just `wget`, `ca-certificates` and `gosu`, so no compiler toolchain is present in the running image.
