@@ -3,6 +3,13 @@
 // Rendered only when the frontend runs in public demo mode (VITE_PUBLIC_DEMO).
 // Communicates that the environment is simulated, shared, and reset nightly, and
 // offers a way back to the marketing site (Req 10.2).
+//
+// The Source link is deliberately always visible, unlike the marketing link. It
+// is open-source hygiene rather than a compliance control: AGPL section 13 only
+// obliges a network source offer for a *modified* version, and the hosted demo
+// runs repo-shipped Compose overlays and seed data rather than modified Aeolus.
+// Offering source unconditionally costs nothing and stays correct if the demo
+// ever does run a modified build.
 
 import { PUBLIC_DEMO } from "../lib/env";
 
@@ -28,6 +35,15 @@ export function DemoBanner() {
         rel="noopener noreferrer"
       >
         aeolus.com.au
+      </a>
+      <span className="text-[#6B7785]">·</span>
+      <a
+        href="https://github.com/j-a-m-i-e-c/aeolus"
+        className="text-[#3BA4FF] hover:underline"
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        Source
       </a>
     </div>
   );

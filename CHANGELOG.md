@@ -4,12 +4,6 @@ Aeolus follows semantic versioning for published releases. Until the first stabl
 
 ## Unreleased
 
-### Licensing
-
-* Aeolus is now licensed under the GNU Affero General Public License v3.0 (`AGPL-3.0-only`), replacing the previous MIT licence. Use, modification, redistribution and commercial use remain permitted under the AGPL's terms; the licence adds a source-availability obligation when a modified version is made available for users to interact with over a network.
-* `LICENSING.md` documents the licensing model, third-party software, possible future permissive ecosystem packages and possible alternative commercial terms. `COPYRIGHT` records the copyright holder.
-* `CONTRIBUTING.md` explains that contributor terms are being established before substantial external code contributions are merged.
-
 ### Security and reliability
 
 * WebSocket access tokens are sent only in the first authenticated message and are no longer accepted from query strings.
