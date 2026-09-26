@@ -581,4 +581,6 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for repository setup, development workflo
 
 ## Licence
 
-The applicable licence is defined in [LICENSE](LICENSE).
+Aeolus is open source under the [GNU Affero General Public License v3.0](LICENSE) (`AGPL-3.0-only`). You may use, modify and redistribute Aeolus, including commercially, under the terms of that licence. If you modify the covered software and make that modified version available for users to interact with over a network, the AGPL requires those users to be offered the corresponding source code.
+
+See [LICENSING.md](LICENSING.md) for the project licensing model, third-party software and possible alternative commercial terms.

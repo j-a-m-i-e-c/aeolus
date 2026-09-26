@@ -77,6 +77,14 @@ See `src/connectors/README.md` for the full developer guide.
 - Test files live next to source: `device-registry.test.ts`
 - Property-based tests use fast-check
 
+## Licensing and contributions
+
+Aeolus itself is licensed under `AGPL-3.0-only`. By submitting a pull request, you must have the right to submit the material you contribute and must not include code or other content under terms that are incompatible with the project.
+
+The project also wants to preserve the option of offering Aeolus under separate commercial terms in the future. A contributor-rights policy for substantial external code contributions is therefore being established. Until that policy is published, please open an issue before starting a non-trivial code contribution. Maintainers may defer merging substantial external code changes until the contributor terms are in place. Bug reports, design discussion, documentation suggestions and small fixes remain welcome.
+
+See [LICENSING.md](LICENSING.md) for the project licensing model.
+
 ## Pull Request Checklist
 
 - [ ] Code builds without errors
