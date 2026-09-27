@@ -218,13 +218,14 @@ The platform handles transport, persistence, authentication, real time updates a
 
 ### State flow
 
-The automation state store supports three common interaction patterns:
+The automation state store supports four common interaction patterns:
 
 1. **Logic to UI:** `state.set()` persists a value and pushes an update to the component.
 2. **UI to future Logic execution:** `aeolus.save()` persists a setting that the next event can read.
 3. **UI to immediate Logic execution:** `aeolus.fire()` sends a named event and payload to the associated script.
+4. **UI to state plus immediate Logic:** `aeolus.saveAndFire()` persists a value and wakes Logic in one bounded operation when the state change itself should cause work.
 
-This makes it possible to keep device decisions in backend logic while exposing a narrowly tailored operator interface.
+The underlying distinction is deliberate: durable state answers **what is true**, while a UI event says **what just happened**. Keeping those separate lets device decisions stay in backend Logic while the interface remains a narrowly tailored expression of operator state and intent. See [Custom UI SDK: state, events and operator intent](reference/custom-ui-sdk.md) for the practical API guide.
 
 <!--
 MEDIA TODO: Full stack authoring GIF

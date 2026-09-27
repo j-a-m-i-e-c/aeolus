@@ -215,6 +215,8 @@ Together the two sides behave like a small edge application. Each automation has
 * **UI → Logic, immediate:** `aeolus.fire(eventName, payload)` runs the associated Logic now with `context.topic = "ui/{ruleId}/{eventName}"` and `context.state = payload`.
 * **Save and run:** `aeolus.saveAndFire(key, value)` requests both persistence and an immediate `state-set` Logic event carrying `{ key, value }`. The immediate run can use `context.state`; later runs can read the stored value.
 
+For the method-level mental model and examples of when to use `read()`, `save()`, `fire()` and `saveAndFire()`, see [**Custom UI SDK: state, events and operator intent**](docs/reference/custom-ui-sdk.md).
+
 ### Logic: normal module-style TypeScript
 
 For a substantial project, the Logic tab should read like a good `main()` method: enough orchestration to explain how the automation thinks, without burying the reader in implementation detail.

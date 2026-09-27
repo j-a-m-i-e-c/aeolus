@@ -133,6 +133,8 @@ Each script automation has private persistent state.
 to keep a history of observations, write a Collection record with `db`. See
 [Data and storage](data-and-storage.md).
 
+For the UI-side mental model behind `read()`, `save()`, `fire()` and `saveAndFire()`, including when state should stay separate from an event, see [Custom UI SDK: state, events and operator intent](custom-ui-sdk.md).
+
 ### Logic to UI
 
 ```javascript

@@ -6,6 +6,7 @@ These documents describe how Aeolus is currently assembled. They are split by co
 
 - [Architecture](architecture.md)
 - [Automation runtime](automations.md)
+- [Custom UI SDK: state, events and operator intent](custom-ui-sdk.md)
 - [Connectors](connectors.md)
 - [Data and storage](data-and-storage.md)
 - [API and WebSocket](api.md)
