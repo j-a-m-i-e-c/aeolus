@@ -26,6 +26,7 @@ export interface SecurityStatus {
   sharedCredential: { username: string; password: string } | null;
   backendConnected: boolean;
   managedProvisioningEnabled: boolean;
+  perDeviceProvisioningEnabled: boolean;
 }
 
 // ---- API helpers ----
@@ -51,6 +52,7 @@ interface MqttProvisioningState {
   credentials: MqttCredentialListItem[];
   loading: boolean;
   managedProvisioningEnabled: boolean;
+  perDeviceProvisioningEnabled: boolean;
 
   fetchStatus: () => Promise<void>;
   setLevel: (level: SecurityLevel) => Promise<void>;
@@ -69,6 +71,7 @@ export const useMqttProvisioningStore = create<MqttProvisioningState>((set) => (
   credentials: [],
   loading: false,
   managedProvisioningEnabled: false,
+  perDeviceProvisioningEnabled: false,
 
   // ---- Actions ----
 
@@ -80,6 +83,7 @@ export const useMqttProvisioningStore = create<MqttProvisioningState>((set) => (
         level: status.level,
         sharedCredential: status.sharedCredential,
         managedProvisioningEnabled: status.managedProvisioningEnabled,
+        perDeviceProvisioningEnabled: status.perDeviceProvisioningEnabled,
         loading: false,
       });
     } catch (err) {

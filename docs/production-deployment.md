@@ -51,13 +51,13 @@ The **Security → MQTT Security** screen supports three modes:
 
 The backend provisioning service can write the Mosquitto configuration and password file, then reload the broker. The default Compose stack wires this up through the Docker-managed `mosquitto_config` volume (`MQTT_PASSWORD_FILE` / `MQTT_CONFIG_FILE`) and the `aeolus-mosquitto-reloader` sidecar, which `SIGHUP`s Mosquitto when the files change (`MQTT_RELOAD_STRATEGY=none`; the backend writes files and lets the sidecar reload). A one-shot init service seeds the runtime volume from the committed `mosquitto/mosquitto.conf` when the volume is first created. The tracked `mosquitto/` directory is source-only and is never recursively owned by a running container. No Docker socket is mounted; the reload happens over a shared PID namespace, not the Docker API.
 
-> **Opt-in by default:** dashboard-managed provisioning (Shared Password / Per-Device) is gated behind `MQTT_MANAGED_PROVISIONING_ENABLED`, which defaults to `false`. The plumbing above is present, but the managed security levels stay disabled until you set `MQTT_MANAGED_PROVISIONING_ENABLED=true`. With it disabled, use the manual procedure below. The Docker socket is deliberately never mounted — do not expose it to make this feature work.
+> **Shared Password is supported by the standard stack:** it includes the writable runtime config volume and reload sidecar needed for Open ↔ Shared Password changes. Set `MQTT_MANAGED_PROVISIONING_ENABLED=true` to manage those modes from the dashboard; it stays `false` by default until Shared Password has passed field verification on a real deployment. `MQTT_PER_DEVICE_PROVISIONING_ENABLED` separately gates the experimental Per-Device credential mode. The Docker socket is deliberately never mounted — do not expose it to make this feature work.
 
 See [MQTT security](security/mqtt.md) for the credential model and provisioning API.
 
 ### Manual broker configuration
 
-If dashboard-managed provisioning is disabled, manage the live Docker volume directly rather than editing the tracked `mosquitto/` source directory. Start the broker once so the config volume is created and seeded:
+If you choose to manage Mosquitto manually instead of using the dashboard, edit the live Docker volume rather than the tracked `mosquitto/` source directory. Start the broker once so the config volume is created and seeded:
 
 ```bash
 docker compose up -d mosquitto
@@ -450,7 +450,7 @@ Or restore from a database backup if data was affected (Section 5).
 
 The default deployment removes several high-risk host-control paths, but it should still be treated as an edge service that needs ordinary network and host hardening:
 
-- **No Docker socket mount** — the backend container has no access to `/var/run/docker.sock`, so a compromised container cannot control the host's Docker daemon. Mosquitto reloads do not require that privilege: the default stack uses a narrowly scoped `mosquitto-reloader` sidecar sharing Mosquitto's PID namespace and watching the shared config directory. Dashboard-managed provisioning itself remains opt-in.
+- **No Docker socket mount** — the backend container has no access to `/var/run/docker.sock`, so a compromised container cannot control the host's Docker daemon. Mosquitto reloads do not require that privilege: the default stack uses a narrowly scoped `mosquitto-reloader` sidecar sharing Mosquitto's PID namespace and watching the shared config directory. Open and Shared Password provisioning are supported by that plumbing once `MQTT_MANAGED_PROVISIONING_ENABLED=true` is set; Per-Device is gated separately again.
 - **No host control in the system router** — `/api/system` exposes diagnostics only: `GET /` (admin), `GET /logs` (admin) and `GET /version` (local build info, no network I/O). The one non-GET route, `POST /version/check`, is admin-only, changes nothing locally, and exists so an update check never runs merely because somebody opened the System page. There are no shutdown, reboot, update, or prune endpoints; host control is done via SSH/Docker, not the web app.
 - **No git or Docker CLI in the production image** — the build commit is baked into `dist/build-info.json` at build time, so no runtime git is needed.
 - **Backend runs as a non-root user** — the container starts as root only long enough for the entrypoint to repair data-volume ownership, then drops to the unprivileged `aeolus` user via `gosu` before running Node. The application process never runs as root.

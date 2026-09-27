@@ -4,15 +4,11 @@ Configure an ESP32, Arduino or other MQTT client for the local broker.
 
 ## Before you start
 
-The default Docker Compose broker is Open and does not require credentials. Dashboard-managed Shared Password and
-Per-Device security are under development and disabled by default. For an authenticated production deployment,
-configure Mosquitto manually as described in [Production deployment](../production-deployment.md#2-mqtt-broker-security),
-then enter the same credentials in the device firmware.
+The default Docker Compose broker is Open and does not require credentials. Shared Password is supported by the standard Compose stack once `MQTT_MANAGED_PROVISIONING_ENABLED=true` is set: switch to it in **Security → MQTT Security**, then copy the generated shared username/password into the device firmware.
 
-The dashboard workflow below is available only for development testing when
-`MQTT_MANAGED_PROVISIONING_ENABLED=true` is set explicitly.
+Per-Device credentials remain experimental. The workflow below applies only when `MQTT_PER_DEVICE_PROVISIONING_ENABLED=true` is set deliberately.
 
-## Create the credential (experimental dashboard workflow)
+## Create a Per-Device credential (experimental workflow)
 
 1. In the Per-Device credential list, choose **Add Device**.
 2. Enter a recognisable device name, such as `living-room-esp32`.

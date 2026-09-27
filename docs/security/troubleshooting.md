@@ -36,7 +36,7 @@ Confirm that the frontend can refresh its access token and reconnect. Check prox
 
 ## MQTT device cannot connect
 
-First confirm whether the deployment uses dashboard provisioning or operator-managed Mosquitto configuration. The default Compose stack includes the required file mounts and reload sidecar, but dashboard-managed provisioning is disabled unless `MQTT_MANAGED_PROVISIONING_ENABLED=true` is set deliberately.
+The default Compose stack includes the required file mounts and reload sidecar, so Open and Shared Password need no plumbing changes — set `MQTT_MANAGED_PROVISIONING_ENABLED=true` to manage them from the dashboard. It stays `false` by default until Shared Password has passed field verification. `MQTT_PER_DEVICE_PROVISIONING_ENABLED=true` is additionally required for the experimental Per-Device mode.
 
 Then check:
 

@@ -49,18 +49,10 @@ authorization model first, hardening against determined insiders second.
 Items in this section gate a feature that is **off by default**. They are not
 pre-promotion blockers for the default product.
 
-### Ungate dashboard-managed MQTT provisioning 📋
-Broker-side verification is implemented: after writing credentials and
-triggering a reload, the backend probes the broker to confirm the new policy is
-actually enforced before reporting success (`BrokerVerifier`), and the Compose
-reload sidecar now watches the config directory so atomic password-file
-replacements are observed. Managed Shared Password / Per-Device security remain
-gated behind `MQTT_MANAGED_PROVISIONING_ENABLED=true` by default.
+### Promote Per-Device MQTT provisioning 📋
+Broker-side verification is implemented. Shared Password is supported by the standard Compose deployment and is ready for field verification before being promoted to the default dashboard capability. The Compose reload sidecar now arms its directory watch immediately and performs a startup reconciliation reload, so the first Open → authenticated transition cannot be missed.
 
-Before flipping the default on: exercise the verified provisioning path against a
-real broker deployment (mode switch / rotation / revocation / restart), then
-enable managed provisioning by default (or document it as a supported opt-in).
-This is mostly an operational sign-off, with one code correction first:
+Per-Device remains gated behind `MQTT_PER_DEVICE_PROVISIONING_ENABLED=true`. Before promoting it, exercise create/connect/restart/revoke against a real broker and correct the remaining revocation-proof weakness:
 
 - **Per-device revocation verification is misleading.** `revokeDeviceCredential()`
   deletes the credential then probes the broker with `{ username, password:

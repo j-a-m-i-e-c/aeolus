@@ -205,7 +205,7 @@ async function main(): Promise<void> {
   if (config.managedMqttProvisioningEnabled) {
     await provisioningService.initialize();
   } else {
-    logger.info("Dashboard-managed MQTT security is disabled while under development");
+    logger.info("Dashboard-managed MQTT broker writes are disabled for this deployment");
   }
 
   // 4. Connector Framework (needed before CommandService)
@@ -456,6 +456,7 @@ async function main(): Promise<void> {
     "/api/mqtt/provisioning",
     createProvisioningRoutes(provisioningService, {
       managedProvisioningEnabled: config.managedMqttProvisioningEnabled,
+      perDeviceProvisioningEnabled: config.perDeviceMqttProvisioningEnabled,
     }),
   );
   const sandboxTypesPath = path.resolve(import.meta.dirname, "automations/sandbox-types.d.ts");

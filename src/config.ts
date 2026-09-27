@@ -9,8 +9,10 @@ export interface Config {
   mqttTopics: string[];
   /** Topic leaf names ignored by automatic device discovery. */
   mqttDiscoveryIgnoredTopicSuffixes: string[];
-  /** Dashboard-managed Mosquitto provisioning is opt-in while under development. */
+  /** Deployment has writable/reloadable broker plumbing for dashboard-managed security. */
   managedMqttProvisioningEnabled: boolean;
+  /** Experimental Per-Device credential management gate. */
+  perDeviceMqttProvisioningEnabled: boolean;
   /**
    * Broker-side verification of managed provisioning changes. After writing
    * config/password files and triggering a reload, the provisioning service
@@ -87,6 +89,7 @@ export const config: Config = {
     .map((suffix) => suffix.trim().toLowerCase())
     .filter(Boolean),
   managedMqttProvisioningEnabled: process.env.MQTT_MANAGED_PROVISIONING_ENABLED === "true",
+  perDeviceMqttProvisioningEnabled: process.env.MQTT_PER_DEVICE_PROVISIONING_ENABLED === "true",
   mqttProvisioningVerify: {
     budgetMs: parseInt(process.env.MQTT_PROVISIONING_VERIFY_BUDGET_MS || "12000", 10),
     pollIntervalMs: parseInt(process.env.MQTT_PROVISIONING_VERIFY_POLL_MS || "500", 10),

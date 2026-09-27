@@ -464,7 +464,7 @@ Aeolus includes dashboard controls and APIs for three broker security modes:
 | **Shared password** | One credential for all external MQTT clients |
 | **Per-device** | Separate credentials for individual devices |
 
-Applying those settings automatically requires a provisioning-enabled deployment with scoped access to the Mosquitto files and reload mechanism. The default Docker Compose stack provides that plumbing through a Docker-managed Mosquitto runtime-config volume and a dedicated reload sidecar without mounting the Docker socket. The committed `mosquitto/` directory remains source-only, so a running container cannot change its ownership or rewrite tracked files. Dashboard-managed provisioning remains opt-in behind `MQTT_MANAGED_PROVISIONING_ENABLED=true`. See [MQTT security](docs/security/mqtt.md).
+Applying those settings automatically requires a provisioning-enabled deployment with scoped access to the Mosquitto files and reload mechanism. The default Docker Compose stack provides that plumbing through a Docker-managed Mosquitto runtime-config volume and a dedicated reload sidecar without mounting the Docker socket. The committed `mosquitto/` directory remains source-only, so a running container cannot change its ownership or rewrite tracked files. Open and Shared Password are managed by that standard Docker Compose plumbing once `MQTT_MANAGED_PROVISIONING_ENABLED=true` is set, which stays `false` by default pending field verification. Per-Device provisioning remains experimental and is independently gated behind `MQTT_PER_DEVICE_PROVISIONING_ENABLED=true`. See [MQTT security](docs/security/mqtt.md).
 
 Aeolus should still be deployed on a segmented or otherwise trusted network when it controls meaningful physical equipment.
 
@@ -532,7 +532,8 @@ Runtime defaults come from [`src/config.ts`](src/config.ts); `docker-compose.yml
 | `MQTT_BROKER_URL` | `mqtt://localhost:1883` | Broker used by the backend |
 | `MQTT_TOPICS` | `#` | MQTT subscription filter |
 | `MQTT_DISCOVERY_IGNORED_TOPIC_SUFFIXES` | `set,command,cmd,heartbeat,availability` | Topic leaf names excluded from automatic device discovery |
-| `MQTT_MANAGED_PROVISIONING_ENABLED` | `false` | Enables experimental dashboard management of Shared / Per-Device broker security |
+| `MQTT_MANAGED_PROVISIONING_ENABLED` | `false` | Allows Aeolus to write/reload live Mosquitto configuration |
+| `MQTT_PER_DEVICE_PROVISIONING_ENABLED` | `false` | Enables experimental Per-Device credential management |
 | `PORT` / `API_PORT` | `3001` | Backend API port |
 | `DB_PATH` | `./data/aeolus.db` (`/app/data/aeolus.db` in Compose) | SQLite database path |
 | `LOG_LEVEL` | `debug` (`info` in Compose) | Application logging level |

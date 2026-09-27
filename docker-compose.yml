@@ -47,7 +47,7 @@ services:
     networks:
       - aeolus
 
-  # Lightweight sidecar that watches the shared password file and sends SIGHUP
+  # Lightweight sidecar that watches the shared broker-config directory and sends SIGHUP
   # to the Mosquitto process when it changes. Shares the PID namespace with the
   # mosquitto container so it can signal PID 1 directly — no Docker socket needed.
   mosquitto-reloader:
@@ -65,20 +65,31 @@ services:
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
-        echo "mosquitto-reloader: waiting for /watch/password_file to appear"
-        while [ ! -f /watch/password_file ]; do sleep 2; done
-        echo "mosquitto-reloader: watching /watch directory for config changes"
-        # Watch the DIRECTORY, not the file: the backend replaces password_file
-        # atomically (temp file + rename), which swaps the inode. A watch bound
-        # to the old file path would stop firing after the first replacement and
-        # never sees the rename (moved_to is a directory event). Watching the
-        # directory for moved_to/create/close_write reliably catches every
-        # atomic write and re-arms each iteration. The dir holds only
-        # mosquitto.conf and password_file, so reloading on any change is correct.
-        while inotifywait -e close_write -e moved_to -e create /watch 2>/dev/null; do
-          echo "mosquitto-reloader: config directory changed, sending SIGHUP to mosquitto"
-          kill -HUP 1
-        done
+        set -eu
+        echo "mosquitto-reloader: arming directory watcher"
+        # Start watching immediately. Do NOT wait for password_file first: the
+        # backend creates/replaces that file atomically and can win the startup
+        # race, leaving the first Open -> authenticated transition unapplied.
+        #
+        # The persistent directory watch handles every later atomic rename. The
+        # one reconciliation HUP after the watcher is armed handles any config or
+        # password-file write that happened before the watch became active. Thus
+        # a change is covered whether it lands before, during, or after startup.
+        inotifywait -m -e close_write -e moved_to -e create --format '%e %f' /watch 2>/dev/null |
+          while read -r event file; do
+            echo "mosquitto-reloader: $${event} $${file}; sending SIGHUP to mosquitto"
+            kill -HUP 1
+          done &
+        watcher_pid=$$!
+
+        # Give inotifywait a moment to install its watch, then reconcile the
+        # broker with the current files. If a write already happened, this HUP
+        # applies it; if it happens after the watch is armed, the event applies it.
+        sleep 1
+        echo "mosquitto-reloader: startup reconciliation, sending SIGHUP to mosquitto"
+        kill -HUP 1
+
+        wait "$$watcher_pid"
     logging:
       driver: json-file
       options:
@@ -130,6 +141,7 @@ services:
       REST_ACTION_TIMEOUT_MS: "${REST_ACTION_TIMEOUT_MS:-7000}"
       MQTT_DISCOVERY_IGNORED_TOPIC_SUFFIXES: "${MQTT_DISCOVERY_IGNORED_TOPIC_SUFFIXES:-set,command,cmd,heartbeat,availability}"
       MQTT_MANAGED_PROVISIONING_ENABLED: "${MQTT_MANAGED_PROVISIONING_ENABLED:-false}"
+      MQTT_PER_DEVICE_PROVISIONING_ENABLED: "${MQTT_PER_DEVICE_PROVISIONING_ENABLED:-false}"
       MQTT_PROVISIONING_VERIFY_BUDGET_MS: "${MQTT_PROVISIONING_VERIFY_BUDGET_MS:-12000}"
       MQTT_PROVISIONING_VERIFY_POLL_MS: "${MQTT_PROVISIONING_VERIFY_POLL_MS:-500}"
       MQTT_PROVISIONING_VERIFY_TIMEOUT_MS: "${MQTT_PROVISIONING_VERIFY_TIMEOUT_MS:-3000}"

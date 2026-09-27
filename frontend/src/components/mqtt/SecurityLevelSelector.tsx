@@ -17,8 +17,8 @@ interface LevelOption {
   /**
    * Marks a mode that works but is not yet something to rely on, so the card can
    * say which mode that is instead of the page implying the whole managed feature
-   * is experimental. Only surfaced once managed provisioning is enabled; before
-   * that "Managed setup disabled" is the operative reason and the more useful one.
+   * is experimental. Only Per-Device uses the feature gate; Shared Password is
+   * supported by the normal Compose deployment.
    */
   underDevelopment?: boolean;
 }
@@ -65,7 +65,7 @@ function getConfirmationMessage(currentLevel: SecurityLevel): string {
 
 export default function SecurityLevelSelector() {
   const readOnly = useReadOnlyDemo();
-  const { level, setLevel, loading, managedProvisioningEnabled } = useMqttProvisioningStore();
+  const { level, setLevel, loading, managedProvisioningEnabled, perDeviceProvisioningEnabled } = useMqttProvisioningStore();
   const [pending, setPending] = useState(false);
   const [previewLevel, setPreviewLevel] = useState<SecurityLevel>(level);
 
@@ -80,6 +80,7 @@ export default function SecurityLevelSelector() {
       return;
     }
     if (!managedProvisioningEnabled && newLevel !== "open") return;
+    if (!perDeviceProvisioningEnabled && newLevel === "per_device") return;
 
     // Show confirmation when switching away from modes with active credentials
     if (MODES_WITH_CREDENTIALS.includes(displayedLevel)) {
@@ -100,12 +101,13 @@ export default function SecurityLevelSelector() {
       {LEVEL_OPTIONS.map(({ level: optionLevel, icon: Icon, title, description, underDevelopment }) => {
         const isActive = optionLevel === displayedLevel;
         const needsManagedProvisioning = !managedProvisioningEnabled && optionLevel !== "open";
-        const isDisabled = loading || pending || (needsManagedProvisioning && !readOnly);
+        const needsPerDeviceGate = optionLevel === "per_device" && !perDeviceProvisioningEnabled;
+        const isDisabled = loading || pending || ((needsManagedProvisioning || needsPerDeviceGate) && !readOnly);
         // One reason at a time, most operative first: a mode you cannot select yet
         // says so, rather than also advertising its maturity. Selectable and
         // under development is the case worth labelling.
         const showUnderDevelopment =
-          underDevelopment === true && !needsManagedProvisioning && !readOnly;
+          underDevelopment === true && !needsManagedProvisioning && !needsPerDeviceGate && !readOnly;
 
         return (
           <motion.button
@@ -136,7 +138,10 @@ export default function SecurityLevelSelector() {
               </span>
               <span className="text-xs text-secondary">{description}</span>
               {needsManagedProvisioning && !readOnly && (
-                <span className="text-xs font-medium text-amber-400">Managed setup disabled</span>
+                <span className="text-xs font-medium text-amber-400">Managed broker setup unavailable</span>
+              )}
+              {!needsManagedProvisioning && needsPerDeviceGate && !readOnly && (
+                <span className="text-xs font-medium text-amber-400">Per-Device provisioning disabled</span>
               )}
               {showUnderDevelopment && (
                 <span className="text-xs font-medium text-amber-400">Under development</span>

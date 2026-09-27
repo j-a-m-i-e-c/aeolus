@@ -10,11 +10,13 @@ const h = vi.hoisted(() => {
     level: SecurityLevel;
     loading: boolean;
     managedProvisioningEnabled: boolean;
+    perDeviceProvisioningEnabled: boolean;
     setLevel: typeof setLevel;
   } = {
     level: "open",
     loading: false,
     managedProvisioningEnabled: true,
+    perDeviceProvisioningEnabled: true,
     setLevel,
   };
   const demoState = { readOnly: false };
@@ -34,6 +36,7 @@ describe("SecurityLevelSelector", () => {
     h.state.level = "open";
     h.state.loading = false;
     h.state.managedProvisioningEnabled = true;
+    h.state.perDeviceProvisioningEnabled = true;
     h.demoState.readOnly = false;
     vi.spyOn(window, "confirm").mockReturnValue(true);
   });
@@ -93,16 +96,27 @@ describe("SecurityLevelSelector", () => {
     expect(h.setLevel).not.toHaveBeenCalled();
   });
 
-  it("marks managed security options as unavailable when managed provisioning is disabled", () => {
+  it("keeps Shared Password available while Per-Device provisioning is disabled", async () => {
+    h.state.managedProvisioningEnabled = true;
+    h.state.perDeviceProvisioningEnabled = false;
+    render(<SecurityLevelSelector />);
+
+    expect(screen.getAllByText("Per-Device provisioning disabled")).toHaveLength(1);
+    const sharedPassword = screen.getByRole("button", { name: /shared password/i });
+    expect(sharedPassword).not.toBeDisabled();
+    fireEvent.click(sharedPassword);
+    await waitFor(() => expect(h.setLevel).toHaveBeenCalledWith("shared_password"));
+    expect(screen.getByRole("button", { name: /per-device/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /^open/i })).not.toBeDisabled();
+  });
+
+  it("disables authenticated modes when managed broker plumbing is unavailable", () => {
     h.state.managedProvisioningEnabled = false;
     render(<SecurityLevelSelector />);
 
-    expect(screen.getAllByText("Managed setup disabled")).toHaveLength(2);
-    const sharedPassword = screen.getByRole("button", { name: /shared password/i });
-    expect(sharedPassword).toBeDisabled();
-    fireEvent.click(sharedPassword);
-    expect(h.setLevel).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: /^open/i })).not.toBeDisabled();
+    expect(screen.getAllByText("Managed broker setup unavailable")).toHaveLength(2);
+    expect(screen.getByRole("button", { name: /shared password/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /per-device/i })).toBeDisabled();
   });
 
   it("labels Per-Device as under development once it is selectable, and leaves Shared Password unqualified", () => {
@@ -117,17 +131,19 @@ describe("SecurityLevelSelector", () => {
     expect(screen.getByRole("button", { name: /shared password/i })).not.toHaveTextContent("Under development");
   });
 
-  it("prefers the managed-setup reason over the maturity label while provisioning is disabled", () => {
-    h.state.managedProvisioningEnabled = false;
+  it("shows the Per-Device gate reason instead of a second maturity label while disabled", () => {
+    h.state.managedProvisioningEnabled = true;
+    h.state.perDeviceProvisioningEnabled = false;
     render(<SecurityLevelSelector />);
 
-    expect(screen.getAllByText("Managed setup disabled")).toHaveLength(2);
+    expect(screen.getAllByText("Per-Device provisioning disabled")).toHaveLength(1);
     expect(screen.queryByText("Under development")).not.toBeInTheDocument();
   });
 
   it("lets the public demo preview broker modes without applying them", () => {
     h.demoState.readOnly = true;
     h.state.managedProvisioningEnabled = false;
+    h.state.perDeviceProvisioningEnabled = false;
     render(<SecurityLevelSelector />);
     fireEvent.click(screen.getByText("Shared Password"));
     expect(screen.getByText(/Demo preview · not applied/i)).toBeInTheDocument();

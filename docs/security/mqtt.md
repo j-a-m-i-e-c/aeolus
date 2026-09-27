@@ -1,11 +1,6 @@
 # MQTT security
 
-Open broker access is the current default. Dashboard-managed Shared Password and Per-Device provisioning are under
-development and disabled by default because a deployment must prove that Mosquitto has applied every credential
-change before Aeolus can safely report it as active. The dashboard labels both options accordingly, and their APIs
-return `503` unless `MQTT_MANAGED_PROVISIONING_ENABLED=true` is set deliberately for development work.
-
-For authenticated production deployments today, manage Mosquitto credentials and reloads through the host deployment.
+Open broker access is the current default. Shared Password is supported by the standard Docker Compose deployment, which already includes the writable runtime config volume and Mosquitto reload sidecar; enable it with `MQTT_MANAGED_PROVISIONING_ENABLED=true`, which stays `false` by default pending field verification. Per-Device provisioning remains under development and is independently gated by `MQTT_PER_DEVICE_PROVISIONING_ENABLED=true`.
 
 ## Security levels
 
@@ -27,15 +22,15 @@ Each device receives its own username and password. Credentials can be created a
 
 ## Provisioning API
 
-The following endpoints are experimental and require `MQTT_MANAGED_PROVISIONING_ENABLED=true`:
+Open and Shared Password need only `MQTT_MANAGED_PROVISIONING_ENABLED=true`. Selecting `per_device`, and all credential-list/create/revoke endpoints, additionally require `MQTT_PER_DEVICE_PROVISIONING_ENABLED=true`.
 
-| Method | Path | Access |
-|---|---|---|
-| `GET` | `/api/mqtt/provisioning/status` | Authenticated |
-| `PUT` | `/api/mqtt/provisioning/level` | Admin |
-| `POST` | `/api/mqtt/provisioning/shared/regenerate` | Admin |
-| `GET`, `POST` | `/api/mqtt/provisioning/credentials` | Admin |
-| `DELETE` | `/api/mqtt/provisioning/credentials/:id` | Admin |
+| Method | Path | Access | Gate |
+|---|---|---|---|
+| `GET` | `/api/mqtt/provisioning/status` | Authenticated | none |
+| `PUT` | `/api/mqtt/provisioning/level` | Admin | only `per_device` is gated |
+| `POST` | `/api/mqtt/provisioning/shared/regenerate` | Admin | none |
+| `GET`, `POST` | `/api/mqtt/provisioning/credentials` | Admin | Per-Device flag |
+| `DELETE` | `/api/mqtt/provisioning/credentials/:id` | Admin | Per-Device flag |
 
 Legacy credential endpoints also exist under `/api/auth/mqtt-credentials`.
 
@@ -83,7 +78,7 @@ Aeolus hashes device passwords into Mosquitto's native sha512-pbkdf2 (`$7$`) for
 
 The default Compose deployment keeps live broker configuration in the Docker-managed `mosquitto_config` volume, mounted into both the backend and broker at `/mosquitto/config`. A one-shot init service copies the committed `mosquitto/mosquitto.conf` into that volume only when the live config does not yet exist. This keeps tracked source files separate from mutable runtime state and prevents container ownership changes from breaking Git operations on the host.
 
-The reload sidecar mounts the same runtime volume read-only and watches the config **directory** (not a single file path) for move/create events. The backend's atomic temp-file-plus-rename writes are therefore observed reliably and the broker is sent `SIGHUP` for each one.
+The reload sidecar mounts the same runtime volume read-only and watches the config **directory** (not a single file path) for move/create/write events. It arms that watch immediately, then sends one startup reconciliation `SIGHUP`. This removes the first-transition race where the backend could create `password_file` before the old sidecar began watching. Later atomic temp-file-plus-rename writes are observed by the persistent directory watch and trigger another `SIGHUP`.
 
 ### Change verification
 
@@ -93,13 +88,14 @@ backend therefore probes the broker with short-lived throwaway connections and o
 policy is demonstrably enforced:
 
 - switching to Open confirms anonymous access is accepted;
-- switching to Shared Password / Per-Device confirms anonymous access is rejected and the backend credential is accepted;
+- switching to Shared Password confirms anonymous access is rejected and the backend credential is accepted;
+- Per-Device uses the same broker verification path when its experimental gate is enabled;
 - regenerating the shared password confirms the new credential is accepted;
 - creating a device credential confirms it is accepted; revoking one confirms it is rejected while the backend still connects.
 
 The probes poll within a bounded budget to tolerate the asynchronous reload. If the broker does not converge within the
 budget, the API returns `503` — the change is still saved and will apply on the broker's next reload or restart; only the
-live confirmation did not land in time. Verification runs only while `MQTT_MANAGED_PROVISIONING_ENABLED=true`.
+live confirmation did not land in time. Verification runs for supported Shared Password changes regardless of the Per-Device feature gate.
 
 ### Reload strategies
 
@@ -124,7 +120,8 @@ The backend supports pluggable reload strategies via `MQTT_RELOAD_STRATEGY`:
 | `MQTT_RELOAD_PID_FILE` | — | PID file for the `signal` strategy |
 | `MQTT_RELOAD_COMMAND` | — | Shell command for the `command` strategy |
 | `MQTT_PBKDF2_ITERATIONS` | `100000` | PBKDF2 iteration count (embedded in each hash) |
-| `MQTT_MANAGED_PROVISIONING_ENABLED` | `false` | Enables experimental dashboard-managed Shared / Per-Device provisioning |
+| `MQTT_MANAGED_PROVISIONING_ENABLED` | `false` in source, `true` in standard Compose | Allows dashboard writes/reloads against the live broker configuration |
+| `MQTT_PER_DEVICE_PROVISIONING_ENABLED` | `false` | Enables experimental Per-Device provisioning |
 | `MQTT_PROVISIONING_VERIFY_BUDGET_MS` | `12000` | Total budget to confirm a change against the broker |
 | `MQTT_PROVISIONING_VERIFY_POLL_MS` | `500` | Gap between verification poll attempts |
 | `MQTT_PROVISIONING_VERIFY_TIMEOUT_MS` | `3000` | Per-attempt connection timeout for a verification probe |

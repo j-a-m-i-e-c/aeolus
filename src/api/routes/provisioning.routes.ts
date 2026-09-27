@@ -13,8 +13,10 @@ import type { MqttProvisioningService } from "../../mqtt/mqtt-provisioning-servi
 import { AppError } from "../middleware/error-handler.js";
 
 export interface ProvisioningRouteOptions {
-  /** Managed broker configuration is deliberately opt-in while under development. */
+  /** Deployment can safely write/reload the live broker configuration. */
   managedProvisioningEnabled?: boolean;
+  /** Experimental Per-Device provisioning gate. */
+  perDeviceProvisioningEnabled?: boolean;
 }
 
 // ─── Route Factory ───────────────────────────────────────────────────────────
@@ -25,11 +27,35 @@ export function createProvisioningRoutes(
 ): Router {
   const router = Router();
   const managedProvisioningEnabled = options.managedProvisioningEnabled ?? false;
+  const perDeviceProvisioningEnabled = options.perDeviceProvisioningEnabled ?? false;
+
   const requireManagedProvisioning: RequestHandler = (_req, _res, next) => {
     if (!managedProvisioningEnabled) {
       next(new AppError(
         503,
-        "Dashboard-managed MQTT security is under development and disabled by default",
+        "Dashboard-managed MQTT security is unavailable in this deployment",
+      ));
+      return;
+    }
+    next();
+  };
+
+  const requirePerDeviceProvisioning: RequestHandler = (_req, _res, next) => {
+    if (!perDeviceProvisioningEnabled) {
+      next(new AppError(
+        503,
+        "Per-Device MQTT provisioning is under development and disabled by default",
+      ));
+      return;
+    }
+    next();
+  };
+
+  const requirePerDeviceLevelWhenSelected: RequestHandler = (req, _res, next) => {
+    if (req.body?.level === "per_device" && !perDeviceProvisioningEnabled) {
+      next(new AppError(
+        503,
+        "Per-Device MQTT provisioning is under development and disabled by default",
       ));
       return;
     }
@@ -48,7 +74,7 @@ export function createProvisioningRoutes(
     const safeStatus = isAdmin
       ? status
       : { ...status, sharedCredential: null };
-    res.json({ ...safeStatus, managedProvisioningEnabled });
+    res.json({ ...safeStatus, managedProvisioningEnabled, perDeviceProvisioningEnabled });
   }));
 
   // ─── Security Level Management (admin-only) ──────────────────────────────
@@ -60,6 +86,7 @@ export function createProvisioningRoutes(
     requireAdmin,
     requireManagedProvisioning,
     validate({ body: setSecurityLevelSchema }),
+    requirePerDeviceLevelWhenSelected,
     asyncHandler(async (req, res) => {
       const { level } = req.body;
       const status = await provisioningService.setSecurityLevel(level);
@@ -89,6 +116,7 @@ export function createProvisioningRoutes(
     authenticate,
     requireAdmin,
     requireManagedProvisioning,
+    requirePerDeviceProvisioning,
     asyncHandler((req, res) => {
       const credentials = provisioningService.listDeviceCredentials();
       res.json(credentials);
@@ -101,6 +129,7 @@ export function createProvisioningRoutes(
     authenticate,
     requireAdmin,
     requireManagedProvisioning,
+    requirePerDeviceProvisioning,
     validate({ body: createDeviceCredentialSchema }),
     asyncHandler(async (req, res) => {
       const { deviceName } = req.body;
@@ -116,6 +145,7 @@ export function createProvisioningRoutes(
     authenticate,
     requireAdmin,
     requireManagedProvisioning,
+    requirePerDeviceProvisioning,
     asyncHandler(async (req, res) => {
       const id = req.params.id as string;
       await provisioningService.revokeDeviceCredential(id);

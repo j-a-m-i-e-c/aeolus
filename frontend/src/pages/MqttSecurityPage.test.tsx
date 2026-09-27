@@ -7,12 +7,14 @@ const mockFetchStatus = vi.fn();
 let mockLevel = "open";
 let mockLoading = true;
 let mockManagedProvisioningEnabled = true;
+let mockPerDeviceProvisioningEnabled = true;
 
 vi.mock("../store/mqtt-provisioning-store", () => ({
   useMqttProvisioningStore: () => ({
     level: mockLevel,
     loading: mockLoading,
     managedProvisioningEnabled: mockManagedProvisioningEnabled,
+    perDeviceProvisioningEnabled: mockPerDeviceProvisioningEnabled,
     fetchStatus: mockFetchStatus,
   }),
 }));
@@ -35,6 +37,7 @@ describe("MqttSecurityPage", () => {
     mockLevel = "open";
     mockLoading = true;
     mockManagedProvisioningEnabled = true;
+    mockPerDeviceProvisioningEnabled = true;
   });
 
   it("shows a loading spinner initially", () => {
@@ -61,9 +64,10 @@ describe("MqttSecurityPage", () => {
     expect(screen.queryByTestId("device-credential-list")).not.toBeInTheDocument();
   });
 
-  it("shows DeviceCredentialList when level is per_device", async () => {
+  it("shows DeviceCredentialList when level is per_device and the experimental gate is enabled", async () => {
     mockLevel = "per_device";
     mockLoading = false;
+    mockManagedProvisioningEnabled = true;
     render(<MqttSecurityPage />);
     await waitFor(() => expect(mockFetchStatus).toHaveBeenCalled());
     expect(screen.getByTestId("device-credential-list")).toBeInTheDocument();
@@ -79,14 +83,27 @@ describe("MqttSecurityPage", () => {
     expect(screen.queryByTestId("device-credential-list")).not.toBeInTheDocument();
   });
 
-  it("explains that managed provisioning is disabled while standard broker modes remain available", async () => {
+  it("keeps Shared Password available when only the Per-Device flag is off", async () => {
+    mockLoading = false;
+    mockManagedProvisioningEnabled = true;
+    mockPerDeviceProvisioningEnabled = false;
+    mockLevel = "shared_password";
+    render(<MqttSecurityPage />);
+
+    await waitFor(() => expect(mockFetchStatus).toHaveBeenCalled());
+    expect(screen.getByTestId("shared-password-panel")).toBeInTheDocument();
+    expect(screen.queryByText(/Dashboard-managed broker security is turned off/i)).not.toBeInTheDocument();
+  });
+
+  it("says how to turn managed broker security on rather than implying the plumbing is missing", async () => {
     mockLoading = false;
     mockManagedProvisioningEnabled = false;
     render(<MqttSecurityPage />);
 
-    expect(await screen.findByText(/Managed broker provisioning is not enabled in this deployment/i)).toBeInTheDocument();
-    // Scoped to Per-Device: the notice must not imply Shared Password is unfinished.
-    expect(screen.getByText(/Per-Device mode is still under development/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Dashboard-managed broker security is turned off/i)).toBeInTheDocument();
+    // The standard Compose stack does have the plumbing; only the flag is off, so the
+    // notice must point at the flag instead of blaming the deployment.
+    expect(screen.getByText(/MQTT_MANAGED_PROVISIONING_ENABLED=true/)).toBeInTheDocument();
   });
 
   it("qualifies Per-Device with its revocation-verification gap when that mode is active", async () => {
@@ -97,6 +114,17 @@ describe("MqttSecurityPage", () => {
 
     expect(await screen.findByText(/revocation is not yet conclusively verified/i)).toBeInTheDocument();
     expect(screen.getByTestId("device-credential-list")).toBeInTheDocument();
+  });
+
+  it("explains the Per-Device gate if that mode is persisted while the flag is off", async () => {
+    mockLoading = false;
+    mockManagedProvisioningEnabled = true;
+    mockPerDeviceProvisioningEnabled = false;
+    mockLevel = "per_device";
+    render(<MqttSecurityPage />);
+
+    expect(await screen.findByText(/Per-Device changes are disabled unless/i)).toBeInTheDocument();
+    expect(screen.queryByTestId("device-credential-list")).not.toBeInTheDocument();
   });
 
   it("adds no under-development caveat to Shared Password", async () => {
