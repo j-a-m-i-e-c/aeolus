@@ -14,6 +14,13 @@ interface LevelOption {
   icon: typeof Unlock;
   title: string;
   description: string;
+  /**
+   * Marks a mode that works but is not yet something to rely on, so the card can
+   * say which mode that is instead of the page implying the whole managed feature
+   * is experimental. Only surfaced once managed provisioning is enabled; before
+   * that "Managed setup disabled" is the operative reason and the more useful one.
+   */
+  underDevelopment?: boolean;
 }
 
 const LEVEL_OPTIONS: LevelOption[] = [
@@ -34,6 +41,9 @@ const LEVEL_OPTIONS: LevelOption[] = [
     icon: Shield,
     title: "Per-Device",
     description: "Unique credentials per device",
+    // Creation and broker enforcement work; revocation verification does not yet
+    // prove the old password stopped working. Shared Password has no such gap.
+    underDevelopment: true,
   },
 ];
 
@@ -87,10 +97,15 @@ export default function SecurityLevelSelector() {
 
   return (
     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-      {LEVEL_OPTIONS.map(({ level: optionLevel, icon: Icon, title, description }) => {
+      {LEVEL_OPTIONS.map(({ level: optionLevel, icon: Icon, title, description, underDevelopment }) => {
         const isActive = optionLevel === displayedLevel;
         const needsManagedProvisioning = !managedProvisioningEnabled && optionLevel !== "open";
         const isDisabled = loading || pending || (needsManagedProvisioning && !readOnly);
+        // One reason at a time, most operative first: a mode you cannot select yet
+        // says so, rather than also advertising its maturity. Selectable and
+        // under development is the case worth labelling.
+        const showUnderDevelopment =
+          underDevelopment === true && !needsManagedProvisioning && !readOnly;
 
         return (
           <motion.button
@@ -122,6 +137,9 @@ export default function SecurityLevelSelector() {
               <span className="text-xs text-secondary">{description}</span>
               {needsManagedProvisioning && !readOnly && (
                 <span className="text-xs font-medium text-amber-400">Managed setup disabled</span>
+              )}
+              {showUnderDevelopment && (
+                <span className="text-xs font-medium text-amber-400">Under development</span>
               )}
               {readOnly && optionLevel !== level && isActive && (
                 <span className="text-xs font-medium text-[#72B7E6]">Demo preview · not applied</span>

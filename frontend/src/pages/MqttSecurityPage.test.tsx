@@ -84,6 +84,29 @@ describe("MqttSecurityPage", () => {
     mockManagedProvisioningEnabled = false;
     render(<MqttSecurityPage />);
 
-    expect(await screen.findByText(/Managed Mosquitto provisioning is experimental and disabled/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Managed broker provisioning is not enabled in this deployment/i)).toBeInTheDocument();
+    // Scoped to Per-Device: the notice must not imply Shared Password is unfinished.
+    expect(screen.getByText(/Per-Device mode is still under development/i)).toBeInTheDocument();
+  });
+
+  it("qualifies Per-Device with its revocation-verification gap when that mode is active", async () => {
+    mockLoading = false;
+    mockManagedProvisioningEnabled = true;
+    mockLevel = "per_device";
+    render(<MqttSecurityPage />);
+
+    expect(await screen.findByText(/revocation is not yet conclusively verified/i)).toBeInTheDocument();
+    expect(screen.getByTestId("device-credential-list")).toBeInTheDocument();
+  });
+
+  it("adds no under-development caveat to Shared Password", async () => {
+    mockLoading = false;
+    mockManagedProvisioningEnabled = true;
+    mockLevel = "shared_password";
+    render(<MqttSecurityPage />);
+
+    await waitFor(() => expect(mockFetchStatus).toHaveBeenCalled());
+    expect(screen.queryByText(/under development/i)).not.toBeInTheDocument();
+    expect(screen.getByTestId("shared-password-panel")).toBeInTheDocument();
   });
 });

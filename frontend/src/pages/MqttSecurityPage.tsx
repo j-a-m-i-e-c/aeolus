@@ -38,9 +38,10 @@ export default function MqttSecurityPage() {
 
       {!managedProvisioningEnabled && (
         <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-200">
-          Managed Mosquitto provisioning is experimental and disabled in this deployment. The authentication
-          modes themselves are standard broker configurations; configure Shared Password or Per-Device access on
-          the host unless managed provisioning has been explicitly enabled and verified for your deployment.
+          Managed broker provisioning is not enabled in this deployment, so Aeolus will not write Mosquitto&apos;s
+          configuration. Set <code className="font-mono text-xs">MQTT_MANAGED_PROVISIONING_ENABLED=true</code> to
+          manage Shared Password from here; Per-Device mode is still under development. These are standard broker
+          configurations either way, so you can also set them up on the host.
         </div>
       )}
 
@@ -52,9 +53,17 @@ export default function MqttSecurityPage() {
       )}
 
       {managedProvisioningEnabled && level === "per_device" && (
-        <div className="bg-surface border border-border rounded-xl p-5">
-          <DeviceCredentialList />
-        </div>
+        <>
+          <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-200">
+            Per-Device mode is under development. Credentials are created and enforced by the broker, but
+            revocation is not yet conclusively verified: deleting a credential is checked with a probe that
+            cannot prove the previous password stopped working. Prefer Shared Password for a deployment you are
+            relying on.
+          </div>
+          <div className="bg-surface border border-border rounded-xl p-5">
+            <DeviceCredentialList />
+          </div>
+        </>
       )}
     </div>
   );

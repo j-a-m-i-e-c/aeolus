@@ -105,6 +105,26 @@ describe("SecurityLevelSelector", () => {
     expect(screen.getByRole("button", { name: /^open/i })).not.toBeDisabled();
   });
 
+  it("labels Per-Device as under development once it is selectable, and leaves Shared Password unqualified", () => {
+    h.state.managedProvisioningEnabled = true;
+    render(<SecurityLevelSelector />);
+
+    expect(screen.getAllByText("Under development")).toHaveLength(1);
+    const perDevice = screen.getByRole("button", { name: /per-device/i });
+    expect(perDevice).toHaveTextContent("Under development");
+    // Selectable, not blocked: the mode works, it is the revocation proof that lags.
+    expect(perDevice).not.toBeDisabled();
+    expect(screen.getByRole("button", { name: /shared password/i })).not.toHaveTextContent("Under development");
+  });
+
+  it("prefers the managed-setup reason over the maturity label while provisioning is disabled", () => {
+    h.state.managedProvisioningEnabled = false;
+    render(<SecurityLevelSelector />);
+
+    expect(screen.getAllByText("Managed setup disabled")).toHaveLength(2);
+    expect(screen.queryByText("Under development")).not.toBeInTheDocument();
+  });
+
   it("lets the public demo preview broker modes without applying them", () => {
     h.demoState.readOnly = true;
     h.state.managedProvisioningEnabled = false;
