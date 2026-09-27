@@ -62,7 +62,10 @@ The configured font stacks are:
 ```text
 Interface: Inter, system-ui, sans-serif
 Code and machine data: JetBrains Mono, monospace
+Wordmark only: Manrope Bold (700)
 ```
+
+Manrope is reserved for the product wordmark beside the glyph and is applied in exactly one place, `frontend/src/components/AeolusWordmark.tsx`. It is not an interface face: headings, labels and controls stay on Inter, so the wordmark reads as a mark rather than as a heading style that spreads through the dashboard. Only the 700 weight is self-hosted, because that is the only weight used.
 
 Use the sans-serif stack for navigation, labels, explanations and controls. Use monospace for:
 

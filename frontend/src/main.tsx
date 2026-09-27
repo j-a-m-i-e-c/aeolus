@@ -11,6 +11,9 @@ import "@fontsource/inter/600.css";
 import "@fontsource/inter/700.css";
 import "@fontsource/jetbrains-mono/400.css";
 import "@fontsource/jetbrains-mono/500.css";
+// Wordmark only, so just the one weight it uses. Self-hosted like the others:
+// the host CSP allows font-src 'self', and @fontsource emits woff2 into /assets.
+import "@fontsource/manrope/700.css";
 import "./index.css";
 // Configure Monaco to load from the bundled package (no CDN) — must run before
 // any editor mounts.
