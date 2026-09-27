@@ -65,6 +65,18 @@ services:
       # src/simulator/scenarios/index.ts. Set it to a comma-separated list to trim.
       AEOLUS_SIMULATOR_SCENARIOS: ${AEOLUS_SIMULATOR_SCENARIOS:-}
       MQTT_BROKER_URL: mqtt://localhost:1883
+      # Device-side MQTT credentials, unset in Open mode. Every simulated device
+      # speaks through this one process, so in Shared Password mode the simulator
+      # holds the shared device credential (`aeolus-shared`) — NOT the backend's
+      # private `aeolus-backend` credential, which the backend generates and
+      # applies to itself and which never comes from the environment.
+      #
+      # Without these the simulator has no way to authenticate, so switching the
+      # broker to Shared Password would silently take all simulated hardware
+      # offline while the backend stayed connected. Empty defaults keep Open mode
+      # unchanged: `loadSimulatorConfig` omits the fields when they are blank.
+      MQTT_USERNAME: ${MQTT_USERNAME:-}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:-}
       AEOLUS_SIMULATOR_LOG_LEVEL: ${AEOLUS_SIMULATOR_LOG_LEVEL:-info}
     command: ["node", "dist/simulator/index.js"]
     depends_on:
