@@ -2,18 +2,27 @@
 
 Configure an ESP32, Arduino or other MQTT client for the local broker.
 
-## Before you start
+## Choose the broker security mode
 
-The default Docker Compose broker is Open and does not require credentials. Shared Password is supported by the standard Compose stack once `MQTT_MANAGED_PROVISIONING_ENABLED=true` is set: switch to it in **Security → MQTT Security**, then copy the generated shared username/password into the device firmware.
+Open **Security → MQTT Security** and choose one of the three supported modes:
 
-Per-Device credentials remain experimental. The workflow below applies only when `MQTT_PER_DEVICE_PROVISIONING_ENABLED=true` is set deliberately.
+- **Open** — no MQTT username/password. Best for bring-up on a trusted or isolated LAN.
+- **Shared Password** — one generated credential used by all external MQTT devices.
+- **Per-Device** — a unique credential for each device, with independent revocation.
 
-## Create a Per-Device credential (experimental workflow)
+The standard Docker Compose deployment supports all three immediately; there are no MQTT provisioning feature flags to enable.
 
-1. In the Per-Device credential list, choose **Add Device**.
-2. Enter a recognisable device name, such as `living-room-esp32`.
-3. Create the credential.
-4. Copy the generated password immediately. It is shown once.
+## Shared Password
+
+Switch to **Shared Password** and copy the displayed username and password into each MQTT client that should connect. Regenerating the credential invalidates the old shared password, so update affected devices after rotating it.
+
+## Create a Per-Device credential
+
+1. Switch to **Per-Device**.
+2. Choose **Add Device**.
+3. Enter a recognisable device name, such as `living-room-esp32`.
+4. Create the credential.
+5. Copy the generated password immediately. It is shown once.
 
 Example:
 
@@ -34,26 +43,20 @@ client.setServer(mqtt_server, mqtt_port);
 client.connect("living-room-esp32", mqtt_user, mqtt_pass);
 ```
 
-Use a unique MQTT client ID as well as a unique credential.
+Use a unique MQTT client ID as well as a unique Per-Device credential. MQTT credentials are logical identities rather than hardware-bound secrets, so protect both the username/password and the client configuration that carries them.
 
 ## Verify it
 
 - Check the MQTT status in Aeolus.
-- Watch the MQTT inspector for its messages.
-- Check broker logs:
+- Watch the MQTT inspector for the device's messages.
+- Check broker logs if needed:
 
 ```bash
 docker logs aeolus-mosquitto
 ```
 
-## Revoke it
+## Revoke a Per-Device credential
 
-In a provisioning-enabled deployment, delete the credential from **Security → MQTT Security**. In a manually managed deployment, also remove it from the Mosquitto password file and reload the broker.
+Delete the credential from **Security → MQTT Security**. Aeolus regenerates the broker password file and reloads Mosquitto automatically. The revoked username/password will no longer authenticate while other device credentials remain active.
 
-The experimental provisioning API is under:
-
-```text
-/api/mqtt/provisioning
-```
-
-See [MQTT security](../security/mqtt.md) for the endpoint list and security modes.
+See [MQTT security](../security/mqtt.md) for the endpoint list, broker wiring and security trade-offs.

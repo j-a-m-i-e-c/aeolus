@@ -28,8 +28,8 @@ The backend uses host networking in Docker so it can reach LAN products and perf
 | `AUTH_COOKIE_SECURE` | `auto` | Refresh-cookie `Secure` policy (`auto`, `true`, `false`) |
 | `JWT_SECRET` | generated and stored | Optional explicit JWT signing key |
 | `METRICS_TOKEN` | unset | Optional bearer token for `/metrics` |
-| `AEOLUS_PROJECT_DIR` | process working directory | Mosquitto config root for provisioning-enabled deployments |
-| `MQTT_PASSWORD_FILE` | `<project>/mosquitto/password_file` | Password-file path for provisioning-enabled deployments |
+| `AEOLUS_PROJECT_DIR` | process working directory | Mosquitto config root used to locate broker files in a custom runtime |
+| `MQTT_PASSWORD_FILE` | `<project>/mosquitto/password_file` | Live broker password-file path; the standard Compose stack sets this itself |
 
 Docker Compose also accepts deployment variables such as `API_PORT`, `FRONTEND_PORT`, `MQTT_PORT`, `BUILD_COMMIT` and `BUILD_DATE`. The browser endpoints `VITE_API_URL` and `VITE_WS_URL` are Vite build-time variables, not backend runtime variables.
 
@@ -70,7 +70,7 @@ driver error.
 
 ## MQTT provisioning deployment boundary
 
-The provisioning service needs writable access to the live Mosquitto configuration and password file, plus a way to reload the broker. The default `docker-compose.yml` provides that plumbing without a Docker socket: a Docker-managed `mosquitto_config` volume is shared with the backend and broker, and the `mosquitto-reloader` sidecar watches that volume and sends Mosquitto `SIGHUP` after atomic config changes. A one-shot init service seeds the volume from the committed `mosquitto/mosquitto.conf` on first creation. The tracked `mosquitto/` directory is never used as mutable runtime storage. Open and Shared Password provisioning are supported by this default Compose plumbing. `MQTT_MANAGED_PROVISIONING_ENABLED` describes whether the deployment lets Aeolus write and reload the live broker configuration; it stays `false` by default until Shared Password has passed field verification, so set it to `true` to manage those modes from the dashboard. `MQTT_PER_DEVICE_PROVISIONING_ENABLED=true` separately enables the experimental Per-Device credential workflow. See [MQTT security](../security/mqtt.md).
+The provisioning service needs writable access to the live Mosquitto configuration and password file, plus a way to reload the broker. The default `docker-compose.yml` provides that plumbing without a Docker socket: a Docker-managed `mosquitto_config` volume is shared with the backend and broker, and the `mosquitto-reloader` sidecar watches that volume and sends Mosquitto `SIGHUP` after atomic config changes. A one-shot init service seeds the volume from the committed `mosquitto/mosquitto.conf` on first creation. The tracked `mosquitto/` directory is never used as mutable runtime storage. Open, Shared Password and Per-Device provisioning are supported by this default Compose plumbing with no feature flags. The backend detects the live broker paths supplied by Compose and initializes managed broker security automatically. See [MQTT security](../security/mqtt.md).
 
 ## Demo simulator (Phase 2)
 

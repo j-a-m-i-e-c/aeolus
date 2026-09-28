@@ -50,7 +50,7 @@ const PASSWORD_BYTES = 24;
 export interface ProvisioningVerification {
   /** Confirms broker behaviour after a change. Omitted → verification disabled. */
   verifier?: BrokerVerifier;
-  /** Guards whether verification runs at all (mirrors managed-provisioning gate). */
+  /** Enables broker probes when this runtime is wired to managed Mosquitto files. */
   enabled?: boolean;
 }
 

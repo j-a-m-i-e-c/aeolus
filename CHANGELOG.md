@@ -13,8 +13,9 @@ Aeolus follows semantic versioning for published releases. Until the first stabl
 * The dashboard host CSP no longer requires inline script execution.
 * Version information is local only until an administrator explicitly asks Aeolus to check GitHub releases.
 * The Mosquitto reload watcher is built with its dependencies instead of installing packages when the stack starts.
-* Shared Password MQTT provisioning is supported by the standard Compose stack and no longer shares a feature gate with Per-Device; the experimental gate now applies only to Per-Device credentials. Dashboard-managed provisioning remains opt-in behind `MQTT_MANAGED_PROVISIONING_ENABLED=true` until Shared Password has passed field verification.
+* Open, Shared Password and Per-Device MQTT security are now first-class capabilities of the standard Compose stack with no provisioning feature flags. Mode changes, restart persistence and Per-Device revocation were field-verified on a Raspberry Pi deployment.
 * The Mosquitto reload sidecar arms its directory watch immediately and performs a startup reconciliation reload, eliminating the first Open-to-authenticated transition race.
+* Dashboard copy controls now fall back to the browser selection/`execCommand` path when the modern Clipboard API is unavailable or denied, including local-LAN HTTP access to a Pi.
 * The standard Compose path now explicitly propagates documented security/runtime settings from `.env` while keeping public-demo mode overlay-only.
 * Reverse-proxy trust is explicit and hop-bounded so HTTPS scheme detection and per-client rate limiting work behind a known Caddy/nginx hop.
 * Ordinary `interact` users can fire only named UI events or the constrained atomic state-set primitive; arbitrary fire-context injection is admin-only.

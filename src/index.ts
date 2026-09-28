@@ -198,14 +198,21 @@ async function main(): Promise<void> {
     pollIntervalMs: config.mqttProvisioningVerify.pollIntervalMs,
     connectTimeoutMs: config.mqttProvisioningVerify.connectTimeoutMs,
   });
+  // Managed MQTT security is a supported capability, not a feature flag. The
+  // standard Compose deployment always supplies both live broker paths. A raw
+  // source-run intentionally does not: without a shared broker config/password
+  // path there is nothing safe or useful for Aeolus to manage.
+  const brokerManagementAvailable = Boolean(
+    process.env.MQTT_CONFIG_FILE && process.env.MQTT_PASSWORD_FILE,
+  );
   const provisioningService = new MqttProvisioningService(mqttService, configWriter, reloader, {
     verifier: brokerVerifier,
-    enabled: config.managedMqttProvisioningEnabled,
+    enabled: brokerManagementAvailable,
   });
-  if (config.managedMqttProvisioningEnabled) {
+  if (brokerManagementAvailable) {
     await provisioningService.initialize();
   } else {
-    logger.info("Dashboard-managed MQTT broker writes are disabled for this deployment");
+    logger.info("MQTT broker management unavailable in this runtime (live broker paths not configured)");
   }
 
   // 4. Connector Framework (needed before CommandService)
@@ -454,10 +461,7 @@ async function main(): Promise<void> {
   app.use("/api/mqtt", createMqttRoutes(mqttService, mqttPublishPolicy, privateTopicStore));
   app.use(
     "/api/mqtt/provisioning",
-    createProvisioningRoutes(provisioningService, {
-      managedProvisioningEnabled: config.managedMqttProvisioningEnabled,
-      perDeviceProvisioningEnabled: config.perDeviceMqttProvisioningEnabled,
-    }),
+    createProvisioningRoutes(provisioningService, { brokerManagementAvailable }),
   );
   const sandboxTypesPath = path.resolve(import.meta.dirname, "automations/sandbox-types.d.ts");
   app.use("/api/automations", createAutomationRoutes(engine, db, registry, commandService, executionLog, sandboxTypesPath, requireAutomation, permissionResolver, connectorRegistry, stateStore, conditionRegistry, commandHistoryStore));

@@ -24,8 +24,6 @@ describe("config", () => {
     delete process.env.MQTT_BROKER_URL;
     delete process.env.MQTT_TOPICS;
     delete process.env.MQTT_DISCOVERY_IGNORED_TOPIC_SUFFIXES;
-    delete process.env.MQTT_MANAGED_PROVISIONING_ENABLED;
-    delete process.env.MQTT_PER_DEVICE_PROVISIONING_ENABLED;
     delete process.env.PORT;
     delete process.env.DB_PATH;
     delete process.env.LOG_LEVEL;
@@ -42,8 +40,6 @@ describe("config", () => {
     expect(config.mqttDiscoveryIgnoredTopicSuffixes).toEqual([
       "set", "command", "cmd", "heartbeat", "availability",
     ]);
-    expect(config.managedMqttProvisioningEnabled).toBe(false);
-    expect(config.perDeviceMqttProvisioningEnabled).toBe(false);
     expect(config.mqttProvisioningVerify).toEqual({
       budgetMs: 12000,
       pollIntervalMs: 500,
@@ -64,8 +60,6 @@ describe("config", () => {
     process.env.MQTT_BROKER_URL = "mqtt://broker.local:1884";
     process.env.MQTT_TOPICS = "home/+/temp, office/# ";
     process.env.MQTT_DISCOVERY_IGNORED_TOPIC_SUFFIXES = "set, status ";
-    process.env.MQTT_MANAGED_PROVISIONING_ENABLED = "true";
-    process.env.MQTT_PER_DEVICE_PROVISIONING_ENABLED = "true";
     process.env.MQTT_PROVISIONING_VERIFY_BUDGET_MS = "8000";
     process.env.MQTT_PROVISIONING_VERIFY_POLL_MS = "250";
     process.env.MQTT_PROVISIONING_VERIFY_TIMEOUT_MS = "2000";
@@ -83,8 +77,6 @@ describe("config", () => {
     expect(config.mqttBrokerUrl).toBe("mqtt://broker.local:1884");
     expect(config.mqttTopics).toEqual(["home/+/temp", "office/#"]);
     expect(config.mqttDiscoveryIgnoredTopicSuffixes).toEqual(["set", "status"]);
-    expect(config.managedMqttProvisioningEnabled).toBe(true);
-    expect(config.perDeviceMqttProvisioningEnabled).toBe(true);
     expect(config.mqttProvisioningVerify).toEqual({
       budgetMs: 8000,
       pollIntervalMs: 250,

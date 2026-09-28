@@ -115,11 +115,19 @@ describe("scrubForDemo", () => {
 
   describe("GET /api/mqtt/provisioning/status", () => {
     it("preserves a null sharedCredential (does not turn null into a mask)", () => {
-      const body = { level: "open", sharedCredential: null, backendConnected: true, managedProvisioningEnabled: false };
+      const body = { level: "open", sharedCredential: null, backendConnected: true, brokerManagementAvailable: true };
       const out = scrubForDemo("/api/mqtt/provisioning/status", body) as Record<string, unknown>;
       expect(out.sharedCredential).toBeNull();
       expect(out.level).toBe("open");
-      expect(out.managedProvisioningEnabled).toBe(false);
+      expect(out.brokerManagementAvailable).toBe(true);
+    });
+
+    it("keeps a capability boolean a boolean even when its key hits a sensitive token", () => {
+      // "brokerManagementAvailable" tokenises to include "broker", so a naive
+      // mask would send the frontend the truthy string "•••" instead of a flag.
+      const body = { level: "open", sharedCredential: null, backendConnected: true, brokerManagementAvailable: false };
+      const out = scrubForDemo("/api/mqtt/provisioning/status", body) as Record<string, unknown>;
+      expect(out.brokerManagementAvailable).toBe(false);
     });
   });
 

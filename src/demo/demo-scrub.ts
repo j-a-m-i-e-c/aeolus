@@ -75,9 +75,15 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 /**
  * Recursively mask sensitive fields in an arbitrary JSON value:
  *  - a value under a sensitive key name is replaced with MASK (null/undefined
- *    are preserved so shapes the frontend depends on stay intact);
+ *    and booleans are preserved so shapes the frontend depends on stay intact);
  *  - other strings are scrubbed for inline IPs/tokens;
  *  - arrays and objects are walked.
+ *
+ * Booleans are deliberately not masked. Key-name detection is token-based, so a
+ * capability flag can match a sensitive token without carrying anything
+ * sensitive (`brokerManagementAvailable` tokenises to include "broker"). A
+ * boolean cannot encode a host, address or credential, and masking one would
+ * hand the frontend a truthy string in place of a flag it branches on.
  */
 function deepScrub(value: unknown): unknown {
   if (typeof value === "string") return scrubText(value);
@@ -86,7 +92,7 @@ function deepScrub(value: unknown): unknown {
     const out: Record<string, unknown> = {};
     for (const [key, val] of Object.entries(value)) {
       if (looksSensitiveKey(key)) {
-        out[key] = val == null ? val : MASK;
+        out[key] = val == null || typeof val === "boolean" ? val : MASK;
       } else {
         out[key] = deepScrub(val);
       }

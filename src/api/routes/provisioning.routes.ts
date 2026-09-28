@@ -13,10 +13,12 @@ import type { MqttProvisioningService } from "../../mqtt/mqtt-provisioning-servi
 import { AppError } from "../middleware/error-handler.js";
 
 export interface ProvisioningRouteOptions {
-  /** Deployment can safely write/reload the live broker configuration. */
-  managedProvisioningEnabled?: boolean;
-  /** Experimental Per-Device provisioning gate. */
-  perDeviceProvisioningEnabled?: boolean;
+  /**
+   * Whether this runtime is wired to the live broker configuration. The standard
+   * Docker Compose deployment always is. This is runtime capability detection,
+   * not a feature flag: Open, Shared Password and Per-Device are all supported.
+   */
+  brokerManagementAvailable?: boolean;
 }
 
 // ─── Route Factory ───────────────────────────────────────────────────────────
@@ -26,36 +28,13 @@ export function createProvisioningRoutes(
   options: ProvisioningRouteOptions = {},
 ): Router {
   const router = Router();
-  const managedProvisioningEnabled = options.managedProvisioningEnabled ?? false;
-  const perDeviceProvisioningEnabled = options.perDeviceProvisioningEnabled ?? false;
+  const brokerManagementAvailable = options.brokerManagementAvailable ?? true;
 
-  const requireManagedProvisioning: RequestHandler = (_req, _res, next) => {
-    if (!managedProvisioningEnabled) {
+  const requireBrokerManagement: RequestHandler = (_req, _res, next) => {
+    if (!brokerManagementAvailable) {
       next(new AppError(
         503,
-        "Dashboard-managed MQTT security is unavailable in this deployment",
-      ));
-      return;
-    }
-    next();
-  };
-
-  const requirePerDeviceProvisioning: RequestHandler = (_req, _res, next) => {
-    if (!perDeviceProvisioningEnabled) {
-      next(new AppError(
-        503,
-        "Per-Device MQTT provisioning is under development and disabled by default",
-      ));
-      return;
-    }
-    next();
-  };
-
-  const requirePerDeviceLevelWhenSelected: RequestHandler = (req, _res, next) => {
-    if (req.body?.level === "per_device" && !perDeviceProvisioningEnabled) {
-      next(new AppError(
-        503,
-        "Per-Device MQTT provisioning is under development and disabled by default",
+        "This runtime is not connected to writable/reloadable Mosquitto configuration",
       ));
       return;
     }
@@ -74,7 +53,7 @@ export function createProvisioningRoutes(
     const safeStatus = isAdmin
       ? status
       : { ...status, sharedCredential: null };
-    res.json({ ...safeStatus, managedProvisioningEnabled, perDeviceProvisioningEnabled });
+    res.json({ ...safeStatus, brokerManagementAvailable });
   }));
 
   // ─── Security Level Management (admin-only) ──────────────────────────────
@@ -84,9 +63,8 @@ export function createProvisioningRoutes(
     "/level",
     authenticate,
     requireAdmin,
-    requireManagedProvisioning,
+    requireBrokerManagement,
     validate({ body: setSecurityLevelSchema }),
-    requirePerDeviceLevelWhenSelected,
     asyncHandler(async (req, res) => {
       const { level } = req.body;
       const status = await provisioningService.setSecurityLevel(level);
@@ -101,8 +79,8 @@ export function createProvisioningRoutes(
     "/shared/regenerate",
     authenticate,
     requireAdmin,
-    requireManagedProvisioning,
-    asyncHandler(async (req, res) => {
+    requireBrokerManagement,
+    asyncHandler(async (_req, res) => {
       const credential = await provisioningService.regenerateSharedPassword();
       res.json(credential);
     }),
@@ -115,9 +93,8 @@ export function createProvisioningRoutes(
     "/credentials",
     authenticate,
     requireAdmin,
-    requireManagedProvisioning,
-    requirePerDeviceProvisioning,
-    asyncHandler((req, res) => {
+    requireBrokerManagement,
+    asyncHandler((_req, res) => {
       const credentials = provisioningService.listDeviceCredentials();
       res.json(credentials);
     }),
@@ -128,8 +105,7 @@ export function createProvisioningRoutes(
     "/credentials",
     authenticate,
     requireAdmin,
-    requireManagedProvisioning,
-    requirePerDeviceProvisioning,
+    requireBrokerManagement,
     validate({ body: createDeviceCredentialSchema }),
     asyncHandler(async (req, res) => {
       const { deviceName } = req.body;
@@ -144,8 +120,7 @@ export function createProvisioningRoutes(
     "/credentials/:id",
     authenticate,
     requireAdmin,
-    requireManagedProvisioning,
-    requirePerDeviceProvisioning,
+    requireBrokerManagement,
     asyncHandler(async (req, res) => {
       const id = req.params.id as string;
       await provisioningService.revokeDeviceCredential(id);

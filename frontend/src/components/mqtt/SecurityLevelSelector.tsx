@@ -14,13 +14,6 @@ interface LevelOption {
   icon: typeof Unlock;
   title: string;
   description: string;
-  /**
-   * Marks a mode that works but is not yet something to rely on, so the card can
-   * say which mode that is instead of the page implying the whole managed feature
-   * is experimental. Only Per-Device uses the feature gate; Shared Password is
-   * supported by the normal Compose deployment.
-   */
-  underDevelopment?: boolean;
 }
 
 const LEVEL_OPTIONS: LevelOption[] = [
@@ -34,16 +27,13 @@ const LEVEL_OPTIONS: LevelOption[] = [
     level: "shared_password",
     icon: Key,
     title: "Shared Password",
-    description: "Single credential for all devices",
+    description: "Single credential shared by your MQTT devices",
   },
   {
     level: "per_device",
     icon: Shield,
     title: "Per-Device",
-    description: "Unique credentials per device",
-    // Creation and broker enforcement work; revocation verification does not yet
-    // prove the old password stopped working. Shared Password has no such gap.
-    underDevelopment: true,
+    description: "Unique credentials that can be revoked independently",
   },
 ];
 
@@ -65,7 +55,7 @@ function getConfirmationMessage(currentLevel: SecurityLevel): string {
 
 export default function SecurityLevelSelector() {
   const readOnly = useReadOnlyDemo();
-  const { level, setLevel, loading, managedProvisioningEnabled, perDeviceProvisioningEnabled } = useMqttProvisioningStore();
+  const { level, setLevel, loading, brokerManagementAvailable } = useMqttProvisioningStore();
   const [pending, setPending] = useState(false);
   const [previewLevel, setPreviewLevel] = useState<SecurityLevel>(level);
 
@@ -79,10 +69,8 @@ export default function SecurityLevelSelector() {
       setPreviewLevel(newLevel);
       return;
     }
-    if (!managedProvisioningEnabled && newLevel !== "open") return;
-    if (!perDeviceProvisioningEnabled && newLevel === "per_device") return;
+    if (!brokerManagementAvailable && newLevel !== "open") return;
 
-    // Show confirmation when switching away from modes with active credentials
     if (MODES_WITH_CREDENTIALS.includes(displayedLevel)) {
       const message = getConfirmationMessage(displayedLevel);
       if (!window.confirm(message)) return;
@@ -98,16 +86,10 @@ export default function SecurityLevelSelector() {
 
   return (
     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-      {LEVEL_OPTIONS.map(({ level: optionLevel, icon: Icon, title, description, underDevelopment }) => {
+      {LEVEL_OPTIONS.map(({ level: optionLevel, icon: Icon, title, description }) => {
         const isActive = optionLevel === displayedLevel;
-        const needsManagedProvisioning = !managedProvisioningEnabled && optionLevel !== "open";
-        const needsPerDeviceGate = optionLevel === "per_device" && !perDeviceProvisioningEnabled;
-        const isDisabled = loading || pending || ((needsManagedProvisioning || needsPerDeviceGate) && !readOnly);
-        // One reason at a time, most operative first: a mode you cannot select yet
-        // says so, rather than also advertising its maturity. Selectable and
-        // under development is the case worth labelling.
-        const showUnderDevelopment =
-          underDevelopment === true && !needsManagedProvisioning && !needsPerDeviceGate && !readOnly;
+        const needsBrokerManagement = !brokerManagementAvailable && optionLevel !== "open";
+        const isDisabled = loading || pending || (needsBrokerManagement && !readOnly);
 
         return (
           <motion.button
@@ -129,29 +111,16 @@ export default function SecurityLevelSelector() {
               className={isActive ? "text-[#3BA4FF]" : "text-[#6B7785]"}
             />
             <div className="flex flex-col gap-0.5">
-              <span
-                className={`text-sm font-medium ${
-                  isActive ? "text-primary" : "text-primary"
-                }`}
-              >
-                {title}
-              </span>
+              <span className="text-sm font-medium text-primary">{title}</span>
               <span className="text-xs text-secondary">{description}</span>
-              {needsManagedProvisioning && !readOnly && (
-                <span className="text-xs font-medium text-amber-400">Managed broker setup unavailable</span>
-              )}
-              {!needsManagedProvisioning && needsPerDeviceGate && !readOnly && (
-                <span className="text-xs font-medium text-amber-400">Per-Device provisioning disabled</span>
-              )}
-              {showUnderDevelopment && (
-                <span className="text-xs font-medium text-amber-400">Under development</span>
+              {needsBrokerManagement && !readOnly && (
+                <span className="text-xs font-medium text-amber-400">Broker management unavailable in this runtime</span>
               )}
               {readOnly && optionLevel !== level && isActive && (
                 <span className="text-xs font-medium text-[#72B7E6]">Demo preview · not applied</span>
               )}
             </div>
 
-            {/* Active indicator dot */}
             {isActive && (
               <motion.div
                 className="absolute top-3 right-3 w-2 h-2 rounded-full bg-[#3BA4FF]"

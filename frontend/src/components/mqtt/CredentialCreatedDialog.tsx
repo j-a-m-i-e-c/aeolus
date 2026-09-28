@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Copy, Check, AlertTriangle, X } from "lucide-react";
 import type { MqttCredential } from "../../store/mqtt-provisioning-store";
+import { copyTextToClipboard } from "../../lib/clipboard";
 
 interface CredentialCreatedDialogProps {
   credential: MqttCredential;
@@ -17,11 +18,11 @@ export default function CredentialCreatedDialog({
 
   const copyToClipboard = async (text: string, field: "username" | "password") => {
     try {
-      await navigator.clipboard.writeText(text);
+      await copyTextToClipboard(text);
       setCopiedField(field);
       setTimeout(() => setCopiedField(null), 2000);
     } catch {
-      // Fallback for non-secure contexts
+      // Keep the icon unchanged when the browser rejects both copy mechanisms.
     }
   };
 

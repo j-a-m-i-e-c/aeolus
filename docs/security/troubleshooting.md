@@ -36,7 +36,7 @@ Confirm that the frontend can refresh its access token and reconnect. Check prox
 
 ## MQTT device cannot connect
 
-The default Compose stack includes the required file mounts and reload sidecar, so Open and Shared Password need no plumbing changes — set `MQTT_MANAGED_PROVISIONING_ENABLED=true` to manage them from the dashboard. It stays `false` by default until Shared Password has passed field verification. `MQTT_PER_DEVICE_PROVISIONING_ENABLED=true` is additionally required for the experimental Per-Device mode.
+The default Compose stack includes the required file mounts and reload sidecar, so Open, Shared Password and Per-Device work from the dashboard without provisioning feature flags. If a custom runtime cannot apply a mode change, verify that the live Mosquitto config/password paths and reload mechanism are wired equivalently.
 
 Then check:
 

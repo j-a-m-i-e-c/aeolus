@@ -44,26 +44,11 @@ authorization model first, hardening against determined insiders second.
 
 ---
 
-## Operational sign-off / opt-in features
+## Operational sign-off / MQTT security
 
-Items in this section gate a feature that is **off by default**. They are not
-pre-promotion blockers for the default product.
+Open, Shared Password and Per-Device MQTT modes have completed real-broker Raspberry Pi field verification, including mode transitions, restart persistence and revoking an active Per-Device credential. The temporary provisioning feature flags have been removed; the standard Compose deployment exposes all three modes directly. See [ADR-0017](adr/0017-mqtt-security-modes.md).
 
-### Promote Per-Device MQTT provisioning 📋
-Broker-side verification is implemented. Shared Password is supported by the standard Compose deployment and is ready for field verification before being promoted to the default dashboard capability. The Compose reload sidecar now arms its directory watch immediately and performs a startup reconciliation reload, so the first Open → authenticated transition cannot be missed.
-
-Per-Device remains gated behind `MQTT_PER_DEVICE_PROVISIONING_ENABLED=true`. Before promoting it, exercise create/connect/restart/revoke against a real broker and correct the remaining revocation-proof weakness:
-
-- **Per-device revocation verification is misleading.** `revokeDeviceCredential()`
-  deletes the credential then probes the broker with `{ username, password:
-  "revoked" }`. Rejecting a deliberately-wrong password does not prove the *old
-  valid* password stopped working — if the password file failed to reload, the
-  old credential could still be valid and verification would falsely pass. Since
-  Aeolus intentionally does not retain device plaintext, real post-delete login
-  verification needs a design change (rotate-with-known-old-secret, or verify a
-  config/password-file generation marker + successful reload). Until then, remove
-  or rename the misleading "revoked credential rejected" assertion. (Not a
-  default-path blocker — provisioning stays opt-in.)
+One narrower hardening opportunity remains: the automated post-delete probe cannot replay the deleted device's original plaintext password because Aeolus intentionally does not retain that secret. Real field testing confirmed revocation works, while the automated path currently proves broker reachability/backend authentication plus regenerated password-file state rather than replaying the exact revoked secret. If stronger machine-verifiable revocation evidence becomes important, add a generation marker or a revoke flow that can retain the old secret only for the duration of verification.
 
 ---
 

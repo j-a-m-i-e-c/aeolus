@@ -33,6 +33,7 @@ This is especially useful for decisions that are easy to misunderstand from code
 | [0014](0014-fixed-command-proof-scaffold.md) | A fixed four-stage command proof, explained from a snapshot | Accepted |
 | [0015](0015-first-run-trust-and-mqtt-security.md) | First run trust and MQTT security model | Accepted |
 | [0016](0016-shared-state-and-automation-events.md) | Shared State for current truth, Automation Events for occurrences | Accepted |
+| [0017](0017-mqtt-security-modes.md) | Open, Shared Password and Per-Device as first-class MQTT security modes | Accepted |
 
 ## Writing a new ADR
 

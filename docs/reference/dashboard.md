@@ -58,7 +58,7 @@ Admin pages manage:
 - shared credentials;
 - per-device MQTT credentials.
 
-The default Compose stack provides the shared Mosquitto files and reload sidecar without a Docker socket. Open and Shared Password can therefore be managed from the dashboard once `MQTT_MANAGED_PROVISIONING_ENABLED=true` is set, which stays `false` by default pending field verification. Per-Device remains under development and additionally requires `MQTT_PER_DEVICE_PROVISIONING_ENABLED=true`. See [MQTT security](../security/mqtt.md).
+The default Compose stack provides the shared Mosquitto files and reload sidecar without a Docker socket. Open, Shared Password and Per-Device can all be managed directly from the dashboard with no provisioning feature flags. See [MQTT security](../security/mqtt.md).
 
 ## Modular dashboard
 

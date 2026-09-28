@@ -3,14 +3,19 @@
 import { useState } from "react";
 import { Key, Copy, Check, RefreshCw, Loader2 } from "lucide-react";
 import { useMqttProvisioningStore } from "../../store/mqtt-provisioning-store";
+import { copyTextToClipboard } from "../../lib/clipboard";
 
 function CopyButton({ value }: { value: string }) {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
-    await navigator.clipboard.writeText(value);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+    try {
+      await copyTextToClipboard(value);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Keep the icon unchanged when the browser rejects both copy mechanisms.
+    }
   };
 
   return (

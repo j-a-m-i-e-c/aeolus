@@ -30,7 +30,7 @@ Open MQTT remains a supported mode for development and trusted or isolated local
 
 The MQTT broker should not be exposed directly to the public internet. Internet reachable Aeolus deployments should expose only the intended application ingress and should retain the normal authentication and transport protections for that environment.
 
-The project may later change the default MQTT mode to Shared Password if that can be done without making custom device onboarding disproportionately complex. That is a separate product default decision and is not required by this ADR.
+All three broker modes are now supported first-class capabilities. Their trade-offs and the decision to keep Open as the first-run default for compatibility are recorded in [ADR-0017](0017-mqtt-security-modes.md).
 
 ## Why this fits Aeolus
 
@@ -58,13 +58,13 @@ This would protect first setup from another client that can reach Aeolus but can
 
 Generate or request a shared broker credential before external MQTT devices can connect.
 
-This gives a stronger default broker boundary, but it also means every development device must be provisioned with credentials before the operator can experiment with Aeolus. Shared Password remains available and may become the default later if onboarding can stay simple.
+This gives a stronger default broker boundary, but it also means every development device must be provisioned with credentials before the operator can experiment with Aeolus. Shared Password is fully supported and may become the first-run default later if onboarding can stay simple without silently breaking existing anonymous devices.
 
 ### Mandatory Per Device MQTT credentials
 
 Require individually provisioned credentials for every MQTT device.
 
-This provides stronger identity and revocation properties, but imposes the highest provisioning cost. It remains appropriate for deployments that need that level of isolation, not as a mandatory baseline for every Aeolus installation.
+This provides stronger identity and revocation properties, but imposes the highest provisioning cost. It is fully supported for deployments that need individual broker identities and revocation, but is not mandatory for every installation.
 
 ## Consequences
 
@@ -88,7 +88,7 @@ This provides stronger identity and revocation properties, but imposes the highe
 
 Reconsider the first administrator decision if Aeolus targets nontechnical consumer installation, ships as a plug and play appliance, gains automatic internet exposure during setup, or if a low friction bootstrap flow can materially improve security without harming the developer experience.
 
-Reconsider the MQTT default independently if Shared Password can become the shipped default while preserving straightforward onboarding for custom hardware.
+Reconsider the MQTT default independently when onboarding can select/provision Shared Password without surprising existing sites; see ADR-0017.
 
 ## Implementation anchors
 

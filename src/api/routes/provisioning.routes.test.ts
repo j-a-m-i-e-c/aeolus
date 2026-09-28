@@ -110,14 +110,13 @@ function createMockProvisioningService(
 
 function createApp(
   mockService: MqttProvisioningService,
-  managedProvisioningEnabled = true,
-  perDeviceProvisioningEnabled = true,
+  brokerManagementAvailable = true,
 ): express.Express {
   const app = express();
   app.use(express.json());
   app.use(
     "/api/mqtt/provisioning",
-    createProvisioningRoutes(mockService, { managedProvisioningEnabled, perDeviceProvisioningEnabled }),
+    createProvisioningRoutes(mockService, { brokerManagementAvailable }),
   );
   app.use(errorHandler);
   return app;
@@ -143,8 +142,7 @@ describe("Feature: mqtt-device-provisioning — Provisioning Routes Integration 
       const body = res.body as SecurityStatus;
       expect(body.level).toBe("open");
       expect(body.backendConnected).toBe(true);
-      expect((res.body as { managedProvisioningEnabled: boolean }).managedProvisioningEnabled).toBe(true);
-      expect((res.body as { perDeviceProvisioningEnabled: boolean }).perDeviceProvisioningEnabled).toBe(true);
+      expect((res.body as { brokerManagementAvailable: boolean }).brokerManagementAvailable).toBe(true);
     });
 
     it("exposes the shared credential to admins", async () => {
@@ -195,38 +193,25 @@ describe("Feature: mqtt-device-provisioning — Provisioning Routes Integration 
     });
   });
 
-  it("blocks broker mutations when managed broker plumbing is unavailable", async () => {
-    const disabledApp = createApp(mockService, false, false);
-
-    const status = await request(disabledApp, "GET", "/api/mqtt/provisioning/status");
+  it("reports runtime broker-management capability and rejects mutations when it is unavailable", async () => {
+    const unavailableApp = createApp(mockService, false);
+    const status = await request(unavailableApp, "GET", "/api/mqtt/provisioning/status");
     expect(status.status).toBe(200);
-    expect((status.body as { managedProvisioningEnabled: boolean }).managedProvisioningEnabled).toBe(false);
-    expect((status.body as { perDeviceProvisioningEnabled: boolean }).perDeviceProvisioningEnabled).toBe(false);
+    expect((status.body as { brokerManagementAvailable: boolean }).brokerManagementAvailable).toBe(false);
 
-    const shared = await request(disabledApp, "PUT", "/api/mqtt/provisioning/level", {
+    const change = await request(unavailableApp, "PUT", "/api/mqtt/provisioning/level", {
       level: "shared_password",
     });
-    expect(shared.status).toBe(503);
-    expect((shared.body as { error: string }).error).toContain("unavailable in this deployment");
+    expect(change.status).toBe(503);
+    expect(mockService.setSecurityLevel).not.toHaveBeenCalled();
   });
 
-  it("keeps Shared Password available when only the Per-Device feature gate is disabled", async () => {
-    const sharedOnlyApp = createApp(mockService, true, false);
-
-    const shared = await request(sharedOnlyApp, "PUT", "/api/mqtt/provisioning/level", {
-      level: "shared_password",
-    });
-    expect(shared.status).toBe(200);
-    expect(mockService.setSecurityLevel).toHaveBeenCalledWith("shared_password");
-
-    const regenerate = await request(sharedOnlyApp, "POST", "/api/mqtt/provisioning/shared/regenerate");
-    expect(regenerate.status).toBe(200);
-
-    const perDevice = await request(sharedOnlyApp, "PUT", "/api/mqtt/provisioning/level", {
-      level: "per_device",
-    });
-    expect(perDevice.status).toBe(503);
-    expect((perDevice.body as { error: string }).error).toContain("Per-Device");
+  it("allows all three security modes when broker management is available", async () => {
+    for (const level of ["open", "shared_password", "per_device"] as const) {
+      const result = await request(app, "PUT", "/api/mqtt/provisioning/level", { level });
+      expect(result.status).toBe(200);
+      expect(mockService.setSecurityLevel).toHaveBeenCalledWith(level);
+    }
   });
 
   // ─── PUT /level ──────────────────────────────────────────────────────────
