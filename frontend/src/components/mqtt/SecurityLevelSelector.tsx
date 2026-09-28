@@ -27,13 +27,13 @@ const LEVEL_OPTIONS: LevelOption[] = [
     level: "shared_password",
     icon: Key,
     title: "Shared Password",
-    description: "Single credential shared by your MQTT devices",
+    description: "One generated credential shared by all MQTT devices. Blocks anonymous connections.",
   },
   {
     level: "per_device",
     icon: Shield,
     title: "Per-Device",
-    description: "Unique credentials that can be revoked independently",
+    description: "Unique credential for each MQTT device, with independent revocation.",
   },
 ];
 
