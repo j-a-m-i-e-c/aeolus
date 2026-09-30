@@ -74,6 +74,8 @@ The default Compose deployment keeps live broker configuration in the Docker-man
 
 The reload sidecar mounts the same runtime volume read-only and watches the config **directory** for move/create/write events. It arms that watch immediately, then sends one startup reconciliation `SIGHUP`. This prevents the first Open → authenticated transition from landing before the watcher is ready. Later atomic temp-file-plus-rename writes trigger another `SIGHUP`.
 
+The sidecar signals the broker over a shared PID namespace rather than the Docker API, so no container needs the Docker socket. [ADR-0018](../adr/0018-mosquitto-reload-sidecar.md) records why that shape was chosen, the PID-1 invariant it depends on, and how it fails.
+
 ### Change verification
 
 After a managed security change, Aeolus probes the broker with short-lived MQTT connections and waits for the expected policy to become observable:

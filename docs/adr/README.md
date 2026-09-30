@@ -34,6 +34,7 @@ This is especially useful for decisions that are easy to misunderstand from code
 | [0015](0015-first-run-trust-and-mqtt-security.md) | First run trust and MQTT security model | Accepted |
 | [0016](0016-shared-state-and-automation-events.md) | Shared State for current truth, Automation Events for occurrences | Accepted |
 | [0017](0017-mqtt-security-modes.md) | Open, Shared Password and Per-Device as first-class MQTT security modes | Accepted |
+| [0018](0018-mosquitto-reload-sidecar.md) | Mosquitto reload sidecar with shared PID namespace, no Docker socket | Accepted |
 
 ## Writing a new ADR
 

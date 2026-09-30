@@ -9,7 +9,7 @@ Aeolus is local-first and is used both as a development environment for custom h
 
 A single mandatory MQTT policy creates the wrong trade-off somewhere: anonymous MQTT is extremely convenient during hardware bring-up but inappropriate on a shared network; one shared password is easy to provision but cannot revoke one device; individual credentials provide identity and revocation but add provisioning work.
 
-The standard Docker Compose deployment now has the infrastructure needed to change Mosquitto policy safely at runtime: a private mutable config volume, atomic config/password-file writes, a narrowly scoped reload sidecar, backend credentials separate from device credentials, and broker-side verification after changes. Open, Shared Password and Per-Device mode transitions, restart persistence and Per-Device revocation have been exercised successfully on a real Raspberry Pi deployment.
+The standard Docker Compose deployment now has the infrastructure needed to change Mosquitto policy safely at runtime: a private mutable config volume, atomic config/password-file writes, a narrowly scoped reload sidecar, backend credentials separate from device credentials, and broker-side verification after changes. How that runtime broker management works — and why it needs no Docker socket — is a separate decision recorded in [ADR-0018](0018-mosquitto-reload-sidecar.md). Open, Shared Password and Per-Device mode transitions, restart persistence and Per-Device revocation have been exercised successfully on a real Raspberry Pi deployment.
 
 ## Decision
 
@@ -69,7 +69,7 @@ Useful during implementation, but wrong after successful field verification. Fea
 * Operators can move from frictionless bring-up to stronger broker identity without replacing the broker or editing Mosquitto by hand.
 * Shared Password and Per-Device changes are applied and verified through one path.
 * Per-Device credentials can be revoked independently.
-* No Docker socket is required for runtime broker management.
+* No Docker socket is required for runtime broker management ([ADR-0018](0018-mosquitto-reload-sidecar.md)).
 
 ### Negative / accepted trade-offs
 
@@ -94,3 +94,4 @@ Revisit the authentication mechanisms if deployments need broker ACLs, username-
 * `src/api/routes/provisioning.routes.ts`
 * `frontend/src/pages/MqttSecurityPage.tsx`
 * `docs/security/mqtt.md`
+* `docker-compose.yml`, `mosquitto/reloader.Dockerfile` — the broker runtime plumbing, decided in [ADR-0018](0018-mosquitto-reload-sidecar.md)
