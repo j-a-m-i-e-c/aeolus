@@ -91,11 +91,23 @@ describe("auth-store", () => {
       expect(s().accessToken).toBeNull();
     });
 
-    it("returns false on a network error", async () => {
+    it("preserves an existing session and records a recoverable outage", async () => {
+      useAuthStore.setState({ accessToken: adminToken, isAuthenticated: true, connectionInterrupted: false });
       vi.mocked(fetch).mockRejectedValue(new Error("offline"));
-
       expect(await s().refresh()).toBe(false);
-      expect(s().isAuthenticated).toBe(false);
+      expect(s().isAuthenticated).toBe(true);
+      expect(s().accessToken).toBe(adminToken);
+      expect(s().connectionInterrupted).toBe(true);
+      vi.mocked(fetch).mockResolvedValue(okJson({ accessToken: adminToken }));
+      expect(await s().refresh()).toBe(true);
+      expect(s().connectionInterrupted).toBe(false);
+    });
+
+    it("retains auth on a transient 503", async () => {
+      useAuthStore.setState({ accessToken: adminToken, isAuthenticated: true });
+      vi.mocked(fetch).mockResolvedValue(new Response("", { status: 503 }));
+      expect(await s().refresh()).toBe(false);
+      expect(s().isAuthenticated).toBe(true);
     });
   });
 

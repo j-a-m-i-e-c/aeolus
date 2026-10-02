@@ -4,6 +4,13 @@ Aeolus follows semantic versioning for published releases. Until the first stabl
 
 ## Unreleased
 
+### Resilient authoring and account sessions (pending full Build 60 verification)
+
+* A temporary Pi/network outage now preserves the active dashboard authentication state and retries, instead of treating a fetch failure or 5xx as credential revocation. `401/403` still ends the session.
+* Standard automation editors keep browser-local IndexedDB recovery snapshots of multi-file projects and form fields, with explicit restoration and a pre-save changed-project check.
+* Admin user provisioning can choose per-user 1/7/30-day refresh sessions and optional idle logout; access JWTs remain 15 minutes.
+* Six retrospective architectural decisions now document resource authority, authored HTTP egress, MQTT topic/identity contracts, connector ownership, public-demo isolation and golden reset. ADR-0025 documents this change as Proposed until full CI and field verification.
+
 ### Security and reliability
 
 * WebSocket access tokens are sent only in the first authenticated message and are no longer accepted from query strings.

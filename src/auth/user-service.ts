@@ -22,6 +22,8 @@ export interface User {
   role: "admin" | "user";
   groupId: string | null;
   createdAt: number;
+  sessionDays: number;
+  inactivityMinutes: number;
 }
 
 export interface UserListItem {
@@ -30,6 +32,8 @@ export interface UserListItem {
   role: "admin" | "user";
   groupId: string | null;
   createdAt: number;
+  sessionDays: number;
+  inactivityMinutes: number;
 }
 
 interface UserRow {
@@ -39,6 +43,8 @@ interface UserRow {
   role: "admin" | "user";
   group_id: string | null;
   created_at: number;
+  session_days?: number;
+  inactivity_minutes?: number;
 }
 
 function rowToUser(row: UserRow): User {
@@ -49,6 +55,8 @@ function rowToUser(row: UserRow): User {
     role: row.role,
     groupId: row.group_id,
     createdAt: row.created_at,
+    sessionDays: row.session_days ?? 7,
+    inactivityMinutes: row.inactivity_minutes ?? 0,
   };
 }
 
@@ -59,6 +67,8 @@ function rowToListItem(row: UserRow): UserListItem {
     role: row.role,
     groupId: row.group_id,
     createdAt: row.created_at,
+    sessionDays: row.session_days ?? 7,
+    inactivityMinutes: row.inactivity_minutes ?? 0,
   };
 }
 
@@ -67,6 +77,12 @@ function validatePassword(password: string): void {
     throw new BadRequestError(
       `Password must be at least ${MIN_PASSWORD_LENGTH} characters`,
     );
+  }
+}
+
+export function validateSessionPolicy(sessionDays: number, inactivityMinutes: number): void {
+  if (![1, 7, 30].includes(sessionDays) || ![0, 30, 120, 480].includes(inactivityMinutes)) {
+    throw new BadRequestError("Unsupported session policy");
   }
 }
 
@@ -80,8 +96,11 @@ export async function createUser(
   password: string,
   groupId: string | null,
   role: "admin" | "user" = "user",
+  sessionDays = 7,
+  inactivityMinutes = 0,
 ): Promise<User> {
   validatePassword(password);
+  validateSessionPolicy(sessionDays, inactivityMinutes);
 
   const id = crypto.randomUUID();
   const passwordHash = await bcrypt.hash(password, BCRYPT_COST);
@@ -90,9 +109,9 @@ export async function createUser(
   const db = getDatabase();
   try {
     db.prepare(
-      `INSERT INTO users (id, username, password_hash, role, group_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-    ).run(id, username, passwordHash, role, groupId, createdAt);
+      `INSERT INTO users (id, username, password_hash, role, group_id, created_at, session_days, inactivity_minutes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(id, username, passwordHash, role, groupId, createdAt, sessionDays, inactivityMinutes);
   } catch (err: unknown) {
     if (
       err instanceof Error &&
@@ -110,6 +129,8 @@ export async function createUser(
     role,
     groupId,
     createdAt,
+    sessionDays,
+    inactivityMinutes,
   };
 }
 
@@ -156,7 +177,7 @@ export function getUserByUsername(username: string): User | null {
 export function listUsers(): UserListItem[] {
   const db = getDatabase();
   const rows = db
-    .prepare("SELECT id, username, role, group_id, created_at FROM users")
+    .prepare("SELECT id, username, role, group_id, created_at, session_days, inactivity_minutes FROM users")
     .all() as UserRow[];
   return rows.map(rowToListItem);
 }
@@ -172,6 +193,8 @@ export async function updateUser(
     groupId?: string | null;
     password?: string;
     role?: "admin" | "user";
+    sessionDays?: number;
+    inactivityMinutes?: number;
   },
 ): Promise<User> {
   const db = getDatabase();
@@ -188,6 +211,16 @@ export async function updateUser(
       assertNotLastAdmin();
     }
     db.prepare("UPDATE users SET role = ? WHERE id = ?").run(updates.role, id);
+  }
+
+  if (updates.sessionDays !== undefined || updates.inactivityMinutes !== undefined) {
+    const sessionDays = updates.sessionDays ?? existing.sessionDays;
+    const inactivityMinutes = updates.inactivityMinutes ?? existing.inactivityMinutes;
+    validateSessionPolicy(sessionDays, inactivityMinutes);
+    db.prepare("UPDATE users SET session_days = ?, inactivity_minutes = ? WHERE id = ?")
+      .run(sessionDays, inactivityMinutes, id);
+    // Reductions take effect during refresh validation. Existing access JWTs
+    // still live at most 15 minutes; policy does not revoke a password.
   }
 
   if (updates.password !== undefined) {

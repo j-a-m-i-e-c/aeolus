@@ -1,6 +1,6 @@
 // frontend/src/components/panes/AutomationPane.tsx — Self-contained automation pane (setup / status / editing)
 
-import { useState, useEffect, useCallback, lazy, Suspense } from "react";
+import { useState, useEffect, useCallback, useRef, lazy, Suspense } from "react";
 import {
   Power,
   PowerOff,
@@ -31,6 +31,9 @@ import { useAutomationStateStore } from "../../store/automation-state-store";
 import { useCommandActivityStore } from "../../store/command-activity-store";
 import type { PaneConfig } from "../../types/dashboard";
 
+import { useAutomationDraft } from "../../hooks/useAutomationDraft";
+import { putAutomationDraft, deleteAutomationDraft } from "../../lib/automation-drafts";
+import { AutomationDraftBanner } from "../AutomationDraftBanner";
 import { API_URL, PUBLIC_DEMO } from "../../lib/env";
 
 type PaneMode = "setup" | "status" | "editing";
@@ -66,6 +69,7 @@ export function AutomationPane({ config, paneId }: Props) {
   const panes = useDashboardStore((s) => s.panes);
   const activeTabId = useDashboardStore((s) => s.activeTabId);
   const isAdmin = useAuthStore((s) => s.user?.role) === "admin";
+  const userId = useAuthStore((s) => s.user?.id) ?? "anonymous";
   const isPublicVisitor = PUBLIC_DEMO && !isAdmin;
   const isDemoDraft = isPublicVisitor && !ruleId && config.demoDraft === true;
 
@@ -107,6 +111,18 @@ export function AutomationPane({ config, paneId }: Props) {
   const [executionHistory, setExecutionHistory] = useState<ExecutionEntry[]>([]);
   const [draftSavedAt, setDraftSavedAt] = useState<number | null>(null);
   const [evidenceOpen, setEvidenceOpen] = useState(false);
+  const serverProjectAtOpen = useRef<string | null>(null);
+  const draftKey = `${userId}:pane:${ruleId || paneId || "new"}`;
+  const draftPayload = { name, topic: triggerTopic, triggerType, cronExpression, project: projectSource };
+  const draft = useAutomationDraft({
+    key: draftKey,
+    enabled: !isPublicVisitor && mode !== "status",
+    payload: draftPayload,
+    restore: (saved) => {
+      setName(saved.name); setTriggerTopic(saved.topic); setTriggerType(saved.triggerType);
+      setCronExpression(saved.cronExpression); setProjectSource(saved.project);
+    },
+  });
 
   // Track ruleId changes to switch modes
   useEffect(() => {
@@ -272,6 +288,13 @@ export function AutomationPane({ config, paneId }: Props) {
         }
         return;
       }
+      const newer = draft.markSaved(draftPayload);
+      if (newer) {
+        const newKey = `${userId}:pane:${data.id}`;
+        await putAutomationDraft({ key: newKey, baseline: JSON.stringify(draftPayload), payload: newer, savedAt: Date.now() });
+        await deleteAutomationDraft(draftKey);
+        setErrors([{ line: 0, column: 0, message: "The submitted version was saved, but newer edits were retained as a local recovery draft. Reopen the editor to recover them." }]);
+      }
       // Success — store ruleId and name, then transition
       if (paneId) {
         updatePaneConfig(paneId, { ...config, ruleId: data.id, ruleName: name.trim() });
@@ -281,6 +304,12 @@ export function AutomationPane({ config, paneId }: Props) {
     } finally {
       setSaving(false);
     }
+  // `draft`, `draftPayload`, `draftKey` and `userId` are deliberately excluded.
+  // The first two are rebuilt on every render, so listing them would recreate
+  // this callback on each keystroke; the payload's constituent values (name,
+  // triggerTopic, triggerType, cronExpression, projectSource) are already
+  // dependencies, so the callback still invalidates when the content changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [name, triggerTopic, triggerType, cronExpression, triggerValid, projectSource, saving, paneId, config, updatePaneConfig, panes, activeTabId, isAdmin, isDemoDraft]);
 
   // ── Update handler (editing mode) ──
@@ -294,6 +323,13 @@ export function AutomationPane({ config, paneId }: Props) {
     setSaving(true);
     setErrors([]);
     try {
+      if (serverProjectAtOpen.current) {
+        const latest = await authFetch(`${API_URL}/api/automations/${ruleId}/project`);
+        if (!latest.ok || JSON.stringify(await latest.json()) !== serverProjectAtOpen.current) {
+          setErrors([{ line: 0, column: 0, message: "Server project changed while editing. Your local recovery draft is retained; reload and reconcile." }]);
+          return;
+        }
+      }
       const res = await authFetch(`${API_URL}/api/automations/${ruleId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -314,6 +350,12 @@ export function AutomationPane({ config, paneId }: Props) {
         }
         return;
       }
+      const newer = draft.markSaved(draftPayload);
+      if (newer) {
+        serverProjectAtOpen.current = JSON.stringify(draftPayload.project);
+        setErrors([{ line: 0, column: 0, message: "The submitted version was saved, but newer edits remain in this editor. Save again when ready." }]);
+        return;
+      }
       // Success — refresh and go back to status
       setMode("status");
       fetchRule();
@@ -326,6 +368,10 @@ export function AutomationPane({ config, paneId }: Props) {
     } finally {
       setSaving(false);
     }
+  // `draft` and `draftPayload` excluded for the same reason as createRule above:
+  // both are per-render objects, and the values they are built from are already
+  // listed here.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [name, triggerTopic, triggerType, cronExpression, triggerValid, projectSource, rule, saving, ruleId, fetchRule, paneId, config, updatePaneConfig, isPublicVisitor]);
 
   // ── Toggle handler ──
@@ -370,6 +416,7 @@ export function AutomationPane({ config, paneId }: Props) {
         const response = await authFetch(`${API_URL}/api/automations/${rule.id}/project`);
         if (!response.ok) throw new Error("Failed to load Automation Project");
         const project = await response.json() as AutomationProjectSource;
+        serverProjectAtOpen.current = JSON.stringify(project);
         setProjectSource(project);
       } catch {
         setErrors([{ line: 0, column: 0, message: "Failed to load Automation Project source" }]);
@@ -595,6 +642,11 @@ export function AutomationPane({ config, paneId }: Props) {
           </div>
         )}
 
+        {draft.recovery && <AutomationDraftBanner savedAt={draft.recovery.savedAt}
+          conflict={draft.recovery.baseline !== draft.serverBaseline}
+          onRestore={draft.recover} onDiscard={draft.discardRecovery} />}
+        {draft.savedAt && !draft.recovery && <div role="status" className="text-[10px] text-[#73D99A]">Local recovery draft saved {new Date(draft.savedAt).toLocaleTimeString()}</div>}
+        {draft.storageError && <div role="alert" className="text-xs text-amber-400">Local draft storage unavailable. Save or copy your changes before leaving.</div>}
         <div className="flex-1 min-h-0">
           <Suspense fallback={<div className="h-full flex items-center justify-center text-xs text-[#6B7785]">Loading project editor…</div>}>
             <AutomationProjectEditor

@@ -30,7 +30,9 @@ import { NotFoundError } from "../middleware/error-handler.js";
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const REFRESH_COOKIE_NAME = "refreshToken";
-const REFRESH_COOKIE_MAX_AGE = 604800; // 7 days in seconds
+/** Fallback session length when a caller does not supply the user's policy. */
+const DEFAULT_SESSION_DAYS = 7;
+const SECONDS_PER_DAY = 86400;
 
 // ─── Login Rate Limiter ──────────────────────────────────────────────────────
 
@@ -75,13 +77,23 @@ function refreshCookieSecure(req: import("express").Request): boolean {
   return req.secure;
 }
 
-function setRefreshCookie(req: import("express").Request, res: import("express").Response, token: string): void {
+/**
+ * Set the refresh cookie, sized to the user's administrator-configured session
+ * policy. `days` is validated to 1, 7 or 30 by the user schema, so no defensive
+ * zero/negative handling is needed here.
+ */
+function setRefreshCookie(
+  req: import("express").Request,
+  res: import("express").Response,
+  token: string,
+  days = DEFAULT_SESSION_DAYS,
+): void {
   res.cookie(REFRESH_COOKIE_NAME, token, {
     httpOnly: true,
     secure: refreshCookieSecure(req),
     sameSite: "strict",
     path: "/api/auth",
-    maxAge: REFRESH_COOKIE_MAX_AGE * 1000, // Express expects milliseconds
+    maxAge: days * SECONDS_PER_DAY * 1000, // Express expects milliseconds
   });
 }
 
@@ -120,7 +132,7 @@ export function createAuthRoutes(): Router {
     asyncHandler(async (req, res) => {
       const { username, password } = req.body;
       const result = await authService.setupAdmin(username, password);
-      setRefreshCookie(req, res, result.refreshToken);
+      setRefreshCookie(req, res, result.refreshToken, result.user.sessionDays);
       res.status(201).json({
         accessToken: result.accessToken,
         user: result.user,
@@ -136,7 +148,7 @@ export function createAuthRoutes(): Router {
     asyncHandler(async (req, res) => {
       const { username, password } = req.body;
       const result = await authService.login(username, password);
-      setRefreshCookie(req, res, result.refreshToken);
+      setRefreshCookie(req, res, result.refreshToken, result.user.sessionDays);
       res.json({
         accessToken: result.accessToken,
         user: result.user,
@@ -170,7 +182,7 @@ export function createAuthRoutes(): Router {
       res.status(401).json({ error: "No refresh token provided" });
       return;
     }
-    const accessToken = authService.refresh(refreshToken);
+    const accessToken = authService.refresh(refreshToken, req.body?.active === true);
     res.json({ accessToken });
   }));
 
@@ -228,12 +240,14 @@ export function createAuthRoutes(): Router {
     requireAdmin,
     validate({ body: createUserSchema }),
     asyncHandler(async (req, res) => {
-      const { username, password, groupId, role } = req.body;
+      const { username, password, groupId, role, sessionDays, inactivityMinutes } = req.body;
       const user = await userService.createUser(
         username,
         password,
         groupId,
         role,
+        sessionDays,
+        inactivityMinutes,
       );
       res.status(201).json({
         id: user.id,
@@ -241,6 +255,8 @@ export function createAuthRoutes(): Router {
         role: user.role,
         groupId: user.groupId,
         createdAt: user.createdAt,
+        sessionDays: user.sessionDays,
+        inactivityMinutes: user.inactivityMinutes,
       });
     }),
   );
@@ -261,6 +277,8 @@ export function createAuthRoutes(): Router {
         role: user.role,
         groupId: user.groupId,
         createdAt: user.createdAt,
+        sessionDays: user.sessionDays,
+        inactivityMinutes: user.inactivityMinutes,
       });
     }),
   );

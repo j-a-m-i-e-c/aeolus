@@ -58,6 +58,12 @@ export default defineConfig({
         "src/pages/data-store/TimeSeriesChart.tsx", // SVG chart
         "src/components/FlowDiagram.tsx", // node/edge flow diagram
         "src/components/panes/types.ts", // type-only module
+        // IndexedDB is not implemented in jsdom, so the draft store's request/
+        // transaction plumbing cannot execute here. The recovery *behaviour*
+        // built on it (offer-never-apply, debounce, save/clear, newer-edit
+        // retention, storage-failure surfacing) is covered against a mocked
+        // store in hooks/useAutomationDraft.test.ts.
+        "src/lib/automation-drafts.ts", // IndexedDB request/transaction wrapper
         // Complex interactive pages are excluded from the aggregate threshold because
         // jsdom is a poor fit for Monaco, drag-and-drop and browser-heavy workflows.
         // Their logic is covered by focused component/unit tests where practical,

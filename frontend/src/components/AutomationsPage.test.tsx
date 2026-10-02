@@ -219,10 +219,18 @@ describe("AutomationsPage", () => {
     fireEvent.click(screen.getByText("Script Rule"));
     await screen.findByText("Edit Automation");
 
-    // Next save (PUT) fails with transpile details.
-    mockAuthFetch.mockResolvedValueOnce(
-      jsonResponse({ details: [{ line: 3, column: 5, message: "Unexpected token" }] }, 400),
-    );
+    // Saving an existing automation first re-reads the server project to detect a
+    // concurrent change (ADR-0025), so target the PUT by method rather than by
+    // call order — the number of preceding reads is not this test's concern.
+    const serveReads = mockAuthFetch.getMockImplementation()!;
+    mockAuthFetch.mockImplementation((url: string, init?: RequestInit) => {
+      if (init?.method === "PUT") {
+        return Promise.resolve(
+          jsonResponse({ details: [{ line: 3, column: 5, message: "Unexpected token" }] }, 400),
+        );
+      }
+      return serveReads(url, init);
+    });
     fireEvent.click(screen.getByRole("button", { name: "Update Automation" }));
 
     expect(await screen.findByText(/Line 3:5 — Unexpected token/)).toBeInTheDocument();

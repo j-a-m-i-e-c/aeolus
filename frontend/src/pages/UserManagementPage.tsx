@@ -17,11 +17,32 @@ interface UserRecord {
   role: "admin" | "user";
   groupId: string | null;
   createdAt: number;
+  sessionDays: number;
+  inactivityMinutes: number;
 }
 
 interface GroupRecord {
   id: string;
   name: string;
+}
+
+function SessionPolicyFields({ days, idle, onDays, onIdle }: {
+  days: number; idle: number; onDays: (n: number) => void; onIdle: (n: number) => void;
+}) {
+  return <div className="flex flex-wrap gap-3 text-xs text-[#9AA6B2]">
+    <label>Session lifetime
+      <select aria-label="Session lifetime" className="ml-2 bg-background border border-[#2A3441] rounded p-1" value={days} onChange={e => onDays(Number(e.target.value))}>
+        <option value={1}>1 day</option><option value={7}>7 days</option><option value={30}>30 days</option>
+      </select>
+    </label>
+    <label>Idle logout
+      <select aria-label="Idle logout" className="ml-2 bg-background border border-[#2A3441] rounded p-1" value={idle} onChange={e => onIdle(Number(e.target.value))}>
+        <option value={0}>Disabled</option><option value={30}>30 minutes</option>
+        <option value={120}>2 hours</option><option value={480}>8 hours</option>
+      </select>
+    </label>
+    <p className="w-full text-[10px]">Access tokens stay short-lived. Idle time tracks user interaction, not background refreshes. Policy changes take effect at the next refresh.</p>
+  </div>;
 }
 
 // ---------------------------------------------------------------------------
@@ -40,6 +61,8 @@ export function UserManagementPage() {
   const [createUsername, setCreateUsername] = useState("");
   const [createPassword, setCreatePassword] = useState("");
   const [createGroupId, setCreateGroupId] = useState<string>("");
+  const [createSessionDays, setCreateSessionDays] = useState(7);
+  const [createIdleMinutes, setCreateIdleMinutes] = useState(0);
   const [createRole, setCreateRole] = useState<"admin" | "user">("user");
   const [createError, setCreateError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -48,6 +71,8 @@ export function UserManagementPage() {
   const [editUser, setEditUser] = useState<UserRecord | null>(null);
   const [editGroupId, setEditGroupId] = useState<string>("");
   const [editRole, setEditRole] = useState<"admin" | "user">("user");
+  const [editSessionDays, setEditSessionDays] = useState(7);
+  const [editIdleMinutes, setEditIdleMinutes] = useState(0);
   const [editPassword, setEditPassword] = useState("");
   const [editError, setEditError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -129,6 +154,8 @@ export function UserManagementPage() {
           password: createPassword,
           groupId: createGroupId || null,
           role: createRole,
+          sessionDays: createSessionDays,
+          inactivityMinutes: createIdleMinutes,
         }),
       });
 
@@ -161,6 +188,8 @@ export function UserManagementPage() {
     setEditGroupId(user.groupId ?? "");
     setEditRole(user.role);
     setEditPassword("");
+    setEditSessionDays(user.sessionDays ?? 7);
+    setEditIdleMinutes(user.inactivityMinutes ?? 0);
     setEditError(null);
   };
 
@@ -182,6 +211,8 @@ export function UserManagementPage() {
       if (editRole !== editUser.role) {
         updates.role = editRole;
       }
+      if (editSessionDays !== (editUser.sessionDays ?? 7)) updates.sessionDays = editSessionDays;
+      if (editIdleMinutes !== (editUser.inactivityMinutes ?? 0)) updates.inactivityMinutes = editIdleMinutes;
       if (editPassword) {
         updates.password = editPassword;
       }
@@ -334,6 +365,7 @@ export function UserManagementPage() {
             </div>
           </div>
 
+          <SessionPolicyFields days={createSessionDays} idle={createIdleMinutes} onDays={setCreateSessionDays} onIdle={setCreateIdleMinutes} />
           {createError && (
             <p className="text-xs text-[#EF4444]">{createError}</p>
           )}
@@ -495,6 +527,7 @@ export function UserManagementPage() {
               </div>
             </div>
 
+            <SessionPolicyFields days={editSessionDays} idle={editIdleMinutes} onDays={setEditSessionDays} onIdle={setEditIdleMinutes} />
             {editError && (
               <p className="text-xs text-[#EF4444]">{editError}</p>
             )}

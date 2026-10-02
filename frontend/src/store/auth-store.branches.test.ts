@@ -113,26 +113,59 @@ describe("auth-store — branch coverage", () => {
   });
 
   describe("checkSetupNeeded", () => {
-    it("falls through to login view when status endpoint returns non-ok", async () => {
+    it("keeps reconnecting when the status endpoint is unavailable", async () => {
       vi.mocked(fetch)
         .mockResolvedValueOnce(new Response("", { status: 401 })) // refresh
         .mockResolvedValueOnce(new Response("", { status: 500 })); // status
 
       await s().checkSetupNeeded();
 
+      // A broken status endpoint cannot establish that the site is unconfigured,
+      // so showing a login or setup screen here would be a guess. Stay loading
+      // and retry instead.
+      expect(s().connectionInterrupted).toBe(true);
+      expect(s().loading).toBe(true);
       expect(s().needsSetup).toBe(false);
       expect(s().isAuthenticated).toBe(false);
-      expect(s().loading).toBe(false);
     });
 
-    it("handles network error in checkSetupNeeded", async () => {
+    it("stays reconnecting when the first refresh hits a server error, not a rejection", async () => {
+      // A Pi mid-restart answers 503. Treating that like a rejected cookie would
+      // send the operator to a login screen and discard a recoverable session.
+      vi.mocked(fetch).mockResolvedValueOnce(new Response("", { status: 503 }));
+
+      await s().checkSetupNeeded();
+
+      expect(s().connectionInterrupted).toBe(true);
+      expect(s().loading).toBe(true);
+      // The status endpoint must not even be consulted: nothing was established.
+      expect(vi.mocked(fetch).mock.calls).toHaveLength(1);
+    });
+
+    it("shows the login view once the server definitively rejects the cookie", async () => {
+      vi.mocked(fetch)
+        .mockResolvedValueOnce(new Response("", { status: 401 })) // refresh
+        .mockResolvedValueOnce(okJson({ needsSetup: false })); // status
+
+      await s().checkSetupNeeded();
+
+      expect(s().loading).toBe(false);
+      expect(s().needsSetup).toBe(false);
+      expect(s().isAuthenticated).toBe(false);
+      expect(s().connectionInterrupted).toBe(false);
+    });
+
+    it("does not drop to a login screen while the server is unreachable", async () => {
       vi.mocked(fetch).mockRejectedValue(new Error("network error"));
 
       await s().checkSetupNeeded();
 
+      // ADR-0025: an unreachable Pi is not evidence that the install is
+      // unconfigured or that the refresh cookie was revoked.
+      expect(s().connectionInterrupted).toBe(true);
+      expect(s().loading).toBe(true);
       expect(s().needsSetup).toBe(false);
       expect(s().isAuthenticated).toBe(false);
-      expect(s().loading).toBe(false);
     });
   });
 

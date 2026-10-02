@@ -146,6 +146,41 @@ describe("user-service", () => {
       );
     });
 
+    it("stores a new session policy", async () => {
+      const user = await createUser("policyset", "password123", "g1");
+      expect(user.sessionDays).toBe(7);
+      expect(user.inactivityMinutes).toBe(0);
+
+      const updated = await updateUser(user.id, { sessionDays: 30, inactivityMinutes: 120 });
+
+      expect(updated.sessionDays).toBe(30);
+      expect(updated.inactivityMinutes).toBe(120);
+    });
+
+    it("keeps the other half of the policy when only one field is supplied", async () => {
+      const user = await createUser("policyhalf", "password123", "g1", "user", 30, 480);
+
+      const idleOnly = await updateUser(user.id, { inactivityMinutes: 30 });
+      expect(idleOnly.sessionDays).toBe(30);
+      expect(idleOnly.inactivityMinutes).toBe(30);
+
+      const daysOnly = await updateUser(user.id, { sessionDays: 1 });
+      expect(daysOnly.sessionDays).toBe(1);
+      expect(daysOnly.inactivityMinutes).toBe(30);
+    });
+
+    it("rejects an unsupported session policy", async () => {
+      const user = await createUser("policybad", "password123", "g1");
+      await expect(updateUser(user.id, { sessionDays: 14 })).rejects.toThrow(
+        "Unsupported session policy",
+      );
+      await expect(updateUser(user.id, { inactivityMinutes: 5 })).rejects.toThrow(
+        "Unsupported session policy",
+      );
+      // The rejected write must not have landed.
+      expect(getUser(user.id)!.sessionDays).toBe(7);
+    });
+
     it("revokes refresh tokens when an admin resets the password (audit High 2)", async () => {
       const user = await createUser("adminreset", "password123", "g1");
       testDb

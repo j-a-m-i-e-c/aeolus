@@ -63,6 +63,10 @@ Aeolus uses a pluggable connector framework. To add a new device integration:
 
 See `src/connectors/README.md` for the full developer guide.
 
+## Architecture Decision Records
+
+Add or update an [ADR](docs/adr/README.md) when changing a security boundary, deployment/process model, durable data contract or cross-cutting authority/identity model. A future maintainer should be able to understand *why* the choice was made and what would break if they simplified it. For ordinary feature additions, bug fixes or implementation details, update the appropriate reference/how-to documentation instead of producing ADR noise. Retrospective ADRs record their actual writing date, not an invented original decision date; leave proposals marked Proposed until implementation and validation establish the claim. Link implementation anchors and related ADRs, and update the ADR index.
+
 ## Code Standards
 
 - TypeScript strict mode

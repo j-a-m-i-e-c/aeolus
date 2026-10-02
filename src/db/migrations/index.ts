@@ -56,6 +56,7 @@ import { automationProjects } from "./015-automation-projects.js";
 import { promoteLegacyAutomationProjects } from "./016-promote-legacy-automation-projects.js";
 import { commandCapabilitySnapshot } from "./017-command-capability-snapshot.js";
 import { commandTriggerProvenance } from "./018-command-trigger-provenance.js";
+import { sessionPolicies } from "./019-session-policies.js";
 
 export const migrations: Migration[] = [
   baseline,                      // id 1
@@ -76,4 +77,5 @@ export const migrations: Migration[] = [
   promoteLegacyAutomationProjects,   // id 16
   commandCapabilitySnapshot,         // id 17
   commandTriggerProvenance,          // id 18
+  sessionPolicies,                  // id 19
 ];

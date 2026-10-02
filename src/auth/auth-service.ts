@@ -14,6 +14,7 @@ import {
   generateRefreshToken,
   validateRefreshToken,
   revokeRefreshToken,
+  touchRefreshActivity,
 } from "./token-service.js";
 import { getUserByUsername, getUser, verifyPassword } from "./user-service.js";
 import { config } from "../config.js";
@@ -24,7 +25,7 @@ import logger from "../logger.js";
 export interface LoginResult {
   accessToken: string;
   refreshToken: string;
-  user: { id: string; username: string; role: string };
+  user: { id: string; username: string; role: string; sessionDays: number };
 }
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -134,7 +135,7 @@ export async function setupAdmin(
   return {
     accessToken,
     refreshToken,
-    user: { id, username: username.trim(), role: "admin" },
+    user: { id, username: username.trim(), role: "admin", sessionDays: 7 },
   };
 }
 
@@ -176,7 +177,7 @@ export async function login(
   return {
     accessToken,
     refreshToken,
-    user: { id: user.id, username: user.username, role: user.role },
+    user: { id: user.id, username: user.username, role: user.role, sessionDays: user.sessionDays },
   };
 }
 
@@ -188,7 +189,7 @@ export async function login(
  * - Looks up the user to get current role/groupId (fresh data for new access token)
  * - Generates and returns a new access token string
  */
-export function refresh(refreshToken: string): string {
+export function refresh(refreshToken: string, active = false): string {
   const tokenRecord = validateRefreshToken(refreshToken);
   if (!tokenRecord) {
     throw new UnauthorizedError("Invalid or expired refresh token");
@@ -199,6 +200,8 @@ export function refresh(refreshToken: string): string {
   if (!user) {
     throw new UnauthorizedError("User not found");
   }
+
+  if (active) touchRefreshActivity(refreshToken);
 
   // Generate new access token with current user data
   const accessToken = generateAccessToken({

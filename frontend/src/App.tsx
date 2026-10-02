@@ -67,6 +67,7 @@ function AuthenticatedApp() {
   const fetchPermissions = usePermissionsStore((s) => s.fetchPermissions);
   const permissionsLoaded = usePermissionsStore((s) => s.loaded);
   const authUser = useAuthStore((s) => s.user);
+  const connectionInterrupted = useAuthStore((s) => s.connectionInterrupted);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
 
   useEffect(() => { initialize(); }, [initialize]);
@@ -102,6 +103,9 @@ function AuthenticatedApp() {
 
   return (
     <Layout>
+      {connectionInterrupted && <div role="status" className="mx-4 mt-2 rounded-md border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+        Aeolus connection interrupted. Your session and local editor remain available; server saves may fail until connectivity returns.
+      </div>}
       <Routes>
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
         <Route path="/dashboard" element={<DashboardPage />} />
@@ -136,19 +140,38 @@ function AuthenticatedApp() {
 
 export default function App() {
   const loading = useAuthStore((s) => s.loading);
+  const connectionInterrupted = useAuthStore((s) => s.connectionInterrupted);
   const needsSetup = useAuthStore((s) => s.needsSetup);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const checkSetupNeeded = useAuthStore((s) => s.checkSetupNeeded);
 
   useEffect(() => {
-    checkSetupNeeded();
+    void checkSetupNeeded();
+    // Local-first installations can vanish temporarily when the Pi reboots or
+    // the laptop changes Wi-Fi. Recheck without discarding an in-progress editor.
+    const recover = () => {
+      const auth = useAuthStore.getState();
+      if (auth.loading) void auth.checkSetupNeeded();
+      else if (auth.connectionInterrupted) void auth.refresh();
+    };
+    const onVisibility = () => { if (document.visibilityState === "visible") recover(); };
+    window.addEventListener("online", recover);
+    window.addEventListener("focus", recover);
+    document.addEventListener("visibilitychange", onVisibility);
+    const timer = window.setInterval(recover, 15_000);
+    return () => {
+      window.removeEventListener("online", recover);
+      window.removeEventListener("focus", recover);
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.clearInterval(timer);
+    };
   }, [checkSetupNeeded]);
 
   // Show loading spinner while checking auth state
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#0B0F14]">
-        <div className="text-[#6B7785] text-sm animate-pulse">Loading…</div>
+        <div role="status" className="text-[#9AA6B2] text-sm">{connectionInterrupted ? "Aeolus is unreachable. Reconnecting without discarding your session…" : "Loading…"}</div>
       </div>
     );
   }

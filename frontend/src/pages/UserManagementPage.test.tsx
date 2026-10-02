@@ -111,6 +111,20 @@ describe("UserManagementPage", () => {
     expect(screen.getByText("Password must be at least 8 characters")).toBeInTheDocument();
   });
 
+  it("lets admins select a bounded policy while provisioning a user", async () => {
+    render(<UserManagementPage />);
+    await screen.findByText("No users found");
+    fireEvent.click(screen.getByRole("button", { name: /Add User/ }));
+    fireEvent.change(screen.getByPlaceholderText("username"), { target: { value: "operator" } });
+    fireEvent.change(screen.getByPlaceholderText("min 8 characters"), { target: { value: "password123" } });
+    fireEvent.change(screen.getByLabelText("Session lifetime"), { target: { value: "30" } });
+    fireEvent.change(screen.getByLabelText("Idle logout"), { target: { value: "120" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(h.authFetch.mock.calls.some((c) => c[1]?.method === "POST")).toBe(true));
+    const request = h.authFetch.mock.calls.find((c) => c[1]?.method === "POST")!;
+    expect(JSON.parse(request[1].body)).toMatchObject({ sessionDays: 30, inactivityMinutes: 120 });
+  });
+
   it("submits a create request with the entered values", async () => {
     render(<UserManagementPage />);
     await screen.findByText("No users found");

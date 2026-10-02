@@ -35,6 +35,13 @@ This is especially useful for decisions that are easy to misunderstand from code
 | [0016](0016-shared-state-and-automation-events.md) | Shared State for current truth, Automation Events for occurrences | Accepted |
 | [0017](0017-mqtt-security-modes.md) | Open, Shared Password and Per-Device as first-class MQTT security modes | Accepted |
 | [0018](0018-mosquitto-reload-sidecar.md) | Mosquitto reload sidecar with shared PID namespace, no Docker socket | Accepted |
+| [0019](0019-resource-authorization-and-automation-authority.md) | Resource authorization and scoped automation authority | Accepted |
+| [0020](0020-authored-http-egress-boundary.md) | Separate outbound HTTP boundary for authored code | Accepted |
+| [0021](0021-mqtt-device-identity-and-topic-contract.md) | MQTT identity, reserved topics and correlated replies | Accepted |
+| [0022](0022-multi-instance-connector-ownership.md) | Multi-instance connector ownership and action routing | Accepted |
+| [0023](0023-public-demo-backend-isolation.md) | Backend-enforced public demo isolation | Accepted |
+| [0024](0024-reproducible-demo-and-reset.md) | Showcase ownership and reproducible hosted reset | Accepted |
+| [0025](0025-resilient-sessions-and-local-automation-drafts.md) | Resilient sessions, local drafts and admin session policies | Proposed |
 
 ## Writing a new ADR
 

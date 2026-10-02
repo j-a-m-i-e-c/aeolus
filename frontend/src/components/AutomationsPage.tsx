@@ -12,7 +12,7 @@
 // device. A tier is chosen per call in Logic via `devices.action(..., { tier })`, or
 // omitted so each device resolves to the strongest level it can actually prove.
 
-import { useState, useEffect, useCallback, lazy, Suspense } from "react";
+import { useState, useEffect, useCallback, useRef, lazy, Suspense } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Plus,
@@ -35,6 +35,9 @@ import {
   type AutomationTriggerType,
   type TranspileError,
 } from "./automation-authoring";
+import { useAutomationDraft } from "../hooks/useAutomationDraft";
+import { putAutomationDraft, deleteAutomationDraft } from "../lib/automation-drafts";
+import { AutomationDraftBanner } from "./AutomationDraftBanner";
 import { authFetch } from "../lib/auth-fetch";
 import { useAuthStore } from "../store/auth-store";
 import { usePermissionsStore } from "../store/permissions-store";
@@ -63,6 +66,7 @@ interface AutomationRule {
 
 export function AutomationsPage() {
   const role = useAuthStore((s) => s.user?.role);
+  const userId = useAuthStore((s) => s.user?.id) ?? "anonymous";
   const isAdmin = role === "admin";
   const canPerform = usePermissionsStore((s) => s.canPerform);
   const dashboardTabs = useDashboardStore((s) => s.tabs);
@@ -99,6 +103,19 @@ export function AutomationsPage() {
 
   // Editing state
   const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
+  const serverProjectAtOpen = useRef<string | null>(null);
+  const draftKey = `${userId}:page:${editingRuleId || "new"}`;
+  const draftPayload = { name: scriptName, topic: scriptTriggerTopic, triggerType, cronExpression, project: projectSource, ownerTabId };
+  const draft = useAutomationDraft({
+    key: draftKey,
+    enabled: showForm,
+    payload: draftPayload,
+    restore: (saved) => {
+      setScriptName(saved.name); setScriptTriggerTopic(saved.topic);
+      setTriggerType(saved.triggerType); setCronExpression(saved.cronExpression);
+      setProjectSource(saved.project); setOwnerTabId(saved.ownerTabId);
+    },
+  });
 
   const fetchRules = useCallback(async () => {
     try {
@@ -135,6 +152,13 @@ export function AutomationsPage() {
     const method = isEditing ? "PUT" : "POST";
 
     try {
+      if (isEditing && serverProjectAtOpen.current) {
+        const latest = await authFetch(`${API_URL}/api/automations/${editingRuleId}/project`);
+        if (!latest.ok || JSON.stringify(await latest.json()) !== serverProjectAtOpen.current) {
+          setProjectLoadError("This automation changed on the server. Your browser draft is retained; reload and reconcile before saving.");
+          return;
+        }
+      }
       const res = await authFetch(url, {
         method,
         headers: { "Content-Type": "application/json" },
@@ -160,6 +184,22 @@ export function AutomationsPage() {
         return;
       }
 
+      const newer = draft.markSaved(draftPayload);
+      if (newer) {
+        // The submitted version was saved, but the editor moved on. Keep it
+        // open; on a create, transfer recovery to the newly created ID.
+        if (!isEditing) {
+          const created = await res.json() as { id: string };
+          const newKey = `${userId}:page:${created.id}`;
+          await putAutomationDraft({ key: newKey, baseline: JSON.stringify(draftPayload), payload: newer, savedAt: Date.now() });
+          await deleteAutomationDraft(draftKey);
+          setEditingRuleId(created.id);
+        }
+        serverProjectAtOpen.current = JSON.stringify(draftPayload.project);
+        setProjectLoadError("The submitted version was saved, but you made newer edits during the request. They are retained locally; save again when ready.");
+        fetchRules();
+        return;
+      }
       resetAuthoring();
       setShowForm(false);
       fetchRules();
@@ -200,7 +240,9 @@ export function AutomationsPage() {
       // persisted Automation Project.
       const response = await authFetch(`${API_URL}/api/automations/${rule.id}/project`);
       if (!response.ok) throw new Error("Failed to load Automation Project");
-      setProjectSource(await response.json() as AutomationProjectSource);
+      const loaded = await response.json() as AutomationProjectSource;
+      serverProjectAtOpen.current = JSON.stringify(loaded);
+      setProjectSource(loaded);
     } catch {
       // Fail closed rather than opening the editor with a stale/default Project:
       // saving that state could overwrite valid authored source after a transient
@@ -289,6 +331,11 @@ export function AutomationsPage() {
             </h2>
 
             <div className="space-y-4">
+              {draft.recovery && <AutomationDraftBanner savedAt={draft.recovery.savedAt}
+                conflict={draft.recovery.baseline !== draft.serverBaseline}
+                onRestore={draft.recover} onDiscard={draft.discardRecovery} />}
+              {draft.savedAt && !draft.recovery && <p role="status" className="text-[10px] text-[#73D99A]">Local recovery draft saved {new Date(draft.savedAt).toLocaleTimeString()}</p>}
+              {draft.storageError && <p role="alert" className="text-xs text-amber-400">Local draft storage is unavailable. Save or copy your work before leaving.</p>}
               <div className="rounded-lg border border-[#2A3441] bg-background p-3">
                 <AutomationAuthoringFields
                   name={scriptName}

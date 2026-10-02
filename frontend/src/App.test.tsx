@@ -8,18 +8,27 @@ const authState: {
   loading: boolean;
   needsSetup: boolean;
   isAuthenticated: boolean;
+  connectionInterrupted: boolean;
   user: { username: string; role: string } | null;
   checkSetupNeeded: ReturnType<typeof vi.fn>;
+  refresh: ReturnType<typeof vi.fn>;
 } = {
   loading: true,
   needsSetup: false,
   isAuthenticated: false,
+  connectionInterrupted: false,
   user: null,
   checkSetupNeeded: vi.fn(),
+  refresh: vi.fn(),
 };
 
+// App's reconnect handler reads the store imperatively via getState(), so the
+// mock must expose it as well as the selector form.
 vi.mock("./store/auth-store", () => ({
-  useAuthStore: (selector: (s: typeof authState) => unknown) => selector(authState),
+  useAuthStore: Object.assign(
+    (selector: (s: typeof authState) => unknown) => selector(authState),
+    { getState: () => authState },
+  ),
 }));
 
 // --- Stub the page/screen components so we only test the guard's branching ---
@@ -92,8 +101,10 @@ describe("App auth guard", () => {
     authState.loading = true;
     authState.needsSetup = false;
     authState.isAuthenticated = false;
+    authState.connectionInterrupted = false;
     authState.user = null;
     authState.checkSetupNeeded.mockReset();
+    authState.refresh.mockReset();
     permState.loaded = true;
     setDevices.mockClear();
     initialize.mockClear();
@@ -111,6 +122,56 @@ describe("App auth guard", () => {
     authState.loading = true;
     render(<App />);
     expect(screen.getByText("Loading…")).toBeInTheDocument();
+  });
+
+  it("says it is reconnecting rather than loading when the server is unreachable", () => {
+    authState.loading = true;
+    authState.connectionInterrupted = true;
+    render(<App />);
+    expect(screen.getByText(/Aeolus is unreachable\. Reconnecting/)).toBeInTheDocument();
+    expect(screen.queryByText("Loading…")).not.toBeInTheDocument();
+  });
+
+  it("warns inside the authenticated shell that server saves may fail", async () => {
+    authState.loading = false;
+    authState.isAuthenticated = true;
+    authState.connectionInterrupted = true;
+    authState.user = { username: "admin", role: "admin" };
+    render(<App />);
+    await waitFor(() => expect(screen.getByTestId("layout")).toBeInTheDocument());
+    expect(screen.getByText(/Aeolus connection interrupted/)).toBeInTheDocument();
+  });
+
+  it("retries the setup check when connectivity returns during initial load", () => {
+    authState.loading = true;
+    render(<App />);
+    authState.checkSetupNeeded.mockClear();
+    act(() => { window.dispatchEvent(new Event("online")); });
+    expect(authState.checkSetupNeeded).toHaveBeenCalled();
+    expect(authState.refresh).not.toHaveBeenCalled();
+  });
+
+  it("refreshes instead of re-checking setup when an established session was interrupted", () => {
+    authState.loading = false;
+    authState.isAuthenticated = true;
+    authState.connectionInterrupted = true;
+    authState.user = { username: "admin", role: "admin" };
+    render(<App />);
+    authState.checkSetupNeeded.mockClear();
+    act(() => { window.dispatchEvent(new Event("focus")); });
+    expect(authState.refresh).toHaveBeenCalled();
+    expect(authState.checkSetupNeeded).not.toHaveBeenCalled();
+  });
+
+  it("does nothing on a visibility change while the connection is healthy", () => {
+    authState.loading = false;
+    authState.isAuthenticated = true;
+    authState.user = { username: "admin", role: "admin" };
+    render(<App />);
+    authState.checkSetupNeeded.mockClear();
+    act(() => { document.dispatchEvent(new Event("visibilitychange")); });
+    expect(authState.refresh).not.toHaveBeenCalled();
+    expect(authState.checkSetupNeeded).not.toHaveBeenCalled();
   });
 
   it("shows the setup page on first run (needsSetup)", () => {

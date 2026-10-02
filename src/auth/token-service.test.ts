@@ -145,6 +145,83 @@ describe("Token Service", () => {
     });
   });
 
+  describe("administrator session policies", () => {
+    function insertUser(days: number, idle: number): void {
+      testDb.prepare(`INSERT INTO users
+        (id, username, password_hash, role, group_id, created_at, session_days, inactivity_minutes)
+        VALUES ('policy-user', 'policy-user', 'hash', 'user', NULL, ?, ?, ?)`)
+        .run(Date.now(), days, idle);
+    }
+
+    it("sets per-user absolute refresh expiration, never extending it on refresh", () => {
+      insertUser(1, 0);
+      const token = generateRefreshToken("policy-user");
+      const first = validateRefreshToken(token)!;
+      expect(first.expiresAt - first.createdAt).toBe(24 * 60 * 60 * 1000);
+      expect(validateRefreshToken(token)!.expiresAt).toBe(first.expiresAt);
+    });
+
+    it("expires an inactive session and deletes its hash", () => {
+      insertUser(7, 30);
+      const token = generateRefreshToken("policy-user");
+      const hash = crypto.createHash("sha256").update(token).digest("hex");
+      testDb.prepare("UPDATE refresh_tokens SET last_activity_at = ? WHERE token_hash = ?")
+        .run(Date.now() - 31 * 60_000, hash);
+      expect(validateRefreshToken(token)).toBeNull();
+      expect(testDb.prepare("SELECT id FROM refresh_tokens WHERE token_hash = ?").get(hash)).toBeUndefined();
+    });
+
+    it("enforces policy reductions on already-issued sessions", () => {
+      insertUser(30, 0);
+      const token = generateRefreshToken("policy-user");
+      const hash = crypto.createHash("sha256").update(token).digest("hex");
+      testDb.prepare("UPDATE refresh_tokens SET created_at = ? WHERE token_hash = ?")
+        .run(Date.now() - 2 * 24 * 60 * 60 * 1000, hash);
+      testDb.prepare("UPDATE users SET session_days = 1 WHERE id = 'policy-user'").run();
+      expect(validateRefreshToken(token)).toBeNull();
+    });
+
+    it("falls back to created_at for sessions minted before activity tracking", () => {
+      insertUser(7, 30);
+      const token = generateRefreshToken("policy-user");
+      const hash = crypto.createHash("sha256").update(token).digest("hex");
+      // Migration 019 backfills this, but a row written by an older binary
+      // mid-upgrade can still be NULL. created_at is the honest substitute.
+      testDb.prepare("UPDATE refresh_tokens SET last_activity_at = NULL WHERE token_hash = ?")
+        .run(hash);
+      const record = validateRefreshToken(token)!;
+      expect(record.lastActivityAt).toBe(record.createdAt);
+    });
+
+    it("applies the default policy when the owning user row is gone", () => {
+      // An orphaned token cannot be created while foreign keys are enforced, but
+      // a database written by an older binary or edited externally can contain
+      // one. dbSessionPolicy must then fall back to 7 days / no idle rather than
+      // reading undefined and expiring the session immediately.
+      testDb.pragma("foreign_keys = OFF");
+      testDb.prepare(`INSERT INTO refresh_tokens
+        (id, user_id, token_hash, expires_at, created_at, last_activity_at)
+        VALUES ('orphan', 'missing-user', ?, ?, ?, ?)`)
+        .run(crypto.createHash("sha256").update("orphan-token").digest("hex"),
+          Date.now() + 86_400_000, Date.now(), Date.now());
+      testDb.pragma("foreign_keys = ON");
+
+      expect(validateRefreshToken("orphan-token")).not.toBeNull();
+    });
+
+    it("only updates activity when explicitly touched", async () => {
+      insertUser(7, 30);
+      const token = generateRefreshToken("policy-user");
+      const hash = crypto.createHash("sha256").update(token).digest("hex");
+      testDb.prepare("UPDATE refresh_tokens SET last_activity_at = ? WHERE token_hash = ?")
+        .run(Date.now() - 20 * 60_000, hash);
+      expect(validateRefreshToken(token)!.lastActivityAt).toBeLessThan(Date.now() - 19 * 60_000);
+      const { touchRefreshActivity } = await import("./token-service.js");
+      touchRefreshActivity(token);
+      expect(validateRefreshToken(token)!.lastActivityAt).toBeGreaterThan(Date.now() - 60_000);
+    });
+  });
+
   describe("generateRefreshToken() / validateRefreshToken()", () => {
     it("should generate a base64url-encoded token", () => {
       process.env.JWT_SECRET = "test-secret";

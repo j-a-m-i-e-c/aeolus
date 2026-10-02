@@ -28,12 +28,13 @@ export interface RefreshTokenRecord {
   tokenHash: string;
   expiresAt: number;
   createdAt: number;
+  lastActivityAt: number;
 }
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const ACCESS_TOKEN_EXPIRY = "15m"; // 15 minutes
-const REFRESH_TOKEN_EXPIRY_MS = 7 * 24 * 60 * 60 * 1000; // 7 days in ms
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 // ─── Secret Management ───────────────────────────────────────────────────────
 
@@ -161,6 +162,18 @@ export function verifyAccessTokenWithExpiry(token: string): {
 
 // ─── Refresh Token Operations ────────────────────────────────────────────────
 
+function dbSessionPolicy(userId: string): { sessionDays: number; inactivityMinutes: number } {
+  const row = getDatabase().prepare("SELECT session_days, inactivity_minutes FROM users WHERE id = ?")
+    .get(userId) as { session_days: number; inactivity_minutes: number } | undefined;
+  return { sessionDays: row?.session_days ?? 7, inactivityMinutes: row?.inactivity_minutes ?? 0 };
+}
+
+/** Mark deliberate user activity from a refresh request; silent keepalive does not count. */
+export function touchRefreshActivity(token: string): void {
+  getDatabase().prepare("UPDATE refresh_tokens SET last_activity_at = ? WHERE token_hash = ?")
+    .run(Date.now(), hashToken(token));
+}
+
 /**
  * Hash a raw refresh token using SHA-256.
  */
@@ -170,20 +183,21 @@ function hashToken(rawToken: string): string {
 
 /**
  * Generate an opaque refresh token (32 bytes, base64url encoded).
- * Stores the SHA-256 hash in the refresh_tokens table with 7-day expiry.
+ * Stores the SHA-256 hash with the user's configured absolute session expiry.
  * Returns the raw token (to be sent to the client).
  */
 export function generateRefreshToken(userId: string): string {
   const rawToken = crypto.randomBytes(32).toString("base64url");
   const tokenHash = hashToken(rawToken);
   const now = Date.now();
-  const expiresAt = now + REFRESH_TOKEN_EXPIRY_MS;
+  const policy = dbSessionPolicy(userId);
+  const expiresAt = now + policy.sessionDays * DAY_MS;
   const id = crypto.randomUUID();
 
   const db = getDatabase();
   db.prepare(
-    "INSERT INTO refresh_tokens (id, user_id, token_hash, expires_at, created_at) VALUES (?, ?, ?, ?, ?)",
-  ).run(id, userId, tokenHash, expiresAt, now);
+    "INSERT INTO refresh_tokens (id, user_id, token_hash, expires_at, created_at, last_activity_at) VALUES (?, ?, ?, ?, ?, ?)",
+  ).run(id, userId, tokenHash, expiresAt, now, now);
 
   return rawToken;
 }
@@ -197,15 +211,20 @@ export function validateRefreshToken(token: string): RefreshTokenRecord | null {
   const db = getDatabase();
 
   const row = db
-    .prepare("SELECT id, user_id, token_hash, expires_at, created_at FROM refresh_tokens WHERE token_hash = ?")
+    .prepare("SELECT id, user_id, token_hash, expires_at, created_at, last_activity_at FROM refresh_tokens WHERE token_hash = ?")
     .get(tokenHash) as
-    | { id: string; user_id: string; token_hash: string; expires_at: number; created_at: number }
+    | { id: string; user_id: string; token_hash: string; expires_at: number; created_at: number; last_activity_at: number | null }
     | undefined;
 
   if (!row) return null;
 
   // Check expiry
-  if (row.expires_at < Date.now()) {
+  const policy = dbSessionPolicy(row.user_id);
+  const idleExpired = policy.inactivityMinutes > 0 &&
+    Date.now() - (row.last_activity_at ?? row.created_at) > policy.inactivityMinutes * 60_000;
+  // Admin policy reductions apply at the next refresh, including to sessions
+  // minted before the policy changed. No sliding absolute session lifetime.
+  if (row.expires_at < Date.now() || row.created_at + policy.sessionDays * DAY_MS < Date.now() || idleExpired) {
     // Token expired — clean it up
     db.prepare("DELETE FROM refresh_tokens WHERE id = ?").run(row.id);
     return null;
@@ -217,6 +236,7 @@ export function validateRefreshToken(token: string): RefreshTokenRecord | null {
     tokenHash: row.token_hash,
     expiresAt: row.expires_at,
     createdAt: row.created_at,
+    lastActivityAt: row.last_activity_at ?? row.created_at,
   };
 }
 

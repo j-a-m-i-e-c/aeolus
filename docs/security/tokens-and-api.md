@@ -21,18 +21,21 @@ Authorization: Bearer <access-token>
 
 ## Refresh tokens
 
-Refresh tokens are random opaque values with a seven-day lifetime.
+Refresh tokens are random opaque values with an administrator-managed per-user lifetime of **1, 7 (default) or 30 days**. Optional inactivity policy is disabled by default, or 30 minutes, 2 hours or 8 hours.
 
 The browser stores the raw value in a cookie with:
 
 - `HttpOnly`;
 - `SameSite=Strict`;
 - `Path=/api/auth`;
-- seven-day maximum age.
+- a maximum age matching the user's chosen session lifetime;
+- `Secure` on HTTPS connections (or as set by `AUTH_COOKIE_SECURE`).
 
 SQLite stores only the SHA-256 hash.
 
-`POST /api/auth/refresh` exchanges a valid refresh cookie for a new access token.
+`POST /api/auth/refresh` exchanges a valid refresh cookie for a new access token. The dashboard may include `{ "active": true }` when deliberate user activity occurred in its current refresh interval. The backend records activity *only after validating the refresh credential* and checks the per-user absolute/idle policy before issuing the new JWT. The activity field is a convenience signal, not cryptographic proof of presence. Requests with no activity field do not keep an idle session alive.
+
+The frontend renews access tokens roughly every 13 minutes. Network failures and temporary server errors are retried without treating the cookie as invalid; a definitive `401/403` clears the browser session. Bearer tokens are still enforced by the server during outages. See [ADR-0025](../adr/0025-resilient-sessions-and-local-automation-drafts.md).
 
 ## JWT signing secret
 

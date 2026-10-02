@@ -16,6 +16,7 @@ interface AuthState {
   isAuthenticated: boolean;
   needsSetup: boolean;
   loading: boolean;
+  connectionInterrupted: boolean;
 
   login: (username: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -28,6 +29,13 @@ interface AuthState {
 
 /** Interval ID for silent refresh timer */
 let refreshTimer: ReturnType<typeof setInterval> | null = null;
+let lastUserInteraction = Date.now();
+if (typeof window !== "undefined") {
+  // Activity means a deliberate gesture, not a silent API poll or open tab.
+  for (const event of ["keydown", "pointerdown", "input", "touchstart"]) {
+    window.addEventListener(event, () => { lastUserInteraction = Date.now(); }, { passive: true });
+  }
+}
 
 /** Duration before token expiry to trigger refresh (13 minutes in ms) */
 const REFRESH_INTERVAL_MS = 13 * 60 * 1000;
@@ -35,10 +43,8 @@ const REFRESH_INTERVAL_MS = 13 * 60 * 1000;
 function startRefreshTimer(refresh: () => Promise<boolean>) {
   stopRefreshTimer();
   refreshTimer = setInterval(async () => {
-    const success = await refresh();
-    if (!success) {
-      stopRefreshTimer();
-    }
+    await refresh();
+    // Keep retrying when offline/5xx; refresh() clears auth only for 401/403.
   }, REFRESH_INTERVAL_MS);
 }
 
@@ -72,6 +78,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   isAuthenticated: false,
   needsSetup: false,
   loading: true,
+  connectionInterrupted: false,
 
   login: async (username: string, password: string) => {
     const res = await fetch(`${API_URL}/api/auth/login`, {
@@ -94,6 +101,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       user,
       isAuthenticated: true,
       needsSetup: false,
+      connectionInterrupted: false,
     });
 
     startRefreshTimer(get().refresh);
@@ -129,36 +137,27 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
+        body: JSON.stringify({ active: typeof document !== "undefined" && document.visibilityState === "visible" && Date.now() - lastUserInteraction < 14 * 60_000 }),
       });
-
-      if (!res.ok) {
-        // Refresh failed — clear auth state and redirect to login
+      if (res.status === 401 || res.status === 403) {
+        // A definitive authentication rejection, unlike an offline Pi/503.
         stopRefreshTimer();
-        set({
-          accessToken: null,
-          user: null,
-          isAuthenticated: false,
-        });
+        set({ accessToken: null, user: null, isAuthenticated: false, connectionInterrupted: false });
         return false;
       }
-
+      if (!res.ok) {
+        set({ connectionInterrupted: true });
+        return false;
+      }
       const data = await res.json();
       const user = decodeTokenPayload(data.accessToken);
-
-      set({
-        accessToken: data.accessToken,
-        user,
-        isAuthenticated: true,
-      });
-
+      if (!user) throw new Error("Malformed refresh response");
+      set({ accessToken: data.accessToken, user, isAuthenticated: true, connectionInterrupted: false });
       return true;
     } catch {
-      stopRefreshTimer();
-      set({
-        accessToken: null,
-        user: null,
-        isAuthenticated: false,
-      });
+      // A rejected fetch/invalid gateway response is not evidence of revocation.
+      // Preserve the editor and retry on the timer, on focus and when online.
+      set({ connectionInterrupted: true });
       return false;
     }
   },
@@ -184,6 +183,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       user,
       isAuthenticated: true,
       needsSetup: false,
+      connectionInterrupted: false,
     });
 
     startRefreshTimer(get().refresh);
@@ -247,29 +247,38 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           isAuthenticated: true,
           needsSetup: false,
           loading: false,
+          connectionInterrupted: false,
         });
         startRefreshTimer(get().refresh);
         return;
       }
 
-      // Refresh failed — check if setup is needed via public status endpoint
+      if (refreshRes.status !== 401 && refreshRes.status !== 403) {
+        set({ connectionInterrupted: true, loading: true });
+        return;
+      }
+      // Refresh was definitively rejected — check first-run setup state.
       const statusRes = await fetch(`${API_URL}/api/auth/status`, {
         headers: { "Content-Type": "application/json" },
       });
 
+      if (!statusRes.ok) {
+        set({ connectionInterrupted: true, loading: true });
+        return;
+      }
       if (statusRes.ok) {
         const statusData = await statusRes.json();
         if (statusData.needsSetup) {
-          set({ needsSetup: true, isAuthenticated: false, loading: false });
+          set({ needsSetup: true, isAuthenticated: false, loading: false, connectionInterrupted: false });
           return;
         }
       }
 
       // Server is set up but user is not authenticated — show login
-      set({ needsSetup: false, isAuthenticated: false, loading: false });
+      set({ needsSetup: false, isAuthenticated: false, loading: false, connectionInterrupted: false });
     } catch {
-      // Network error — assume not reachable
-      set({ needsSetup: false, isAuthenticated: false, loading: false });
+      // Do not replace a recoverable session with a login screen while offline.
+      set({ connectionInterrupted: true, loading: true });
     }
   },
 }));

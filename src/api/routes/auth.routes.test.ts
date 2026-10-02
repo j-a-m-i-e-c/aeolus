@@ -401,7 +401,7 @@ describe("auth.routes", () => {
       expect(res.status).toBe(200);
       const body = res.body as any;
       expect(body.accessToken).toBe("new-access-token-xyz");
-      expect(mocks.refresh).toHaveBeenCalledWith("valid-refresh-token");
+      expect(mocks.refresh).toHaveBeenCalledWith("valid-refresh-token", false);
     });
 
     it("returns 401 when no refresh cookie is present", async () => {
@@ -556,11 +556,15 @@ describe("auth.routes", () => {
       });
       expect(res.status).toBe(201);
       expect((res.body as any).role).toBe("admin");
+      // Session policy omitted from the request, so the route forwards undefined
+      // and userService.createUser applies its 7-day / no-idle defaults.
       expect(mocks.createUser).toHaveBeenCalledWith(
         "newadmin",
         "password123",
         null,
         "admin",
+        undefined,
+        undefined,
       );
     });
 

@@ -248,7 +248,9 @@ export function initSchema(database: DatabaseType): void {
       password_hash TEXT NOT NULL,
       role TEXT NOT NULL DEFAULT 'user' CHECK(role IN ('admin', 'user')),
       group_id TEXT REFERENCES groups(id) ON DELETE SET NULL,
-      created_at INTEGER NOT NULL
+      created_at INTEGER NOT NULL,
+      session_days INTEGER NOT NULL DEFAULT 7,
+      inactivity_minutes INTEGER NOT NULL DEFAULT 0
     );
   `);
   database.exec(`
@@ -265,7 +267,8 @@ export function initSchema(database: DatabaseType): void {
       user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       token_hash TEXT NOT NULL UNIQUE,
       expires_at INTEGER NOT NULL,
-      created_at INTEGER NOT NULL
+      created_at INTEGER NOT NULL,
+      last_activity_at INTEGER
     );
   `);
   database.exec(`
