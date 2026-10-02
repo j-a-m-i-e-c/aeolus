@@ -37,6 +37,7 @@
     "@vitejs/plugin-react": "^4.4.0",
     "@vitest/coverage-v8": "^5.0.1",
     "autoprefixer": "^10.4.20",
+    "fake-indexeddb": "^6.2.5",
     "fast-check": "^4.9.0",
     "jsdom": "^25.0.1",
     "postcss": "^8.4.49",
