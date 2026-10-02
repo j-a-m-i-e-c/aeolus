@@ -1,7 +1,7 @@
 # ADR-0025: Resilient sessions, bounded administrator policies and local draft recovery
 
-- **Status:** Proposed — implementation in Build 60 patch; acceptance requires CI and Pi/browser verification
-- **Date:** 2026-09-30
+- **Status:** Accepted
+- **Date:** 2026-09-30 (proposed), 2026-10-02 (accepted after browser verification)
 
 ## Context
 
@@ -32,9 +32,31 @@ Aeolus targets local, intermittently connected networks. Access JWTs expire ever
 - Changing a session from 7 to 30 days extends **newly issued sessions**, not the absolute expiry already recorded on old refresh credentials. Users should sign out/in to adopt a longer lifetime.
 - Local draft writes can fail when IndexedDB is unavailable/quota-limited, so the editor must surface that explicitly.
 
+## Verification
+
+This ADR was accepted on the strength of `e2e/session-drafts.spec.ts`, which drives a real Chromium against the Compose stack. The three conditions this ADR set for acceptance — crash recovery, concurrent editors, offline reconnect — are each covered:
+
+| Claim | How it is established |
+|---|---|
+| Unsaved authoring survives losing the tab | Edit, wait for the snapshot, reload, and find the draft offered |
+| A draft is offered, never applied | After reload the editor still shows the server version until **Restore** is pressed |
+| A draft never reaches the server | The project endpoint still returns the server version while a draft exists |
+| Discard is durable | The snapshot is gone from IndexedDB and stays gone across a further reload |
+| A changed project refuses a save | Another editor's write via the API makes the next save report the conflict and leave their work intact |
+| A refused save keeps the local draft | The draft is still offered after reloading the blocked editor |
+| An outage ends neither session nor editor | With the API refused, the editor keeps its content, stays signed in, and saves once connectivity returns |
+| An unreachable server is not a login screen | A reload with the API refused shows the reconnecting screen, not Create Admin or Sign in, and recovers on focus |
+| An admin's session length reaches the cookie | A user provisioned at 1 day receives `Max-Age=86400`, `HttpOnly`, `SameSite=Strict` |
+
+Two qualifications on that evidence. The outage cases refuse API requests at the browser rather than physically interrupting a network, so they exercise the same code path a Pi reboot or Wi-Fi drop reaches, not the physical event. And the per-user session policy is enforced in `token-service.ts`, covered by unit tests for absolute expiry, idle expiry and policy reduction applied to already-issued sessions; the e2e test above establishes only that an administrator's choice reaches the issued cookie.
+
+The read-before-write limitation recorded above is unchanged and is not a gap in verification: it is an accepted property of this design. Drafts are recovery, not collaboration.
+
 ## Revisit when
 
-Aeolus supports true collaborative authoring, multi-device draft sync, regulated session controls, browser-based encryption or a server-side revision API. Validate drafts in the browser, including offline reconnect, crash recovery and concurrent editors, before marking this ADR Accepted.
+Aeolus supports true collaborative authoring, multi-device draft sync, regulated session controls, browser-based encryption or a server-side revision API.
+
+Introduce server-side revision IDs with `If-Match` before describing Aeolus as safe for simultaneous editors. The pre-save re-read narrows the window but cannot close it, so two operators saving within the same round trip can still lose one set of edits.
 
 ## Implementation anchors
 
@@ -48,4 +70,6 @@ Aeolus supports true collaborative authoring, multi-device draft sync, regulated
 - `src/auth/user-service.ts`
 - `src/api/routes/auth.routes.ts`
 - `src/db/migrations/019-session-policies.ts`
+- `frontend/src/lib/automation-drafts.test.ts` — the draft store against a real IndexedDB
+- `e2e/session-drafts.spec.ts` — the browser verification this ADR's acceptance rests on
 - `docs/security/authentication.md`

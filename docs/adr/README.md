@@ -41,7 +41,7 @@ This is especially useful for decisions that are easy to misunderstand from code
 | [0022](0022-multi-instance-connector-ownership.md) | Multi-instance connector ownership and action routing | Accepted |
 | [0023](0023-public-demo-backend-isolation.md) | Backend-enforced public demo isolation | Accepted |
 | [0024](0024-reproducible-demo-and-reset.md) | Showcase ownership and reproducible hosted reset | Accepted |
-| [0025](0025-resilient-sessions-and-local-automation-drafts.md) | Resilient sessions, local drafts and admin session policies | Proposed |
+| [0025](0025-resilient-sessions-and-local-automation-drafts.md) | Resilient sessions, local drafts and admin session policies | Accepted |
 
 ## Writing a new ADR
 

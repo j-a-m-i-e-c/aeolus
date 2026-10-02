@@ -4,12 +4,13 @@ Aeolus follows semantic versioning for published releases. Until the first stabl
 
 ## Unreleased
 
-### Resilient authoring and account sessions (pending full Build 60 verification)
+### Resilient authoring and account sessions
 
 * A temporary Pi/network outage now preserves the active dashboard authentication state and retries, instead of treating a fetch failure or 5xx as credential revocation. `401/403` still ends the session.
 * Standard automation editors keep browser-local IndexedDB recovery snapshots of multi-file projects and form fields, with explicit restoration and a pre-save changed-project check.
 * Admin user provisioning can choose per-user 1/7/30-day refresh sessions and optional idle logout; access JWTs remain 15 minutes.
-* Six retrospective architectural decisions now document resource authority, authored HTTP egress, MQTT topic/identity contracts, connector ownership, public-demo isolation and golden reset. ADR-0025 documents this change as Proposed until full CI and field verification.
+* Six retrospective architectural decisions now document resource authority, authored HTTP egress, MQTT topic/identity contracts, connector ownership, public-demo isolation and golden reset. ADR-0025 records this change and is Accepted: crash recovery, concurrent-editor refusal and outage reconnect are verified in a real browser by `e2e/session-drafts.spec.ts`.
+* Simultaneous editors are still not fully protected. The pre-save check refuses a save when the project already moved, but two operators saving within the same round trip can still lose one set of edits; that needs server-side revision IDs.
 
 ### Security and reliability
 
