@@ -5,6 +5,9 @@ import { useAutomationStateStore } from "../store/automation-state-store";
 import { useCommandActivityStore } from "../store/command-activity-store";
 import { useDataStoreStore } from "../store/data-store-store";
 import { useAuthStore } from "../store/auth-store";
+import { useDashboardStore } from "../store/dashboard-store";
+import { useConfigurationInvalidationStore } from "../store/configuration-invalidation-store";
+import { isLocalMutation } from "./mutation-id";
 import { WS_URL } from "./env";
 
 const RECONNECT_DELAY = 3000;
@@ -33,6 +36,8 @@ export function connectWebSocket(): void {
 
       if (msg.type === "snapshot") {
         useDeviceStore.getState().setDevices(msg.data);
+        useDashboardStore.getState().reconcileLayout();
+        useConfigurationInvalidationStore.getState().noteReconcile();
       } else if (msg.type === "state-change") {
         const store = useDeviceStore.getState();
         if (msg.data.device && !store.devices[msg.data.deviceId]) {
@@ -67,6 +72,20 @@ export function connectWebSocket(): void {
         // Only real changes are broadcast — an identical write performs no work and
         // emits nothing — so the Shared State browser can apply each one directly.
         useDataStoreStore.getState().applySharedStateChange(msg.data);
+      } else if (msg.type === "configuration-invalidated") {
+        const data = msg.data ?? {};
+        if (data.resource === "layout" && Number.isInteger(data.revision)) {
+          if (!isLocalMutation(data.mutationId)) {
+            useDashboardStore.getState().handleRemoteLayoutRevision(data.revision);
+          }
+        } else if (data.resource === "automation" && typeof data.id === "string") {
+          useConfigurationInvalidationStore.getState().noteAutomation({
+            id: data.id,
+            revision: Number.isInteger(data.revision) ? data.revision : null,
+            deleted: data.deleted === true,
+            mutationId: typeof data.mutationId === "string" ? data.mutationId : null,
+          });
+        }
       }
     } catch {
       // Ignore malformed messages

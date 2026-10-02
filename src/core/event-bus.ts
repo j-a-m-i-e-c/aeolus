@@ -37,6 +37,8 @@ export const AUTOMATION_EVENT = "automation:event" as const;
 export const SHARED_STATE_CHANGE = "shared-state:change" as const;
 /** Emitted after a command lifecycle transition is durably recorded (phase-1 Req 7.5). */
 export const COMMAND_LIFECYCLE_TRANSITION = "command:lifecycle-transition" as const;
+/** A document-like configuration resource changed after a successful commit. */
+export const CONFIGURATION_INVALIDATED = "configuration:invalidated" as const;
 
 /** Typed event bus instance used across the application */
 export const eventBus = new EventEmitter();

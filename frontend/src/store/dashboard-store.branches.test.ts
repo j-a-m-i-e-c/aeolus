@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 vi.mock("../lib/api-client", () => ({
   fetchLayout: vi.fn(),
-  saveLayout: vi.fn().mockResolvedValue({ success: true }),
+  saveLayout: vi.fn().mockResolvedValue({ success: true, revision: 2 }),
   deleteAutomation: vi.fn().mockResolvedValue({ success: true }),
 }));
 
@@ -175,6 +175,7 @@ describe("dashboard-store — branch coverage", () => {
 
     it("merges server layout with pinned tabs", async () => {
       vi.mocked(fetchLayout).mockResolvedValue({
+        revision: 1,
         tabs: [customTab("custom-1", "My Tab")],
         panes: [{ id: "p1", tabId: "custom-1", paneType: "device-grid", config: {}, x: 0, y: 0, w: 6, h: 4, createdAt: 0 }],
       });

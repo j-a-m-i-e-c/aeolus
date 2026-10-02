@@ -29,6 +29,8 @@ import { usePermissionsStore } from "../../store/permissions-store";
 import { useDeviceStore, type Device } from "../../store/device-store";
 import { useAutomationStateStore } from "../../store/automation-state-store";
 import { useCommandActivityStore } from "../../store/command-activity-store";
+import { useConfigurationInvalidationStore } from "../../store/configuration-invalidation-store";
+import { createMutationId } from "../../lib/mutation-id";
 import type { PaneConfig } from "../../types/dashboard";
 
 import { useAutomationDraft } from "../../hooks/useAutomationDraft";
@@ -51,6 +53,7 @@ interface AutomationRule {
   hasUi?: boolean;
   triggerType?: AutomationTriggerType;
   cronExpression?: string | null;
+  revision: number;
   structured?: {
     trigger: string;
     conditions: string[];
@@ -72,6 +75,11 @@ export function AutomationPane({ config, paneId }: Props) {
   const userId = useAuthStore((s) => s.user?.id) ?? "anonymous";
   const isPublicVisitor = PUBLIC_DEMO && !isAdmin;
   const isDemoDraft = isPublicVisitor && !ruleId && config.demoDraft === true;
+  const automationInvalidation = useConfigurationInvalidationStore((state) =>
+    ruleId ? state.automationById[ruleId] ?? null : null,
+  );
+  const reconcileSequence = useConfigurationInvalidationStore((state) => state.reconcileSequence);
+  const localMutationIds = useRef(new Set<string>());
 
   // Custom-UI interactivity is gated by the tab's RBAC level: a visitor holding
   // only `read` on the pane's tab (e.g. a look-only public-demo tab) gets a
@@ -111,7 +119,7 @@ export function AutomationPane({ config, paneId }: Props) {
   const [executionHistory, setExecutionHistory] = useState<ExecutionEntry[]>([]);
   const [draftSavedAt, setDraftSavedAt] = useState<number | null>(null);
   const [evidenceOpen, setEvidenceOpen] = useState(false);
-  const serverProjectAtOpen = useRef<string | null>(null);
+  const serverRevisionAtOpen = useRef<number | null>(null);
   const draftKey = `${userId}:pane:${ruleId || paneId || "new"}`;
   const draftPayload = { name, topic: triggerTopic, triggerType, cronExpression, project: projectSource };
   const draft = useAutomationDraft({
@@ -167,6 +175,35 @@ export function AutomationPane({ config, paneId }: Props) {
       setLoading(false);
     }
   }, [ruleId]);
+
+  useEffect(() => {
+    const change = automationInvalidation;
+    if (!ruleId || !change) return;
+    if (localMutationIds.current.has(change.mutationId ?? "")) return;
+    if (mode === "editing") {
+      if (change.deleted) {
+        setErrors([{ line: 0, column: 0, message: "This automation was deleted in another browser. Your local draft is retained." }]);
+      } else if (change.revision != null && serverRevisionAtOpen.current != null && change.revision > serverRevisionAtOpen.current) {
+        setErrors([{ line: 0, column: 0, message: "This automation changed in another browser. Your local draft is retained; reload and reconcile before saving." }]);
+      }
+      return;
+    }
+    void fetchRule();
+  }, [automationInvalidation, ruleId, mode, fetchRule]);
+
+  useEffect(() => {
+    if (!ruleId || mode !== "editing") return;
+    void (async () => {
+      try {
+        const response = await authFetch(`${API_URL}/api/automations/${ruleId}/project`);
+        if (!response.ok) return;
+        const latest = await response.json() as { revision?: number };
+        if (Number.isInteger(latest.revision) && serverRevisionAtOpen.current != null && latest.revision! > serverRevisionAtOpen.current) {
+          setErrors([{ line: 0, column: 0, message: "This automation changed while this browser was disconnected. Your local draft is retained; reload and reconcile before saving." }]);
+        }
+      } catch {}
+    })();
+  }, [reconcileSequence, ruleId, mode]);
 
   // Fetch initial last fired timestamp
   const fetchLastFired = useCallback(async () => {
@@ -323,16 +360,17 @@ export function AutomationPane({ config, paneId }: Props) {
     setSaving(true);
     setErrors([]);
     try {
-      if (serverProjectAtOpen.current) {
-        const latest = await authFetch(`${API_URL}/api/automations/${ruleId}/project`);
-        if (!latest.ok || JSON.stringify(await latest.json()) !== serverProjectAtOpen.current) {
-          setErrors([{ line: 0, column: 0, message: "Server project changed while editing. Your local recovery draft is retained; reload and reconcile." }]);
-          return;
-        }
-      }
+      const mutationId = createMutationId();
+      localMutationIds.current.add(mutationId);
       const res = await authFetch(`${API_URL}/api/automations/${ruleId}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "X-Aeolus-Mutation-Id": mutationId,
+          ...(rule?.ruleType === "script" && serverRevisionAtOpen.current != null
+            ? { "If-Match": `"${serverRevisionAtOpen.current}"` }
+            : {}),
+        },
         body: JSON.stringify({
           name: name.trim(),
           triggerTopic: triggerCarriesPattern(triggerType) ? triggerTopic.trim() : undefined,
@@ -352,7 +390,7 @@ export function AutomationPane({ config, paneId }: Props) {
       }
       const newer = draft.markSaved(draftPayload);
       if (newer) {
-        serverProjectAtOpen.current = JSON.stringify(draftPayload.project);
+        serverRevisionAtOpen.current = data.revision ?? serverRevisionAtOpen.current;
         setErrors([{ line: 0, column: 0, message: "The submitted version was saved, but newer edits remain in this editor. Save again when ready." }]);
         return;
       }
@@ -415,8 +453,9 @@ export function AutomationPane({ config, paneId }: Props) {
         // one editor. Saving persists the projected tree as a real project.
         const response = await authFetch(`${API_URL}/api/automations/${rule.id}/project`);
         if (!response.ok) throw new Error("Failed to load Automation Project");
-        const project = await response.json() as AutomationProjectSource;
-        serverProjectAtOpen.current = JSON.stringify(project);
+        const loaded = await response.json() as AutomationProjectSource & { revision: number };
+        const { revision, ...project } = loaded;
+        serverRevisionAtOpen.current = revision;
         setProjectSource(project);
       } catch {
         setErrors([{ line: 0, column: 0, message: "Failed to load Automation Project source" }]);

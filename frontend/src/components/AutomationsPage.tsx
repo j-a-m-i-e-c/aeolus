@@ -42,6 +42,8 @@ import { authFetch } from "../lib/auth-fetch";
 import { useAuthStore } from "../store/auth-store";
 import { usePermissionsStore } from "../store/permissions-store";
 import { useDashboardStore } from "../store/dashboard-store";
+import { useConfigurationInvalidationStore } from "../store/configuration-invalidation-store";
+import { createMutationId } from "../lib/mutation-id";
 
 import { API_URL } from "../lib/env";
 
@@ -62,6 +64,7 @@ interface AutomationRule {
   authoredUnrestricted?: boolean;
   triggerType?: AutomationTriggerType;
   cronExpression?: string | null;
+  revision: number;
 }
 
 export function AutomationsPage() {
@@ -103,7 +106,10 @@ export function AutomationsPage() {
 
   // Editing state
   const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
-  const serverProjectAtOpen = useRef<string | null>(null);
+  const serverRevisionAtOpen = useRef<number | null>(null);
+  const automationSequence = useConfigurationInvalidationStore((state) => state.automationSequence);
+  const reconcileSequence = useConfigurationInvalidationStore((state) => state.reconcileSequence);
+  const localMutationIds = useRef(new Set<string>());
   const draftKey = `${userId}:page:${editingRuleId || "new"}`;
   const draftPayload = { name: scriptName, topic: scriptTriggerTopic, triggerType, cronExpression, project: projectSource, ownerTabId };
   const draft = useAutomationDraft({
@@ -128,6 +134,38 @@ export function AutomationsPage() {
     fetchRules();
   }, [fetchRules]);
 
+  useEffect(() => {
+    if (!editingRuleId) {
+      void fetchRules();
+      return;
+    }
+    const change = useConfigurationInvalidationStore.getState().automationById[editingRuleId];
+    if (change && localMutationIds.current.has(change.mutationId ?? "")) return;
+    if (change?.deleted) {
+      setProjectLoadError("This automation was deleted in another browser. Your local draft is retained.");
+      return;
+    }
+    if (change?.revision != null && serverRevisionAtOpen.current != null && change.revision > serverRevisionAtOpen.current) {
+      setProjectLoadError("This automation changed in another browser. Your local draft is retained; reload and reconcile before saving.");
+      return;
+    }
+    void fetchRules();
+  }, [automationSequence, editingRuleId, fetchRules]);
+
+  useEffect(() => {
+    if (!editingRuleId || !showForm) return;
+    void (async () => {
+      try {
+        const response = await authFetch(`${API_URL}/api/automations/${editingRuleId}/project`);
+        if (!response.ok) return;
+        const latest = await response.json() as { revision?: number };
+        if (Number.isInteger(latest.revision) && serverRevisionAtOpen.current != null && latest.revision! > serverRevisionAtOpen.current) {
+          setProjectLoadError("This automation changed while this browser was disconnected. Your local draft is retained; reload and reconcile before saving.");
+        }
+      } catch {}
+    })();
+  }, [reconcileSequence, editingRuleId, showForm]);
+
   const resetAuthoring = () => {
     setScriptName("");
     setScriptTriggerTopic("");
@@ -139,6 +177,7 @@ export function AutomationsPage() {
     setTranspileErrors([]);
     setProjectLoadError(null);
     setEditingRuleId(null);
+    serverRevisionAtOpen.current = null;
   };
 
   const saveScript = async () => {
@@ -152,16 +191,17 @@ export function AutomationsPage() {
     const method = isEditing ? "PUT" : "POST";
 
     try {
-      if (isEditing && serverProjectAtOpen.current) {
-        const latest = await authFetch(`${API_URL}/api/automations/${editingRuleId}/project`);
-        if (!latest.ok || JSON.stringify(await latest.json()) !== serverProjectAtOpen.current) {
-          setProjectLoadError("This automation changed on the server. Your browser draft is retained; reload and reconcile before saving.");
-          return;
-        }
-      }
+      const mutationId = createMutationId();
+      localMutationIds.current.add(mutationId);
       const res = await authFetch(url, {
         method,
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "X-Aeolus-Mutation-Id": mutationId,
+          ...(isEditing && serverRevisionAtOpen.current != null
+            ? { "If-Match": `"${serverRevisionAtOpen.current}"` }
+            : {}),
+        },
         body: JSON.stringify({
           name: scriptName.trim(),
           // `mqtt` and `shared-state` both carry a pattern; cron and manual do not.
@@ -178,24 +218,26 @@ export function AutomationsPage() {
 
       if (!res.ok) {
         const data = await res.json();
-        if (data.details) {
+        if (res.status === 409) {
+          setProjectLoadError(data.error || "This automation changed on the server. Your browser draft is retained; reload and reconcile before saving.");
+        } else if (data.details) {
           setTranspileErrors(data.details as TranspileError[]);
         }
         return;
       }
 
+      const saved = await res.json() as { id: string; revision: number };
       const newer = draft.markSaved(draftPayload);
       if (newer) {
         // The submitted version was saved, but the editor moved on. Keep it
         // open; on a create, transfer recovery to the newly created ID.
         if (!isEditing) {
-          const created = await res.json() as { id: string };
-          const newKey = `${userId}:page:${created.id}`;
+          const newKey = `${userId}:page:${saved.id}`;
           await putAutomationDraft({ key: newKey, baseline: JSON.stringify(draftPayload), payload: newer, savedAt: Date.now() });
           await deleteAutomationDraft(draftKey);
-          setEditingRuleId(created.id);
+          setEditingRuleId(saved.id);
         }
-        serverProjectAtOpen.current = JSON.stringify(draftPayload.project);
+        serverRevisionAtOpen.current = saved.revision;
         setProjectLoadError("The submitted version was saved, but you made newer edits during the request. They are retained locally; save again when ready.");
         fetchRules();
         return;
@@ -207,13 +249,22 @@ export function AutomationsPage() {
   };
 
   const deleteRule = async (id: string) => {
-    // Require explicit confirmation before permanently deleting an automation
-    // (pre-promotion-release-gates Req 6.3). This is now the only path to deletion.
-    if (!window.confirm("Delete this automation? This action cannot be undone.")) {
-      return;
+    if (!window.confirm("Delete this automation? This action cannot be undone.")) return;
+    const rule = rules.find((candidate) => candidate.id === id);
+    if (!rule) return;
+    const mutationId = createMutationId();
+    localMutationIds.current.add(mutationId);
+    const res = await authFetch(`${API_URL}/api/automations/${id}`, {
+      method: "DELETE",
+      headers: {
+        "If-Match": `"${rule.revision}"`,
+        "X-Aeolus-Mutation-Id": mutationId,
+      },
+    });
+    if (res.status === 409) {
+      setProjectLoadError("This automation changed before it could be deleted. Reload the latest version and try again.");
     }
-    await authFetch(`${API_URL}/api/automations/${id}`, { method: "DELETE" });
-    fetchRules();
+    await fetchRules();
   };
 
   const toggleRule = async (id: string, enabled: boolean) => {
@@ -240,9 +291,10 @@ export function AutomationsPage() {
       // persisted Automation Project.
       const response = await authFetch(`${API_URL}/api/automations/${rule.id}/project`);
       if (!response.ok) throw new Error("Failed to load Automation Project");
-      const loaded = await response.json() as AutomationProjectSource;
-      serverProjectAtOpen.current = JSON.stringify(loaded);
-      setProjectSource(loaded);
+      const loaded = await response.json() as AutomationProjectSource & { revision: number };
+      const { revision, ...project } = loaded;
+      serverRevisionAtOpen.current = revision;
+      setProjectSource(project);
     } catch {
       // Fail closed rather than opening the editor with a stale/default Project:
       // saving that state could overwrite valid authored source after a transient

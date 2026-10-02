@@ -39,6 +39,7 @@ export interface AutomationProject {
 
 export interface StoredAutomationProject {
   automationId: string;
+  revision: number;
   files: AutomationProjectFile[];
   logicEntry: string;
   uiEntry: string | null;
@@ -257,8 +258,8 @@ export function saveAutomationProject(db: DatabaseType, automationId: string, co
 
 /** Read a project, projecting legacy two-blob automations when no project row exists. */
 export function readAutomationProject(db: DatabaseType, automationId: string): StoredAutomationProject | null {
-  const rule = db.prepare("SELECT id, rule_type, script_source, ui_source FROM automation_rules WHERE id = ?").get(automationId) as
-    | { id: string; rule_type: string; script_source: string | null; ui_source: string | null }
+  const rule = db.prepare("SELECT id, rule_type, script_source, ui_source, revision FROM automation_rules WHERE id = ?").get(automationId) as
+    | { id: string; rule_type: string; script_source: string | null; ui_source: string | null; revision: number }
     | undefined;
   if (!rule) return null;
 
@@ -271,6 +272,7 @@ export function readAutomationProject(db: DatabaseType, automationId: string): S
     if (rule.ui_source != null) files.push({ path: DEFAULT_UI_ENTRY, content: rule.ui_source });
     return {
       automationId,
+      revision: rule.revision,
       files,
       logicEntry: DEFAULT_LOGIC_ENTRY,
       uiEntry: rule.ui_source != null ? DEFAULT_UI_ENTRY : null,
@@ -281,6 +283,7 @@ export function readAutomationProject(db: DatabaseType, automationId: string): S
   const files = db.prepare("SELECT path, content FROM automation_project_files WHERE automation_id = ? ORDER BY path").all(automationId) as AutomationProjectFile[];
   return {
     automationId,
+    revision: rule.revision,
     files,
     logicEntry: project.logic_entry,
     uiEntry: project.ui_entry,

@@ -215,7 +215,8 @@ describe("readAutomationProject", () => {
       id TEXT PRIMARY KEY,
       rule_type TEXT NOT NULL,
       script_source TEXT,
-      ui_source TEXT
+      ui_source TEXT,
+      revision INTEGER NOT NULL DEFAULT 1
     )`);
     automationProjects.up(db);
     return db;

@@ -35,6 +35,7 @@ vi.mock("../../auth/auth-middleware.js", () => ({
 vi.mock("../../core/event-bus.js", () => ({
   eventBus: { emit: vi.fn() },
   AUTOMATION_STATE_CHANGE: "automation:state-change",
+  CONFIGURATION_INVALIDATED: "configuration:invalidated",
 }));
 
 const RULE_ID = "rule-project";
@@ -71,14 +72,31 @@ function readFiles(): Array<{ path: string; content: string }> {
   return db.prepare("SELECT path, content FROM automation_project_files WHERE automation_id = ? ORDER BY path").all(RULE_ID) as Array<{ path: string; content: string }>;
 }
 
-async function put(body: unknown): Promise<{ status: number; body: any }> {
+async function put(body: unknown, revision?: number): Promise<{ status: number; body: any }> {
   const server = app.listen(0);
   try {
     const address = server.address();
     if (!address || typeof address === "string") throw new Error("no port");
+    const currentRevision = revision ?? (db.prepare("SELECT revision FROM automation_rules WHERE id = ?").get(RULE_ID) as { revision: number }).revision;
     const res = await fetch(`http://127.0.0.1:${address.port}/api/automations/${RULE_ID}/project`, {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "If-Match": `"${currentRevision}"` },
+      body: JSON.stringify(body),
+    });
+    return { status: res.status, body: await res.json().catch(() => undefined) };
+  } finally {
+    server.close();
+  }
+}
+
+async function putAutomation(body: unknown, revision: number): Promise<{ status: number; body: any }> {
+  const server = app.listen(0);
+  try {
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("no port");
+    const res = await fetch(`http://127.0.0.1:${address.port}/api/automations/${RULE_ID}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", "If-Match": `"${revision}"` },
       body: JSON.stringify(body),
     });
     return { status: res.status, body: await res.json().catch(() => undefined) };
@@ -137,6 +155,37 @@ describe("PUT /api/automations/:id/project — write atomicity", () => {
     expect(projection.compiled_ui).toContain("ui-v1");
 
     expect(readFiles().map((f) => f.path)).toEqual(["logic/constants.ts", "logic/index.ts", "ui/index.tsx"]);
+  });
+
+  it("atomically rejects a stale project revision", async () => {
+    const first = await put(workingProject(), 1);
+    expect(first.status).toBe(200);
+    expect(first.body.project.revision).toBe(2);
+
+    const staleProject = workingProject();
+    staleProject.files[1] = { path: "logic/constants.ts", content: `export const LABEL = "stale-overwrite";` };
+    const stale = await put(staleProject, 1);
+    expect(stale.status).toBe(409);
+
+    expect(readProjection().compiled_js).toContain("working-v1");
+    expect((db.prepare("SELECT revision FROM automation_rules WHERE id = ?").get(RULE_ID) as { revision: number }).revision).toBe(2);
+  });
+
+
+  it("applies the same atomic revision guard to the editor's PUT /:id save path", async () => {
+    const first = await putAutomation({ name: "Project Rule", project: workingProject() }, 1);
+    expect(first.status).toBe(200);
+    expect(first.body.revision).toBe(2);
+
+    const staleProject = workingProject();
+    staleProject.files[1] = { path: "logic/constants.ts", content: `export const LABEL = "stale-main-route";` };
+    const stale = await putAutomation({ name: "Stale Rename", project: staleProject }, 1);
+    expect(stale.status).toBe(409);
+
+    const row = db.prepare("SELECT name, revision, compiled_js FROM automation_rules WHERE id = ?").get(RULE_ID) as { name: string; revision: number; compiled_js: string };
+    expect(row.name).toBe("Project Rule");
+    expect(row.revision).toBe(2);
+    expect(row.compiled_js).toContain("working-v1");
   });
 
   // The core guarantee: a failed compile is a no-op, not a partial write.

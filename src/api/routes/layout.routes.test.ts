@@ -46,14 +46,23 @@ async function request(
   method: string,
   path: string,
   body?: unknown,
+  revision?: number | null,
 ): Promise<{ status: number; body: any }> {
+  let effectiveRevision = revision;
+  if (method.toUpperCase() === "PUT" && path === "/api/layout" && revision === undefined) {
+    const current = await request(app, "GET", "/api/layout");
+    effectiveRevision = current.body.revision as number;
+  }
   return new Promise((resolve, reject) => {
     const server = app.listen(0, () => {
       const addr = server.address();
       if (!addr || typeof addr === "string") { server.close(); reject(new Error("No address")); return; }
       const options: RequestInit = {
         method: method.toUpperCase(),
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(effectiveRevision == null ? {} : { "If-Match": `"${effectiveRevision}"` }),
+        },
       };
       if (body !== undefined) options.body = JSON.stringify(body);
       fetch(`http://127.0.0.1:${addr.port}${path}`, options)
@@ -90,6 +99,22 @@ describe("layout.routes", () => {
     it("returns empty tabs and panes when database is empty", async () => {
       const res = await request(app, "GET", "/api/layout");
       expect(res.status).toBe(200);
+      // An empty but healthy database still has the seeded singleton revision,
+      // so the client may persist against it. Only a failed read withholds one.
+      expect(res.body.revision).toBe(1);
+      expect(res.body.tabs).toEqual([]);
+      expect(res.body.panes).toEqual([]);
+    });
+
+    it("withholds a revision when the layout cannot be read", async () => {
+      // A read error must not hand back a revision, because the empty fallback
+      // body plus a usable revision is exactly the combination that would let a
+      // client overwrite the real layout with nothing.
+      db.exec("DROP TABLE panes");
+
+      const res = await request(app, "GET", "/api/layout");
+      expect(res.status).toBe(200);
+      expect(res.body.revision).toBeNull();
       expect(res.body.tabs).toEqual([]);
       expect(res.body.panes).toEqual([]);
     });
@@ -176,6 +201,30 @@ describe("layout.routes", () => {
       expect(count.c).toBe(0);
     });
 
+    it("rejects a stale layout revision without changing the stored layout", async () => {
+      const first = await request(app, "PUT", "/api/layout", {
+        tabs: [{ id: "tab-a", name: "A", icon: "x", order: 0, pinned: false, createdAt: 1 }],
+        panes: [],
+      }, 1);
+      expect(first.status).toBe(200);
+      expect(first.body.revision).toBe(2);
+
+      const stale = await request(app, "PUT", "/api/layout", {
+        tabs: [{ id: "tab-b", name: "B", icon: "x", order: 0, pinned: false, createdAt: 2 }],
+        panes: [],
+      }, 1);
+      expect(stale.status).toBe(409);
+
+      const current = await request(app, "GET", "/api/layout");
+      expect(current.body.revision).toBe(2);
+      expect(current.body.tabs.map((tab: { id: string }) => tab.id)).toEqual(["tab-a"]);
+    });
+
+    it("requires If-Match for a layout write", async () => {
+      const res = await request(app, "PUT", "/api/layout", { tabs: [], panes: [] }, null);
+      expect(res.status).toBe(428);
+    });
+
     it("returns 400 when tabs is not an array", async () => {
       const res = await request(app, "PUT", "/api/layout", {
         tabs: "not-array",
@@ -217,7 +266,7 @@ describe("layout.routes", () => {
       const res = await request(brokenApp, "PUT", "/api/layout", {
         tabs: [{ id: "tab-1", name: "Test", icon: "x", order: 0, pinned: false, createdAt: 1000 }],
         panes: [],
-      });
+      }, 1);
       expect(res.status).toBe(500);
     });
   });

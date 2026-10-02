@@ -42,6 +42,11 @@ export interface WsEventMapping {
    * Omit to treat the event as unscoped — admin-only.
    */
   visibility?: (data: unknown) => BroadcastEnvelope;
+  /**
+   * Optional client payload projection. Visibility metadata may be server-only
+   * and must not automatically become part of the WebSocket message.
+   */
+  payload?: (data: unknown) => unknown;
 }
 
 /** Unscoped events are admin-only by default (fail-closed). */
@@ -133,10 +138,11 @@ export class WsServer {
     // Data-driven broadcast registration. Each mapping derives its own
     // server-side visibility; an absent resolver means the event is unscoped
     // and therefore admin-only (fail-closed).
-    for (const { eventName, messageType, visibility } of mappings) {
+    for (const { eventName, messageType, visibility, payload } of mappings) {
       eventBus.on(eventName, (data: unknown) => {
         const envelope = visibility ? visibility(data) : ADMIN_ONLY;
-        this.broadcast({ type: messageType, data }, envelope);
+        const clientData = payload ? payload(data) : data;
+        this.broadcast({ type: messageType, data: clientData }, envelope);
       });
     }
   }

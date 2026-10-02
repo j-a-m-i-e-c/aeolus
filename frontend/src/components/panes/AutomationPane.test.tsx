@@ -97,6 +97,7 @@ function routeStatus(rule: Record<string, unknown> = RULE) {
     if (url.endsWith("/api/automations")) return Promise.resolve(jsonResponse([rule]));
     if (url.endsWith("/api/automations/r1/project")) return Promise.resolve(jsonResponse({
       automationId: "r1",
+      revision: 1,
       files: [{ path: "logic/index.ts", content: `automation({ actions: [] });` }],
       logicEntry: "logic/index.ts",
       uiEntry: null,

@@ -19,15 +19,16 @@ import { compileAutomationProject, readAutomationProject, saveAutomationProject,
 import { buildSnippetCatalog } from "../../automations/snippet-catalog.js";
 import { isValidCron } from "../../automations/cron-utils.js";
 import type { ConnectorRegistry } from "../../connectors/connector-registry.js";
-import { BadRequestError, NotFoundError, ForbiddenError } from "../middleware/error-handler.js";
+import { BadRequestError, NotFoundError, ForbiddenError, ConflictError } from "../middleware/error-handler.js";
 import { validate } from "../middleware/validate.js";
 import { asyncHandler } from "../middleware/async-handler.js";
+import { mutationIdFromRequest, requireIfMatchRevision } from "../middleware/revision-precondition.js";
 import { createAutomationBodySchema, updateAutomationBodySchema, automationProjectSchema, automationIdParamsSchema, toggleAutomationBodySchema, automationStateBodySchema, demoAccessBodySchema, AUTOMATION_STATE_KEY_MAX_LENGTH } from "../schemas/automation.schemas.js";
 import { requireTabPermission, requireAdmin } from "../../auth/auth-middleware.js";
 import type { RequestHandler } from "express";
 import type { PermissionLevel } from "../../auth/permission-service.js";
 import type { PermissionResolver } from "../../auth/permission-resolver.js";
-import { eventBus, AUTOMATION_STATE_CHANGE, DEVICE_STATE_CHANGE } from "../../core/event-bus.js";
+import { eventBus, AUTOMATION_STATE_CHANGE, CONFIGURATION_INVALIDATED, DEVICE_STATE_CHANGE } from "../../core/event-bus.js";
 import type { AutomationStateStore } from "../../automations/automation-state-store.js";
 import logger from "../../logger.js";
 
@@ -52,6 +53,7 @@ interface StoredRule {
   owner_tab_id: string | null;
   enabled: number;
   created_at: number;
+  revision: number;
 }
 
 /**
@@ -165,6 +167,7 @@ export function createAutomationRoutes(
     if (!existing) throw new NotFoundError(`Automation rule ${id} not found`);
     assertMayMutateAuthority(req, existing);
     if (existing.rule_type !== "script") throw new BadRequestError("Only script automations can use Automation Projects");
+    const expectedRevision = requireIfMatchRevision(req);
 
     let compiled: Awaited<ReturnType<typeof compileAutomationProject>>;
     try {
@@ -177,17 +180,26 @@ export function createAutomationRoutes(
     }
 
     db.transaction(() => {
-      db.prepare(`UPDATE automation_rules
+      const updated = db.prepare(`UPDATE automation_rules
         SET script_source = ?, compiled_js = ?, structured_metadata = NULL,
-            ui_source = ?, compiled_ui = ?
-        WHERE id = ?`)
-        .run(compiled.logicSource, compiled.compiledJs, compiled.uiSource, compiled.compiledUi, id);
+            ui_source = ?, compiled_ui = ?, revision = revision + 1
+        WHERE id = ? AND revision = ?`)
+        .run(compiled.logicSource, compiled.compiledJs, compiled.uiSource, compiled.compiledUi, id, expectedRevision);
+      if (updated.changes !== 1) {
+        throw new ConflictError("This automation changed on the server while you were editing it");
+      }
       saveAutomationProject(db, id, compiled);
     })();
 
     engine.unregister(id);
     const updated = queryRuleById(db, id)!;
     if (updated.enabled) registerUiRule(engine, registry, commandService, updated, conditionRegistry);
+    eventBus.emit(CONFIGURATION_INVALIDATED, {
+      resource: "automation",
+      id,
+      revision: updated.revision,
+      mutationId: mutationIdFromRequest(req),
+    });
     res.json({ success: true, id, project: readAutomationProject(db, id) });
   }));
 
@@ -341,6 +353,10 @@ export function createAutomationRoutes(
         ownerTabId: row.owner_tab_id ?? null,
         authoredUnrestricted: row.authored_unrestricted === 1,
         hasUi: row.compiled_ui != null,
+        // Required by every caller that mutates from the list: the dashboard's
+        // delete/toggle and the showcase seeder both send it as If-Match. Omit
+        // it and those requests present "undefined" and are refused.
+        revision: row.revision,
       };
       if (ruleType === "form") {
         entry.actionType = row.action_type;
@@ -441,11 +457,12 @@ export function createAutomationRoutes(
         structured_metadata: structuredJson, ui_source: effectiveUiSource, compiled_ui: compiledUi,
         trigger_type: triggerType, cron_expression: effectiveCronExpression,
         authored_unrestricted: authoredUnrestricted, owner_tab_id: ownerTabId,
-        enabled: 1, created_at: now,
+        enabled: 1, created_at: now, revision: 1,
       }, conditionRegistry);
 
+      eventBus.emit(CONFIGURATION_INVALIDATED, { resource: "automation", id, revision: 1, mutationId: mutationIdFromRequest(req) });
       logger.info({ ruleId: id, name, triggerTopic: effectiveTriggerTopic, ruleType: "script", ownerTabId }, "Script automation rule created");
-      res.json({ success: true, id, ownerTabId, authoredUnrestricted: authoredUnrestricted === 1 });
+      res.json({ success: true, id, revision: 1, ownerTabId, authoredUnrestricted: authoredUnrestricted === 1 });
     } else {
       // Form rule (default). Legacy form rules may still pair a single UI
       // source blob; script rules use Automation Project UI exclusively.
@@ -468,11 +485,12 @@ export function createAutomationRoutes(
         structured_metadata: null, ui_source: uiSourceValue, compiled_ui: compiledUiValue,
         trigger_type: triggerType, cron_expression: effectiveCronExpression,
         authored_unrestricted: authoredUnrestricted, owner_tab_id: ownerTabId,
-        enabled: 1, created_at: now,
+        enabled: 1, created_at: now, revision: 1,
       }, conditionRegistry);
 
+      eventBus.emit(CONFIGURATION_INVALIDATED, { resource: "automation", id, revision: 1, mutationId: mutationIdFromRequest(req) });
       logger.info({ ruleId: id, name, triggerTopic: effectiveTriggerTopic, ownerTabId }, "Form automation rule created");
-      res.json({ success: true, id, ownerTabId, authoredUnrestricted: authoredUnrestricted === 1 });
+      res.json({ success: true, id, revision: 1, ownerTabId, authoredUnrestricted: authoredUnrestricted === 1 });
     }
   }));
 
@@ -490,6 +508,7 @@ export function createAutomationRoutes(
     assertMayMutateAuthority(req, existing);
 
     const { name, triggerTopic, conditionType, conditionValue, actionType, actionTarget, actionParams, project, uiSource, triggerType: rawTriggerType, cronExpression } = req.body;
+    const expectedRevision = requireIfMatchRevision(req);
 
     const { triggerType, effectiveTriggerTopic, effectiveCronExpression } =
       resolveTriggerConfig({ rawTriggerType, triggerTopic, cronExpression }, existing);
@@ -526,19 +545,29 @@ export function createAutomationRoutes(
       }
 
       db.transaction(() => {
-        db.prepare(
-          `UPDATE automation_rules SET name = ?, trigger_topic = ?, condition_type = ?, condition_value = ?, script_source = ?, compiled_js = ?, structured_metadata = ?, ui_source = ?, compiled_ui = ?, trigger_type = ?, cron_expression = ? WHERE id = ?`
-        ).run(
-          name || existing.name,
-          effectiveTriggerTopic,
-          preserveOrReplace(conditionType, existing.condition_type),   // Req 8.5
-          preserveOrReplace(conditionValue, existing.condition_value), // Req 8.5
-          updatedSource, compiledJs, structuredJson, updatedUiSource, compiledUi,
-          triggerType, effectiveCronExpression, id,
-        );
-        if (compiledProject) {
-          saveAutomationProject(db, id, compiledProject);
+        const result = compiledProject
+          ? db.prepare(
+              `UPDATE automation_rules SET name = ?, trigger_topic = ?, condition_type = ?, condition_value = ?, script_source = ?, compiled_js = ?, structured_metadata = ?, ui_source = ?, compiled_ui = ?, trigger_type = ?, cron_expression = ?, revision = revision + 1 WHERE id = ? AND revision = ?`
+            ).run(
+              name || existing.name, effectiveTriggerTopic,
+              preserveOrReplace(conditionType, existing.condition_type),
+              preserveOrReplace(conditionValue, existing.condition_value),
+              updatedSource, compiledJs, structuredJson, updatedUiSource, compiledUi,
+              triggerType, effectiveCronExpression, id, expectedRevision,
+            )
+          : db.prepare(
+              `UPDATE automation_rules SET name = ?, trigger_topic = ?, condition_type = ?, condition_value = ?, script_source = ?, compiled_js = ?, structured_metadata = ?, ui_source = ?, compiled_ui = ?, trigger_type = ?, cron_expression = ?, revision = revision + 1 WHERE id = ? AND revision = ?`
+            ).run(
+              name || existing.name, effectiveTriggerTopic,
+              preserveOrReplace(conditionType, existing.condition_type),
+              preserveOrReplace(conditionValue, existing.condition_value),
+              updatedSource, compiledJs, structuredJson, updatedUiSource, compiledUi,
+              triggerType, effectiveCronExpression, id, expectedRevision,
+            );
+        if (result.changes !== 1) {
+          throw new ConflictError("This automation changed on the server while you were editing it");
         }
+        if (compiledProject) saveAutomationProject(db, id, compiledProject);
       })();
 
       // Re-register in engine
@@ -548,16 +577,17 @@ export function createAutomationRoutes(
         registerUiRule(engine, registry, commandService, updated, conditionRegistry);
       }
 
+      eventBus.emit(CONFIGURATION_INVALIDATED, { resource: "automation", id, revision: updated.revision, mutationId: mutationIdFromRequest(req) });
       logger.info({ ruleId: id, name: updated.name }, "Script automation rule updated");
-      res.json({ success: true, id });
+      res.json({ success: true, id, revision: updated.revision });
     } else {
       // Form rule update. Script UI source comes only from its Project.
       const { uiSourceValue, compiledUiValue } = resolveUiSource(uiSource, existing);
       // Resolve the effective action target (use submitted or existing).
       const effectiveActionTarget = actionTarget || existing.action_target;
 
-      db.prepare(
-        `UPDATE automation_rules SET name = ?, trigger_topic = ?, condition_type = ?, condition_value = ?, action_type = ?, action_target = ?, action_params = ?, ui_source = ?, compiled_ui = ?, trigger_type = ?, cron_expression = ? WHERE id = ?`
+      const result = db.prepare(
+        `UPDATE automation_rules SET name = ?, trigger_topic = ?, condition_type = ?, condition_value = ?, action_type = ?, action_target = ?, action_params = ?, ui_source = ?, compiled_ui = ?, trigger_type = ?, cron_expression = ?, revision = revision + 1 WHERE id = ? AND revision = ?`
       ).run(
         name || existing.name,
         effectiveTriggerTopic,
@@ -571,7 +601,11 @@ export function createAutomationRoutes(
         triggerType,
         effectiveCronExpression,
         id,
+        expectedRevision,
       );
+      if (result.changes !== 1) {
+        throw new ConflictError("This automation changed on the server while you were editing it");
+      }
 
       // Re-register in engine
       engine.unregister(id);
@@ -580,8 +614,9 @@ export function createAutomationRoutes(
         registerUiRule(engine, registry, commandService, updated, conditionRegistry);
       }
 
+      eventBus.emit(CONFIGURATION_INVALIDATED, { resource: "automation", id, revision: updated.revision, mutationId: mutationIdFromRequest(req) });
       logger.info({ ruleId: id, name: updated.name }, "Form automation rule updated");
-      res.json({ success: true, id });
+      res.json({ success: true, id, revision: updated.revision });
     }
   }));
 
@@ -594,11 +629,30 @@ export function createAutomationRoutes(
     }
     // A non-admin cannot delete an unrestricted automation (audit Critical 1).
     assertMayMutateAuthority(req, existing);
+    const expectedRevision = requireIfMatchRevision(req);
+    const tombstoneTabIds = new Set(
+      (db.prepare(
+        "SELECT tab_id AS tabId FROM automation_tab_assignments WHERE automation_id = ?",
+      ).all(id) as Array<{ tabId: string }>).map((row) => row.tabId),
+    );
+    if (existing.owner_tab_id) tombstoneTabIds.add(existing.owner_tab_id);
+
+    const deleted = db.prepare(
+      "DELETE FROM automation_rules WHERE id = ? AND revision = ?",
+    ).run(id, expectedRevision);
+    if (deleted.changes !== 1) {
+      throw new ConflictError("This automation changed on the server before it could be deleted");
+    }
+
     if (stateStore) {
       stateStore.deleteAll(id);
     }
-    db.prepare("DELETE FROM automation_rules WHERE id = ?").run(id);
     engine.unregister(id);
+    eventBus.emit(CONFIGURATION_INVALIDATED, {
+      resource: "automation", id, revision: null, deleted: true,
+      tabIds: [...tombstoneTabIds],
+      mutationId: mutationIdFromRequest(req),
+    });
     logger.info({ ruleId: id, ruleType: existing.rule_type }, "Automation rule deleted");
     res.json({ success: true });
   }));
@@ -625,6 +679,7 @@ export function createAutomationRoutes(
       engine.unregister(id);
     }
 
+    eventBus.emit(CONFIGURATION_INVALIDATED, { resource: "automation", id, revision: existing.revision, mutationId: mutationIdFromRequest(req) });
     res.json({ success: true, enabled: !!enabled });
   }));
 

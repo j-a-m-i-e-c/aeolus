@@ -52,33 +52,26 @@ One narrower hardening opportunity remains: the automated post-delete probe cann
 
 ---
 
-## Concurrent automation authoring
+## Concurrent configuration consistency
 
-### Automation Project saves need a server-side revision precondition 🟡
+### Server revision preconditions implemented and verified ✅
 
-[ADR-0025](adr/0025-resilient-sessions-and-local-automation-drafts.md) is Accepted:
-local draft recovery, the refusal to overwrite a project that already changed, and
-outage reconnect are verified in a browser by `e2e/session-drafts.spec.ts`. One
-property is deliberately *not* claimed by it.
+The atomic race identified by ADR-0025 is implemented in the ADR-0026 change set:
+Automation authoring and the shared dashboard layout now use server-owned revisions,
+`If-Match`, transactional compare-and-swap and `409` conflicts. Configuration commits
+also invalidate other connected browsers so passive clients converge and active authors
+keep their local work.
 
-Before saving an existing automation the editor re-reads the server project and
-refuses the save if it moved. That catches the ordinary case — someone else saved
-while this editor sat open — but it is a read-then-write, not a compare-and-swap.
-Two operators who save inside the same round trip can still have one set of edits
-silently replaced, and no draft is lost only because the loser's snapshot stays in
-their own browser.
+[ADR-0026](adr/0026-multi-user-mutation-consistency.md) is Accepted: the unit, type and
+lint gates pass, and the two-browser `e2e/multi-user-consistency.spec.ts` shows
+simultaneous saves yielding one commit plus one retained conflicting editor, concurrent
+layout writes yielding one `200` and one `409`, and a stale delete refused. What it does
+not cover is a multi-operator field trial on a Pi.
 
-Closing it properly means a revision the server owns:
-
-- stamp each Automation Project with a revision (monotonic counter or content hash)
-  and return it on read;
-- have `PUT /api/automations/:id/project` require it, via `If-Match` or a body
-  field, and answer `409` when it no longer matches;
-- surface the conflict in the editor as the existing "changed on the server" path
-  already does, keeping the local draft.
-
-Until then Aeolus should not be described as safe for simultaneous editors.
-Single-operator sites — the normal case — are unaffected.
+Remaining work is scope rather than correctness. The wider mutable-endpoint
+classification is recorded in `architecture/multi-user-mutation-audit.md`; administrative
+connector/user/Data Store/MQTT configuration should be reviewed per resource rather than
+inheriting document revisions indiscriminately.
 
 ---
 

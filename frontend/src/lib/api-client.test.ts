@@ -82,22 +82,25 @@ describe("api-client", () => {
   it("deletes an automation via DELETE", async () => {
     mockAuthFetch.mockResolvedValue(jsonResponse({ success: true }));
 
-    await deleteAutomation("rule-9");
+    await deleteAutomation("rule-9", 3);
 
     const [url, init] = mockAuthFetch.mock.calls[0];
     expect(url).toBe("http://test.local:3001/api/automations/rule-9");
     expect(init?.method).toBe("DELETE");
+    expect(new Headers(init?.headers).get("If-Match")).toBe('"3"');
   });
 
   it("saves layout via PUT with the payload serialized", async () => {
-    mockAuthFetch.mockResolvedValue(jsonResponse({ success: true }));
+    mockAuthFetch.mockResolvedValue(jsonResponse({ success: true, revision: 8 }));
     const payload = { tabs: [], panes: [] } as never;
 
-    await saveLayout(payload);
+    await saveLayout(payload, 7);
 
     const [url, init] = mockAuthFetch.mock.calls[0];
     expect(url).toBe("http://test.local:3001/api/layout");
     expect(init?.method).toBe("PUT");
+    expect((init?.headers as Record<string, string>)["If-Match"]).toBe('"7"');
+    expect((init?.headers as Record<string, string>)["X-Aeolus-Mutation-Id"]).toEqual(expect.any(String));
     expect(JSON.parse(init?.body as string)).toEqual({ tabs: [], panes: [] });
   });
 

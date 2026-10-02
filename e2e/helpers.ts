@@ -98,3 +98,32 @@ export async function ensureAdmin(page: Page): Promise<void> {
     await login(page);
   }
 }
+
+/** Current server-owned dashboard layout revision for optimistic concurrency. */
+export async function layoutRevision(
+  request: APIRequestContext,
+  headers: Record<string, string>,
+): Promise<number> {
+  const res = await request.get(`${API_URL}/api/layout`, { headers });
+  expect(res.ok(), `layout read failed: ${res.status()} ${await res.text()}`).toBeTruthy();
+  const revision = (await res.json() as { revision?: number }).revision;
+  expect(Number.isInteger(revision), "layout response must include an integer revision").toBeTruthy();
+  return revision as number;
+}
+
+/** Current server-owned Automation Project revision for optimistic concurrency. */
+export async function projectRevision(
+  request: APIRequestContext,
+  automationId: string,
+  headers: Record<string, string>,
+): Promise<number> {
+  const res = await request.get(`${API_URL}/api/automations/${automationId}/project`, { headers });
+  expect(res.ok(), `project read failed: ${res.status()} ${await res.text()}`).toBeTruthy();
+  const revision = (await res.json() as { revision?: number }).revision;
+  expect(Number.isInteger(revision), "project response must include an integer revision").toBeTruthy();
+  return revision as number;
+}
+
+export function withIfMatch(headers: Record<string, string>, revision: number): Record<string, string> {
+  return { ...headers, "If-Match": `"${revision}"` };
+}

@@ -44,7 +44,8 @@ export function initSchema(database: DatabaseType): void {
       script_source TEXT DEFAULT NULL,
       compiled_js TEXT DEFAULT NULL,
       enabled INTEGER NOT NULL DEFAULT 1,
-      created_at INTEGER NOT NULL
+      created_at INTEGER NOT NULL,
+      revision INTEGER NOT NULL DEFAULT 1
     );
   `);
 
@@ -85,6 +86,8 @@ export function initSchema(database: DatabaseType): void {
   // { writableStateKeys?: string[]; fireEvents?: string[] }. NULL ⇒ no per-rule
   // demo allowlist. Only consulted for public-demo sessions.
   addColumn("demo_access", "TEXT DEFAULT NULL");
+  // Optimistic concurrency for authored automation changes (migration 020).
+  addColumn("revision", "INTEGER NOT NULL DEFAULT 1");
 
   // Backfill existing rows that lack a rule_type value
   database.exec(`UPDATE automation_rules SET rule_type = 'form' WHERE rule_type IS NULL;`);
@@ -118,6 +121,14 @@ export function initSchema(database: DatabaseType): void {
     );
     CREATE INDEX IF NOT EXISTS idx_automation_project_files_automation
       ON automation_project_files(automation_id);
+  `);
+
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS layout_metadata (
+      singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+      revision INTEGER NOT NULL
+    );
+    INSERT OR IGNORE INTO layout_metadata (singleton, revision) VALUES (1, 1);
   `);
 
   database.exec(`

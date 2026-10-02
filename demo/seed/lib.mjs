@@ -34,9 +34,9 @@ export function createApi(baseUrl) {
    *   that was already absent, a 409 from creating something that already exists —
    *   where the caller has a real decision to make. Never for unexpected failures.
    */
-  async function request(method, path, body, { authenticated = true, retries = 6, tolerate = [] } = {}) {
+  async function request(method, path, body, { authenticated = true, retries = 6, tolerate = [], headers: extraHeaders = {} } = {}) {
     for (let attempt = 0; ; attempt++) {
-      const headers = { "Content-Type": "application/json" };
+      const headers = { "Content-Type": "application/json", ...extraHeaders };
       if (authenticated && token) headers.Authorization = `Bearer ${token}`;
       const opts = { method, headers };
       if (body !== undefined) opts.body = JSON.stringify(body);
@@ -74,8 +74,8 @@ export function createApi(baseUrl) {
     }
   }
 
-  async function api(method, path, body, { tolerate = [] } = {}) {
-    return request(method, path, body, { authenticated: true, tolerate });
+  async function api(method, path, body, { tolerate = [], headers = {} } = {}) {
+    return request(method, path, body, { authenticated: true, tolerate, headers });
   }
 
   /** Authenticate an admin, creating the first admin on a pristine database. */
@@ -324,9 +324,21 @@ export async function reconcileShowcaseAutomations(api, declared) {
     }
   }
 
+  const liveRevisionById = new Map(
+    liveRules.filter((rule) => rule?.id && Number.isInteger(rule.revision))
+      .map((rule) => [rule.id, rule.revision]),
+  );
   for (const ruleId of doomed.keys()) {
     // Tolerated: a rule the ledger names may have been deleted by hand since.
-    await api("DELETE", `/api/automations/${ruleId}`, undefined, { tolerate: [404] });
+    // A concurrent human edit wins over stale seed cleanup.
+    const revision = liveRevisionById.get(ruleId);
+    if (!Number.isInteger(revision)) {
+      throw new Error(`Cannot safely delete showcase automation ${ruleId}: server did not return a revision`);
+    }
+    await api("DELETE", `/api/automations/${ruleId}`, undefined, {
+      tolerate: [404, 409],
+      headers: { "If-Match": `"${revision}"` },
+    });
   }
 
   // Clear every automation entry, including ones whose rule was already gone, so the
@@ -691,7 +703,8 @@ export async function buildLayout(api, tabModules, idMap, layout = parseShowcase
   });
   panes.push(...keptPanes);
 
-  await api("PUT", "/api/layout", { tabs, panes });
+  if (!Number.isInteger(current?.revision)) throw new Error("GET /api/layout returned no revision");
+  await api("PUT", "/api/layout", { tabs, panes }, { headers: { "If-Match": `"${current.revision}"` } });
   await recordShowcaseTabs(api, declaredTabIds, ledger.tabIds);
 
   const retired = ledger.tabIds.filter((id) => !declaredTabIds.includes(id));

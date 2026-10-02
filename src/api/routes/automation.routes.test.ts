@@ -93,6 +93,7 @@ vi.mock("../../automations/cron-utils.js", () => ({
 vi.mock("../../core/event-bus.js", () => ({
   eventBus: { emit: vi.fn() },
   AUTOMATION_STATE_CHANGE: "automation:state-change",
+  CONFIGURATION_INVALIDATED: "configuration:invalidated",
 }));
 
 /** Minimal HTTP helper — sends a request to an Express app and returns status + body */
@@ -101,6 +102,7 @@ async function request(
   method: string,
   path: string,
   body?: unknown,
+  ifMatch?: number | null,
 ): Promise<{ status: number; body: unknown; contentType?: string }> {
   return new Promise((resolve, reject) => {
     const server = app.listen(0, () => {
@@ -111,9 +113,14 @@ async function request(
         return;
       }
       const url = `http://127.0.0.1:${addr.port}${path}`;
+      const authoringWrite = method.toUpperCase() === "PUT" && /^\/api\/automations\/[^/]+$/.test(path);
+      const effectiveRevision = ifMatch === undefined && authoringWrite ? 1 : ifMatch;
       const options: RequestInit = {
         method: method.toUpperCase(),
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(effectiveRevision == null ? {} : { "If-Match": `"${effectiveRevision}"` }),
+        },
       };
       if (body !== undefined) {
         options.body = JSON.stringify(body);
@@ -385,6 +392,7 @@ describe("automation.routes", () => {
         cron_expression: null,
         enabled: 1,
         created_at: 1000,
+        revision: 1,
       };
       mockDb._rows.push(dbRow);
 
@@ -419,6 +427,7 @@ describe("automation.routes", () => {
         cron_expression: null,
         enabled: 1,
         created_at: 1000,
+        revision: 1,
       });
 
       const res = await request(app, "GET", "/api/automations");
@@ -566,6 +575,7 @@ describe("automation.routes", () => {
         cron_expression: null,
         enabled: 1,
         created_at: 1000,
+        revision: 1,
       };
       mockDb._rows.push(existingRule);
 
@@ -598,6 +608,7 @@ describe("automation.routes", () => {
         cron_expression: null,
         enabled: 1,
         created_at: 1000,
+        revision: 1,
       };
       mockDb._rows.push(existingRule);
 
@@ -644,9 +655,10 @@ describe("automation.routes", () => {
         cron_expression: null,
         enabled: 1,
         created_at: 1000,
+        revision: 1,
       });
 
-      const res = await request(app, "DELETE", "/api/automations/rule-to-delete");
+      const res = await request(app, "DELETE", "/api/automations/rule-to-delete", undefined, 1);
       expect(res.status).toBe(200);
       expect((res.body as any).success).toBe(true);
       expect(mockEngine.unregister).toHaveBeenCalledWith("rule-to-delete");
@@ -684,6 +696,7 @@ describe("automation.routes", () => {
         cron_expression: null,
         enabled: 1,
         created_at: 1000,
+        revision: 1,
       });
 
       const res = await request(app, "PATCH", "/api/automations/toggle-rule/toggle", {
@@ -934,6 +947,7 @@ describe("automation.routes", () => {
         cron_expression: null,
         enabled: 1,
         created_at: 1000,
+        revision: 1,
       });
 
       const res = await request(app, "GET", "/api/automations/no-ui-rule/ui-module");
@@ -961,6 +975,7 @@ describe("automation.routes", () => {
         cron_expression: null,
         enabled: 1,
         created_at: 1000,
+        revision: 1,
       });
 
       const res = await request(app, "GET", "/api/automations/ui-rule/ui-module");
@@ -1002,6 +1017,7 @@ describe("loadUiRules", () => {
         cron_expression: null,
         enabled: 1,
         created_at: 1000,
+        revision: 1,
       },
       {
         id: "rule-2",

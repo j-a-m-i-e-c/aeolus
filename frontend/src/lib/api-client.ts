@@ -2,15 +2,24 @@
 
 import { authFetch } from "./auth-fetch";
 import { API_URL } from "./env";
+import { createMutationId, rememberLocalMutation } from "./mutation-id";
+
+export class ApiRequestError extends Error {
+  constructor(public readonly status: number, message: string) {
+    super(message);
+    this.name = "ApiRequestError";
+  }
+}
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  const { headers: optionHeaders, ...rest } = options ?? {};
   const res = await authFetch(`${API_URL}${path}`, {
-    headers: { "Content-Type": "application/json" },
-    ...options,
+    ...rest,
+    headers: { "Content-Type": "application/json", ...(optionHeaders ?? {}) },
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(body.error || `Request failed: ${res.status}`);
+    throw new ApiRequestError(res.status, body.error || `Request failed: ${res.status}`);
   }
   return res.json();
 }
@@ -84,23 +93,31 @@ export async function fetchAutomations() {
   return request<AutomationRule[]>("/api/automations");
 }
 
-export async function deleteAutomation(id: string) {
+export async function deleteAutomation(id: string, revision: number) {
+  const mutationId = createMutationId();
   return request<{ success: boolean }>(`/api/automations/${id}`, {
     method: "DELETE",
+    headers: {
+      "If-Match": `"${revision}"`,
+      "X-Aeolus-Mutation-Id": mutationId,
+    },
   });
 }
 
 // ---- Layout persistence ----
 
-import type { LayoutPayload } from "../types/dashboard";
+import type { LayoutPayload, LayoutWritePayload } from "../types/dashboard";
 
 export async function fetchLayout(): Promise<LayoutPayload> {
   return request<LayoutPayload>("/api/layout");
 }
 
-export async function saveLayout(payload: LayoutPayload): Promise<{ success: boolean }> {
-  return request<{ success: boolean }>("/api/layout", {
+export async function saveLayout(payload: LayoutWritePayload, revision: number): Promise<{ success: boolean; revision: number }> {
+  const mutationId = createMutationId();
+  rememberLocalMutation(mutationId);
+  return request<{ success: boolean; revision: number }>("/api/layout", {
     method: "PUT",
+    headers: { "If-Match": `"${revision}"`, "X-Aeolus-Mutation-Id": mutationId },
     body: JSON.stringify(payload),
   });
 }

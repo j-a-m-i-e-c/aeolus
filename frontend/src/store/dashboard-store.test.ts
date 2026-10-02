@@ -5,7 +5,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // Stub persistence + automation deletion so debounced saves and side effects are inert.
 vi.mock("../lib/api-client", () => ({
   fetchLayout: vi.fn(),
-  saveLayout: vi.fn().mockResolvedValue({ success: true }),
+  saveLayout: vi.fn().mockResolvedValue({ success: true, revision: 2 }),
   deleteAutomation: vi.fn().mockResolvedValue({ success: true }),
 }));
 
@@ -32,7 +32,7 @@ describe("dashboard-store", () => {
   beforeEach(() => {
     vi.useFakeTimers(); // debouncedPersist schedules a 2s timer on every mutation
     vi.mocked(deleteAutomation).mockClear();
-    useDashboardStore.setState({ tabs: [], panes: [], activeTabId: null, initialized: false });
+    useDashboardStore.setState({ tabs: [], panes: [], activeTabId: null, initialized: false, layoutRevision: 1, layoutConflict: false });
   });
 
   afterEach(() => {

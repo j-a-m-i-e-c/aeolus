@@ -4,7 +4,7 @@ import { create } from "zustand";
 import type { Tab, Pane, PaneConfig } from "../types/dashboard";
 import { DEFAULT_TABS, DEFAULT_PANES } from "../types/dashboard";
 import { PANE_REGISTRY } from "../lib/pane-registry";
-import { fetchLayout, saveLayout } from "../lib/api-client";
+import { ApiRequestError, fetchLayout, saveLayout } from "../lib/api-client";
 import { PUBLIC_DEMO } from "../lib/env";
 
 /** Generate a UUID that works in non-secure contexts (HTTP) */
@@ -24,6 +24,8 @@ interface DashboardState {
   panes: Pane[];
   activeTabId: string | null;
   initialized: boolean;
+  layoutRevision: number | null;
+  layoutConflict: boolean;
 
   // Tab actions
   addTab: (name: string, icon: string) => void;
@@ -43,6 +45,8 @@ interface DashboardState {
   initialize: () => Promise<void>;
   resetLayout: () => Promise<void>;
   persistLayout: () => void;
+  handleRemoteLayoutRevision: (revision: number) => void;
+  reconcileLayout: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -50,6 +54,10 @@ interface DashboardState {
 // ---------------------------------------------------------------------------
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+let persistInFlight = false;
+let persistRequested = false;
+let persistPromise: Promise<void> | null = null;
+let remoteConflictEpoch = 0;
 const DEBOUNCE_MS = 2000;
 
 function debouncedPersist(getState: () => DashboardState): void {
@@ -59,6 +67,7 @@ function debouncedPersist(getState: () => DashboardState): void {
   if (PUBLIC_DEMO) return;
   if (debounceTimer) clearTimeout(debounceTimer);
   debounceTimer = setTimeout(() => {
+    debounceTimer = null;
     getState().persistLayout();
   }, DEBOUNCE_MS);
 }
@@ -80,6 +89,8 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
   panes: [],
   activeTabId: null,
   initialized: false,
+  layoutRevision: null,
+  layoutConflict: false,
 
   // ---- Tab actions ----
 
@@ -245,16 +256,28 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
       // Drop panes whose type is no longer registered (e.g. the removed
       // "device-grid" pane) so legacy layouts don't render broken/empty tiles.
       const panes = (layout.panes || DEFAULT_PANES).filter((p: Pane) => p.paneType in PANE_REGISTRY);
-      set({ tabs: allTabs, panes, activeTabId: allTabs[0]?.id ?? null, initialized: true });
+      set({ tabs: allTabs, panes, activeTabId: allTabs[0]?.id ?? null, initialized: true, layoutRevision: layout.revision, layoutConflict: false });
     } catch (err) {
       console.warn("[dashboard-store] Failed to fetch layout, using defaults:", err);
-      set({ tabs: DEFAULT_TABS, panes: DEFAULT_PANES, activeTabId: DEFAULT_TABS[0]?.id ?? null, initialized: true });
+      set({ tabs: DEFAULT_TABS, panes: DEFAULT_PANES, activeTabId: DEFAULT_TABS[0]?.id ?? null, initialized: true, layoutRevision: null });
     }
   },
 
   resetLayout: async () => {
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
+      debounceTimer = null;
+    }
+    persistRequested = false;
+    if (persistPromise) await persistPromise;
     try {
       const layout = await fetchLayout();
+      // A read the server could not version carries its empty fallback, and this
+      // path runs on remote invalidations. Adopting it would strip every custom
+      // tab from passive viewers because of one transient database read error.
+      if (layout.revision == null) return;
+      const currentRevision = get().layoutRevision;
+      if (currentRevision != null && layout.revision < currentRevision) return;
       const pinnedTabs = DEFAULT_TABS.filter((t) => t.pinned);
       const savedCustomTabs = (layout.tabs || []).filter((t: Tab) => !t.pinned);
       const allTabs = [...pinnedTabs, ...savedCustomTabs];
@@ -266,6 +289,8 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
           ? state.activeTabId
           : (allTabs[0]?.id ?? null),
         initialized: true,
+        layoutRevision: layout.revision,
+        layoutConflict: false,
       }));
     } catch (err) {
       console.warn("[dashboard-store] Failed to reset layout:", err);
@@ -274,11 +299,77 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
 
   persistLayout: () => {
     if (PUBLIC_DEMO) return;
-    const { tabs, panes } = get();
-    // Only persist custom (unpinned) tabs — pinned tabs are hardcoded
-    const customTabs = tabs.filter((t) => !t.pinned);
-    saveLayout({ tabs: customTabs, panes }).catch((err) => {
-      console.warn("[dashboard-store] Failed to persist layout:", err);
-    });
+    persistRequested = true;
+    if (persistInFlight) return;
+    persistInFlight = true;
+
+    persistPromise = (async () => {
+      try {
+        while (persistRequested) {
+          persistRequested = false;
+          const { tabs, panes, layoutRevision } = get();
+          if (layoutRevision == null) return;
+          const customTabs = tabs.filter((t) => !t.pinned);
+          const conflictEpochAtStart = remoteConflictEpoch;
+          try {
+            const result = await saveLayout({ tabs: customTabs, panes }, layoutRevision);
+            set({
+              layoutRevision: result.revision,
+              layoutConflict: remoteConflictEpoch !== conflictEpochAtStart ? true : false,
+            });
+          } catch (err) {
+            if (err instanceof ApiRequestError && err.status === 409) {
+              set({ layoutConflict: true });
+              console.warn("[dashboard-store] Dashboard changed elsewhere; local layout was not persisted.");
+              persistRequested = false;
+              return;
+            }
+            console.warn("[dashboard-store] Failed to persist layout:", err);
+            return;
+          }
+        }
+      } finally {
+        persistInFlight = false;
+        persistPromise = null;
+      }
+    })();
+  },
+
+  handleRemoteLayoutRevision: (revision) => {
+    const current = get().layoutRevision;
+    if (current != null && revision <= current) return;
+
+    // A remote commit arriving while local layout work is queued means this
+    // browser's base snapshot is stale. Preserve local state and force an
+    // explicit reload instead of silently discarding either operator's work.
+    if (persistInFlight || persistRequested || debounceTimer) {
+      remoteConflictEpoch += 1;
+      if (debounceTimer) {
+        clearTimeout(debounceTimer);
+        debounceTimer = null;
+      }
+      persistRequested = false;
+      set({ layoutConflict: true });
+      return;
+    }
+
+    // Passive viewers have no unsaved layout work, so converge automatically.
+    void get().resetLayout();
+  },
+
+  reconcileLayout: () => {
+    void (async () => {
+      try {
+        const layout = await fetchLayout();
+        // Nothing to reconcile against when the server could not supply a
+        // revision; the next reconnect cycle retries.
+        if (layout.revision == null) return;
+        const current = get().layoutRevision;
+        if (current != null && layout.revision <= current) return;
+        get().handleRemoteLayoutRevision(layout.revision);
+      } catch {
+        // Reconciliation is best-effort; the normal reconnect cycle will retry.
+      }
+    })();
   },
 }));

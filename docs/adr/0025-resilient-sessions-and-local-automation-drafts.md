@@ -11,7 +11,7 @@ Aeolus targets local, intermittently connected networks. Access JWTs expire ever
 
 **Recovery versus rejection.** Keep the 15-minute access JWT in memory. On refresh HTTP `401/403`, clear auth; on network failures/5xx, keep existing state and retry periodically and on regained connectivity/focus. On initial load when the Pi cannot be reached, show an offline/reconnecting screen rather than incorrectly claiming the site is unconfigured or the cookie is invalid. A session is considered authenticated for UI continuity while temporarily offline, but protected API calls still depend on server validation; stale access tokens confer no offline authority.
 
-**Local drafts.** Save unsaved automation metadata and the complete multi-file Project in origin-local IndexedDB, namespaced by logged-in user and automation/editor location. Writes are debounced, and a stored draft is *offered*, never applied automatically, after reopening. Mark when the loaded server version differs from the draft's original baseline. A pre-save project re-read detects a server change and blocks a naive overwrite of an already-changed project. Local snapshots are for recovery only, not authoritative server revisions and not a cross-device sync feature. Do not store credentials or tokens in them. A real server-side atomic revision/precondition is still needed if simultaneous multi-editor changes become important; read-before-write has an acknowledged race.
+**Local drafts.** Save unsaved automation metadata and the complete multi-file Project in origin-local IndexedDB, namespaced by logged-in user and automation/editor location. Writes are debounced, and a stored draft is *offered*, never applied automatically, after reopening. Mark when the loaded server version differs from the draft's original baseline. A pre-save project re-read detects a server change and blocks a naive overwrite of an already-changed project. Local snapshots are for recovery only, not authoritative server revisions and not a cross-device sync feature. Do not store credentials or tokens in them. The draft mechanism itself remains recovery-only. Atomic simultaneous-save protection is specified separately by ADR-0026 rather than being a responsibility of this ADR.
 
 **Admin policy.** Keep short-lived JWTs fixed. Administrators can configure per-user refresh-session lifetimes (1, 7, or 30 days) and optional inactivity (disabled, 30 minutes, 2 hours or 8 hours) from user provisioning. Persist these with the user and apply them server-side at refresh. An absolute session lifetime never silently extends through background activity. Only deliberate frontend user interactions update the inactivity timer when the refresh occurs; passive polling does not. Normal logins receive an HttpOnly strict-SameSite cookie sized for their per-user policy. When policies shrink, existing refresh credentials are subject to the stricter rule at their next refresh. Existing 15-minute access JWTs may survive until expiry; this is not immediate token revocation.
 
@@ -28,7 +28,7 @@ Aeolus targets local, intermittently connected networks. Access JWTs expire ever
 - Local drafts live in the browser profile; they are not encrypted against another person with access to that profile. Logging out does not automatically destroy recoverable authored work. Advise shared-computer users accordingly.
 - Temporary disconnection preserves the editor but does not mean offline server mutations succeed; drafts handle that gap.
 - Inactivity is sampled when refresh occurs, not continuously every keystroke at the server. A session with no refresh requests is rejected when it next refreshes; already-issued JWTs remain valid for their maximum 15 minutes. Frontend activity signalling is a usability-based session idle policy, not strong proof of physical user presence; malicious clients can issue authorized requests.
-- A pre-save project re-read catches common concurrent changes but cannot guarantee an atomic compare-and-swap with the subsequent PUT. Introduce server revision IDs/`If-Match` before advertising full collaborative conflict safety.
+- Draft recovery does not attempt to merge competing authored code. ADR-0026 adds server revision preconditions so a stale save can be rejected atomically while this ADR keeps the losing browser draft recoverable.
 - Changing a session from 7 to 30 days extends **newly issued sessions**, not the absolute expiry already recorded on old refresh credentials. Users should sign out/in to adopt a longer lifetime.
 - Local draft writes can fail when IndexedDB is unavailable/quota-limited, so the editor must surface that explicitly.
 
@@ -50,13 +50,11 @@ This ADR was accepted on the strength of `e2e/session-drafts.spec.ts`, which dri
 
 Two qualifications on that evidence. The outage cases refuse API requests at the browser rather than physically interrupting a network, so they exercise the same code path a Pi reboot or Wi-Fi drop reaches, not the physical event. And the per-user session policy is enforced in `token-service.ts`, covered by unit tests for absolute expiry, idle expiry and policy reduction applied to already-issued sessions; the e2e test above establishes only that an administrator's choice reaches the issued cookie.
 
-The read-before-write limitation recorded above is unchanged and is not a gap in verification: it is an accepted property of this design. Drafts are recovery, not collaboration.
+The original read-before-write limitation led to ADR-0026. This ADR remains about recovery rather than collaboration; its browser verification is still valid independently of the stronger server-side revision protocol.
 
 ## Revisit when
 
-Aeolus supports true collaborative authoring, multi-device draft sync, regulated session controls, browser-based encryption or a server-side revision API.
-
-Introduce server-side revision IDs with `If-Match` before describing Aeolus as safe for simultaneous editors. The pre-save re-read narrows the window but cannot close it, so two operators saving within the same round trip can still lose one set of edits.
+Aeolus supports true collaborative authoring, multi-device draft sync, regulated session controls or browser-based encryption. Server-side revision consistency is now handled by ADR-0026.
 
 ## Implementation anchors
 

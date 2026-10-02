@@ -33,9 +33,12 @@ export interface Pane {
 
 /** API transport shape for GET/PUT /api/layout */
 export interface LayoutPayload {
+  revision: number | null;
   tabs: Tab[];
   panes: Pane[];
 }
+
+export type LayoutWritePayload = Omit<LayoutPayload, "revision">;
 
 // ---------------------------------------------------------------------------
 // Default_Layout seed data — used on first launch when no saved layout exists

@@ -2,12 +2,14 @@
 
 import { Router } from "express";
 import type { Database as DatabaseType } from "better-sqlite3";
-import { BadRequestError } from "../middleware/error-handler.js";
+import { BadRequestError, ConflictError } from "../middleware/error-handler.js";
 import { asyncHandler } from "../middleware/async-handler.js";
+import { mutationIdFromRequest, requireIfMatchRevision } from "../middleware/revision-precondition.js";
 import { requireAdmin } from "../../auth/auth-middleware.js";
 import type { PermissionResolver } from "../../auth/permission-resolver.js";
 import { safeJsonParse } from "../../core/safe-json.js";
 import { extractAutomationAssignments, extractCollectionAssignments, type PaneRef } from "../../auth/pane-reference-extractor.js";
+import { CONFIGURATION_INVALIDATED, eventBus } from "../../core/event-bus.js";
 import logger from "../../logger.js";
 
 interface TabRow {
@@ -72,19 +74,25 @@ export function createLayoutRoutes(
         createdAt: row.created_at,
       }));
 
+      const revision = (db.prepare("SELECT revision FROM layout_metadata WHERE singleton = 1").get() as { revision: number } | undefined)?.revision ?? 1;
+
       if (req.user?.role === "admin") {
-        res.json({ tabs, panes });
+        res.json({ revision, tabs, panes });
         return;
       }
 
       const accessible = new Set(resolver.accessibleTabIds(req.user?.userId ?? ""));
       res.json({
+        revision,
         tabs: tabs.filter((t) => accessible.has(t.id)),
         panes: panes.filter((p) => accessible.has(p.tabId)),
       });
     } catch (err) {
       logger.error(err, "Failed to read layout from database");
-      res.json({ tabs: [], panes: [] });
+      // A failed read must not invent a revision that could authorize a later
+      // whole-layout overwrite. Clients may render the empty fallback, but
+      // persistence stays disabled until a successful read supplies a revision.
+      res.json({ revision: null, tabs: [], panes: [] });
     }
   });
 
@@ -95,9 +103,17 @@ export function createLayoutRoutes(
     if (!Array.isArray(tabs) || !Array.isArray(panes)) {
       throw new BadRequestError("Invalid layout payload: tabs and panes must be arrays");
     }
+    const expectedRevision = requireIfMatchRevision(req);
 
     // Atomic replace using better-sqlite3 transaction
     const replaceLayout = db.transaction((tabsData: typeof tabs, panesData: typeof panes) => {
+      const advanced = db.prepare(
+        "UPDATE layout_metadata SET revision = revision + 1 WHERE singleton = 1 AND revision = ?",
+      ).run(expectedRevision);
+      if (advanced.changes !== 1) {
+        throw new ConflictError("The dashboard changed while you were editing it");
+      }
+
       db.prepare("DELETE FROM panes").run();
       db.prepare("DELETE FROM tabs").run();
 
@@ -162,8 +178,14 @@ export function createLayoutRoutes(
 
     replaceLayout(tabs, panes);
 
-    logger.info({ tabs: tabs.length, panes: panes.length }, "Layout persisted");
-    res.json({ success: true });
+    const revision = (db.prepare("SELECT revision FROM layout_metadata WHERE singleton = 1").get() as { revision: number }).revision;
+    eventBus.emit(CONFIGURATION_INVALIDATED, {
+      resource: "layout",
+      revision,
+      mutationId: mutationIdFromRequest(req),
+    });
+    logger.info({ tabs: tabs.length, panes: panes.length, revision }, "Layout persisted");
+    res.json({ success: true, revision });
   }));
 
   return router;

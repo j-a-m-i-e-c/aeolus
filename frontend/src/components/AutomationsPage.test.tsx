@@ -85,6 +85,7 @@ describe("AutomationsPage", () => {
       if (url.endsWith("/api/automations/r2/project")) {
         return Promise.resolve(jsonResponse({
           automationId: "r2",
+          revision: 1,
           files: [{ path: "logic/index.ts", content: "when(x)" }],
           logicEntry: "logic/index.ts",
           uiEntry: null,

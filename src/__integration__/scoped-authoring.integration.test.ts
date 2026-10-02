@@ -146,6 +146,7 @@ describe("Scoped automation authoring (integration)", () => {
     const upd = await request(app)
       .put(`/api/automations/${id}`)
       .set("Authorization", `Bearer ${userToken()}`)
+      .set("If-Match", '"1"')
       .send({ name: "Renamed", authoredUnrestricted: true, ownerTabId: "tab-b" });
     expect(upd.status).toBe(200);
 
@@ -193,12 +194,16 @@ describe("Scoped automation authoring (integration)", () => {
     const adminPut = await request(app)
       .put(`/api/automations/${id}`)
       .set("Authorization", `Bearer ${adminToken()}`)
+      .set("If-Match", '"1"')
       .send({ name: "Admin edit" });
     expect(adminPut.status).toBe(200);
 
+    // The admin PUT above advanced the revision to 2, so the delete has to
+    // present that rather than the revision the rule was created with.
     const adminDel = await request(app)
       .delete(`/api/automations/${id}`)
-      .set("Authorization", `Bearer ${adminToken()}`);
+      .set("Authorization", `Bearer ${adminToken()}`)
+      .set("If-Match", '"2"');
     expect(adminDel.status).toBe(200);
   });
 });

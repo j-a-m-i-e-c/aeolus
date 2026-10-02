@@ -20,7 +20,7 @@
 
 import { test, expect, type Page, type APIRequestContext } from "@playwright/test";
 import { API_URL } from "./constants";
-import { adminAuth, ensureAdmin } from "./helpers";
+import { adminAuth, ensureAdmin, layoutRevision, projectRevision, withIfMatch } from "./helpers";
 
 const TAB_ID = "tab-e2e-drafts";
 const TAB_NAME = "E2E Drafts";
@@ -62,7 +62,8 @@ async function seedBaseline(request: APIRequestContext): Promise<Seeded> {
   let ruleId: string;
   if (found) {
     ruleId = found.id;
-    const reset = await request.put(`${API_URL}/api/automations/${ruleId}/project`, { headers: auth, data: INITIAL_PROJECT });
+    const revision = await projectRevision(request, ruleId, auth);
+    const reset = await request.put(`${API_URL}/api/automations/${ruleId}/project`, { headers: withIfMatch(auth, revision), data: INITIAL_PROJECT });
     expect(reset.ok(), `reset failed: ${reset.status()} ${await reset.text()}`).toBeTruthy();
   } else {
     const created = await request.post(`${API_URL}/api/automations`, {
@@ -80,8 +81,9 @@ async function seedBaseline(request: APIRequestContext): Promise<Seeded> {
   }
 
   const now = new Date().toISOString();
+  const currentLayoutRevision = await layoutRevision(request, auth);
   const layout = await request.put(`${API_URL}/api/layout`, {
-    headers: auth,
+    headers: withIfMatch(auth, currentLayoutRevision),
     data: {
       tabs: [{ id: TAB_ID, name: TAB_NAME, icon: "code", order: 0, pinned: false, createdAt: now }],
       panes: [{
@@ -251,15 +253,16 @@ test.describe("ADR-0025 — resilient sessions and local draft recovery", () => 
 
     // ── Another editor saves the same automation while this one is open. An API
     //    PUT is exactly what the other editor's save performs. ──
+    const theirRevision = await projectRevision(request, seeded.ruleId, seeded.auth);
     const theirSave = await request.put(`${API_URL}/api/automations/${seeded.ruleId}/project`, {
-      headers: seeded.auth,
+      headers: withIfMatch(seeded.auth, theirRevision),
       data: { ...INITIAL_PROJECT, files: [{ path: "logic/index.ts", content: editedLogic(OTHER_EDITOR_MARKER) }] },
     });
     expect(theirSave.ok(), `concurrent save failed: ${theirSave.status()}`).toBeTruthy();
 
     // ── The pre-save re-read must refuse this save ──
     await saveButton(page).click();
-    await expect(page.getByText(/Server project changed while editing/)).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText(/changed (?:in another browser|on the server)/i)).toBeVisible({ timeout: 20_000 });
 
     // The other editor's work is intact: no blind overwrite.
     expect(await readProjectSource(request, seeded)).toContain(OTHER_EDITOR_MARKER);

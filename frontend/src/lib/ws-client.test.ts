@@ -16,9 +16,18 @@ vi.mock("../store/data-store-store", () => ({
   useDataStoreStore: { getState: () => dsMocks },
 }));
 
+const configMocks = vi.hoisted(() => ({ handleRemoteLayoutRevision: vi.fn(), noteAutomation: vi.fn() }));
+vi.mock("../store/dashboard-store", () => ({
+  useDashboardStore: { getState: () => ({ handleRemoteLayoutRevision: configMocks.handleRemoteLayoutRevision }) },
+}));
+vi.mock("../store/configuration-invalidation-store", () => ({
+  useConfigurationInvalidationStore: { getState: () => ({ noteAutomation: configMocks.noteAutomation }) },
+}));
+
 import { connectWebSocket, disconnectWebSocket } from "./ws-client";
 import { useDeviceStore, type Device } from "../store/device-store";
 import { useAutomationStateStore } from "../store/automation-state-store";
+import { clearRememberedMutations, rememberLocalMutation } from "./mutation-id";
 
 // ── Minimal WebSocket double ──────────────────────────────────────────────
 class MockWebSocket {
@@ -57,6 +66,9 @@ describe("ws-client", () => {
     MockWebSocket.instances = [];
     dsMocks.addRealtimeRecord.mockReset();
     dsMocks.removeCollection.mockReset();
+    configMocks.handleRemoteLayoutRevision.mockReset();
+    configMocks.noteAutomation.mockReset();
+    clearRememberedMutations();
     (globalThis as unknown as { WebSocket: unknown }).WebSocket = MockWebSocket;
     useDeviceStore.setState({ devices: {}, wsConnected: false, mqttMessages: [], automationEvents: [], deviceHistory: {} });
     useAutomationStateStore.setState({ stateByRule: {} });
@@ -134,6 +146,22 @@ describe("ws-client", () => {
     latest().message({ type: "data-store-collection-deleted", data: { collection: "c" } });
     expect(dsMocks.addRealtimeRecord).toHaveBeenCalledWith("c", { id: 1 });
     expect(dsMocks.removeCollection).toHaveBeenCalledWith("c");
+  });
+
+  it("routes remote configuration invalidations and ignores this browser's own mutation echo", () => {
+    connectWebSocket();
+    latest().message({ type: "configuration-invalidated", data: { resource: "layout", revision: 4, mutationId: "remote-layout" } });
+    latest().message({ type: "configuration-invalidated", data: { resource: "automation", id: "r2", revision: 7, mutationId: "remote-rule" } });
+    expect(configMocks.handleRemoteLayoutRevision).toHaveBeenCalledWith(4);
+    // The mutation id is forwarded rather than resolved here: the store records it
+    // so an editor can tell a remote change from the echo of its own save.
+    expect(configMocks.noteAutomation).toHaveBeenCalledWith({
+      id: "r2", revision: 7, deleted: false, mutationId: "remote-rule",
+    });
+
+    rememberLocalMutation("mine");
+    latest().message({ type: "configuration-invalidated", data: { resource: "layout", revision: 5, mutationId: "mine" } });
+    expect(configMocks.handleRemoteLayoutRevision).toHaveBeenCalledTimes(1);
   });
 
   it("ignores malformed messages without throwing", () => {

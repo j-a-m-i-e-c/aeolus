@@ -7,7 +7,7 @@ import path from "node:path";
 import { config } from "./config.js";
 import logger from "./logger.js";
 import { getDatabase, closeDatabase } from "./db/database.js";
-import { eventBus, DEVICE_STATE_CHANGE, AUTOMATION_STATE_CHANGE, WS_STATE_CHANGE, MQTT_RAW_MESSAGE, AUTOMATION_FIRED, AUTOMATION_COMPLETED, DATA_STORE_WRITE, DATA_STORE_COLLECTION_DELETED, COMMAND_LIFECYCLE_TRANSITION, AUTOMATION_EVENT, SHARED_STATE_CHANGE } from "./core/event-bus.js";
+import { eventBus, DEVICE_STATE_CHANGE, AUTOMATION_STATE_CHANGE, WS_STATE_CHANGE, MQTT_RAW_MESSAGE, AUTOMATION_FIRED, AUTOMATION_COMPLETED, DATA_STORE_WRITE, DATA_STORE_COLLECTION_DELETED, COMMAND_LIFECYCLE_TRANSITION, AUTOMATION_EVENT, SHARED_STATE_CHANGE, CONFIGURATION_INVALIDATED } from "./core/event-bus.js";
 import { DeviceRegistry } from "./core/device-registry.js";
 import { MqttService } from "./mqtt/mqtt-service.js";
 import { createPrivateTopicStore } from "./mqtt/private-topic-store.js";
@@ -506,6 +506,33 @@ async function main(): Promise<void> {
     if (!ruleId) return { visibility: "admin" };
     return { visibility: "tabs", tabIds: ownershipStore.getExposingTabs(ruleId) };
   };
+  // Configuration invalidations carry no document content. Layout revision
+  // notices are safe for every authenticated client; an automation invalidation
+  // follows the automation's existing tab scope. The REST refetch remains the
+  // source of truth and applies the caller's normal authorization filters.
+  const configurationVisibility = (data: unknown): BroadcastEnvelope => {
+    const resource = stringField(data, "resource");
+    if (resource === "layout") return { visibility: "public" };
+    if (resource === "automation") {
+      const id = stringField(data, "id");
+      if (!id) return { visibility: "admin" };
+      if (data && typeof data === "object" && (data as Record<string, unknown>).deleted === true) {
+        // The FK assignments disappear with a deletion, so the route captures
+        // their server-derived tab IDs immediately before deleting the row.
+        const tombstoneTabs = (data as Record<string, unknown>).tabIds;
+        if (Array.isArray(tombstoneTabs) && tombstoneTabs.every((value) => typeof value === "string")) {
+          return { visibility: "tabs", tabIds: tombstoneTabs as string[] };
+        }
+      }
+      return { visibility: "tabs", tabIds: ownershipStore.getExposingTabs(id) };
+    }
+    return { visibility: "admin" };
+  };
+  const configurationPayload = (data: unknown): unknown => {
+    if (!data || typeof data !== "object") return data;
+    const { tabIds: _serverOnlyTabIds, ...clientData } = data as Record<string, unknown>;
+    return clientData;
+  };
   // The raw MQTT feed is a discovery/debugging firehose: its value is showing
   // topics BEFORE anything consumes them (building an automation, onboarding a
   // device), so it is public by default rather than tab-scoped. Admins can carve
@@ -523,6 +550,7 @@ async function main(): Promise<void> {
   const dataStoreVisibility = createDataStoreVisibility(collectionOwnershipStore);
 
   const WS_MAPPINGS: WsEventMapping[] = [
+    { eventName: CONFIGURATION_INVALIDATED, messageType: "configuration-invalidated", visibility: configurationVisibility, payload: configurationPayload },
     { eventName: WS_STATE_CHANGE, messageType: "state-change", visibility: deviceVisibility },
     // The raw MQTT feed is a discovery firehose — visible to all authenticated
     // clients so it stays useful for building automations and onboarding.

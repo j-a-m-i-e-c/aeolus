@@ -39,6 +39,8 @@ interface Call {
 interface Rule {
   id: string;
   name: string;
+  /** Optional in fixtures; the fake always reports a concrete one, as the server does. */
+  revision?: number;
 }
 
 interface Tab {
@@ -81,6 +83,9 @@ function fakeAeolus(
   const buckets: Record<string, Record<string, unknown>> = structuredClone(initial.buckets ?? {});
   let tabs: Tab[] = structuredClone(initial.tabs ?? []);
   let panes: Pane[] = structuredClone(initial.panes ?? []);
+  // The layout is a single versioned document, seeded at revision 1 like the
+  // real layout_metadata singleton, and advanced by each accepted write.
+  let layoutRevision = 1;
   let nextId = 1;
 
   const api = async (
@@ -115,10 +120,12 @@ function fakeAeolus(
       return { success: true };
     }
     if (method === "GET" && reqPath === "/api/automations") {
-      return automations.map((rule) => ({ ...rule }));
+      // The real list endpoint always carries a revision, and the seeder refuses
+      // to delete without one rather than issuing an unconditional delete.
+      return automations.map((rule) => ({ ...rule, revision: rule.revision ?? 1 }));
     }
     if (method === "POST" && reqPath === "/api/automations") {
-      const created = { id: `rule-${nextId++}`, name: (body as { name: string }).name };
+      const created = { id: `rule-${nextId++}`, name: (body as { name: string }).name, revision: 1 };
       automations.push(created);
       return created;
     }
@@ -130,13 +137,14 @@ function fakeAeolus(
       return { success: true };
     }
     if (method === "GET" && reqPath === "/api/layout") {
-      return { tabs: structuredClone(tabs), panes: structuredClone(panes) };
+      return { revision: layoutRevision, tabs: structuredClone(tabs), panes: structuredClone(panes) };
     }
     if (method === "PUT" && reqPath === "/api/layout") {
       const next = body as { tabs: Tab[]; panes: Pane[] };
       tabs = structuredClone(next.tabs);
       panes = structuredClone(next.panes);
-      return { success: true };
+      layoutRevision += 1;
+      return { success: true, revision: layoutRevision };
     }
     return { success: true };
   };

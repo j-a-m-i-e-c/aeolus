@@ -100,6 +100,7 @@ vi.mock("../../automations/cron-utils.js", () => ({
 vi.mock("../../core/event-bus.js", () => ({
   eventBus: { emit: vi.fn() },
   AUTOMATION_STATE_CHANGE: "automation:state-change",
+  CONFIGURATION_INVALIDATED: "configuration:invalidated",
   DEVICE_STATE_CHANGE: "device:state-change",
 }));
 
@@ -111,7 +112,7 @@ async function request(
   method: string,
   url: string,
   body?: unknown,
-  options?: { omitContentType?: boolean },
+  options?: { omitContentType?: boolean; ifMatch?: number | null },
 ): Promise<{ status: number; body: any; contentType: string }> {
   const server = app.listen(0);
   await new Promise((resolve) => server.once("listening", resolve));
@@ -122,7 +123,16 @@ async function request(
   }
   try {
     const init: RequestInit = { method: method.toUpperCase() };
-    if (!options?.omitContentType) init.headers = { "Content-Type": "application/json" };
+    if (!options?.omitContentType) {
+      const autoProjectRevision = method.toUpperCase() === "PUT" && (
+        /\/api\/automations\/[^/]+\/project$/.test(url) || /\/api\/automations\/[^/]+$/.test(url)
+      ) ? 1 : null;
+      const revision = options?.ifMatch === undefined ? autoProjectRevision : options.ifMatch;
+      init.headers = {
+        "Content-Type": "application/json",
+        ...(revision == null ? {} : { "If-Match": `"${revision}"` }),
+      };
+    }
     if (body !== undefined) init.body = JSON.stringify(body);
     const res = await fetch(`http://127.0.0.1:${addr.port}${url}`, init);
     const contentType = res.headers.get("content-type") || "";
@@ -158,6 +168,7 @@ function formRow(overrides: Row = {}): Row {
     owner_tab_id: "tab-1",
     enabled: 1,
     created_at: 1000,
+    revision: 1,
     ...overrides,
   };
 }
@@ -403,6 +414,14 @@ describe("automation.routes — decision paths", () => {
       const res = await request(buildApp(), "PUT", "/api/automations/rule-form/project", project);
       expect(res.status).toBe(400);
       expect(res.body.error).toContain("Only script automations");
+    });
+
+    it("requires If-Match before replacing an existing project", async () => {
+      db._rows.push(scriptRow());
+      const res = await request(buildApp(), "PUT", "/api/automations/rule-script/project", project, { ifMatch: null });
+      expect(res.status).toBe(428);
+      expect(res.body.error).toContain("If-Match");
+      expect(saveAutomationProject).not.toHaveBeenCalled();
     });
 
     it("returns compiler diagnostics when the project does not compile", async () => {

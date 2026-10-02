@@ -10,7 +10,7 @@ Aeolus follows semantic versioning for published releases. Until the first stabl
 * Standard automation editors keep browser-local IndexedDB recovery snapshots of multi-file projects and form fields, with explicit restoration and a pre-save changed-project check.
 * Admin user provisioning can choose per-user 1/7/30-day refresh sessions and optional idle logout; access JWTs remain 15 minutes.
 * Six retrospective architectural decisions now document resource authority, authored HTTP egress, MQTT topic/identity contracts, connector ownership, public-demo isolation and golden reset. ADR-0025 records this change and is Accepted: crash recovery, concurrent-editor refusal and outage reconnect are verified in a real browser by `e2e/session-drafts.spec.ts`.
-* Simultaneous editors are still not fully protected. The pre-save check refuses a save when the project already moved, but two operators saving within the same round trip can still lose one set of edits; that needs server-side revision IDs.
+* Shared dashboard layout and Automation Project authoring now use server-owned revisions and atomic `If-Match` preconditions. Stale writes return `409` instead of silently replacing another operator's committed change; WebSocket invalidations keep passive clients current while active authors retain their local draft. Recorded in [ADR-0026](docs/adr/0026-multi-user-mutation-consistency.md), verified by a two-browser end-to-end test.
 
 ### Security and reliability
 

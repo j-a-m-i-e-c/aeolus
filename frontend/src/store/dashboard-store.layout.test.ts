@@ -14,7 +14,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 vi.mock("../lib/api-client", () => ({
   fetchLayout: vi.fn(),
-  saveLayout: vi.fn().mockResolvedValue({ success: true }),
+  saveLayout: vi.fn().mockResolvedValue({ success: true, revision: 2 }),
   deleteAutomation: vi.fn().mockResolvedValue({ success: true }),
 }));
 
@@ -50,7 +50,7 @@ describe("dashboard-store — server layout", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.mocked(fetchLayout).mockReset();
-    useDashboardStore.setState({ tabs: [], panes: [], activeTabId: null, initialized: false });
+    useDashboardStore.setState({ tabs: [], panes: [], activeTabId: null, initialized: false, layoutRevision: 1, layoutConflict: false });
   });
 
   afterEach(() => {
@@ -79,6 +79,7 @@ describe("dashboard-store — server layout", () => {
 
     it("drops panes whose type this build no longer registers", async () => {
       vi.mocked(fetchLayout).mockResolvedValue({
+        revision: 1,
         tabs: [tab("garden")],
         panes: [pane("keep", "garden"), pane("drop", "garden", { paneType: "device-grid" })],
       } as never);
@@ -107,7 +108,7 @@ describe("dashboard-store — server layout", () => {
   describe("resetLayout", () => {
     it("keeps the tab the user is looking at when the reset still contains it", async () => {
       useDashboardStore.setState({ activeTabId: "garden" });
-      vi.mocked(fetchLayout).mockResolvedValue({ tabs: [tab("garden"), tab("pond")], panes: [] } as never);
+      vi.mocked(fetchLayout).mockResolvedValue({ revision: 1, tabs: [tab("garden"), tab("pond")], panes: [] } as never);
 
       await d().resetLayout();
 
@@ -116,7 +117,7 @@ describe("dashboard-store — server layout", () => {
 
     it("moves to the first tab when the one in view no longer exists", async () => {
       useDashboardStore.setState({ activeTabId: "deleted-elsewhere" });
-      vi.mocked(fetchLayout).mockResolvedValue({ tabs: [tab("pond")], panes: [] } as never);
+      vi.mocked(fetchLayout).mockResolvedValue({ revision: 1, tabs: [tab("pond")], panes: [] } as never);
 
       await d().resetLayout();
 
@@ -126,7 +127,7 @@ describe("dashboard-store — server layout", () => {
 
     it("selects the first tab when nothing was in view", async () => {
       useDashboardStore.setState({ activeTabId: null });
-      vi.mocked(fetchLayout).mockResolvedValue({ tabs: [tab("pond")], panes: [] } as never);
+      vi.mocked(fetchLayout).mockResolvedValue({ revision: 1, tabs: [tab("pond")], panes: [] } as never);
 
       await d().resetLayout();
 
@@ -147,8 +148,24 @@ describe("dashboard-store — server layout", () => {
       warn.mockRestore();
     });
 
+    it("refuses a read the server could not version", async () => {
+      // The server withholds a revision when its layout read failed, and sends
+      // the empty fallback alongside it. This path runs on remote invalidations,
+      // so adopting that would wipe every custom tab from a passive viewer over
+      // one transient database error.
+      useDashboardStore.setState({ tabs: [tab("garden")], panes: [pane("p1", "garden")], activeTabId: "garden" });
+      vi.mocked(fetchLayout).mockResolvedValue({ revision: null, tabs: [], panes: [] } as never);
+
+      await d().resetLayout();
+
+      expect(d().tabs.map((t) => t.id)).toEqual(["garden"]);
+      expect(d().panes.map((p) => p.id)).toEqual(["p1"]);
+      expect(d().activeTabId).toBe("garden");
+    });
+
     it("drops unregistered pane types on reset too", async () => {
       vi.mocked(fetchLayout).mockResolvedValue({
+        revision: 1,
         tabs: [tab("garden")],
         panes: [pane("keep", "garden"), pane("drop", "garden", { paneType: "device-grid" })],
       } as never);

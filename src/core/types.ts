@@ -327,4 +327,10 @@ export type WsMessage =
   | {
       type: "state-change";
       data: { deviceId: string; state: Record<string, unknown>; timestamp: number };
+    }
+  | {
+      type: "configuration-invalidated";
+      data:
+        | { resource: "layout"; revision: number; mutationId?: string | null }
+        | { resource: "automation"; id: string; revision: number | null; deleted?: boolean; mutationId?: string | null; tabIds?: string[] };
     };
