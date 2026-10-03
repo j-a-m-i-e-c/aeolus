@@ -666,6 +666,65 @@ describe("automation.routes", () => {
     });
   });
 
+  // ─── Revision conflicts (ADR-0026) ───────────────────────────────────────
+  //
+  // Every mutation is a conditional write whose row count decides the outcome, so
+  // a stale revision matching no row must surface as 409 rather than falling
+  // through as a silent no-op that looks like success. A zero-change result is
+  // exactly what the database reports in that case.
+
+  describe("stale revisions", () => {
+    const formRule = {
+      id: "rule-1", name: "Old Name", trigger_topic: "sensors/temp",
+      condition_type: null, condition_value: null, action_type: "publish",
+      action_target: "devices/light/set", action_params: '{"state":"on"}',
+      rule_type: "form", script_source: null, compiled_js: null,
+      structured_metadata: null, ui_source: null, compiled_ui: null,
+      trigger_type: "mqtt", cron_expression: null, enabled: 1,
+      created_at: 1000, revision: 1,
+    };
+
+    beforeEach(() => {
+      mockDb._statement.run.mockReturnValue({ changes: 0 });
+    });
+
+    it("refuses a form-rule update whose revision no longer matches", async () => {
+      mockDb._rows.push({ ...formRule });
+
+      const res = await request(app, "PUT", "/api/automations/rule-1", { name: "Updated Name" }, 1);
+
+      expect(res.status).toBe(409);
+      expect(mockEngine.register).not.toHaveBeenCalled();
+    });
+
+    it("refuses a script-rule update whose revision no longer matches", async () => {
+      mockDb._rows.push({
+        ...formRule,
+        id: "script-1", rule_type: "script", action_type: "script", action_target: "",
+        action_params: "{}", script_source: "export default function run() {}",
+        compiled_js: "compiled:export default function run() {}",
+      });
+
+      const res = await request(app, "PUT", "/api/automations/script-1", {
+        scriptSource: "export default function run() { log.info('v2'); }",
+      }, 1);
+
+      expect(res.status).toBe(409);
+    });
+
+    it("refuses a delete whose revision no longer matches and leaves the rule registered", async () => {
+      mockDb._rows.push({ ...formRule, id: "rule-doomed" });
+
+      const res = await request(app, "DELETE", "/api/automations/rule-doomed", undefined, 1);
+
+      expect(res.status).toBe(409);
+      // The rule is still live: unregistering it here would stop a running
+      // automation that was never actually deleted.
+      expect(mockEngine.unregister).not.toHaveBeenCalled();
+      expect(mockStateStore.deleteAll).not.toHaveBeenCalled();
+    });
+  });
+
   // ─── PATCH /api/automations/:id/toggle ───────────────────────────────────
 
   describe("PATCH /api/automations/:id/toggle", () => {

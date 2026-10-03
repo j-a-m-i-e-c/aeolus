@@ -220,6 +220,52 @@ describe("layout.routes", () => {
       expect(current.body.tabs.map((tab: { id: string }) => tab.id)).toEqual(["tab-a"]);
     });
 
+    it("rebuilds automation ownership from the panes it just stored", async () => {
+      // The layout write is authoritative, so tab ownership is derived from the
+      // panes just stored rather than merged with whatever was there before.
+      db.prepare("INSERT INTO automation_rules (id, name, trigger_topic, rule_type, enabled, created_at) VALUES (?, ?, ?, 'script', 1, 1)")
+        .run("rule-live", "Live", "sensor/x");
+
+      const automationPane = (tabId: string) => ({
+        id: "pane-1", tabId, paneType: "automation",
+        config: { ruleId: "rule-live" }, x: 0, y: 0, w: 6, h: 4, createdAt: 1,
+      });
+
+      const first = await request(app, "PUT", "/api/layout", {
+        tabs: [{ id: "tab-old", name: "Old", icon: "x", order: 0, pinned: false, createdAt: 1 }],
+        panes: [automationPane("tab-old")],
+      }, 1);
+      expect(first.status).toBe(200);
+      expect(db.prepare("SELECT tab_id FROM automation_tab_assignments").all()).toEqual([{ tab_id: "tab-old" }]);
+
+      // Moving the pane to another tab must move the ownership with it, leaving
+      // no assignment behind for the tab that no longer shows the automation.
+      const second = await request(app, "PUT", "/api/layout", {
+        tabs: [{ id: "tab-new", name: "New", icon: "x", order: 0, pinned: false, createdAt: 2 }],
+        panes: [automationPane("tab-new")],
+      }, first.body.revision);
+      expect(second.status).toBe(200);
+
+      const rows = db.prepare("SELECT automation_id, tab_id FROM automation_tab_assignments").all();
+      expect(rows).toEqual([{ automation_id: "rule-live", tab_id: "tab-new" }]);
+    });
+
+    it("ignores pane references to automations that no longer exist", async () => {
+      // A layout can outlive the automation a pane points at. Writing an
+      // assignment for a deleted rule would grant a tab authority over nothing
+      // and leave a dangling row behind.
+      const res = await request(app, "PUT", "/api/layout", {
+        tabs: [{ id: "tab-new", name: "New", icon: "x", order: 0, pinned: false, createdAt: 1 }],
+        panes: [{
+          id: "pane-1", tabId: "tab-new", paneType: "automation",
+          config: { ruleId: "rule-deleted" }, x: 0, y: 0, w: 6, h: 4, createdAt: 1,
+        }],
+      }, 1);
+      expect(res.status).toBe(200);
+
+      expect(db.prepare("SELECT automation_id FROM automation_tab_assignments").all()).toEqual([]);
+    });
+
     it("requires If-Match for a layout write", async () => {
       const res = await request(app, "PUT", "/api/layout", { tabs: [], panes: [] }, null);
       expect(res.status).toBe(428);
