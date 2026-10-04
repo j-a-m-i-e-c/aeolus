@@ -5,7 +5,15 @@ WORKDIR /app
 ARG BUILD_COMMIT=unknown
 ARG BUILD_DATE=unknown
 
-RUN apt-get update && apt-get install -y python3 make g++ && rm -rf /var/lib/apt/lists/*
+# --no-install-recommends matters here, not just in the production stage below.
+# apt installs the Recommends tier by default and resolves it recursively, so
+# asking for three packages pulled in ~90 — including X11 and image libraries
+# that have nothing to do with compiling isolated-vm, better-sqlite3 or bcrypt.
+# On an arm64 Pi that download was the single slowest step of a deploy. What
+# node-gyp actually needs arrives through Depends (g++ → g++-12 → gcc-12,
+# libstdc++-12-dev), which this flag does not touch.
+RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY package.json package-lock.json ./
 RUN npm ci

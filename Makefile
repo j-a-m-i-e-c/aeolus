@@ -24,16 +24,27 @@ HOSTED_DEMO_BUILD_COMPOSE := --project-directory . -f demo/compose/hosted-runtim
 # ─── Production / hosted release ─────────────────────────────────────────────
 
 # BUILD_COMMIT/BUILD_DATE are build args consumed by the `backend` build in
-# docker-compose.yml, so they must be set on the command that BUILDS (`up --build`),
-# not on `down`. They are also resolved after `git pull`, so the stamp records the
-# commit actually being deployed rather than the one that was checked out before.
+# docker-compose.yml, so they must be set on the command that BUILDS, not on
+# `down` or a plain `up`. They are also resolved after `git pull`, so the stamp
+# records the commit actually being deployed rather than the one that was
+# checked out before.
+#
+# Build BEFORE stopping anything. The images are built from the pulled commit
+# while the previous stack keeps serving, so the site is down for the container
+# swap rather than for the whole build — which on a Pi is minutes, not seconds.
+#
+# Only images are pruned here. `docker builder prune` used to run on every
+# deploy, which emptied the build cache and made each deploy recompile layers
+# that had not changed, apt included. Reclaiming build cache is a deliberate
+# occasional act: see `make clean`.
 deploy: ## Pull latest, rebuild, and deploy the BASE stack (run on Pi)
 	@test -z "$$(git status --porcelain)" || { echo "Refusing deploy: working tree has local changes"; exit 1; }
-	git pull --ff-only && \
-	docker compose down && \
+	git pull --ff-only
 	BUILD_COMMIT=$$(git rev-parse --short HEAD) BUILD_DATE=$$(git log -1 --format=%cI HEAD) \
-	docker compose up -d --build && \
-	docker builder prune -f && docker image prune -f
+	docker compose build
+	docker compose down
+	docker compose up -d
+	docker image prune -f
 
 deploy-demo: ## Deploy hardened public demo FROM THIS PC (no compilation on Lightsail)
 	./demo/operations/deploy/deploy-from-pc.sh
@@ -76,8 +87,13 @@ logs-backend: ## Tail backend logs only
 status: ## Show running containers
 	docker compose ps
 
-clean: ## Remove unused Docker images and build cache (does NOT touch volumes/data)
-	docker builder prune -f && docker image prune -a -f
+clean: ## Reclaim Docker disk space, keeping a bounded build cache (does NOT touch volumes/data)
+	@# Bounded rather than total: --max-used-space evicts oldest-first down to the
+	@# limit instead of emptying the cache, so the next build still reuses the
+	@# layers that have not changed. Docker 28 renamed the old --keep-storage flag,
+	@# so fall back to an unbounded prune on older daemons.
+	docker builder prune -f --max-used-space 3GB || docker builder prune -f
+	docker image prune -a -f
 
 # ─── Development ──────────────────────────────────────────────────────────────
 
