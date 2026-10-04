@@ -146,27 +146,44 @@ export function AutomationsPage() {
   useEffect(() => {
     if (!automationSequence || automationSequence <= handledAutomationSequence.current) return;
     const state = useConfigurationInvalidationStore.getState();
-    const change = Object.values(state.automationById).find((candidate) => candidate.sequence === automationSequence);
-    if (!change) return;
+
+    // Process every retained change newer than the high-water mark, oldest
+    // first. React can batch several invalidations before this effect runs, and
+    // reading only the one matching the latest sequence would skip a change to
+    // the automation being edited whenever a change to a different automation
+    // happened to follow it — the editor would then get no conflict notice until
+    // its save was refused.
+    const pending = Object.values(state.automationById)
+      .filter((candidate) => candidate.sequence > handledAutomationSequence.current)
+      .sort((a, b) => a.sequence - b.sequence);
     handledAutomationSequence.current = automationSequence;
 
-    // Consume this editor's one expected echo even if the save already closed the
-    // editor. A later client cannot then reuse the same id to hide a remote change.
-    if (change.mutationId && localMutationIds.current.delete(change.mutationId)) return;
+    let refetchList = false;
+    let editorNotice: string | null = null;
 
-    if (!editingRuleId || change.id !== editingRuleId) {
-      void fetchRules();
-      return;
+    for (const change of pending) {
+      // Consume this editor's one expected echo even if the save already closed
+      // the editor. A later client cannot then reuse the same id to hide a
+      // remote change.
+      if (change.mutationId && localMutationIds.current.delete(change.mutationId)) continue;
+
+      if (!editingRuleId || change.id !== editingRuleId) {
+        refetchList = true;
+        continue;
+      }
+      if (change.deleted) {
+        editorNotice = "This automation was deleted in another browser. Your local draft is retained.";
+        continue;
+      }
+      if (change.revision != null && serverRevisionAtOpen.current != null && change.revision > serverRevisionAtOpen.current) {
+        editorNotice = "This automation changed in another browser. Your local draft is retained; reload and reconcile before saving.";
+        continue;
+      }
+      refetchList = true;
     }
-    if (change.deleted) {
-      setProjectLoadError("This automation was deleted in another browser. Your local draft is retained.");
-      return;
-    }
-    if (change.revision != null && serverRevisionAtOpen.current != null && change.revision > serverRevisionAtOpen.current) {
-      setProjectLoadError("This automation changed in another browser. Your local draft is retained; reload and reconcile before saving.");
-      return;
-    }
-    void fetchRules();
+
+    if (editorNotice) setProjectLoadError(editorNotice);
+    if (refetchList) void fetchRules();
   }, [automationSequence, editingRuleId, fetchRules]);
 
   useEffect(() => {

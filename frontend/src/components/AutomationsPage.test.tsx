@@ -172,6 +172,33 @@ describe("AutomationsPage", () => {
     });
   });
 
+  it("notices a change to the open editor even when a later invalidation batches with it", async () => {
+    // Two invalidations can land in one React batch: the edited automation at
+    // sequence N and an unrelated one at N+1. Reading only the latest sequence
+    // would leave the editor unaware until its save was refused.
+    mockAuthFetch.mockImplementation((url: string) => {
+      if (url.endsWith("/api/automations/r2/project")) {
+        return Promise.resolve(jsonResponse({
+          automationId: "r2", revision: 4, files: [], logicEntry: "logic/index.ts", uiEntry: null,
+        }));
+      }
+      return Promise.resolve(jsonResponse(RULES));
+    });
+
+    render(<AutomationsPage />);
+    await screen.findByText("Script Rule");
+    fireEvent.click(screen.getByText("Script Rule"));
+    await screen.findByRole("heading", { name: "Edit Automation" });
+
+    act(() => {
+      const store = useConfigurationInvalidationStore.getState();
+      store.noteAutomation({ id: "r2", revision: 5, deleted: false, mutationId: "bob-edits-r2" });
+      store.noteAutomation({ id: "r1", revision: 2, deleted: false, mutationId: "bob-edits-r1" });
+    });
+
+    expect(await screen.findByText(/changed in another browser/i)).toBeInTheDocument();
+  });
+
   it("shows the empty state when there are no rules", async () => {
     mockAuthFetch.mockResolvedValue(jsonResponse([]));
     render(<AutomationsPage />);
