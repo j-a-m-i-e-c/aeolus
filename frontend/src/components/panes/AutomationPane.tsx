@@ -80,6 +80,8 @@ export function AutomationPane({ config, paneId }: Props) {
   );
   const reconcileSequence = useConfigurationInvalidationStore((state) => state.reconcileSequence);
   const localMutationIds = useRef(new Set<string>());
+  /** Newest invalidation already acted on; see the effect that reads it. */
+  const handledInvalidationSequence = useRef(0);
 
   // Custom-UI interactivity is gated by the tab's RBAC level: a visitor holding
   // only `read` on the pane's tab (e.g. a look-only public-demo tab) gets a
@@ -179,7 +181,12 @@ export function AutomationPane({ config, paneId }: Props) {
   useEffect(() => {
     const change = automationInvalidation;
     if (!ruleId || !change) return;
-    if (localMutationIds.current.has(change.mutationId ?? "")) return;
+    // This effect also re-runs on a mode change, so without a high-water mark
+    // entering the editor would replay the current invalidation as a conflict
+    // against source the editor had just loaded.
+    if (change.sequence <= handledInvalidationSequence.current) return;
+    handledInvalidationSequence.current = change.sequence;
+    if (change.mutationId && localMutationIds.current.delete(change.mutationId)) return;
     if (mode === "editing") {
       if (change.deleted) {
         setErrors([{ line: 0, column: 0, message: "This automation was deleted in another browser. Your local draft is retained." }]);
@@ -192,10 +199,23 @@ export function AutomationPane({ config, paneId }: Props) {
   }, [automationInvalidation, ruleId, mode, fetchRule]);
 
   useEffect(() => {
-    if (!ruleId || mode !== "editing") return;
+    if (!reconcileSequence || !ruleId) return;
+
+    // Passive panes may have missed a rename/delete while the socket was down.
+    // Re-read them at every authenticated snapshot. Active editors keep their
+    // local source and only compare the server revision.
+    if (mode !== "editing") {
+      void fetchRule();
+      return;
+    }
+
     void (async () => {
       try {
         const response = await authFetch(`${API_URL}/api/automations/${ruleId}/project`);
+        if (response.status === 404) {
+          setErrors([{ line: 0, column: 0, message: "This automation was deleted or is no longer available. Your local draft is retained." }]);
+          return;
+        }
         if (!response.ok) return;
         const latest = await response.json() as { revision?: number };
         if (Number.isInteger(latest.revision) && serverRevisionAtOpen.current != null && latest.revision! > serverRevisionAtOpen.current) {
@@ -203,7 +223,7 @@ export function AutomationPane({ config, paneId }: Props) {
         }
       } catch {}
     })();
-  }, [reconcileSequence, ruleId, mode]);
+  }, [reconcileSequence, ruleId, mode, fetchRule]);
 
   // Fetch initial last fired timestamp
   const fetchLastFired = useCallback(async () => {

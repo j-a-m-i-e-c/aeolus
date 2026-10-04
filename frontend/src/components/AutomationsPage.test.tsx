@@ -6,7 +6,7 @@
 // framer-motion are mocked so the logic runs in jsdom.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 
 const { mockAuthFetch } = vi.hoisted(() => ({ mockAuthFetch: vi.fn() }));
 vi.mock("../lib/auth-fetch", () => ({ authFetch: mockAuthFetch }));
@@ -53,6 +53,7 @@ import { AutomationsPage } from "./AutomationsPage";
 import { useAuthStore } from "../store/auth-store";
 import { usePermissionsStore } from "../store/permissions-store";
 import { useDashboardStore } from "../store/dashboard-store";
+import { useConfigurationInvalidationStore } from "../store/configuration-invalidation-store";
 
 const RULES = [
   // Legacy form rule with a non-device action: no acknowledgement level applies.
@@ -102,6 +103,9 @@ describe("AutomationsPage", () => {
     });
     usePermissionsStore.setState({ accessibleTabs: [], loaded: true });
     useDashboardStore.setState({ tabs: [] });
+    useConfigurationInvalidationStore.setState({
+      automationById: {}, automationSequence: 0, reconcileSequence: 0,
+    });
   });
 
   it("fetches and renders existing rules on mount", async () => {
@@ -109,6 +113,63 @@ describe("AutomationsPage", () => {
     expect(await screen.findByText("Form Rule")).toBeInTheDocument();
     expect(screen.getByText("Script Rule")).toBeInTheDocument();
     expect(mockAuthFetch).toHaveBeenCalledWith("http://test.local:3001/api/automations");
+  });
+
+
+  it("refetches the passive automation list at a reconnect reconciliation boundary", async () => {
+    let currentRules = RULES;
+    mockAuthFetch.mockImplementation((url: string) => {
+      if (url.endsWith("/api/automations/r2/project")) {
+        return Promise.resolve(jsonResponse({ automationId: "r2", revision: 1, files: [], logicEntry: "logic/index.ts", uiEntry: null }));
+      }
+      return Promise.resolve(jsonResponse(currentRules));
+    });
+
+    render(<AutomationsPage />);
+    await screen.findByText("Script Rule");
+    currentRules = RULES.map((rule) => rule.id === "r2" ? { ...rule, name: "Script Rule Renamed" } : rule);
+
+    act(() => useConfigurationInvalidationStore.getState().noteReconcile());
+    expect(await screen.findByText("Script Rule Renamed")).toBeInTheDocument();
+  });
+
+  it("surfaces an automation that disappeared while an editor was disconnected", async () => {
+    render(<AutomationsPage />);
+    await screen.findByText("Script Rule");
+    fireEvent.click(screen.getByText("Script Rule"));
+    await screen.findByRole("heading", { name: "Edit Automation" });
+
+    const normalReads = mockAuthFetch.getMockImplementation()!;
+    mockAuthFetch.mockImplementation((url: string, init?: RequestInit) => {
+      if (!init?.method && url.endsWith("/api/automations/r2/project")) {
+        return Promise.resolve(jsonResponse({ error: "not found" }, 404));
+      }
+      return normalReads(url, init);
+    });
+
+    act(() => useConfigurationInvalidationStore.getState().noteReconcile());
+    expect(await screen.findByText(/deleted or is no longer available/i)).toBeInTheDocument();
+  });
+
+
+  it("does not replay an older invalidation for the open editor when another automation changes", async () => {
+    render(<AutomationsPage />);
+    await screen.findByText("Script Rule");
+
+    act(() => useConfigurationInvalidationStore.getState().noteAutomation({
+      id: "r2", revision: 9, deleted: false, mutationId: "older-r2",
+    }));
+
+    fireEvent.click(screen.getByText("Script Rule"));
+    await screen.findByRole("heading", { name: "Edit Automation" });
+
+    act(() => useConfigurationInvalidationStore.getState().noteAutomation({
+      id: "r1", revision: 2, deleted: false, mutationId: "newer-r1",
+    }));
+
+    await waitFor(() => {
+      expect(screen.queryByText(/changed in another browser/i)).not.toBeInTheDocument();
+    });
   });
 
   it("shows the empty state when there are no rules", async () => {

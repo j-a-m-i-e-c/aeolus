@@ -7,7 +7,7 @@
 // runs in jsdom.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import type { PaneConfig } from "../../types/dashboard";
 
 const { mockAuthFetch } = vi.hoisted(() => ({ mockAuthFetch: vi.fn() }));
@@ -73,6 +73,7 @@ vi.mock("../../store/automation-state-store", () => {
 });
 
 import { AutomationPane } from "./AutomationPane";
+import { useConfigurationInvalidationStore } from "../../store/configuration-invalidation-store";
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status });
@@ -113,6 +114,9 @@ describe("AutomationPane — setup mode", () => {
   beforeEach(() => {
     mockAuthFetch.mockReset();
     updatePaneConfig.mockClear();
+    useConfigurationInvalidationStore.setState({
+      automationById: {}, automationSequence: 0, reconcileSequence: 0,
+    });
   });
 
   it("renders a project editor and a disabled Save Automation button", async () => {
@@ -161,6 +165,9 @@ describe("AutomationPane — status mode", () => {
   beforeEach(() => {
     mockAuthFetch.mockReset();
     updatePaneConfig.mockClear();
+    useConfigurationInvalidationStore.setState({
+      automationById: {}, automationSequence: 0, reconcileSequence: 0,
+    });
   });
 
   it("loads the rule and shows its trigger + activity feed (no ui/structured)", async () => {
@@ -170,6 +177,66 @@ describe("AutomationPane — status mode", () => {
     expect(await screen.findByText("MQTT · a/b")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Edit" })).toBeInTheDocument();
     expect(screen.getByTestId("activity-feed")).toBeInTheDocument();
+  });
+
+
+  it("refetches a passive status pane at a reconnect reconciliation boundary", async () => {
+    let currentRule = RULE;
+    mockAuthFetch.mockImplementation((url: string) => {
+      if (url.endsWith("/api/automations")) return Promise.resolve(jsonResponse([currentRule]));
+      if (url.includes("/history")) return Promise.resolve(jsonResponse([]));
+      if (url.includes("/state")) return Promise.resolve(jsonResponse({}));
+      return Promise.resolve(jsonResponse({}));
+    });
+
+    render(<AutomationPane config={{ ruleId: "r1" } as unknown as PaneConfig} />);
+    await screen.findByText("MQTT · a/b");
+    currentRule = { ...RULE, topic: "renamed/topic" };
+
+    act(() => useConfigurationInvalidationStore.getState().noteReconcile());
+    expect(await screen.findByText("MQTT · renamed/topic")).toBeInTheDocument();
+  });
+
+  it("does not replay an invalidation that predates the editor being opened", async () => {
+    // The pane reloads its source when the editor opens, so an invalidation it
+    // already handled in status mode describes a change the editor has in hand.
+    // Replaying it on the mode change would report a conflict against itself.
+    routeStatus();
+    render(<AutomationPane config={{ ruleId: "r1" } as unknown as PaneConfig} paneId="p1" />);
+    await screen.findByText("MQTT · a/b");
+
+    act(() => useConfigurationInvalidationStore.getState().noteAutomation({
+      id: "r1", revision: 9, deleted: false, mutationId: "remote-earlier",
+    }));
+
+    // The pane refetches on the invalidation, so wait for it to settle before
+    // entering the editor.
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    await screen.findByTestId("project-editor");
+
+    await waitFor(() => {
+      expect(screen.queryByText(/changed in another browser/i)).not.toBeInTheDocument();
+    });
+  });
+
+  it("reports a missing automation after reconnect without discarding the open editor", async () => {
+    routeStatus();
+    render(<AutomationPane config={{ ruleId: "r1" } as unknown as PaneConfig} paneId="p1" />);
+    await screen.findByText("MQTT · a/b");
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    await screen.findByTestId("project-editor");
+
+    const normalReads = mockAuthFetch.getMockImplementation()!;
+    mockAuthFetch.mockImplementation((url: string, init?: RequestInit) => {
+      if (!init?.method && url.endsWith("/api/automations/r1/project")) {
+        return Promise.resolve(jsonResponse({ error: "not found" }, 404));
+      }
+      return normalReads(url, init);
+    });
+
+    act(() => useConfigurationInvalidationStore.getState().noteReconcile());
+    expect(await screen.findByText(/deleted or is no longer available/i)).toBeInTheDocument();
+    expect(screen.getByTestId("project-editor")).toBeInTheDocument();
   });
 
   it("toggles the rule via PATCH", async () => {

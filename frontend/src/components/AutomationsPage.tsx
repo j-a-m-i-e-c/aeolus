@@ -107,6 +107,15 @@ export function AutomationsPage() {
   // Editing state
   const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
   const serverRevisionAtOpen = useRef<number | null>(null);
+  /**
+   * The newest invalidation already acted on.
+   *
+   * The effect below also re-runs when the open editor changes, which would
+   * otherwise replay the current invalidation against the editor that just
+   * opened — reporting a remote change for something the editor loaded fresh a
+   * moment ago. Only a sequence newer than this one is new information.
+   */
+  const handledAutomationSequence = useRef(0);
   const automationSequence = useConfigurationInvalidationStore((state) => state.automationSequence);
   const reconcileSequence = useConfigurationInvalidationStore((state) => state.reconcileSequence);
   const localMutationIds = useRef(new Set<string>());
@@ -135,17 +144,25 @@ export function AutomationsPage() {
   }, [fetchRules]);
 
   useEffect(() => {
-    if (!editingRuleId) {
+    if (!automationSequence || automationSequence <= handledAutomationSequence.current) return;
+    const state = useConfigurationInvalidationStore.getState();
+    const change = Object.values(state.automationById).find((candidate) => candidate.sequence === automationSequence);
+    if (!change) return;
+    handledAutomationSequence.current = automationSequence;
+
+    // Consume this editor's one expected echo even if the save already closed the
+    // editor. A later client cannot then reuse the same id to hide a remote change.
+    if (change.mutationId && localMutationIds.current.delete(change.mutationId)) return;
+
+    if (!editingRuleId || change.id !== editingRuleId) {
       void fetchRules();
       return;
     }
-    const change = useConfigurationInvalidationStore.getState().automationById[editingRuleId];
-    if (change && localMutationIds.current.has(change.mutationId ?? "")) return;
-    if (change?.deleted) {
+    if (change.deleted) {
       setProjectLoadError("This automation was deleted in another browser. Your local draft is retained.");
       return;
     }
-    if (change?.revision != null && serverRevisionAtOpen.current != null && change.revision > serverRevisionAtOpen.current) {
+    if (change.revision != null && serverRevisionAtOpen.current != null && change.revision > serverRevisionAtOpen.current) {
       setProjectLoadError("This automation changed in another browser. Your local draft is retained; reload and reconcile before saving.");
       return;
     }
@@ -153,10 +170,21 @@ export function AutomationsPage() {
   }, [automationSequence, editingRuleId, fetchRules]);
 
   useEffect(() => {
+    if (!reconcileSequence) return;
+
+    // A WebSocket snapshot is a reconciliation boundary. Refresh the passive
+    // list even when no editor is open so renames/deletes missed during a
+    // disconnect cannot leave this page stale indefinitely.
+    void fetchRules();
+
     if (!editingRuleId || !showForm) return;
     void (async () => {
       try {
         const response = await authFetch(`${API_URL}/api/automations/${editingRuleId}/project`);
+        if (response.status === 404) {
+          setProjectLoadError("This automation was deleted or is no longer available. Your local draft is retained.");
+          return;
+        }
         if (!response.ok) return;
         const latest = await response.json() as { revision?: number };
         if (Number.isInteger(latest.revision) && serverRevisionAtOpen.current != null && latest.revision! > serverRevisionAtOpen.current) {
@@ -164,7 +192,7 @@ export function AutomationsPage() {
         }
       } catch {}
     })();
-  }, [reconcileSequence, editingRuleId, showForm]);
+  }, [reconcileSequence, editingRuleId, showForm, fetchRules]);
 
   const resetAuthoring = () => {
     setScriptName("");

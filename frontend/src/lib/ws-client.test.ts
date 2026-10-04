@@ -162,6 +162,11 @@ describe("ws-client", () => {
     rememberLocalMutation("mine");
     latest().message({ type: "configuration-invalidated", data: { resource: "layout", revision: 5, mutationId: "mine" } });
     expect(configMocks.handleRemoteLayoutRevision).toHaveBeenCalledTimes(1);
+
+    // A mutation id suppresses exactly one expected echo. Reusing an observed id
+    // later must not make a genuinely remote change disappear.
+    latest().message({ type: "configuration-invalidated", data: { resource: "layout", revision: 6, mutationId: "mine" } });
+    expect(configMocks.handleRemoteLayoutRevision).toHaveBeenLastCalledWith(6);
   });
 
   it("ignores malformed messages without throwing", () => {

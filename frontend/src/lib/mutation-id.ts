@@ -28,8 +28,12 @@ export function rememberLocalMutation(id: string): void {
   }
 }
 
-export function isLocalMutation(id: unknown): boolean {
-  return typeof id === "string" && recentLocalMutationSet.has(id);
+export function consumeLocalMutation(id: unknown): boolean {
+  if (typeof id !== "string" || !recentLocalMutationSet.has(id)) return false;
+  recentLocalMutationSet.delete(id);
+  const index = recentLocalMutationIds.indexOf(id);
+  if (index >= 0) recentLocalMutationIds.splice(index, 1);
+  return true;
 }
 
 /** Test-only reset; intentionally not used by production code. */

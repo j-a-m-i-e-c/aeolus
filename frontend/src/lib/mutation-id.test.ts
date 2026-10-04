@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   clearRememberedMutations,
   createMutationId,
-  isLocalMutation,
+  consumeLocalMutation,
   rememberLocalMutation,
 } from "./mutation-id";
 
@@ -27,19 +27,31 @@ describe("mutation-id", () => {
     vi.restoreAllMocks();
   });
 
+  it("falls back when crypto exists but carries no randomUUID", () => {
+    // Non-secure contexts and older browsers expose crypto without randomUUID,
+    // which is why the guard checks the method rather than just the object.
+    vi.stubGlobal("crypto", {});
+    vi.spyOn(Date, "now").mockReturnValue(5678);
+    expect(createMutationId()).toBe("mutation-5678-1");
+    vi.restoreAllMocks();
+  });
+
   it("remembers local mutations and bounds the history", () => {
     for (let i = 0; i < 129; i += 1) rememberLocalMutation(`m-${i}`);
-    expect(isLocalMutation("m-0")).toBe(false);
-    expect(isLocalMutation("m-1")).toBe(true);
-    expect(isLocalMutation("m-128")).toBe(true);
-    expect(isLocalMutation(null)).toBe(false);
+    expect(consumeLocalMutation("m-0")).toBe(false);
+    expect(consumeLocalMutation("m-1")).toBe(true);
+    expect(consumeLocalMutation("m-1")).toBe(false);
+    expect(consumeLocalMutation("m-128")).toBe(true);
+    expect(consumeLocalMutation(null)).toBe(false);
   });
 
   it("does not duplicate remembered ids and can reset", () => {
     rememberLocalMutation("same");
     rememberLocalMutation("same");
-    expect(isLocalMutation("same")).toBe(true);
+    expect(consumeLocalMutation("same")).toBe(true);
+    expect(consumeLocalMutation("same")).toBe(false);
+    rememberLocalMutation("again");
     clearRememberedMutations();
-    expect(isLocalMutation("same")).toBe(false);
+    expect(consumeLocalMutation("again")).toBe(false);
   });
 });

@@ -7,7 +7,7 @@ import { useDataStoreStore } from "../store/data-store-store";
 import { useAuthStore } from "../store/auth-store";
 import { useDashboardStore } from "../store/dashboard-store";
 import { useConfigurationInvalidationStore } from "../store/configuration-invalidation-store";
-import { isLocalMutation } from "./mutation-id";
+import { consumeLocalMutation } from "./mutation-id";
 import { WS_URL } from "./env";
 
 const RECONNECT_DELAY = 3000;
@@ -75,7 +75,7 @@ export function connectWebSocket(): void {
       } else if (msg.type === "configuration-invalidated") {
         const data = msg.data ?? {};
         if (data.resource === "layout" && Number.isInteger(data.revision)) {
-          if (!isLocalMutation(data.mutationId)) {
+          if (!consumeLocalMutation(data.mutationId)) {
             useDashboardStore.getState().handleRemoteLayoutRevision(data.revision);
           }
         } else if (data.resource === "automation" && typeof data.id === "string") {
