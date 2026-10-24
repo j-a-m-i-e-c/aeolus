@@ -61,7 +61,9 @@ export function TabLayout({ tabId }: TabLayoutProps) {
   }, []);
 
   const isMobile = containerWidth < 768;
-  const canArrangeLayout = !CAPTURE_MODE && (isAdmin || PUBLIC_DEMO) && !isMobile;
+  // Deliberately NOT gated on capture mode: hiding the scenario blocks changes how
+  // much room each pane needs, so capture mode is exactly where panes get sized.
+  const canArrangeLayout = (isAdmin || PUBLIC_DEMO) && !isMobile;
 
   const tabPanes = useMemo(
     () => panes.filter((p) => p.tabId === tabId),

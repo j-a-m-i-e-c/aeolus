@@ -107,9 +107,12 @@ local showcase (`make showcase`) and append `?capture=1` to the frontend URL.
 
 Capture mode hides exactly two things:
 
-- dashboard arranging chrome: New Automation, Browse Panes, pane settings and
-  removal buttons, resize handles, and the sidebar's Add Tab, rename, reorder and
-  delete controls. Dragging and resizing panes is disabled too;
+- dashboard editing buttons: New Automation, Browse Panes, pane settings and
+  removal buttons, and the sidebar's Add Tab, rename, reorder and delete controls.
+  Panes can still be dragged and resized, so you can size them for the shot with
+  the scenario blocks already gone. `make showcase-seed` puts the showcase sizes
+  back afterwards; don't run `make showcase-capture-layout` while panes are sized
+  for a capture, or those sizes become the default;
 - showcase controls marked `data-aeolus-demo-scenario`, which exist only to inject
   simulated outside-world conditions.
 

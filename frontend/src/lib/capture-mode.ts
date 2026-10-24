@@ -6,7 +6,9 @@
 // visible URL while the choice remains in sessionStorage for same-tab navigation.
 //
 // It hides exactly two things, and should stay that small:
-//   1. dashboard arranging chrome (TabLayout, Sidebar tab editing), and
+//   1. dashboard editing buttons (TabLayout toolbar and pane buttons, Sidebar tab
+//      editing). Drag and resize stay enabled: panes are sized in this mode, and
+//      their handles are near-invisible on the dark theme anyway; and
 //   2. seeded DEMO SCENARIO stimulus controls inside project UIs, which carry
 //      `data-aeolus-demo-scenario` and are hidden by a rule in index.css.
 // Public-demo notices are deliberately NOT handled: the hosted demo is not a
