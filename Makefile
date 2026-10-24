@@ -33,6 +33,10 @@ HOSTED_DEMO_BUILD_COMPOSE := --project-directory . -f demo/compose/hosted-runtim
 # while the previous stack keeps serving, so the site is down for the container
 # swap rather than for the whole build — which on a Pi is minutes, not seconds.
 #
+# `down --remove-orphans` because this recipe names only the base compose file. A
+# simulator started by `make showcase` is not in it, so a plain `down` would leave
+# it running and publishing fake devices into the real broker after the deploy.
+#
 # Only images are pruned here. `docker builder prune` used to run on every
 # deploy, which emptied the build cache and made each deploy recompile layers
 # that had not changed, apt included. Reclaiming build cache is a deliberate
@@ -42,7 +46,7 @@ deploy: ## Pull latest, rebuild, and deploy the BASE stack (run on Pi)
 	git pull --ff-only
 	BUILD_COMMIT=$$(git rev-parse --short HEAD) BUILD_DATE=$$(git log -1 --format=%cI HEAD) \
 	docker compose build
-	docker compose down
+	docker compose down --remove-orphans
 	docker compose up -d
 	docker image prune -f
 
@@ -61,7 +65,7 @@ public-demo-up: ## Start hardened public-demo stack using already-built/pulled i
 
 public-demo-seed: ## Seed hardened public demo on this host. Usage: make public-demo-seed PASS=... [USER=admin]
 	@if [ -z "$(PASS)" ]; then echo "Error: PASS is required"; exit 1; fi
-	docker compose $(HOSTED_DEMO_COMPOSE) --profile seed run --rm -e SEED_USER="$(USER)" -e SEED_PASS="$(PASS)" seed
+	docker compose $(HOSTED_DEMO_COMPOSE) --profile seed run --rm -e SEED_USER="$(USER)" -e SEED_PASS="$(PASS)" -e SEED_FORCE="$(FORCE)" seed
 
 public-demo-golden: ## Create verified immutable golden snapshot (run on demo host)
 	./demo/operations/create-golden.sh
@@ -97,7 +101,7 @@ clean: ## Reclaim Docker disk space, keeping a bounded build cache (does NOT tou
 
 # ─── Development ──────────────────────────────────────────────────────────────
 
-showcase: ## Start real Aeolus + simulated hardware + showcase content (no visitor restrictions)
+showcase: ## Start Aeolus + simulated hardware + showcase content. Use a separate machine, not a real install
 	docker compose $(LOCAL_SHOWCASE_COMPOSE) up -d --build
 	@echo ""
 	@echo "✅ Aeolus + Showcase is up: full unrestricted app with simulated hardware."
@@ -146,22 +150,22 @@ seed-image: ## Ensure the Node image the seeder runs in is present locally
 		}; \
 	fi
 
-seed: ## Seed demo data via Docker, no host Node needed (usage: make seed PASS=yourpass [USER=admin])
+seed: ## Seed showcase demo data via Docker; refuses on an install with your own content (usage: make seed PASS=yourpass [USER=admin] [FORCE=1])
 	@if [ -z "$(PASS)" ]; then \
 		echo "Error: PASS is required.  Usage: make seed PASS=<admin-password> [USER=admin]"; \
 		exit 1; \
 	fi
 	@$(MAKE) --no-print-directory seed-image
-	docker compose --profile seed run --rm -e SEED_USER="$(USER)" -e SEED_PASS="$(PASS)" seed
+	docker compose --profile seed run --rm -e SEED_USER="$(USER)" -e SEED_PASS="$(PASS)" -e SEED_FORCE="$(FORCE)" seed
 
-showcase-seed: ## Seed the showcase (needs make showcase running). Usage: make showcase-seed PASS=yourpass [USER=admin]
+showcase-seed: ## Seed the showcase (needs make showcase running). Usage: make showcase-seed PASS=yourpass [USER=admin] [FORCE=1]
 	@if [ -z "$(PASS)" ]; then \
 		echo "Error: PASS is required.  Usage: make showcase-seed PASS=<admin-password> [USER=admin]"; \
 		exit 1; \
 	fi
 	@$(MAKE) --no-print-directory seed-image
 	@$(MAKE) --no-print-directory simulator-republish COMPOSE="$(LOCAL_SHOWCASE_COMPOSE)"
-	docker compose $(LOCAL_SHOWCASE_COMPOSE) --profile seed run --rm -e SEED_USER="$(USER)" -e SEED_PASS="$(PASS)" seed
+	docker compose $(LOCAL_SHOWCASE_COMPOSE) --profile seed run --rm -e SEED_USER="$(USER)" -e SEED_PASS="$(PASS)" -e SEED_FORCE="$(FORCE)" seed
 
 showcase-capture-layout: ## Capture the hand-arranged showcase layout into source (needs make showcase running). Usage: make showcase-capture-layout PASS=yourpass [USER=admin]
 	@if [ -z "$(PASS)" ]; then \
@@ -195,7 +199,7 @@ public-demo-local-seed: ## Seed the local public demo, incl. the demo identity (
 	fi
 	@$(MAKE) --no-print-directory seed-image
 	@$(MAKE) --no-print-directory simulator-republish COMPOSE="$(LOCAL_PUBLIC_DEMO_COMPOSE)"
-	docker compose $(LOCAL_PUBLIC_DEMO_COMPOSE) --profile seed run --rm -e SEED_USER="$(USER)" -e SEED_PASS="$(PASS)" seed
+	docker compose $(LOCAL_PUBLIC_DEMO_COMPOSE) --profile seed run --rm -e SEED_USER="$(USER)" -e SEED_PASS="$(PASS)" -e SEED_FORCE="$(FORCE)" seed
 
 # Make the simulator republish before seeding, so the command-profile step is
 # deterministic rather than a 30s gamble.

@@ -24,6 +24,12 @@ restrictions plus host hardening. See the hosted runbook below.
 The full application with simulated hardware. Normal login, normal admin, normal
 authoring — this is what you want on a Pi while developing or reviewing the showcase.
 
+> **Use a separate machine or a fresh install, not your real one.** There is no
+> command that removes the showcase again, and the simulator publishes retained fake
+> devices into the broker. The seeder refuses an install that has never been seeded
+> and already has automations or custom tabs of its own; `FORCE=1` overrides that,
+> after a backup. `make deploy` stops a leftover simulator (`--remove-orphans`).
+
 Compose definition: [`compose/local-showcase.yml`](compose/local-showcase.yml), an
 **overlay** on the normal root [`../docker-compose.yml`](../docker-compose.yml):
 
@@ -147,7 +153,7 @@ The seeder owns exactly what it declares and nothing else:
 
 **The ledger.** Automations get server-generated ids and carry no ownership column, so nothing on the row connects it back to the `farm-water` key in `seed/tabs/`. The seeder therefore records `module key → rule id` in the Shared Automation State bucket `_showcase:seed-ledger` as each automation is created. It is visible in the Shared Automation State explorer, so you can read exactly what the showcase claims without enabling historical Collections.
 
-**One-time adoption.** On an install seeded before the ledger existed there is nothing but the display name to go on, so the first ledger-aware reseed adopts automations whose name exactly matches one the showcase declares, and prints each one. After that, matching is by id only. The single exposure is an automation of yours named exactly e.g. `Water Management` on a pre-ledger install.
+**One-time adoption.** On an install seeded before the ledger existed there is nothing but the display name to go on, so the first ledger-aware reseed adopts automations whose name exactly matches one the showcase declares, and prints each one. After that, matching is by id only. The single exposure is an automation of yours named exactly e.g. `Water Management` on a pre-ledger install, and the real-install guard narrows that further: any automation or custom tab the showcase does not declare stops the seed before adoption runs, unless `FORCE=1`.
 
 **What still wipes everything.** `make reset` and `docker compose down -v`, deliberately. Those are full resets, not reseeds.
 

@@ -38,6 +38,7 @@ import {
   provisionDemoIdentity,
   waitForBackend,
   backendPublicDemoEnabled,
+  inspectSeedTarget,
 } from "./lib.mjs";
 import { tabModules } from "./tabs/index.mjs";
 import { sharedStateBuckets } from "./shared-state.mjs";
@@ -65,6 +66,8 @@ if (!PASS) {
 
 const WANT_PUBLIC_DEMO = process.env.AEOLUS_PUBLIC_DEMO === "true";
 const WANT_SIMULATOR = process.env.AEOLUS_SIMULATOR_BOOTSTRAP === "true";
+// Override for the real-install guard in step 0c. Set by `make ... FORCE=1`.
+const FORCE = ["1", "true", "yes"].includes(String(process.env.SEED_FORCE ?? "").toLowerCase());
 
 console.log(`\n🌬️  Seeding Aeolus multi-domain demo → ${API}\n`);
 
@@ -103,6 +106,42 @@ if (WANT_PUBLIC_DEMO) {
     process.exit(1);
   }
   console.log("  ✓ Backend confirms public-demo mode is live");
+}
+
+// 0c. Refuse to mix the showcase into someone's real install, before anything changes.
+// See findForeignContent in lib.mjs for exactly what counts.
+{
+  const foreign = await inspectSeedTarget(api, {
+    declaredNames: tabModules.flatMap((m) => m.automations).map((a) => a.name),
+    declaredTabIds: tabModules.map((m) => m.tab.id),
+  });
+  const found = foreign.automations.length + foreign.tabs.length;
+  if (found > 0) {
+    const list = (items) => items.slice(0, 5).join(", ") + (items.length > 5 ? `, … (${items.length - 5} more)` : "");
+    const lines = [];
+    if (foreign.automations.length) lines.push(`    · ${foreign.automations.length} automation(s): ${list(foreign.automations)}`);
+    if (foreign.tabs.length) lines.push(`    · ${foreign.tabs.length} dashboard tab(s): ${list(foreign.tabs)}`);
+
+    if (!FORCE) {
+      console.error("\n✗ This looks like a real Aeolus install, so the showcase was not seeded.");
+      console.error("  Nothing has been changed.\n");
+      console.error("  The showcase has never been seeded here, and the install already has");
+      console.error("  content of its own:");
+      for (const line of lines) console.error(line);
+      console.error(`
+  Seeding would add the showcase's automations, tabs and Data Store fixtures next
+  to that, and with \`make showcase\` a simulator publishing fake devices into this
+  broker. There is no command that removes them again, so the showcase belongs on
+  a separate machine or a fresh install.
+
+  If you do want it here, back up first (docs/production-deployment.md, section 5),
+  then rerun the same make command with FORCE=1.
+`);
+      process.exit(1);
+    }
+    console.warn("\n⚠ FORCE=1: seeding the showcase next to existing content:");
+    for (const line of lines) console.warn(line);
+  }
 }
 
 // 1. Enable historical Collections.

@@ -279,6 +279,68 @@ export async function recordShowcaseTabs(api, declaredTabIds, previousTabIds = [
   }
 }
 
+// ─── Real-install guard ──────────────────────────────────────────────────────
+
+/**
+ * Content on this install that the showcase did not create, if it has never been seeded.
+ *
+ * Seeding is careful about what it touches, but it cannot be undone: there is no command
+ * that removes the showcase's automations, tabs and fixtures again, and `make showcase`
+ * adds a simulator that publishes retained fake devices into the broker. So the seeder
+ * refuses to start on what looks like someone's real install, and this decides what that
+ * looks like: no ledger (the showcase has never lived here) AND automations or custom
+ * tabs the showcase does not declare.
+ *
+ * Deliberately not counted:
+ *   - devices: `make showcase-seed` makes the simulator publish BEFORE seeding, so a
+ *     legitimate first showcase seed always finds devices;
+ *   - pinned system tabs, which every install has;
+ *   - automations named exactly like a showcase one, so a pre-ledger showcase install
+ *     still reaches the one-time adoption pass in `reconcileShowcaseAutomations`.
+ *
+ * Once a ledger exists the showcase already lives here by someone's choice, and the
+ * reconcile rules (§12.1) protect everything else, so nothing is reported.
+ *
+ * @param {{ ledgerExisted: boolean, automations: {id?: string, name?: string}[],
+ *   tabs: {id?: string, name?: string, pinned?: boolean}[], declaredNames: Iterable<string>,
+ *   declaredTabIds: Iterable<string> }} input
+ * @returns {{ automations: string[], tabs: string[] }} display names of the foreign content
+ */
+export function findForeignContent({ ledgerExisted, automations, tabs, declaredNames, declaredTabIds }) {
+  if (ledgerExisted) return { automations: [], tabs: [] };
+  const names = new Set(declaredNames);
+  const tabIds = new Set(declaredTabIds);
+  return {
+    automations: automations
+      .filter((rule) => rule && !names.has(rule.name))
+      .map((rule) => String(rule.name ?? rule.id)),
+    tabs: tabs
+      .filter((tab) => tab && !tab.pinned && !tabIds.has(tab.id))
+      .map((tab) => String(tab.name ?? tab.id)),
+  };
+}
+
+/**
+ * Read this install and report anything that would make seeding it a mistake.
+ * Read-only: safe to call before anything has been changed.
+ *
+ * @param {(method: string, path: string, body?: unknown, opts?: object) => Promise<any>} api
+ * @param {{ declaredNames: Iterable<string>, declaredTabIds: Iterable<string> }} declared
+ */
+export async function inspectSeedTarget(api, { declaredNames, declaredTabIds }) {
+  const ledger = await readShowcaseLedger(api);
+  if (ledger.existed) return { automations: [], tabs: [] };
+  const automations = await api("GET", "/api/automations");
+  const layout = await api("GET", "/api/layout");
+  return findForeignContent({
+    ledgerExisted: false,
+    automations: Array.isArray(automations) ? automations : [],
+    tabs: Array.isArray(layout?.tabs) ? layout.tabs : [],
+    declaredNames,
+    declaredTabIds,
+  });
+}
+
 // ─── Reconcile ───────────────────────────────────────────────────────────────
 
 /**
