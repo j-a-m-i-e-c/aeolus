@@ -13,6 +13,7 @@ import { PaneConfigPanel } from "./PaneConfigPanel";
 import { motion } from "framer-motion";
 import { useTabPermission } from "../hooks/useTabPermission";
 import { PUBLIC_DEMO } from "../lib/env";
+import { CAPTURE_MODE } from "../lib/capture-mode";
 
 interface TabLayoutProps {
   tabId: string;
@@ -31,7 +32,7 @@ export function TabLayout({ tabId }: TabLayoutProps) {
   // Public-demo layout edits are deliberately browser-local: dashboard-store
   // suppresses persistence, so visitors can experience the real composition UI
   // without changing the shared showcase for anybody else.
-  const canEditLayout = isAdmin || PUBLIC_DEMO;
+  const canEditLayout = !CAPTURE_MODE && (isAdmin || PUBLIC_DEMO);
 
   // PanePicker visibility
   const [showPicker, setShowPicker] = useState(false);
@@ -60,7 +61,7 @@ export function TabLayout({ tabId }: TabLayoutProps) {
   }, []);
 
   const isMobile = containerWidth < 768;
-  const canArrangeLayout = (isAdmin || PUBLIC_DEMO) && !isMobile;
+  const canArrangeLayout = !CAPTURE_MODE && (isAdmin || PUBLIC_DEMO) && !isMobile;
 
   const tabPanes = useMemo(
     () => panes.filter((p) => p.tabId === tabId),

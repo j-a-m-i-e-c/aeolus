@@ -22,6 +22,8 @@ export interface SandboxHostProps {
   mode?: SandboxMode;
   /** When true, the frame's mutating SDK ops are neutralised (read-only tab). */
   readOnly?: boolean;
+  /** Presentation-only: hide showcase stimulus controls inside the frame. */
+  captureMode?: boolean;
   className?: string;
 }
 
@@ -32,6 +34,7 @@ export function SandboxHost({
   props,
   mode = "untrusted",
   readOnly = false,
+  captureMode = false,
   className,
 }: SandboxHostProps) {
   const { status, error, containerRef, sendPropsPatch } = useSandboxedComponent(
@@ -41,6 +44,7 @@ export function SandboxHost({
     props,
     mode,
     readOnly,
+    captureMode,
   );
 
   const [hostFallback, setHostFallback] = useState(false);

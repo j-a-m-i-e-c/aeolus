@@ -98,6 +98,11 @@ export interface RpcInit {
   moduleSource: string;
   /** Initial props payload (devices, ids, history, etc.). */
   props: PropsPayload;
+  /** Presentation-only host context. Never grants capabilities. */
+  presentation?: {
+    /** Hide showcase-only stimulus controls while capturing screenshots/GIFs. */
+    captureMode?: boolean;
+  };
 }
 
 /** Direction: frame → host handshake (only message sent via window.postMessage). */

@@ -5,10 +5,21 @@ import { render, screen, fireEvent } from "@testing-library/react";
 
 type AuthUser = { role: "admin" | "user" } | null;
 
-const h = vi.hoisted(() => ({ state: { user: null as AuthUser } }));
+const h = vi.hoisted(() => ({
+  state: { user: null as AuthUser },
+  flags: { publicDemo: false, captureMode: false },
+}));
 
 vi.mock("../store/auth-store", () => ({
   useAuthStore: (selector: (s: { user: AuthUser }) => unknown) => selector(h.state),
+}));
+
+vi.mock("../lib/env", () => ({
+  get PUBLIC_DEMO() { return h.flags.publicDemo; },
+}));
+
+vi.mock("../lib/capture-mode", () => ({
+  get CAPTURE_MODE() { return h.flags.captureMode; },
 }));
 
 vi.mock("./MqttSecurityPage", () => ({
@@ -28,6 +39,25 @@ import SecurityPage from "./SecurityPage";
 describe("SecurityPage", () => {
   beforeEach(() => {
     h.state.user = null;
+    h.flags.publicDemo = false;
+    h.flags.captureMode = false;
+  });
+
+  it("lets public-demo visitors in and explains that nothing can be saved", () => {
+    h.flags.publicDemo = true;
+    h.state.user = { role: "user" };
+    render(<SecurityPage />);
+    expect(screen.queryByText("Access denied — admin only")).not.toBeInTheDocument();
+    expect(screen.getByText(/Account, group and broker changes cannot be saved/)).toBeInTheDocument();
+  });
+
+  it("hides the public-demo explanation in media capture mode", () => {
+    h.flags.publicDemo = true;
+    h.flags.captureMode = true;
+    h.state.user = { role: "user" };
+    render(<SecurityPage />);
+    expect(screen.getByText("Security")).toBeInTheDocument();
+    expect(screen.queryByText(/cannot be saved/)).not.toBeInTheDocument();
   });
 
   it("denies access to non-admin users", () => {

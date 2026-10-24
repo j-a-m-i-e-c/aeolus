@@ -85,7 +85,7 @@ export default function WaterManagementDashboard({ model, actions }: {
 
       </div>
 
-      <div style={{ marginTop: 18, padding: 10, border: "1px dashed #6A5935", borderRadius: 10, background: "#17150D" }}>
+      <div data-aeolus-demo-scenario style={{ marginTop: 18, padding: 10, border: "1px dashed #6A5935", borderRadius: 10, background: "#17150D" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
           <div><div style={{ color: "#C8AA62", fontSize: 11, fontWeight: 850, letterSpacing: 1 }}>DEMO SCENARIO</div><div style={{ color: "#766D54", fontSize: 11, marginTop: 2 }}>Inject outside conditions into the simulated property. These controls belong to the demo, not the real operator UI.</div></div>
           {demoScenarioPending && <div style={{ color: "#D7B968", fontSize: 11 }}>INJECTING…</div>}

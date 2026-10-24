@@ -15,6 +15,7 @@ import {
   patchConnectorConfig,
 } from "../lib/api-client";
 import { useReadOnlyDemo } from "../hooks/useReadOnlyDemo";
+import { CAPTURE_MODE } from "../lib/capture-mode";
 
 // ---------------------------------------------------------------------------
 // Types (matching backend API response shapes)
@@ -616,7 +617,7 @@ export function ConnectorsPage() {
         </button>
       </div>
 
-      {readOnly && (
+      {readOnly && !CAPTURE_MODE && (
         <div className="flex items-start gap-3 rounded-xl border border-[#31506A] bg-[#0D1822] px-4 py-3">
           <icons.LockKeyhole size={17} className="mt-0.5 shrink-0 text-[#72B7E6]" />
           <div>
@@ -841,7 +842,7 @@ export function ConnectorsPage() {
                         <ConfigForm schema={connType.configSchema} values={configValues} onChange={setConfigValues} />
                       )}
 
-                      {readOnly && connType.metadata.requiresSetup && (
+                      {readOnly && !CAPTURE_MODE && connType.metadata.requiresSetup && (
                         <div className="rounded-lg border border-[#31506A] bg-[#0D1822] p-3 space-y-3">
                           <div className="space-y-1">
                             <div className="text-[10px] font-semibold uppercase tracking-wider text-[#8CC9F0]">Setup preview</div>

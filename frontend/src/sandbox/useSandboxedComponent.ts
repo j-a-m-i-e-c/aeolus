@@ -75,6 +75,7 @@ export function useSandboxedComponent(
   // eslint-disable-next-line @typescript-eslint/no-unused-vars -- threaded for Req 8/9; must NOT alter v1 isolation
   mode: SandboxMode = "untrusted",
   readOnly = false,
+  captureMode = false,
 ): UseSandboxedComponentResult {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [status, setStatus] = useState<SandboxStatus>(hasUiSource ? "loading" : "idle");
@@ -147,6 +148,7 @@ export function useSandboxedComponent(
         entityType,
         moduleSource: moduleSourceRef.current,
         props: propsRef.current,
+        presentation: { captureMode },
       };
       hostPort.postMessage(init);
 
@@ -231,7 +233,7 @@ export function useSandboxedComponent(
     // when the read-only grant flips (e.g. permissions resolve after first
     // render) so the broker grant reflects the correct capability. Live prop
     // updates flow through sendPropsPatch, not a frame rebuild.
-  }, [entityType, entityId, hasUiSource, readOnly]);
+  }, [entityType, entityId, hasUiSource, readOnly, captureMode]);
 
   const sendPropsPatch = useCallback((patch: Partial<PropsPayload>) => {
     const frameId = frameIdRef.current;

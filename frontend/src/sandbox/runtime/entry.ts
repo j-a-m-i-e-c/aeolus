@@ -80,6 +80,14 @@ async function handleInit(init: RpcInit): Promise<void> {
   }
 
   try {
+    // Showcase projects explicitly mark controls that exist only to inject simulated
+    // world conditions. Capture mode hides those blocks inside the opaque-origin
+    // frame without changing the authored operator UI or any runtime capability.
+    document.documentElement.toggleAttribute(
+      "data-aeolus-capture-mode",
+      init.presentation?.captureMode === true,
+    );
+
     const Component = await loadModule(init.moduleSource);
     const sdk = createSdkClient(port!, init.props);
     const root = createRoot(rootElement);

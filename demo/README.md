@@ -99,6 +99,32 @@ the simulated hardware is described in exactly one place.
 
 **What neither local stack exercises.** Both are different Compose files from the hosted runtime, so validating here says nothing about Cloudflare Tunnel ingress, the golden/active database split, the nightly reset timer or the hosted resource limits. Those are only covered by the hosted release runbook below.
 
+### Media capture mode
+
+For README, website and video capture, prefer the unrestricted local showcase
+(`make showcase`) and append `?capture=1` to the frontend URL. The same switch works
+on the hosted demo, but the hosted demo remains read-only and capability-restricted.
+Capture mode is presentation-only and is remembered in `sessionStorage` for the
+current browser tab. The `capture` parameter is a one-shot toggle: Aeolus consumes
+it and immediately removes it from the visible URL while preserving any other query
+parameters and the hash. Open the page with `?capture=0` to turn capture mode off;
+that flag is removed from the URL too.
+
+Capture mode hides:
+
+- the hosted public-demo banner and read-only explanatory notices;
+- dashboard layout authoring chrome such as New Automation, Browse Panes, Reset
+  layout, pane settings/removal buttons and resize handles, for admins as well as
+  public-demo visitors (dragging and resizing panes is disabled too);
+- showcase controls explicitly marked `data-aeolus-demo-scenario`, which exist only
+  to inject simulated outside-world conditions.
+
+It does **not** change authentication, permissions, device state, automation logic,
+command handling, data, or backend behaviour. Operator controls and command evidence
+remain real application UI. If a capture needs a hidden showcase stimulus, keep a
+second normal tab open and trigger the scenario there while recording the capture-mode
+tab.
+
 ### Showcase ownership
 
 Seeding is a reconcile, not a wipe. Rerun `make showcase-seed` as often as you like — you should never need `docker compose down -v` to seed again.

@@ -38,6 +38,7 @@ import { SharedStateExplorer } from "./SharedStateExplorer";
 import { SettingsPanel } from "./SettingsPanel";
 import { SetupWizard } from "./SetupWizard";
 import { useReadOnlyDemo } from "../../hooks/useReadOnlyDemo";
+import { CAPTURE_MODE } from "../../lib/capture-mode";
 
 type Tab = "collections" | "shared-state" | "storage";
 
@@ -93,7 +94,7 @@ export function DataExplorer() {
         </div>
       </div>
 
-      {readOnly && (
+      {readOnly && !CAPTURE_MODE && (
         <div className="flex items-start gap-3 rounded-xl border border-[#31506A] bg-[#0D1822] px-4 py-3">
           <LockKeyhole size={17} className="mt-0.5 shrink-0 text-[#72B7E6]" />
           <div>

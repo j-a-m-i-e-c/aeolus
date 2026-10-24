@@ -5,6 +5,7 @@ import { Settings, AlertTriangle, Check } from "lucide-react";
 import { useDataStoreStore } from "../../store/data-store-store";
 import { authFetch } from "../../lib/auth-fetch";
 import { useReadOnlyDemo } from "../../hooks/useReadOnlyDemo";
+import { CAPTURE_MODE } from "../../lib/capture-mode";
 
 const API_URL =
   import.meta.env.VITE_API_URL ||
@@ -83,7 +84,7 @@ export function SettingsPanel() {
         <p className="text-xs text-[#6B7785]">
           Set an overall disk budget, a per-collection record ceiling and a collection count. FIFO eviction removes the oldest time-series records as either limit fills.
         </p>
-        {readOnly && <p className="text-xs text-[#72B7E6]">Public demo: change the fields to explore the configuration. Nothing here can be saved.</p>}
+        {readOnly && !CAPTURE_MODE && <p className="text-xs text-[#72B7E6]">Public demo: change the fields to explore the configuration. Nothing here can be saved.</p>}
       </div>
 
       {/* Configuration form */}

@@ -37,6 +37,7 @@ import { useAutomationDraft } from "../../hooks/useAutomationDraft";
 import { putAutomationDraft, deleteAutomationDraft } from "../../lib/automation-drafts";
 import { AutomationDraftBanner } from "../AutomationDraftBanner";
 import { API_URL, PUBLIC_DEMO } from "../../lib/env";
+import { CAPTURE_MODE } from "../../lib/capture-mode";
 
 type PaneMode = "setup" | "status" | "editing";
 
@@ -666,7 +667,7 @@ export function AutomationPane({ config, paneId }: Props) {
   if (mode === "setup" || rule?.ruleType === "script") {
     return (
       <div className="h-full flex flex-col p-3 sm:p-4 gap-3 overflow-hidden">
-        {isPublicVisitor && (
+        {isPublicVisitor && !CAPTURE_MODE && (
           <div className="shrink-0 rounded-lg border border-[#3BA4FF]/25 bg-[#3BA4FF]/8 px-3 py-2 text-[10px] text-[#9AA6B2]">
             <span className="font-semibold text-[#5CE1E6]">{isDemoDraft ? "Demo draft" : "Shared demo"}</span>
             {isDemoDraft
@@ -683,7 +684,7 @@ export function AutomationPane({ config, paneId }: Props) {
                 {describeAutomationTrigger({ triggerType, topic: triggerTopic, cronExpression })}
               </div>
             </div>
-            <span className="rounded-full border border-[#2A3441] px-2 py-1 text-[9px] uppercase tracking-wider text-[#7E8A98]">Local edits only</span>
+            {!CAPTURE_MODE && <span className="rounded-full border border-[#2A3441] px-2 py-1 text-[9px] uppercase tracking-wider text-[#7E8A98]">Local edits only</span>}
           </div>
         ) : (
           <div className="shrink-0">
@@ -797,6 +798,7 @@ function DynamicCustomSection({
         hasUiSource={hasUiSource}
         props={propsPayload}
         readOnly={readOnly}
+        captureMode={CAPTURE_MODE}
         className="h-full w-full"
       />
     );

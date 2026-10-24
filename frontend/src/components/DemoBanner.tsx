@@ -12,9 +12,10 @@
 // ever does run a modified build.
 
 import { PUBLIC_DEMO } from "../lib/env";
+import { CAPTURE_MODE } from "../lib/capture-mode";
 
 export function DemoBanner() {
-  if (!PUBLIC_DEMO) return null;
+  if (!PUBLIC_DEMO || CAPTURE_MODE) return null;
 
   return (
     <div

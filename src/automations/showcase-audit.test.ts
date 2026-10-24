@@ -425,6 +425,9 @@ describe("showcase audit — every seeded tab", () => {
       // having nothing for an operator to press is the correct answer for them.
       if (!project.hasDemoActions) return;
       expect(project.ui, "has demo-only controls but no DEMO SCENARIO block").toContain("DEMO SCENARIO");
+      expect(project.ui, "demo-only controls are not marked for media capture mode").toContain(
+        "data-aeolus-demo-scenario",
+      );
     },
   );
 
