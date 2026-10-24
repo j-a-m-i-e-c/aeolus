@@ -10,8 +10,8 @@
 //   2. seeded DEMO SCENARIO stimulus controls inside project UIs, which carry
 //      `data-aeolus-demo-scenario` and are hidden by a rule in index.css.
 // Public-demo notices are deliberately NOT handled: the hosted demo is not a
-// supported place to create media. Canonical still screenshots belong to a
-// scripted capture, not to this mode.
+// supported place to create media. Still screenshots are taken by hand from the
+// same local showcase with this mode on.
 //
 // Only showcase builds (VITE_SHOWCASE) honour the flag; on a normal install it is
 // ignored and left in the URL untouched. It must never grant capabilities or
