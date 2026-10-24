@@ -1,14 +1,29 @@
-// frontend/src/lib/capture-mode.ts — presentation-only media capture mode.
+// frontend/src/lib/capture-mode.ts — presentation-only capture mode for the local showcase.
 //
-// `?capture=1` enables a clean presentation view for screenshots/GIFs in the
-// current browser tab. `?capture=0` disables it again. The query parameter is a
-// one-shot control flag: after Aeolus consumes it, the flag is removed from the
+// For hand-recorded GIFs and video of the live showcase. `?capture=1` turns it on
+// for the current browser tab and `?capture=0` turns it off. The query parameter is
+// a one-shot control flag: after Aeolus consumes it, the flag is removed from the
 // visible URL while the choice remains in sessionStorage for same-tab navigation.
 //
-// This flag must never grant capabilities or change backend behaviour. It only
-// suppresses demo/presentation chrome and demo-only stimulus controls.
+// It hides exactly two things, and should stay that small:
+//   1. dashboard arranging chrome (TabLayout, Sidebar tab editing), and
+//   2. seeded DEMO SCENARIO stimulus controls inside project UIs, which carry
+//      `data-aeolus-demo-scenario` and are hidden by a rule in index.css.
+// Public-demo notices are deliberately NOT handled: the hosted demo is not a
+// supported place to create media. Canonical still screenshots belong to a
+// scripted capture, not to this mode.
+//
+// Only showcase builds (VITE_SHOWCASE) honour the flag; on a normal install it is
+// ignored and left in the URL untouched. It must never grant capabilities or
+// change backend behaviour.
 
 const STORAGE_KEY = "aeolus:capture-mode";
+
+// Showcase build: set by demo/compose/local-showcase.yml, and so also by the
+// public-demo-local overlay that stacks on it. Read here rather than exported from
+// lib/env.ts because this is its only consumer, and adding it there would break
+// every test that mocks lib/env without it. Off unless VITE_SHOWCASE is exactly "true".
+const SHOWCASE = import.meta.env.VITE_SHOWCASE === "true";
 
 export interface CaptureModeStorage {
   getItem(key: string): string | null;
@@ -91,5 +106,6 @@ export function resolveBrowserCaptureMode(
 
 // Unguarded `window`, like lib/env.ts: this module only ever runs in the browser
 // app (and jsdom under test). The sandbox frame never imports it; it receives the
-// resolved value through RpcInit.presentation instead.
-export const CAPTURE_MODE = resolveBrowserCaptureMode();
+// resolved value through RpcInit.presentation instead. SHOWCASE is a build-time
+// constant, so on a normal build the whole resolution is dead code.
+export const CAPTURE_MODE = SHOWCASE && resolveBrowserCaptureMode();

@@ -7,7 +7,7 @@ type AuthUser = { role: "admin" | "user" } | null;
 
 const h = vi.hoisted(() => ({
   state: { user: null as AuthUser },
-  flags: { publicDemo: false, captureMode: false },
+  flags: { publicDemo: false },
 }));
 
 vi.mock("../store/auth-store", () => ({
@@ -18,9 +18,6 @@ vi.mock("../lib/env", () => ({
   get PUBLIC_DEMO() { return h.flags.publicDemo; },
 }));
 
-vi.mock("../lib/capture-mode", () => ({
-  get CAPTURE_MODE() { return h.flags.captureMode; },
-}));
 
 vi.mock("./MqttSecurityPage", () => ({
   default: () => <div data-testid="mqtt-security" />,
@@ -40,7 +37,6 @@ describe("SecurityPage", () => {
   beforeEach(() => {
     h.state.user = null;
     h.flags.publicDemo = false;
-    h.flags.captureMode = false;
   });
 
   it("lets public-demo visitors in and explains that nothing can be saved", () => {
@@ -51,14 +47,6 @@ describe("SecurityPage", () => {
     expect(screen.getByText(/Account, group and broker changes cannot be saved/)).toBeInTheDocument();
   });
 
-  it("hides the public-demo explanation in media capture mode", () => {
-    h.flags.publicDemo = true;
-    h.flags.captureMode = true;
-    h.state.user = { role: "user" };
-    render(<SecurityPage />);
-    expect(screen.getByText("Security")).toBeInTheDocument();
-    expect(screen.queryByText(/cannot be saved/)).not.toBeInTheDocument();
-  });
 
   it("denies access to non-admin users", () => {
     h.state.user = { role: "user" };

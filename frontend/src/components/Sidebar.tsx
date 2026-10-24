@@ -13,6 +13,7 @@ import { Plus, Trash2, GripVertical, LogOut, X } from "lucide-react";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { fetchHealth } from "../lib/api-client";
 import { PUBLIC_DEMO } from "../lib/env";
+import { CAPTURE_MODE } from "../lib/capture-mode";
 import type { HealthStatus } from "../store/device-store";
 
 // ---------------------------------------------------------------------------
@@ -98,6 +99,11 @@ export function Sidebar({ mobileOpen = false, onClose }: SidebarProps) {
   const canSeeAdminTabs = isAdmin || PUBLIC_DEMO;
   const pinnedTabs = tabs.filter((t) => t.pinned && (canSeeAdminTabs || hasTabAccess(t.id)) && (t.id !== "default-security" || canSeeAdminTabs)).sort((a, b) => a.order - b.order);
   const customTabs = tabs.filter((t) => !t.pinned && (isAdmin || hasTabAccess(t.id))).sort((a, b) => a.order - b.order);
+
+  // Tab arranging (add, rename, reorder, delete). Showcase capture mode hides it so a
+  // recording shows someone operating the dashboard, not editing it; the drag grip
+  // and delete button would otherwise appear whenever the cursor crosses a tab.
+  const canEditTabs = isAdmin && !CAPTURE_MODE;
 
   // Route helpers
   const PINNED_ROUTES: Record<string, string> = {
@@ -270,15 +276,15 @@ export function Sidebar({ mobileOpen = false, onClose }: SidebarProps) {
           isActive ? "bg-elevated text-[#E6EDF3]" : "text-[#6B7785] hover:text-[#9AA6B2] hover:bg-elevated/50"
         } ${isDragOver ? "border border-primary/50" : ""} ${dragTabId === tab.id ? "opacity-50" : ""}`}
         onClick={() => { navigate(getTabRoute(tab)); onClose?.(); }}
-        onDoubleClick={!isPinned && isAdmin ? () => startRename(tab.id, tab.name) : undefined}
-        draggable={!isPinned && isAdmin}
-        onDragStart={!isPinned && isAdmin ? (e) => handleDragStart(e, tab.id) : undefined}
-        onDragOver={!isPinned && isAdmin ? (e) => handleDragOver(e, tab.id) : undefined}
-        onDrop={!isPinned && isAdmin ? (e) => handleDrop(e, tab.id) : undefined}
-        onDragEnd={!isPinned && isAdmin ? handleDragEnd : undefined}
+        onDoubleClick={!isPinned && canEditTabs ? () => startRename(tab.id, tab.name) : undefined}
+        draggable={!isPinned && canEditTabs}
+        onDragStart={!isPinned && canEditTabs ? (e) => handleDragStart(e, tab.id) : undefined}
+        onDragOver={!isPinned && canEditTabs ? (e) => handleDragOver(e, tab.id) : undefined}
+        onDrop={!isPinned && canEditTabs ? (e) => handleDrop(e, tab.id) : undefined}
+        onDragEnd={!isPinned && canEditTabs ? handleDragEnd : undefined}
       >
         {/* Drag handle for custom tabs — admin only */}
-        {!isPinned && isAdmin && (
+        {!isPinned && canEditTabs && (
           <GripVertical size={12} className="text-[#6B7785] opacity-0 group-hover:opacity-100 transition-opacity shrink-0 cursor-grab" />
         )}
 
@@ -310,7 +316,7 @@ export function Sidebar({ mobileOpen = false, onClose }: SidebarProps) {
         )}
 
         {/* Delete button for custom tabs — admin only */}
-        {!isPinned && !isRenaming && isAdmin && (
+        {!isPinned && !isRenaming && canEditTabs && (
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -348,7 +354,7 @@ export function Sidebar({ mobileOpen = false, onClose }: SidebarProps) {
         {customTabs.map((tab) => tabButton(tab, false))}
 
         {/* Add Tab button / inline form — admin only */}
-        {isAdmin && (showAddForm ? (
+        {canEditTabs && (showAddForm ? (
           <div className="flex flex-col gap-2 px-2 py-2 rounded-lg bg-elevated">
             <input
               ref={addNameRef}

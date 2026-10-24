@@ -76,6 +76,38 @@ describe("failSafeStorage", () => {
   });
 });
 
+describe("CAPTURE_MODE is scoped to showcase builds", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+    window.sessionStorage.removeItem("aeolus:capture-mode");
+    window.history.replaceState(null, "", "/");
+  });
+
+  it("ignores ?capture=1 on a normal build and leaves the URL alone", async () => {
+    vi.stubEnv("VITE_SHOWCASE", "false");
+    window.history.replaceState(null, "", "/tab/water?capture=1");
+    vi.resetModules();
+
+    const { CAPTURE_MODE } = await import("./capture-mode");
+
+    expect(CAPTURE_MODE).toBe(false);
+    expect(window.location.search).toBe("?capture=1");
+    expect(window.sessionStorage.getItem("aeolus:capture-mode")).toBeNull();
+  });
+
+  it("honours ?capture=1 on a showcase build", async () => {
+    vi.stubEnv("VITE_SHOWCASE", "true");
+    window.history.replaceState(null, "", "/tab/water?capture=1");
+    vi.resetModules();
+
+    const { CAPTURE_MODE } = await import("./capture-mode");
+
+    expect(CAPTURE_MODE).toBe(true);
+    expect(window.location.search).toBe("");
+  });
+});
+
 describe("resolveBrowserCaptureMode", () => {
   afterEach(() => {
     window.history.replaceState(null, "", "/");

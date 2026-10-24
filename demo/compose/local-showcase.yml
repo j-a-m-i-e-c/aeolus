@@ -33,6 +33,14 @@
 #                                         services, including its own simulator.
 
 services:
+  # Showcase frontend build. VITE_SHOWCASE only makes ?capture=1 (hand-recording
+  # mode, see demo/README.md) available; it restricts nothing. It is a build arg,
+  # so `make showcase` passes --build for it to take effect.
+  frontend:
+    build:
+      args:
+        VITE_SHOWCASE: "true"
+
   # Seeding through this overlay configures the simulated actuators' MQTT command
   # profiles once the simulator has published its devices. No public-demo identity
   # is provisioned — that belongs to the public-demo overlays, which add their own

@@ -8,12 +8,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 
-const demoState = vi.hoisted(() => ({ readOnly: false, captureMode: false }));
+const demoState = vi.hoisted(() => ({ readOnly: false }));
 vi.mock("../../hooks/useReadOnlyDemo", () => ({
   useReadOnlyDemo: () => demoState.readOnly,
-}));
-vi.mock("../../lib/capture-mode", () => ({
-  get CAPTURE_MODE() { return demoState.captureMode; },
 }));
 
 const mockFetchStats = vi.fn();
@@ -41,7 +38,6 @@ import { DataExplorer } from "./DataExplorer";
 describe("DataExplorer", () => {
   beforeEach(() => {
     demoState.readOnly = false;
-    demoState.captureMode = false;
     mockFetchStats.mockReset();
     mockFetchCollections.mockReset();
     mockFetchSharedStateBuckets.mockReset();
@@ -74,14 +70,6 @@ describe("DataExplorer", () => {
     render(<DataExplorer />);
     expect(screen.getByText(/Public demo · read only/i)).toBeInTheDocument();
     expect(screen.getByText(/historical measurements and shared current values/i)).toBeInTheDocument();
-  });
-
-  it("hides the read-only explanation in media capture mode", () => {
-    demoState.readOnly = true;
-    demoState.captureMode = true;
-    render(<DataExplorer />);
-    expect(screen.queryByText(/Public demo · read only/i)).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Data" })).toBeInTheDocument();
   });
 
   it("fetches stats, collections, and Shared State buckets on mount", () => {

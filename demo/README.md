@@ -101,29 +101,34 @@ the simulated hardware is described in exactly one place.
 
 ### Media capture mode
 
-For README, website and video capture, prefer the unrestricted local showcase
-(`make showcase`) and append `?capture=1` to the frontend URL. The same switch works
-on the hosted demo, but the hosted demo remains read-only and capability-restricted.
-Capture mode is presentation-only and is remembered in `sessionStorage` for the
-current browser tab. The `capture` parameter is a one-shot toggle: Aeolus consumes
-it and immediately removes it from the visible URL while preserving any other query
-parameters and the hash. Open the page with `?capture=0` to turn capture mode off;
-that flag is removed from the URL too.
+For hand-recorded GIFs and video of the live showcase: a remote press and the
+automation reacting, a command moving through its evidence lifecycle. Start the
+local showcase (`make showcase`) and append `?capture=1` to the frontend URL.
 
-Capture mode hides:
+Capture mode hides exactly two things:
 
-- the hosted public-demo banner and read-only explanatory notices;
-- dashboard layout authoring chrome such as New Automation, Browse Panes, Reset
-  layout, pane settings/removal buttons and resize handles, for admins as well as
-  public-demo visitors (dragging and resizing panes is disabled too);
-- showcase controls explicitly marked `data-aeolus-demo-scenario`, which exist only
-  to inject simulated outside-world conditions.
+- dashboard arranging chrome: New Automation, Browse Panes, pane settings and
+  removal buttons, resize handles, and the sidebar's Add Tab, rename, reorder and
+  delete controls. Dragging and resizing panes is disabled too;
+- showcase controls marked `data-aeolus-demo-scenario`, which exist only to inject
+  simulated outside-world conditions.
 
 It does **not** change authentication, permissions, device state, automation logic,
 command handling, data, or backend behaviour. Operator controls and command evidence
-remain real application UI. If a capture needs a hidden showcase stimulus, keep a
-second normal tab open and trigger the scenario there while recording the capture-mode
-tab.
+remain real application UI. If a recording needs a hidden scenario stimulus, keep a
+second normal tab open and trigger the scenario there while recording the
+capture-mode tab.
+
+The choice is remembered in `sessionStorage` for the current browser tab. The
+`capture` parameter is a one-shot toggle: Aeolus consumes it and removes it from the
+visible URL, keeping any other query parameters and the hash. `?capture=0` turns
+capture mode off.
+
+Only showcase builds honour it. `local-showcase.yml` builds the frontend with
+`VITE_SHOWCASE=true` (so the public-demo-local overlay, which stacks on it, gets it
+too); a normal install and the hosted demo ignore `?capture=1` entirely. The hosted
+demo is not a supported place to create media, so capture mode does nothing about
+public-demo banners or notices.
 
 ### Showcase ownership
 

@@ -19,7 +19,6 @@ import { fetchDevices } from "./lib/api-client";
 import { useDeviceStore } from "./store/device-store";
 import { useDashboardStore, tabNameToSlug } from "./store/dashboard-store";
 import { useAuthStore } from "./store/auth-store";
-import { CAPTURE_MODE } from "./lib/capture-mode";
 import { usePermissionsStore } from "./store/permissions-store";
 import type { Device } from "./store/device-store";
 
@@ -97,7 +96,7 @@ function AuthenticatedApp() {
     // shell early produces a misleading pinned-tabs-only flash in public demo.
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#0B0F14]">
-        <div className="text-[#6B7785] text-sm animate-pulse">{CAPTURE_MODE ? "Loading workspace…" : "Loading demo workspace…"}</div>
+        <div className="text-[#6B7785] text-sm animate-pulse">Loading demo workspace…</div>
       </div>
     );
   }

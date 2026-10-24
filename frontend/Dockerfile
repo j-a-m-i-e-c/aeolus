@@ -7,6 +7,10 @@ COPY . .
 # to false so normal builds are unchanged; the demo compose overlay sets it true.
 ARG VITE_PUBLIC_DEMO=false
 ENV VITE_PUBLIC_DEMO=$VITE_PUBLIC_DEMO
+# Showcase build flag. Only enables the showcase's ?capture=1 recording mode;
+# false for normal installs, set true by demo/compose/local-showcase.yml.
+ARG VITE_SHOWCASE=false
+ENV VITE_SHOWCASE=$VITE_SHOWCASE
 # Public API/WebSocket origin, baked in at build time. Needed when the dashboard
 # is served from a different origin than the default `http://<host>:3001` — e.g.
 # behind a single Cloudflare Tunnel origin for the public demo, where the tunnel
