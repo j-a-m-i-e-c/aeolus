@@ -6,7 +6,9 @@
 // every number on it must come from a source that can be named.
 const tab = {
   "id": "tab-regional-conditions",
-  "name": "Regional Conditions",
+  // Named for the place rather than "Regional Conditions", which the sidebar truncates
+  // once the "real data" badge is shown beside it.
+  "name": "Northern Rivers",
   "icon": "cloud-rain"
 };
 const devices = [];

@@ -111,7 +111,7 @@ Two showcase tabs fetch live public data instead of using the simulator, so they
 outbound internet access and stay empty without it:
 
 - **Space**: ISS position, launches, NOAA space weather and the Moon.
-- **Regional Conditions**: WaterNSW river heights and rainfall gauges, and NSW RFS fire
+- **Northern Rivers** (Regional Conditions): WaterNSW river heights and rainfall gauges, and NSW RFS fire
   danger and incidents, for the Northern Rivers. WaterNSW's real-time service can take
   more than 10 seconds to answer, so these requests use the `timeoutMs` option on
   `http.get` (see [automations reference](../docs/reference/automations.md)).

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { control } from "@aeolus/ui";
 import RegionalMap, { type Selection } from './RegionalMap';
 import SelectionDetail from './SelectionDetail';
+import MapLegend from './MapLegend';
 import { RAIN_CURRENT_MS, REFRESH_FLOOR_MS, RIVER_CURRENT_MS, TONE, ago, freshness, sourceStatus } from './freshness';
 
 type Model = Record<string, any>;
@@ -100,10 +101,10 @@ export default function RegionalConditionsDashboard({ model, actions }: { model:
     <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10, marginBottom: 14 }}>
       <div>
         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 9 }}>
-          <strong style={{ fontSize: 22, letterSpacing: '.02em' }}>REGIONAL CONDITIONS</strong>
+          <strong style={{ fontSize: 22, letterSpacing: '.02em' }}>NORTHERN RIVERS CONDITIONS</strong>
           <span style={{ fontSize: 11, borderRadius: 12, color: TONE.good, border: '1px solid #316650', padding: '3px 9px' }}>MEASURED PUBLIC DATA</span>
         </div>
-        <div style={{ ...caption, marginTop: 4 }}>Northern Rivers, NSW · river heights and rainfall from WaterNSW gauges · NSW RFS fire danger and incidents</div>
+        <div style={{ ...caption, marginTop: 4 }}>NSW · river heights and rainfall from WaterNSW gauges · NSW RFS fire danger and incidents</div>
       </div>
       <RefreshButton lastAttempt={model.lastFetchAttempt} now={now} onRefresh={actions.refresh} />
     </header>
@@ -117,11 +118,7 @@ export default function RegionalConditionsDashboard({ model, actions }: { model:
             </label>)}
         </div>
         <RegionalMap gauges={gauges} rain={rain} incidents={incidents} now={now} layers={layers} selected={selected} onSelect={setSelected} />
-        <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginTop: 10, fontSize: 11, color: '#ABC5D0' }}>
-          <span>● River gauge: <span style={{ color: TONE.rising }}>rising</span> · <span style={{ color: TONE.falling }}>falling</span> · <span style={{ color: TONE.steady }}>steady</span> · <span style={{ color: TONE.stale }}>stale</span> · dashed ring = suspect reading</span>
-          <span>◆ Rain gauge, filled when it rained in the latest hour</span>
-          <span style={{ color: TONE.fire }}>● RFS incident</span>
-        </div>
+        <MapLegend layers={layers} />
       </section>
 
       <div style={{ display: 'grid', gap: 12, alignContent: 'start' }}>

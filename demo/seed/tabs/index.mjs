@@ -23,10 +23,10 @@ import regionalConditions from "./regional-conditions.mjs";
 // Agriculture leads because it is the clearest demonstration of automating a
 // whole physical site. Stage & Show follows immediately so a visitor who arrived
 // thinking Aeolus is farm software is corrected on the second tab rather than the
-// sixth. The remaining site domains then broaden progressively. Space and Regional
-// Conditions close the list because they are the two tabs driven by real public
-// data instead of the simulator: Space by global feeds, Regional Conditions by
-// measured river, rain and fire data for one region.
+// sixth. The remaining site domains then broaden progressively. Space and Northern
+// Rivers close the list because they are the two tabs driven by real public data
+// instead of the simulator: Space by global feeds, Northern Rivers by measured
+// river, rain and fire data for one region.
 export const tabModules = [
   agriculture,
   stageShow,

@@ -54,30 +54,12 @@ export function trendOf(change1h: unknown): Trend | null {
   return c > 0.05 ? 'rising' : c < -0.05 ? 'falling' : 'steady';
 }
 
+// Status text colours. Marker colours live in markers.tsx, one palette per layer.
 export const TONE = {
-  rising: '#F0C36A',
-  falling: '#65D3BB',
-  steady: '#3FA7C6',
   stale: '#73848E',
-  fire: '#F5AE5C',
-  emergency: '#FF6B69',
   good: '#8BDDB9',
   warn: '#EAB77B',
 };
-
-/** Rainfall colour for one hour's total. Dry is drawn hollow, not coloured. */
-export function rainColour(mm: number): string {
-  if (mm >= 20) return '#C46DF1';
-  if (mm >= 10) return '#E980AE';
-  if (mm >= 4) return '#74B6EB';
-  if (mm >= 1) return '#4DBBBE';
-  return '#55B27D';
-}
-
-export function fireColour(alert: unknown): string {
-  const v = String(alert || '').toLowerCase();
-  return v.includes('emergency') ? TONE.emergency : v.includes('watch') ? TONE.fire : '#E9CF9D';
-}
 
 /** One source's status line: last good refresh, and the latest failure if any. */
 export function sourceStatus(updatedAt: unknown, error: unknown, now: number, expectMs: number) {

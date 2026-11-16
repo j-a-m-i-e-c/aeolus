@@ -39,7 +39,7 @@ Aeolus follows semantic versioning for published releases. Until the first stabl
 * Identical private Automation State and Shared State writes are no-ops, avoiding unnecessary SQLite writes and broadcasts.
 * Bunker, mine and vessel overview composition now uses Shared State instead of snapshot-like Automation Events.
 * Off-grid bunker water consumption follows wall time independently of the accelerated power simulation clock.
-* A Regional Conditions showcase tab maps measured Northern Rivers data on a hand-drawn SVG map: WaterNSW river heights and rainfall gauges with quality flags and retained history, plus NSW RFS fire danger and incidents. Every reading shows its freshness, and a failing source keeps its last data marked stale.
+* A Northern Rivers showcase tab (the Regional Conditions automation) maps measured regional data on a hand-drawn SVG map: WaterNSW river heights and rainfall gauges with quality flags and retained history, plus NSW RFS fire danger and incidents. Every reading shows its freshness, and a failing source keeps its last data marked stale.
 * Media capture mode (`?capture=1`) for hand-recorded showcase video hides dashboard editing chrome and demo-scenario controls. It exists only in showcase builds.
 * Seeding the showcase now refuses an install that has its own automations or tabs and has never held the showcase; `FORCE=1` overrides. `make deploy` stops a leftover simulator.
 

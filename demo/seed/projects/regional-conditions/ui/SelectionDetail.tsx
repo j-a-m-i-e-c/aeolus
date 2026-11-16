@@ -1,4 +1,5 @@
-import { RAIN_CURRENT_MS, RIVER_CURRENT_MS, TONE, ago, clock, fireColour, freshness, rainColour, trendOf } from './freshness';
+import { RAIN_CURRENT_MS, RIVER_CURRENT_MS, TONE, ago, clock, freshness, trendOf } from './freshness';
+import { RIVER, fireColour, rainColour } from './markers';
 import type { Selection } from './RegionalMap';
 
 const caption = { color: '#A2B6C1', fontSize: 12, lineHeight: 1.55 };
@@ -68,7 +69,7 @@ export default function SelectionDetail({ selected, gauges, rain, incidents, riv
       return <div>
         <div style={{ fontWeight: 700, fontSize: 14 }}>{gauge.name}</div>
         <div style={big}>{Number(gauge.level).toFixed(2)} <span style={{ fontSize: 14 }}>m gauge height</span></div>
-        {trend && <div style={{ ...caption, color: TONE[trend] }}>{trend === 'steady' ? 'Steady' : trend === 'rising' ? 'Rising' : 'Falling'} · {Number(gauge.change1h) >= 0 ? '+' : ''}{Number(gauge.change1h).toFixed(2)} m per hour</div>}
+        {trend && <div style={{ ...caption, color: RIVER[trend] }}>{trend === 'steady' ? 'Steady' : trend === 'rising' ? 'Rising' : 'Falling'} · {Number(gauge.change1h) >= 0 ? '+' : ''}{Number(gauge.change1h).toFixed(2)} m per hour</div>}
         <FreshnessLine observedAt={gauge.observedAt} now={now} limit={RIVER_CURRENT_MS} quality={gauge.quality} note={gauge.qualityNote} />
         <div style={{ marginTop: 10 }}><LevelHistory samples={Array.isArray(riverHistory?.[gauge.id]) ? riverHistory[gauge.id] : []} /></div>
         <div style={{ ...caption, marginTop: 8 }}>Height above this gauge's own datum. It is not a flood depth, cannot be compared between gauges, and is not a flood classification.</div>
@@ -102,5 +103,5 @@ export default function SelectionDetail({ selected, gauges, rain, incidents, riv
       </div>;
     }
   }
-  return <div style={caption}>Select a river gauge (circle), a rain gauge (diamond) or an RFS incident on the map. River and rainfall history is what Aeolus has kept since it started reading these gauges.</div>;
+  return <div style={caption}>Select a river gauge (circle), a rain gauge (raindrop) or an RFS incident (flame) on the map. River and rainfall history is what Aeolus has kept since it started reading these gauges.</div>;
 }
