@@ -4,7 +4,8 @@
  *
  * Showcases the platform across distinct deployment domains — agriculture,
  * wildlife, research vessel, underground mining, escape room, stage/show,
- * off-grid shelter, and live space data — proving the core abstractions are
+ * off-grid shelter, live space data, and measured Northern Rivers river, rain
+ * and fire data — proving the core abstractions are
  * domain-agnostic without forcing every use case into the same UI shape.
  *
  * Each tab lives in its own module under demo/seed/tabs/. This orchestrator

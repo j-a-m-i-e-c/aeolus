@@ -105,6 +105,23 @@ the simulated hardware is described in exactly one place.
 
 **What neither local stack exercises.** Both are different Compose files from the hosted runtime, so validating here says nothing about Cloudflare Tunnel ingress, the golden/active database split, the nightly reset timer or the hosted resource limits. Those are only covered by the hosted release runbook below.
 
+### Real-data tabs
+
+Two showcase tabs fetch live public data instead of using the simulator, so they need
+outbound internet access and stay empty without it:
+
+- **Space**: ISS position, launches, NOAA space weather and the Moon.
+- **Regional Conditions**: WaterNSW river heights and rainfall gauges, and NSW RFS fire
+  danger and incidents, for the Northern Rivers. WaterNSW's real-time service can take
+  more than 10 seconds to answer, so these requests use the `timeoutMs` option on
+  `http.get` (see [automations reference](../docs/reference/automations.md)).
+
+Both refresh on a schedule and keep their last readings, marked stale, when a source
+fails. WaterNSW data must carry "© State of New South Wales through WaterNSW", which the
+tab shows. Its copyright terms also require permission to include it in advertising or
+a product for sale; confirm that with WaterNSW before showing the tab on a hosted demo
+that promotes Aeolus.
+
 ### Media capture mode
 
 For hand-recorded GIFs and video of the live showcase: a remote press and the

@@ -18,11 +18,10 @@ export function withinMap(lon: number, lat: number): boolean {
  * status has to be checked before the body is treated as data. Without that, a timeout
  * surfaced as "Unexpected token R in JSON".
  */
-export async function fetchFeed(url: string, headers?: Record<string, string>): Promise<string> {
-  const response = await http.get(url, headers ? { headers } : undefined);
-  // Aeolus aborts an outbound request after 10 s, and the abort reads "This operation
-  // was aborted", which does not say what happened.
-  if (response.status === 0 && /aborted/i.test(response.body)) throw new Error('No answer within 10 s');
+export async function fetchFeed(url: string, options: { headers?: Record<string, string>; timeoutMs?: number } = {}): Promise<string> {
+  const response = await http.get(url, options);
+  const timedOut = response.status === 0 ? /timed out after (\d+) ms/.exec(response.body) : null;
+  if (timedOut) throw new Error('No answer within ' + Math.round(Number(timedOut[1]) / 1000) + ' s');
   if (response.status === 0) throw new Error(plain(response.body) || 'Request failed');
   if (response.status === 408) throw new Error('Source did not answer in time (HTTP 408)');
   if (response.status < 200 || response.status > 299) throw new Error('Source answered HTTP ' + response.status);

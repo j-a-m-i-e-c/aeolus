@@ -27,7 +27,7 @@ src/connectors/connector-manager.test.ts
 
 ### Backend integration tests
 
-`src/__integration__/` runs real Express routes and SQLite-backed services. Current coverage includes API routes, Data Store behaviour, metrics history, the MQTT-to-automation pipeline, command acknowledgement, public-demo reset invariants, and a Linux-only real `isolated-vm` execution test. The isolate test proves Node globals are unavailable, optional capabilities do not break bootstrap, async host-mediated device commands cross the boundary, `actionAll()` keeps its predicate inside the isolate, and timeout/runtime errors are classified.
+`src/__integration__/` runs real Express routes and SQLite-backed services. Current coverage includes API routes, Data Store behaviour, metrics history, the MQTT-to-automation pipeline, command acknowledgement, public-demo reset invariants, and a Linux-only real `isolated-vm` execution test. The isolate test proves Node globals are unavailable, optional capabilities do not break bootstrap, async host-mediated device commands cross the boundary, `actionAll()` keeps its predicate inside the isolate, and timeout/runtime errors are classified. A companion test proves an authored `http` `timeoutMs` reaches the host, defaults when absent and is clamped when excessive.
 
 The demo operations regression suite also checks the golden/checksum contract. A non-root functional regression runs the real golden creator twice with prior sidecars made `0444`; structural tests remain active everywhere so checksum-required reset and timer/release-gate safety do not silently regress.
 
@@ -76,7 +76,7 @@ browser; auth cookie rotation needs real HTTP).
 | Command → ack → ACKNOWLEDGED / TIMED_OUT | | | ✓ | |
 | HTTP API → auth → Zod → SQLite | | | ✓ | |
 | Demo golden/checksum/reset/deploy invariants | ✓ | | ✓ | |
-| Shared outbound HTTP / SSRF policy | ✓ | | | |
+| Shared outbound HTTP / SSRF policy | ✓ | | ✓ (timeout bridge, real V8 on Linux) | |
 | Shared Automation State (durable current values/reactive triggers) | ✓ | | ✓ | |
 | Data Store Collections (write/query/retention) | ✓ | | ✓ | |
 | Metrics sampling and aggregation | | | ✓ | |

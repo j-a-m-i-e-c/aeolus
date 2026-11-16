@@ -522,10 +522,18 @@ declare function automation(config: {
  * Make HTTP requests to external APIs from your automation scripts.
  *
  * Both methods return a promise that resolves to a simplified response object.
- * Requests are limited to public HTTP/HTTPS destinations, have a 10-second
- * timeout, do not follow redirects, and have bounded request/response bodies.
+ * Requests are limited to public HTTP/HTTPS destinations, do not follow
+ * redirects, and have bounded request/response bodies (256 KiB / 1 MiB).
  * Localhost, private/LAN, link-local, metadata and reserved destinations are
  * rejected by the host policy.
+ *
+ * Requests time out after 10 seconds unless `timeoutMs` asks otherwise. It is
+ * clamped to 1–25 seconds: a run has a 30-second completion budget, and a
+ * request still waiting when that expires is abandoned with the run. Several
+ * slow requests therefore belong in `Promise.all`, not one after another.
+ *
+ * Neither method rejects. A refused, failed or timed-out request resolves with
+ * `status: 0` and the reason in `body`, so check `status` before using `body`.
  *
  * @example
  * ```typescript
@@ -539,25 +547,28 @@ declare function automation(config: {
  *   body: JSON.stringify({ text: "Automation fired!" }),
  * });
  * log.info(`Webhook responded: ${result.status}`);
-
+ *
+ * // A public service known to answer slowly
+ * const gauges = await http.get("https://slow.example.gov/api", { timeoutMs: 25000 });
+ * if (gauges.status !== 200) log.warn(`Gauges unavailable: ${gauges.body}`);
  * ```
  */
 declare const http: {
   /**
    * Send an HTTP GET request.
    * @param url - The URL to request.
-   * @param options - Optional headers.
-   * @returns A promise resolving to `{ status, body }`.
+   * @param options - Optional headers, and `timeoutMs` (default 10000, clamped to 1000–25000).
+   * @returns A promise resolving to `{ status, body }`; `status` is 0 if the request failed.
    */
-  get(url: string, options?: { headers?: Record<string, string> }): Promise<{ status: number; body: string }>;
+  get(url: string, options?: { headers?: Record<string, string>; timeoutMs?: number }): Promise<{ status: number; body: string }>;
 
   /**
    * Send an HTTP POST request.
    * @param url - The URL to request.
-   * @param options - Optional headers and body.
-   * @returns A promise resolving to `{ status, body }`.
+   * @param options - Optional headers, body, and `timeoutMs` (default 10000, clamped to 1000–25000).
+   * @returns A promise resolving to `{ status, body }`; `status` is 0 if the request failed.
    */
-  post(url: string, options?: { headers?: Record<string, string>; body?: string }): Promise<{ status: number; body: string }>;
+  post(url: string, options?: { headers?: Record<string, string>; body?: string; timeoutMs?: number }): Promise<{ status: number; body: string }>;
 };
 
 /**

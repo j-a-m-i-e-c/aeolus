@@ -21,7 +21,7 @@ import type {
 } from "../shared-state/shared-state-types.js";
 import type { Device, ActionResult, BulkActionResult, ConfirmOptions, EventMetadata } from "../core/types.js";
 import logger from "../logger.js";
-import { requestPublicHttp } from "../security/outbound-http.js";
+import { requestPublicHttp, resolveOutboundTimeoutMs } from "../security/outbound-http.js";
 
 // isolated-vm is a native addon that requires C++ compilation.
 // On Windows dev machines it may not compile — graceful fallback logs a warning.
@@ -407,7 +407,7 @@ const EXECUTION_TIMEOUT_MS = 5000;
  * actions can complete, while still guaranteeing that an action which never
  * settles cannot make `execute()` hang indefinitely.
  */
-const ACTION_DRAIN_BUDGET_MS = 30_000;
+export const ACTION_DRAIN_BUDGET_MS = 30_000;
 
 /**
  * Await the settling of every in-flight device-action promise, bounded by
@@ -633,15 +633,19 @@ const BOOTSTRAP_SCRIPT = `
 
   globalThis.context = Object.freeze(ctx);
 
+  // timeoutMs crosses as a primitive; 0 means "not given" and the host applies the
+  // default. The host validates and clamps it, so nothing here is trusted.
   globalThis.http = {
     get: function(url, options) {
       var headers = (options && options.headers) ? JSON.stringify(options.headers) : '{}';
-      return httpGetRef.apply(undefined, [url, headers], { result: { promise: true } });
+      var timeout = (options && typeof options.timeoutMs === 'number') ? options.timeoutMs : 0;
+      return httpGetRef.apply(undefined, [url, headers, timeout], { result: { promise: true } });
     },
     post: function(url, options) {
       var headers = (options && options.headers) ? JSON.stringify(options.headers) : '{}';
       var body = (options && options.body) ? options.body : '';
-      return httpPostRef.apply(undefined, [url, headers, body], { result: { promise: true } });
+      var timeout = (options && typeof options.timeoutMs === 'number') ? options.timeoutMs : 0;
+      return httpPostRef.apply(undefined, [url, headers, body, timeout], { result: { promise: true } });
     }
   };
 
@@ -1327,6 +1331,7 @@ export class Sandbox {
       url: string,
       headersJson: string,
       body?: string,
+      timeoutMs?: unknown,
     ): Promise<unknown> => {
       try {
         const headers = JSON.parse(headersJson) as Record<string, string>;
@@ -1334,6 +1339,8 @@ export class Sandbox {
           method,
           headers,
           body: method === "POST" && body ? body : undefined,
+          // Author-requested, so bounded here: default 10 s, clamped to 1–25 s.
+          timeoutMs: resolveOutboundTimeoutMs(timeoutMs),
         });
         return new runtime.ExternalCopy({ status: response.status, body: response.body }).copyInto();
       } catch (err) {
@@ -1347,12 +1354,13 @@ export class Sandbox {
 
     await jail.set(
       "__httpGetRef",
-      new runtime.Reference((url: string, headersJson: string) => request("GET", url, headersJson)),
+      new runtime.Reference((url: string, headersJson: string, timeoutMs: unknown) =>
+        request("GET", url, headersJson, undefined, timeoutMs)),
     );
     await jail.set(
       "__httpPostRef",
-      new runtime.Reference((url: string, headersJson: string, body: string) =>
-        request("POST", url, headersJson, body)),
+      new runtime.Reference((url: string, headersJson: string, body: string, timeoutMs: unknown) =>
+        request("POST", url, headersJson, body, timeoutMs)),
     );
   }
   /**

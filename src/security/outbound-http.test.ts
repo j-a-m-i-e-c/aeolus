@@ -1,10 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
+import { ACTION_DRAIN_BUDGET_MS } from "../automations/sandbox.js";
 import {
+  OUTBOUND_HTTP_MAX_TIMEOUT_MS,
+  OUTBOUND_HTTP_MIN_TIMEOUT_MS,
+  OUTBOUND_HTTP_TIMEOUT_MS,
   OutboundHttpPolicyError,
   isPublicIpAddress,
   isPublicIpv4,
   isPublicIpv6,
   requestPublicHttp,
+  resolveOutboundTimeoutMs,
   validatePublicHttpUrl,
 } from "./outbound-http.js";
 
@@ -213,5 +218,65 @@ describe("requestPublicHttp", () => {
     await expect(requestPublicHttp("http://169.254.169.254/latest/meta-data", { fetchImpl }))
       .rejects.toBeInstanceOf(OutboundHttpPolicyError);
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  /** A fetch that never answers until its signal aborts, as a stalled server does. */
+  const stalledFetch = () => vi.fn((_url: unknown, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+    init?.signal?.addEventListener("abort", () => reject(new DOMException("This operation was aborted", "AbortError")));
+  })) as unknown as typeof fetch;
+
+  it("aborts at the requested timeout and says so", async () => {
+    vi.useFakeTimers();
+    try {
+      const pending = requestPublicHttp("https://example.com", { lookup: publicLookup, fetchImpl: stalledFetch(), timeoutMs: 25_000 });
+      const settled = expect(pending).rejects.toThrow("Outbound request timed out after 25000 ms");
+      // Still waiting just short of the requested limit: the default 10 s no longer applies.
+      await vi.advanceTimersByTimeAsync(24_999);
+      await vi.advanceTimersByTimeAsync(1);
+      await settled;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("uses the 10 s default when no timeout is given", async () => {
+    vi.useFakeTimers();
+    try {
+      const pending = requestPublicHttp("https://example.com", { lookup: publicLookup, fetchImpl: stalledFetch() });
+      const settled = expect(pending).rejects.toThrow(`Outbound request timed out after ${OUTBOUND_HTTP_TIMEOUT_MS} ms`);
+      await vi.advanceTimersByTimeAsync(OUTBOUND_HTTP_TIMEOUT_MS);
+      await settled;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("passes other transport failures through unchanged", async () => {
+    const fetchImpl = vi.fn(async () => { throw new TypeError("fetch failed"); }) as unknown as typeof fetch;
+    await expect(requestPublicHttp("https://example.com", { lookup: publicLookup, fetchImpl })).rejects.toThrow("fetch failed");
+  });
+});
+
+describe("resolveOutboundTimeoutMs", () => {
+  it("defaults when the author gives nothing usable", () => {
+    for (const value of [undefined, null, 0, -5, Number.NaN, Number.POSITIVE_INFINITY, "20000", {}]) {
+      expect(resolveOutboundTimeoutMs(value), String(value)).toBe(OUTBOUND_HTTP_TIMEOUT_MS);
+    }
+  });
+
+  it("honours a value inside the allowed range", () => {
+    expect(resolveOutboundTimeoutMs(15_000)).toBe(15_000);
+    expect(resolveOutboundTimeoutMs(2_500.4)).toBe(2_500);
+  });
+
+  it("clamps rather than refuses an out-of-range value", () => {
+    expect(resolveOutboundTimeoutMs(60_000)).toBe(OUTBOUND_HTTP_MAX_TIMEOUT_MS);
+    expect(resolveOutboundTimeoutMs(50)).toBe(OUTBOUND_HTTP_MIN_TIMEOUT_MS);
+  });
+
+  it("keeps the ceiling inside the sandbox's 30 s completion budget", () => {
+    // A request allowed to outlive the run would be abandoned with it, so the option
+    // would promise a wait the platform cannot keep.
+    expect(OUTBOUND_HTTP_MAX_TIMEOUT_MS).toBeLessThan(ACTION_DRAIN_BUDGET_MS);
   });
 });

@@ -30,6 +30,7 @@ Aeolus follows semantic versioning for published releases. Until the first stabl
 * The atomic state-set primitive clears the same key, value and allowlist bounds as a direct state write, in public-demo sessions as well, so firing is never a looser route into automation state. `saveAndFire()` now works inside the public demo.
 * Philips Hue local traffic uses HTTPS with bridge-certificate identity checks and treats Hue application-level error objects inside HTTP 2xx responses as failures.
 * Hue bridge exchanges are time-bounded, so a peer that accepts a connection and stalls the TLS handshake can no longer hold a command open indefinitely.
+* Authored `http.get/post` accept an optional `timeoutMs` for slow public services. The default stays 10 seconds and requests are clamped to 1–25 seconds so they finish inside a run's 30-second completion budget ([ADR-0020](docs/adr/0020-authored-http-egress-boundary.md)). A timed-out request now reports `Outbound request timed out after N ms` instead of a bare abort message.
 
 ### Automation state and showcase
 
@@ -38,6 +39,9 @@ Aeolus follows semantic versioning for published releases. Until the first stabl
 * Identical private Automation State and Shared State writes are no-ops, avoiding unnecessary SQLite writes and broadcasts.
 * Bunker, mine and vessel overview composition now uses Shared State instead of snapshot-like Automation Events.
 * Off-grid bunker water consumption follows wall time independently of the accelerated power simulation clock.
+* A Regional Conditions showcase tab maps measured Northern Rivers data on a hand-drawn SVG map: WaterNSW river heights and rainfall gauges with quality flags and retained history, plus NSW RFS fire danger and incidents. Every reading shows its freshness, and a failing source keeps its last data marked stale.
+* Media capture mode (`?capture=1`) for hand-recorded showcase video hides dashboard editing chrome and demo-scenario controls. It exists only in showcase builds.
+* Seeding the showcase now refuses an install that has its own automations or tabs and has never held the showcase; `FORCE=1` overrides. `make deploy` stops a leftover simulator.
 
 ### Operations
 

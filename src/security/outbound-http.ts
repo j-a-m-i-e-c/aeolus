@@ -8,7 +8,19 @@
 import { lookup as dnsLookup } from "node:dns/promises";
 import { isIP } from "node:net";
 
+/** Default timeout for one outbound request. */
 export const OUTBOUND_HTTP_TIMEOUT_MS = 10_000;
+/**
+ * Shortest and longest timeout authored code may ask for (`http.get(url, { timeoutMs })`).
+ *
+ * The ceiling is set by the run, not by the network: an automation run gets a 30 s
+ * completion budget (ACTION_DRAIN_BUDGET_MS in automations/sandbox.ts), and a request
+ * still in flight when it expires is abandoned with the run. 25 s lets one slow request
+ * finish inside that budget with room for the work around it. Some public services
+ * take longer than 10 s to answer even a small query, which is what this is for.
+ */
+export const OUTBOUND_HTTP_MIN_TIMEOUT_MS = 1_000;
+export const OUTBOUND_HTTP_MAX_TIMEOUT_MS = 25_000;
 export const OUTBOUND_HTTP_MAX_REQUEST_BYTES = 256 * 1024;
 export const OUTBOUND_HTTP_MAX_RESPONSE_BYTES = 1024 * 1024;
 
@@ -210,6 +222,21 @@ export interface PublicHttpResponse {
   body: string;
 }
 
+/**
+ * Resolve a timeout requested by authored code.
+ *
+ * Absent, non-numeric, non-finite or non-positive values mean "use the default". Any
+ * other value is clamped into [OUTBOUND_HTTP_MIN_TIMEOUT_MS, OUTBOUND_HTTP_MAX_TIMEOUT_MS]
+ * rather than refused, so a script asking for 60 s gets the longest wait the platform
+ * allows instead of a request that never runs.
+ */
+export function resolveOutboundTimeoutMs(requested: unknown): number {
+  if (typeof requested !== "number" || !Number.isFinite(requested) || requested <= 0) {
+    return OUTBOUND_HTTP_TIMEOUT_MS;
+  }
+  return Math.min(OUTBOUND_HTTP_MAX_TIMEOUT_MS, Math.max(OUTBOUND_HTTP_MIN_TIMEOUT_MS, Math.round(requested)));
+}
+
 /** Execute one bounded, no-redirect request to a DNS-preflighted public URL. */
 export async function requestPublicHttp(
   rawUrl: string,
@@ -223,7 +250,12 @@ export async function requestPublicHttp(
   }
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? OUTBOUND_HTTP_TIMEOUT_MS);
+  const timeoutMs = options.timeoutMs ?? OUTBOUND_HTTP_TIMEOUT_MS;
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
   try {
     const response = await (options.fetchImpl ?? fetch)(url, {
       method: options.method ?? "GET",
@@ -242,6 +274,11 @@ export async function requestPublicHttp(
       headers: response.headers,
       body: responseBody,
     };
+  } catch (error) {
+    // The abort surfaces as "This operation was aborted", which tells the author
+    // nothing about why. Say it was the timeout, and which one.
+    if (timedOut) throw new OutboundHttpPolicyError(`Outbound request timed out after ${timeoutMs} ms`);
+    throw error;
   } finally {
     clearTimeout(timer);
   }

@@ -14,6 +14,15 @@ import { fetchFeed, parseJson, plain } from './feeds';
 const HYDSTRA_URL = 'https://realtimedata.waternsw.com.au/cgi/webservice.exe?';
 // The service answers 502 to a request with no User-Agent.
 const HEADERS = { 'User-Agent': 'Aeolus showcase (github.com/j-a-m-i-e-c/aeolus)' };
+// Its speed varies a lot over the day. Measured from two networks, even a one-station
+// query took 2 to 6 s at some times and 9 to 18 s at others, so the default 10 s limit
+// failed for long stretches. 25 s is the longest an automation may wait; the RFS feeds
+// answer in well under a second and keep the default.
+const TIMEOUT_MS = 25000;
+// A fast 408 is retried once with a shorter limit, so the retry still finishes inside
+// the run's 30 s completion budget: at most 3 s + 20 s.
+const RETRY_WITHIN_MS = 3000;
+const RETRY_TIMEOUT_MS = 20000;
 
 // Every Northern Rivers site reports `timezone: "10.0"`: AEST all year, no daylight saving.
 const AEST_OFFSET_MS = 10 * 3600 * 1000;
@@ -74,14 +83,14 @@ export async function getTraces(sites: string[], variable: '100' | '10', dataTyp
   const started = Date.now();
   let body: string;
   try {
-    body = await fetchFeed(url, HEADERS);
+    body = await fetchFeed(url, { headers: HEADERS, timeoutMs: TIMEOUT_MS });
   } catch (error) {
     // When busy, the service often answers 408 within a second or two, and asking again
     // usually works (1 in 8 requests in testing). One immediate retry, for that case only:
-    // the sandbox has no timer to wait with, and retrying after a full 10 s timeout could
-    // run past the automation's completion budget.
-    if (!/HTTP 408/.test(String((error as Error)?.message)) || Date.now() - started > 4000) throw error;
-    body = await fetchFeed(url, HEADERS);
+    // the sandbox has no timer to wait with, and a retry after a slow failure could run
+    // past the automation's completion budget.
+    if (!/HTTP 408/.test(String((error as Error)?.message)) || Date.now() - started > RETRY_WITHIN_MS) throw error;
+    body = await fetchFeed(url, { headers: HEADERS, timeoutMs: RETRY_TIMEOUT_MS });
   }
   const parsed = parseJson(body, 'WaterNSW');
   // Errors arrive with HTTP 200 and a non-zero error_num.

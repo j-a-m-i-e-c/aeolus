@@ -48,7 +48,7 @@ function liveFeeds(overrides: Partial<Record<"level" | "rain" | "incidents" | "f
 
 function makeWorld(respond: Responder) {
   const store = new Map<string, unknown>();
-  const requests: { url: string; headers: Record<string, string> }[] = [];
+  const requests: { url: string; headers: Record<string, string>; timeoutMs?: number }[] = [];
   const warnings: string[] = [];
   const world = {
     store,
@@ -57,9 +57,9 @@ function makeWorld(respond: Responder) {
     /** Replaceable between runs, so a test can make a source fail after it has worked. */
     respond,
     http: {
-      get: async (url: string, options?: { headers?: Record<string, string> }) => {
+      get: async (url: string, options?: { headers?: Record<string, string>; timeoutMs?: number }) => {
         const headers = options?.headers ?? {};
-        requests.push({ url, headers });
+        requests.push({ url, headers, timeoutMs: options?.timeoutMs });
         return world.respond(url, headers);
       },
     },
@@ -110,6 +110,9 @@ describe("Regional Conditions against real feed responses", () => {
     await run(world);
     const hydstra = world.requests.filter((r) => r.url.includes("waternsw"));
     expect(hydstra).toHaveLength(2);
+    // WaterNSW regularly takes longer than the 10 s default; the RFS feeds do not.
+    for (const request of hydstra) expect(request.timeoutMs).toBe(25000);
+    for (const request of world.requests.filter((r) => r.url.includes("rfs.nsw"))) expect(request.timeoutMs).toBeUndefined();
     for (const request of hydstra) {
       // `.pl` answers 301 and automations do not follow redirects.
       expect(request.url).toMatch(/^https:\/\/realtimedata\.waternsw\.com\.au\/cgi\/webservice\.exe\?/);
@@ -257,13 +260,13 @@ describe("Regional Conditions against real feed responses", () => {
     // rain, both exactly as http.get reports them.
     vi.setSystemTime(CAPTURED.hydstraCapturedAt + 11 * 60 * 1000);
     world.respond = liveFeeds({
-      level: () => ({ status: 0, body: "This operation was aborted" }),
+      level: () => ({ status: 0, body: "Outbound request timed out after 25000 ms" }),
       rain: () => ({ status: 408, body: '{"error_num":218,"error_msg":"Request timeout"}' }),
     });
     await run(world);
 
-    // The abort http.get reports for Aeolus' 10 s outbound timeout, reworded.
-    expect(get(world, "riverError")).toBe("No answer within 10 s");
+    // The reason http.get reports for an outbound timeout, reworded for the pane.
+    expect(get(world, "riverError")).toBe("No answer within 25 s");
     expect(get(world, "rainError")).toBe("Source did not answer in time (HTTP 408)");
     expect(get(world, "riverGauges")).toEqual(goodGauges);
     expect(get(world, "riverUpdated")).toBe(CAPTURED.hydstraCapturedAt);
@@ -271,7 +274,7 @@ describe("Regional Conditions against real feed responses", () => {
     expect(get(world, "fireDangerError")).toBe("");
   });
 
-  it("retries a fast 408 from WaterNSW once", async () => {
+  it("retries a fast 408 from WaterNSW once, with a shorter limit that fits the run", async () => {
     let levelCalls = 0;
     const world = makeWorld(liveFeeds({
       level: () => (++levelCalls === 1
@@ -281,6 +284,8 @@ describe("Regional Conditions against real feed responses", () => {
     await run(world);
     expect(levelCalls).toBe(2);
     expect(get(world, "riverError")).toBe("");
+    const levelRequests = world.requests.filter((r) => r.url.includes("waternsw") && r.url.includes("%22varfrom%22%3A%22100%22"));
+    expect(levelRequests.map((r) => r.timeoutMs)).toEqual([25000, 20000]);
   });
 
   it("reports an error page or a changed schema as a source error, never as data", async () => {
