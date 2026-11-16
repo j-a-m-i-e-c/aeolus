@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { control } from "@aeolus/ui";
 import RegionalMap, { type Selection } from './RegionalMap';
 import SelectionDetail from './SelectionDetail';
 import { RAIN_CURRENT_MS, REFRESH_FLOOR_MS, RIVER_CURRENT_MS, TONE, ago, freshness, sourceStatus } from './freshness';
@@ -44,10 +45,13 @@ function RefreshButton({ lastAttempt, now, onRefresh }: { lastAttempt: unknown; 
     return () => clearTimeout(timer);
   }, [pending]);
   const wait = last > 0 ? last + REFRESH_FLOOR_MS - now : 0;
-  const label = pending ? 'Refreshing…' : wait > 0 ? `Checked ${ago(last, now)} · again in ${Math.ceil(wait / 60000)} min` : 'Refresh sources';
-  return <button type="button" disabled={pending || wait > 0}
-    onClick={() => { setRequest({ at: Date.now(), lastSeen: last }); onRefresh(); }}
-    style={{ background: '#153446', border: '1px solid #3D6B82', color: '#C5E9FA', padding: '8px 12px', borderRadius: 8, fontSize: 12, cursor: pending || wait > 0 ? 'default' : 'pointer', opacity: pending || wait > 0 ? 0.7 : 1 }}>
+  // The kit supplies the disabled and pending look, cursor and aria state, so a
+  // refresh that cannot run yet looks unavailable rather than merely unresponsive.
+  const visual = control({ pending, disabled: wait > 0 });
+  const label = pending ? 'Fetching river, rain and fire data…'
+    : wait > 0 ? `Checked ${ago(last, now)} · again in ${Math.ceil(wait / 60000)} min` : 'Refresh sources';
+  return <button type="button" {...visual} style={{ ...visual.style, padding: '8px 12px', borderRadius: 8, fontSize: 12 }}
+    onClick={() => { setRequest({ at: Date.now(), lastSeen: last }); onRefresh(); }}>
     {label}
   </button>;
 }
