@@ -19,6 +19,10 @@ export const RIVER_CURRENT_MS = 3 * HOUR;
 // earlier, so a tighter limit would flip working gauges to stale between uploads.
 export const RAIN_CURRENT_MS = 5 * HOUR;
 
+// Mirrors MIN_REFRESH_MS in logic/index.ts. A Refresh pressed sooner is ignored by the
+// Logic, so the button says so and waits instead of appearing to do nothing.
+export const REFRESH_FLOOR_MS = 5 * 60 * 1000;
+
 export function freshness(observedAt: unknown, now: number, limitMs: number): Freshness {
   const t = Number(observedAt);
   if (!Number.isFinite(t) || t <= 0) return 'unavailable';

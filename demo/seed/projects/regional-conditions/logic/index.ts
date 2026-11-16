@@ -9,6 +9,7 @@ import { updateRiverLevels } from './river';
 
 // Cron runs every ten minutes; the pane's Refresh button can ask sooner. Both pass
 // through this floor, so visitors pressing Refresh cannot hammer public services.
+// The pane disables Refresh for the same period (ui/freshness.ts REFRESH_FLOOR_MS).
 const MIN_REFRESH_MS = 5 * 60 * 1000;
 
 export default async function run(_context: EventContext) {

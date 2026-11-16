@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import RegionalMap, { type Selection } from './RegionalMap';
 import SelectionDetail from './SelectionDetail';
-import { RAIN_CURRENT_MS, RIVER_CURRENT_MS, TONE, freshness, sourceStatus } from './freshness';
+import { RAIN_CURRENT_MS, REFRESH_FLOOR_MS, RIVER_CURRENT_MS, TONE, ago, freshness, sourceStatus } from './freshness';
 
 type Model = Record<string, any>;
 const root = { minHeight: '100%', padding: 16, background: '#081119', color: '#E7F0F5', fontFamily: 'inherit' };
@@ -26,6 +26,30 @@ function Source({ name, updated, error, now }: { name: string; updated: unknown;
     <div style={{ fontSize: 12, color: '#D4E5EB' }}>{name}</div>
     <div style={{ ...caption, color: status.tone }}>{status.label}</div>
   </div>;
+}
+
+/**
+ * Refresh with visible state. Pressing it marks it "Refreshing…" until the Logic records
+ * a new attempt (or 30 s pass). Within the Logic's refresh floor it is disabled and says
+ * when it can be used again, rather than accepting a press that will be ignored.
+ */
+function RefreshButton({ lastAttempt, now, onRefresh }: { lastAttempt: unknown; now: number; onRefresh: () => void }) {
+  const last = Number(lastAttempt) || 0;
+  const [request, setRequest] = useState<{ at: number; lastSeen: number } | null>(null);
+  const [, setTick] = useState(0);
+  const pending = request !== null && request.lastSeen === last && Date.now() - request.at < 30000;
+  useEffect(() => {
+    if (!pending) return;
+    const timer = setTimeout(() => setTick((t) => t + 1), 30000);
+    return () => clearTimeout(timer);
+  }, [pending]);
+  const wait = last > 0 ? last + REFRESH_FLOOR_MS - now : 0;
+  const label = pending ? 'Refreshing…' : wait > 0 ? `Checked ${ago(last, now)} · again in ${Math.ceil(wait / 60000)} min` : 'Refresh sources';
+  return <button type="button" disabled={pending || wait > 0}
+    onClick={() => { setRequest({ at: Date.now(), lastSeen: last }); onRefresh(); }}
+    style={{ background: '#153446', border: '1px solid #3D6B82', color: '#C5E9FA', padding: '8px 12px', borderRadius: 8, fontSize: 12, cursor: pending || wait > 0 ? 'default' : 'pointer', opacity: pending || wait > 0 ? 0.7 : 1 }}>
+    {label}
+  </button>;
 }
 
 function dangerTone(rating: string) {
@@ -77,7 +101,7 @@ export default function RegionalConditionsDashboard({ model, actions }: { model:
         </div>
         <div style={{ ...caption, marginTop: 4 }}>Northern Rivers, NSW · river heights and rainfall from WaterNSW gauges · NSW RFS fire danger and incidents</div>
       </div>
-      <button type="button" onClick={actions.refresh} style={{ background: '#153446', border: '1px solid #3D6B82', color: '#C5E9FA', padding: '8px 12px', borderRadius: 8, cursor: 'pointer', fontSize: 12 }}>Refresh sources</button>
+      <RefreshButton lastAttempt={model.lastFetchAttempt} now={now} onRefresh={actions.refresh} />
     </header>
 
     <div className="regional-layout" style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.3fr) minmax(280px,1fr)', gap: 12 }}>

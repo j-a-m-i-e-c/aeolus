@@ -21,6 +21,7 @@ export default function RegionalConditions(aeolus: CustomComponentProps) {
     incidents: aeolus.read("incidents"),
     incidentsUpdated: aeolus.read("incidentsUpdated"),
     incidentsError: aeolus.read("incidentsError"),
+    lastFetchAttempt: aeolus.read("lastFetchAttempt"),
   };
 
   const actions = {

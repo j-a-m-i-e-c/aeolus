@@ -257,12 +257,13 @@ describe("Regional Conditions against real feed responses", () => {
     // rain, both exactly as http.get reports them.
     vi.setSystemTime(CAPTURED.hydstraCapturedAt + 11 * 60 * 1000);
     world.respond = liveFeeds({
-      level: () => ({ status: 0, body: "The operation was aborted due to timeout" }),
+      level: () => ({ status: 0, body: "This operation was aborted" }),
       rain: () => ({ status: 408, body: '{"error_num":218,"error_msg":"Request timeout"}' }),
     });
     await run(world);
 
-    expect(get(world, "riverError")).toBe("The operation was aborted due to timeout");
+    // The abort http.get reports for Aeolus' 10 s outbound timeout, reworded.
+    expect(get(world, "riverError")).toBe("No answer within 10 s");
     expect(get(world, "rainError")).toBe("Source did not answer in time (HTTP 408)");
     expect(get(world, "riverGauges")).toEqual(goodGauges);
     expect(get(world, "riverUpdated")).toBe(CAPTURED.hydstraCapturedAt);
