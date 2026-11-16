@@ -42,6 +42,9 @@
     ],
     "tab-space": [
       { "ref": "space", "x": 0, "y": 0, "w": 12, "h": 24 }
+    ],
+    "tab-regional-conditions": [
+      { "ref": "regional-conditions", "x": 0, "y": 0, "w": 12, "h": 28 }
     ]
   }
 }

@@ -28,6 +28,10 @@ function DynamicIcon({ name, size, className }: { name: string; size?: number; c
   return <Icon size={size} className={className} />;
 }
 
+// Showcase tabs driven by real public data rather than the simulator, badged so a
+// visitor can tell measured numbers from simulated ones before opening the tab.
+const REAL_DATA_TABS = new Set(["tab-space", "tab-regional-conditions"]);
+
 // ---------------------------------------------------------------------------
 // Icon choices for the "Add Tab" form
 // ---------------------------------------------------------------------------
@@ -309,7 +313,7 @@ export function Sidebar({ mobileOpen = false, onClose }: SidebarProps) {
         ) : (
           <>
             <span className="flex-1 truncate">{tab.name}</span>
-            {tab.id === "tab-space" && (
+            {REAL_DATA_TABS.has(tab.id) && (
               <span className="text-[8px] font-semibold uppercase tracking-wide rounded-full border border-[#4A7A66] bg-[#153328] px-1.5 py-0.5 text-[#88D9AD]">real data</span>
             )}
           </>

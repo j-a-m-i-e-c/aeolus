@@ -1,0 +1,6 @@
+{
+  "$comment": "Real responses captured from the live feeds, trimmed to whole records. hydstraCapturedAt is when the WaterNSW responses were requested; the regression test pins the clock there.",
+  "hydstraCapturedAt": 1794822307059,
+  "hydstraCapturedAtIso": "2026-11-16T09:45:07.059Z",
+  "rfsCapturedAtIso": "2026-11-16T09:25:32.213Z"
+}
