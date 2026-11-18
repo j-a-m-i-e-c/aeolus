@@ -81,6 +81,7 @@ describe("buildDemoPolicy", () => {
       "/api/connectors/available",
       "/api/connectors/:id/status",
       "/api/data-store/config",
+      "/api/system/retention",
       "/api/data-store/stats",
       "/api/data-store/buckets",
       "/api/data-store/buckets/:bucket",
@@ -120,6 +121,7 @@ describe("buildDemoPolicy", () => {
       ["POST", "/api/auth/users"],
       ["DELETE", "/api/auth/users/:id"],
       ["PUT", "/api/mqtt/provisioning/level"],
+      ["PUT", "/api/system/retention"],
     ];
     for (const [m, p] of forbidden) {
       expect(policy.some((e) => e.method === m && e.pattern === p)).toBe(false);

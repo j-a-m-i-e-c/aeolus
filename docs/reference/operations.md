@@ -22,8 +22,6 @@ The backend uses host networking in Docker so it can reach LAN products and perf
 | `NODE_ENV` | `production` (`.env.example` and Compose) | Runtime environment; source development may set `development` |
 | `STATE_HISTORY_MAX` | `100` | History entries per device |
 | `HISTORY_RECORD_INTERVAL` | `5000` | Minimum stored-history interval |
-| `COMMAND_HISTORY_RETENTION_DAYS` | `30` | Days of completed command history kept; `0` disables ([storage limits](data-and-storage.md#storage-limits)) |
-| `COMMAND_HISTORY_MAX_RECORDS` | `50000` | Most completed commands kept; `0` disables |
 | `RATE_LIMIT_RPM` | `1000` | Global requests per minute per IP |
 | `CORS_ORIGINS` | empty | Additional allowed origins |
 | `TRUST_PROXY_HOPS` | `0` | Trusted reverse-proxy hops; `1` behind exactly one local HTTPS proxy |

@@ -86,35 +86,41 @@ These variables are shown in `.env.example` and are read by the backend configur
 ## Storage limits
 
 Aeolus is meant to run unattended for months, including with the showcase left on. Every
-table that grows by itself therefore has a ceiling, so storage use levels off instead of
-climbing:
+table that grows by itself is pruned or bounded:
 
-| What | Ceiling | Approximate size at the ceiling |
-|---|---|---:|
-| Execution history (one row per automation run) | 7 days and 100,000 rows | 27–47 MB |
-| Command history (completed commands and their transitions) | `COMMAND_HISTORY_RETENTION_DAYS` (30) and `COMMAND_HISTORY_MAX_RECORDS` (50,000) | 65 MB |
-| Device state history | `STATE_HISTORY_MAX` entries per device | depends on device count |
-| Data Store Collections | per-collection retention, plus the record and size limits set when the store is enabled | set by those limits |
-| Automation State, Shared State | one value per key, overwritten in place | small |
-| Container logs | 10 MB × 5 files per service (Compose `json-file`) | 50 MB per service |
+| What | Kept | Set by |
+|---|---|---|
+| Execution history (one row per automation run) | 7 days by default, or forever | **System → History retention** (admin) |
+| Command history (completed commands and their transitions) | 7 days by default, or forever | **System → History retention** (admin) |
+| Device state history | `STATE_HISTORY_MAX` entries per device | environment |
+| Data Store Collections | per-collection retention, plus the record and size limits set when the store is enabled | Data Store settings |
+| Automation State, Shared State | one value per key, overwritten in place | — |
+| Container logs | 10 MB × 5 files per service (Compose `json-file`) | `docker-compose.yml` |
 
-Sizes are measured on SQLite including indexes; a run that issues device commands makes a
-larger execution row than one that does not.
+### History retention
 
-Retention runs once at startup and then every six hours (`src/core/housekeeping.ts`), so
-it applies even to a backend that is restarted often. Command history is only pruned
-once a command is complete: one still waiting for its acknowledgement or observation is
-never removed. Set a command-history variable to `0` to turn that bound off, or both to
-keep command history indefinitely.
+Execution history and command history each keep a whole number of days, from 1 to 3650,
+or keep everything. Both default to 7 days. An admin changes them on the System page
+(`GET`/`PUT /api/system/retention`); the values are stored in `system_settings` and
+survive restarts and upgrades. Installations that need a longer audit trail of device
+commands, such as critical systems, should raise the command-history period or keep it
+forever. Nothing else caps these tables, so the period chosen is the period kept.
+
+Retention runs at startup, every six hours, and straight after the setting is saved
+(`src/core/housekeeping.ts`), so it applies even to a backend that is restarted often.
+Shortening a period therefore deletes the older history immediately, and the System page
+asks for confirmation first. Command history is only pruned once a command is complete:
+one still waiting for its acknowledgement or observation is never removed.
+
+Size follows the period and how often automations run. Measured on SQLite including
+indexes, an execution row takes about 270 bytes, or about 465 bytes when the run issued
+two device commands, and a completed command with three transitions about 1.3 KB. An
+automation triggered every two seconds adds 43,200 runs a day, about 12–20 MB a day of
+execution history. History kept forever grows without limit.
 
 Freed space is reused by SQLite rather than returned to the filesystem, so the database
-file stays at its largest size. That is why the ceilings above, not the current file
-size, are the figure to plan around.
-
-| Variable | Default | Purpose |
-|---|---:|---|
-| `COMMAND_HISTORY_RETENTION_DAYS` | `30` | Delete completed commands older than this; `0` disables |
-| `COMMAND_HISTORY_MAX_RECORDS` | `50000` | Keep at most this many completed commands; `0` disables |
+file stays at its largest size. Plan around the size the chosen periods reach, not the
+current file size.
 
 ## What stores what
 

@@ -393,8 +393,6 @@ Or run [Uptime Kuma](https://github.com/louislam/uptime-kuma) on the same Pi for
 | `AUTH_COOKIE_SECURE` | `auto` | `auto` behind a correctly trusted HTTPS proxy | Refresh-cookie Secure policy |
 | `STATE_HISTORY_MAX` | `100` | `100` | Max state-history records kept per device |
 | `HISTORY_RECORD_INTERVAL` | `5000` | `5000` | Minimum ms between recorded state-history points (throttle) |
-| `COMMAND_HISTORY_RETENTION_DAYS` | `30` | `30`, or `0` to keep for audit | Days of completed command history kept |
-| `COMMAND_HISTORY_MAX_RECORDS` | `50000` | `50000` | Most completed commands kept (~65 MB) |
 | `JWT_SECRET` | _(auto-generated)_ | _(your 256-bit key)_ | JWT signing key; auto-generated and stored in the DB if unset |
 | `MQTT_PASSWORD_FILE` | `mosquitto/password_file` | set by the standard Compose stack | Live broker password-file path; only set this by hand in a custom runtime |
 | `AEOLUS_PROJECT_DIR` | _(process.cwd())_ | deployment-specific | Project/config root used to locate Mosquitto files in a custom runtime |

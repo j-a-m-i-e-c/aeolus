@@ -7,6 +7,7 @@ import { fetchHealth } from "../lib/api-client";
 import { authFetch } from "../lib/auth-fetch";
 import { useAuthStore } from "../store/auth-store";
 import { PUBLIC_DEMO } from "../lib/env";
+import { HistoryRetentionCard } from "./system/HistoryRetentionCard";
 import type { HealthStatus } from "../store/device-store";
 
 const API_URL = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:3001`;
@@ -378,6 +379,9 @@ export function SystemPage() {
 
       </>
       )}
+
+      {/* History retention (admin; read-only in the public demo) */}
+      {canViewDiagnostics && <HistoryRetentionCard />}
 
       {/* Application Logs (admin + masked public-demo) */}
       {canViewDiagnostics && <LogViewer />}

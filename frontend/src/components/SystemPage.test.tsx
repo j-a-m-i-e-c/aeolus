@@ -77,6 +77,7 @@ describe("SystemPage", () => {
       }
       if (url.includes("/api/system/version")) return jsonResponse(VERSION_INFO);
       if (url.includes("/api/system/logs")) return jsonResponse([]);
+      if (url.includes("/api/system/retention")) return jsonResponse({ executionHistoryDays: 7, commandHistoryDays: 7 });
       if (url.includes("/api/system")) return systemResponse();
       return jsonResponse({});
     });
@@ -88,6 +89,7 @@ describe("SystemPage", () => {
     expect(await screen.findByText("aeolus-host")).toBeInTheDocument();
     expect(screen.getByText("v22.0.0")).toBeInTheDocument();
     expect(screen.getByText("192.168.1.10")).toBeInTheDocument();
+    expect(await screen.findByLabelText("Execution history")).toHaveValue(7);
   });
 
   it("shows the error state when the system request fails", async () => {
@@ -142,10 +144,12 @@ describe("SystemPage", () => {
     expect(screen.queryByText("aeolus-host")).not.toBeInTheDocument();
     expect(screen.queryByText("System Information Unavailable")).not.toBeInTheDocument();
     expect(screen.queryByText("Application Logs")).not.toBeInTheDocument();
+    expect(screen.queryByText("History retention")).not.toBeInTheDocument();
 
     // The admin-only diagnostics/logs endpoints are never called.
     const calledUrls = mockAuthFetch.mock.calls.map((c) => c[0] as string);
     expect(calledUrls.some((u) => u.includes("/api/system/logs"))).toBe(false);
+    expect(calledUrls.some((u) => u.includes("/api/system/retention"))).toBe(false);
     expect(calledUrls.some((u) => /\/api\/system(\?|$)/.test(u))).toBe(false);
   });
 });

@@ -66,6 +66,7 @@ import { createSharedStateRoutes } from "./api/routes/shared-state.routes.js";
 import { createProvisioningRoutes } from "./api/routes/provisioning.routes.js";
 import { StateHistory } from "./core/state-history.js";
 import { createHousekeeping } from "./core/housekeeping.js";
+import { createRetentionSettings } from "./core/retention-settings.js";
 import { DataStore } from "./data-store/data-store.js";
 import { SharedStateStore } from "./shared-state/shared-state-store.js";
 import { MosquittoConfigWriter } from "./mqtt/mosquitto-config-writer.js";
@@ -296,14 +297,16 @@ async function main(): Promise<void> {
     dataStore.startRetentionTimer();
   }
 
-  // Retention for everything that grows on its own (src/core/housekeeping.ts). Runs
-  // now, after restart reconciliation has closed out interrupted commands, and then
-  // every six hours. It also covers a Data Store enabled at runtime, e.g. by the
-  // showcase seeder, which the hourly timer above only starts for at boot.
+  // History retention (src/core/housekeeping.ts), using the periods an admin sets on
+  // the System page (default 7 days each). Runs now, after restart reconciliation has
+  // closed out interrupted commands, then every six hours and whenever the setting
+  // changes. It also covers a Data Store enabled at runtime, e.g. by the showcase
+  // seeder, which the hourly timer above only starts for at boot.
+  const retentionSettings = createRetentionSettings(db);
   const housekeeping = createHousekeeping({
     db,
     executionLog,
-    commandHistory: config.commandHistory,
+    retention: () => retentionSettings.get(),
     dataStore,
     logger,
   });
@@ -469,7 +472,9 @@ async function main(): Promise<void> {
   app.use("/api/connectors", createConnectorRoutes(connectorManager, connectorRegistry));
   app.use("/api/metrics", createMetricsSummaryRoute(metricsService));
   app.use("/api/commands", createCommandRoutes(commandHistoryStore));
-  app.use("/api/system", createSystemRoutes());
+  app.use("/api/system", createSystemRoutes({
+    retention: { settings: retentionSettings, applyNow: () => { housekeeping.runOnce(); } },
+  }));
   app.use("/api/layout", createLayoutRoutes(db, permissionResolver));
   app.use("/api/data-store", createDataStoreRoutes(dataStore, permissionResolver, collectionOwnershipStore));
   // Shared State is mounted separately from the historical Data Store because it

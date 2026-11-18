@@ -130,6 +130,8 @@ export function buildDemoPolicy(deps: DemoValidatorDeps): DemoPolicyEntry[] {
     { method: "GET", pattern: "/api/connectors/available" },
     { method: "GET", pattern: "/api/connectors/:id/status" },
     { method: "GET", pattern: "/api/data-store/config" },
+    // History retention periods: two numbers, nothing sensitive. The PUT stays unlisted.
+    { method: "GET", pattern: "/api/system/retention" },
     { method: "GET", pattern: "/api/data-store/stats" },
     { method: "GET", pattern: "/api/data-store/buckets" },
     { method: "GET", pattern: "/api/data-store/buckets/:bucket" },

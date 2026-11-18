@@ -7,6 +7,9 @@ import path from "node:path";
 import { execSync } from "node:child_process";
 import { getRecentLogs } from "../../log-buffer.js";
 import { requireAdmin } from "../../auth/auth-middleware.js";
+import { validate } from "../middleware/validate.js";
+import { retentionSettingsBodySchema } from "../schemas/system.schemas.js";
+import type { RetentionSettingsStore } from "../../core/retention-settings.js";
 
 const VALID_LOG_LEVELS = ["trace", "debug", "info", "warn", "error", "fatal"];
 
@@ -97,8 +100,37 @@ function isNewerSemver(latest: string, current: string): boolean | null {
   return false;
 }
 
-export function createSystemRoutes(): Router {
+export interface SystemRouteDeps {
+  /** History retention, edited on the System page. Routes are omitted when absent. */
+  retention?: {
+    settings: RetentionSettingsStore;
+    /** Apply a changed setting now rather than at the next scheduled run. */
+    applyNow: () => void;
+  };
+}
+
+export function createSystemRoutes(deps: SystemRouteDeps = {}): Router {
   const router = Router();
+
+  if (deps.retention) {
+    const { settings, applyNow } = deps.retention;
+
+    /** GET /api/system/retention — how long execution and command history are kept (admin only). */
+    router.get("/retention", requireAdmin, (_req, res) => {
+      res.json(settings.get());
+    });
+
+    /**
+     * PUT /api/system/retention — change history retention (admin only).
+     * Shortening it deletes the older history straight away, so the change is applied
+     * immediately rather than left for the next six-hourly run.
+     */
+    router.put("/retention", requireAdmin, validate({ body: retentionSettingsBodySchema }), (req, res) => {
+      const updated = settings.set(req.body);
+      applyNow();
+      res.json(updated);
+    });
+  }
 
   /**
    * GET /api/system — host diagnostics (admin only).

@@ -117,8 +117,9 @@ outbound internet access and stay empty without it:
   `http.get` (see [automations reference](../docs/reference/automations.md)).
 
 Both refresh on a schedule and keep their last readings, marked stale, when a source
-fails. Leaving the showcase running does not fill storage: everything it accumulates
-(execution and command history, Collections, retained readings) has a ceiling. See
+fails. Leaving the showcase running does not fill storage: Collections and retained readings
+are bounded, and execution and command history are pruned after 7 days unless an admin
+changes that on the System page. See
 [storage limits](../docs/reference/data-and-storage.md#storage-limits). WaterNSW data must carry "© State of New South Wales through WaterNSW", which the
 tab shows. Its copyright terms also require permission to include it in advertising or
 a product for sale; confirm that with WaterNSW before showing the tab on a hosted demo

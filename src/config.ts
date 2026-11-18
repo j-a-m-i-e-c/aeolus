@@ -29,13 +29,6 @@ export interface Config {
   nodeEnv: string;
   stateHistoryMax: number;
   historyRecordInterval: number;
-  /**
-   * Retention for durable command history (completed commands only). Each bound is
-   * applied independently; 0 disables that bound. Defaults keep 30 days and at most
-   * 50,000 commands (about 65 MB), so an install left running, showcase included,
-   * cannot fill its storage with command records.
-   */
-  commandHistory: { maxAgeDays: number; maxRecords: number };
   rateLimitRpm: number;
   corsOrigins: string[];
   /** Number of trusted reverse-proxy hops in front of Aeolus. 0 disables trust proxy. */
@@ -81,17 +74,6 @@ export interface Config {
   };
 }
 
-/**
- * A non-negative integer setting. Unset, blank or non-numeric falls back to the
- * default rather than to 0, because 0 means "no limit" for retention settings and a
- * typo must not silently switch a ceiling off.
- */
-function nonNegativeInt(value: string | undefined, fallback: number): number {
-  if (value === undefined || value.trim() === "") return fallback;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : fallback;
-}
-
 export const config: Config = {
   mqttBrokerUrl: process.env.MQTT_BROKER_URL || "mqtt://localhost:1883",
   mqttTopics: (process.env.MQTT_TOPICS || "#")
@@ -113,10 +95,6 @@ export const config: Config = {
   nodeEnv: process.env.NODE_ENV || "development",
   stateHistoryMax: parseInt(process.env.STATE_HISTORY_MAX || "100", 10),
   historyRecordInterval: parseInt(process.env.HISTORY_RECORD_INTERVAL || "5000", 10),
-  commandHistory: {
-    maxAgeDays: nonNegativeInt(process.env.COMMAND_HISTORY_RETENTION_DAYS, 30),
-    maxRecords: nonNegativeInt(process.env.COMMAND_HISTORY_MAX_RECORDS, 50_000),
-  },
   rateLimitRpm: parseInt(process.env.RATE_LIMIT_RPM || "1000", 10),
   corsOrigins: process.env.CORS_ORIGINS?.split(",").map((s) => s.trim()).filter(Boolean) || [],
   trustedProxyHops: Math.max(0, parseInt(process.env.TRUST_PROXY_HOPS || "0", 10) || 0),

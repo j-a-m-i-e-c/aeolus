@@ -4,6 +4,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import express from "express";
 import { createSystemRoutes } from "./system.routes.js";
 import { errorHandler } from "../middleware/error-handler.js";
+import type { RetentionSettingsStore } from "../../core/retention-settings.js";
 
 vi.mock("../../logger.js", () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
@@ -179,6 +180,77 @@ describe("system.routes", () => {
       expect(res.status).toBe(200);
       expect(res.body.commit).toBe("unknown");
       expect(res.body.buildDate).toBe("unknown");
+    });
+  });
+
+  describe("/api/system/retention", () => {
+    let current: { executionHistoryDays: number | null; commandHistoryDays: number | null };
+    let applyNow: ReturnType<typeof vi.fn>;
+    let set: ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+      current = { executionHistoryDays: 7, commandHistoryDays: 7 };
+      applyNow = vi.fn();
+      set = vi.fn((update: Partial<typeof current>) => {
+        current = { ...current, ...update };
+        return current;
+      });
+      const settings = { get: () => current, set } as unknown as RetentionSettingsStore;
+      app = express();
+      app.use(express.json());
+      app.use((req, _res, next) => {
+        if (testUser) (req as unknown as { user: unknown }).user = testUser;
+        next();
+      });
+      app.use("/api/system", createSystemRoutes({ retention: { settings, applyNow } }));
+      app.use(errorHandler);
+    });
+
+    it("returns the current periods", async () => {
+      const res = await request(app, "GET", "/api/system/retention");
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ executionHistoryDays: 7, commandHistoryDays: 7 });
+    });
+
+    it("saves a new period and applies it straight away", async () => {
+      const res = await request(app, "PUT", "/api/system/retention", { commandHistoryDays: 365 });
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ executionHistoryDays: 7, commandHistoryDays: 365 });
+      expect(applyNow).toHaveBeenCalledTimes(1);
+    });
+
+    it("accepts null as keep forever", async () => {
+      const res = await request(app, "PUT", "/api/system/retention", { executionHistoryDays: null, commandHistoryDays: null });
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ executionHistoryDays: null, commandHistoryDays: null });
+    });
+
+    it.each([
+      ["zero days", { executionHistoryDays: 0 }],
+      ["over ten years", { commandHistoryDays: 3651 }],
+      ["a fraction", { commandHistoryDays: 1.5 }],
+      ["a string", { commandHistoryDays: "30" }],
+      ["an unknown field", { commandHistoryDays: 30, rowLimit: 10 }],
+      ["an empty body", {}],
+    ])("rejects %s with 400 and changes nothing", async (_label, body) => {
+      const res = await request(app, "PUT", "/api/system/retention", body);
+      expect(res.status).toBe(400);
+      expect(set).not.toHaveBeenCalled();
+      expect(applyNow).not.toHaveBeenCalled();
+    });
+
+    it("is admin-only for reading and changing", async () => {
+      testUser = { role: "user" };
+      expect((await request(app, "GET", "/api/system/retention")).status).toBe(403);
+      expect((await request(app, "PUT", "/api/system/retention", { commandHistoryDays: 30 })).status).toBe(403);
+      expect(set).not.toHaveBeenCalled();
+    });
+
+    it("is not mounted when no retention store is given", async () => {
+      const bare = express();
+      bare.use((req, _res, next) => { (req as unknown as { user: unknown }).user = { role: "admin" }; next(); });
+      bare.use("/api/system", createSystemRoutes());
+      expect((await request(bare, "GET", "/api/system/retention")).status).toBe(404);
     });
   });
 
