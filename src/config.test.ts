@@ -93,6 +93,27 @@ describe("config", () => {
     expect(config.trustedProxyHops).toBe(1);
   });
 
+  it("defaults command history retention to 30 days and 50,000 commands", async () => {
+    delete process.env.COMMAND_HISTORY_RETENTION_DAYS;
+    delete process.env.COMMAND_HISTORY_MAX_RECORDS;
+    const { config } = await import("./config.js");
+    expect(config.commandHistory).toEqual({ maxAgeDays: 30, maxRecords: 50_000 });
+  });
+
+  it("reads command history retention, where 0 turns a bound off", async () => {
+    process.env.COMMAND_HISTORY_RETENTION_DAYS = "0";
+    process.env.COMMAND_HISTORY_MAX_RECORDS = "1200.7";
+    const { config } = await import("./config.js");
+    expect(config.commandHistory).toEqual({ maxAgeDays: 0, maxRecords: 1200 });
+  });
+
+  it("falls back to the defaults for a malformed retention value instead of switching it off", async () => {
+    process.env.COMMAND_HISTORY_RETENTION_DAYS = "thirty";
+    process.env.COMMAND_HISTORY_MAX_RECORDS = "-5";
+    const { config } = await import("./config.js");
+    expect(config.commandHistory).toEqual({ maxAgeDays: 30, maxRecords: 50_000 });
+  });
+
   it("handles a single MQTT topic without commas", async () => {
     delete process.env.MQTT_BROKER_URL;
     delete process.env.PORT;

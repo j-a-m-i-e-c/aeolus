@@ -19,6 +19,7 @@ Core tables cover:
 - dashboard tabs and panes;
 - connectors;
 - device history;
+- automation execution history (`execution_history`);
 - durable command history (`command_records` and `command_transitions`);
 - users, groups and refresh tokens;
 - MQTT credentials and system settings;
@@ -81,6 +82,39 @@ Configuration:
 | `HISTORY_RECORD_INTERVAL` | `5000` | Minimum interval between stored snapshots in milliseconds |
 
 These variables are shown in `.env.example` and are read by the backend configuration.
+
+## Storage limits
+
+Aeolus is meant to run unattended for months, including with the showcase left on. Every
+table that grows by itself therefore has a ceiling, so storage use levels off instead of
+climbing:
+
+| What | Ceiling | Approximate size at the ceiling |
+|---|---|---:|
+| Execution history (one row per automation run) | 7 days and 100,000 rows | 27–47 MB |
+| Command history (completed commands and their transitions) | `COMMAND_HISTORY_RETENTION_DAYS` (30) and `COMMAND_HISTORY_MAX_RECORDS` (50,000) | 65 MB |
+| Device state history | `STATE_HISTORY_MAX` entries per device | depends on device count |
+| Data Store Collections | per-collection retention, plus the record and size limits set when the store is enabled | set by those limits |
+| Automation State, Shared State | one value per key, overwritten in place | small |
+| Container logs | 10 MB × 5 files per service (Compose `json-file`) | 50 MB per service |
+
+Sizes are measured on SQLite including indexes; a run that issues device commands makes a
+larger execution row than one that does not.
+
+Retention runs once at startup and then every six hours (`src/core/housekeeping.ts`), so
+it applies even to a backend that is restarted often. Command history is only pruned
+once a command is complete: one still waiting for its acknowledgement or observation is
+never removed. Set a command-history variable to `0` to turn that bound off, or both to
+keep command history indefinitely.
+
+Freed space is reused by SQLite rather than returned to the filesystem, so the database
+file stays at its largest size. That is why the ceilings above, not the current file
+size, are the figure to plan around.
+
+| Variable | Default | Purpose |
+|---|---:|---|
+| `COMMAND_HISTORY_RETENTION_DAYS` | `30` | Delete completed commands older than this; `0` disables |
+| `COMMAND_HISTORY_MAX_RECORDS` | `50000` | Keep at most this many completed commands; `0` disables |
 
 ## What stores what
 

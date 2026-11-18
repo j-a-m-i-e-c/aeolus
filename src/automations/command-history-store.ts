@@ -766,6 +766,59 @@ export class CommandHistoryStore {
   }
 }
 
+export interface CommandHistoryRetention {
+  /** Delete completed commands older than this many days. 0 keeps them regardless of age. */
+  maxAgeDays: number;
+  /** Keep at most this many completed commands, oldest deleted first. 0 means no ceiling. */
+  maxRecords: number;
+}
+
+/**
+ * Enforce command-history retention and return how many commands were deleted.
+ *
+ * Only completed commands are eligible (`terminal_at IS NOT NULL`). A command still
+ * waiting for its evidence is never removed, so a live confirmation can always be
+ * recorded against its row. Transitions are deleted explicitly with their command
+ * rather than relying on ON DELETE CASCADE, which only fires when the connection has
+ * foreign keys enabled.
+ *
+ * A free function rather than a CommandHistoryStore method so the store's constructor
+ * contract and every existing test double stay unchanged.
+ */
+export function pruneCommandHistory(db: DatabaseType, retention: CommandHistoryRetention, now: number): number {
+  const ids: string[] = [];
+  if (retention.maxAgeDays > 0) {
+    const cutoff = now - retention.maxAgeDays * 86_400_000;
+    for (const row of db
+      .prepare("SELECT command_id FROM command_records WHERE terminal_at IS NOT NULL AND terminal_at < ?")
+      .all(cutoff) as Array<{ command_id: string }>) {
+      ids.push(row.command_id);
+    }
+  }
+  if (retention.maxRecords > 0) {
+    for (const row of db
+      .prepare(
+        `SELECT command_id FROM command_records WHERE terminal_at IS NOT NULL
+           ORDER BY requested_at DESC, rowid DESC LIMIT -1 OFFSET ?`,
+      )
+      .all(Math.floor(retention.maxRecords)) as Array<{ command_id: string }>) {
+      ids.push(row.command_id);
+    }
+  }
+  if (ids.length === 0) return 0;
+
+  const unique = [...new Set(ids)];
+  const deleteTransitions = db.prepare("DELETE FROM command_transitions WHERE command_id = ?");
+  const deleteRecord = db.prepare("DELETE FROM command_records WHERE command_id = ?");
+  db.transaction(() => {
+    for (const id of unique) {
+      deleteTransitions.run(id);
+      deleteRecord.run(id);
+    }
+  })();
+  return unique.length;
+}
+
 function clampLimit(limit?: number): number {
   if (limit === undefined || !Number.isFinite(limit)) return DEFAULT_COMMAND_LIST_LIMIT;
   const floored = Math.floor(limit);

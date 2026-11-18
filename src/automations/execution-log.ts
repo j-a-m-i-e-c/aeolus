@@ -196,14 +196,28 @@ export class ExecutionLog {
   }
 
   /**
-   * Delete rows older than `maxAgeDays` from the SQLite table.
-   * No-op if no database is available.
+   * Delete rows older than `maxAgeDays`, then any beyond the newest `maxRows`.
+   *
+   * Both bounds matter. Age alone does not limit size: an automation triggered by a
+   * device publishing every few seconds adds tens of thousands of rows a day, so a
+   * week of them can run to hundreds of megabytes on a Pi's SD card. The row ceiling
+   * caps the table whatever the trigger rate.
+   *
+   * @returns the number of rows deleted. No-op (0) if no database is available.
    */
-  enforceRetention(maxAgeDays: number): void {
-    if (!this.db) return;
+  enforceRetention(maxAgeDays: number, maxRows?: number): number {
+    if (!this.db) return 0;
 
     const cutoff = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
-    this.db.prepare("DELETE FROM execution_history WHERE timestamp < @cutoff").run({ cutoff });
+    let deleted = this.db.prepare("DELETE FROM execution_history WHERE timestamp < @cutoff").run({ cutoff }).changes;
+    if (maxRows !== undefined && maxRows > 0) {
+      deleted += this.db.prepare(
+        `DELETE FROM execution_history WHERE id IN (
+           SELECT id FROM execution_history ORDER BY timestamp DESC LIMIT -1 OFFSET @maxRows
+         )`,
+      ).run({ maxRows: Math.floor(maxRows) }).changes;
+    }
+    return deleted;
   }
 
   /** Convert a raw database row to an ExecutionLogEntry. */

@@ -42,6 +42,7 @@ Aeolus follows semantic versioning for published releases. Until the first stabl
 * A Northern Rivers showcase tab (the Regional Conditions automation) maps measured regional data on a hand-drawn SVG map: WaterNSW river heights and rainfall gauges with quality flags and retained history, plus NSW RFS fire danger and incidents. Every reading shows its freshness, and a failing source keeps its last data marked stale.
 * Media capture mode (`?capture=1`) for hand-recorded showcase video hides dashboard editing chrome and demo-scenario controls. It exists only in showcase builds.
 * Seeding the showcase now refuses an install that has its own automations or tabs and has never held the showcase; `FORCE=1` overrides. `make deploy` stops a leftover simulator.
+* History that grows on its own now has a ceiling, so an install left running (showcase included) cannot fill its storage. Command history, previously never pruned, keeps completed commands for 30 days and at most 50,000 (`COMMAND_HISTORY_RETENTION_DAYS`, `COMMAND_HISTORY_MAX_RECORDS`). Execution history gains a 100,000-row ceiling beside its 7 days. Retention now runs at startup and every six hours; execution history used to be pruned first 24 hours after boot, so a backend restarted daily never pruned it. See [storage limits](docs/reference/data-and-storage.md#storage-limits).
 
 ### Operations
 

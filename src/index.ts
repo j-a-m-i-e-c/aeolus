@@ -65,6 +65,7 @@ import { createDataStoreRoutes } from "./api/routes/data-store.routes.js";
 import { createSharedStateRoutes } from "./api/routes/shared-state.routes.js";
 import { createProvisioningRoutes } from "./api/routes/provisioning.routes.js";
 import { StateHistory } from "./core/state-history.js";
+import { createHousekeeping } from "./core/housekeeping.js";
 import { DataStore } from "./data-store/data-store.js";
 import { SharedStateStore } from "./shared-state/shared-state-store.js";
 import { MosquittoConfigWriter } from "./mqtt/mosquitto-config-writer.js";
@@ -278,19 +279,6 @@ async function main(): Promise<void> {
 
   const executionLog = new ExecutionLog(200, db);
 
-  // Retention timer: prune execution history entries older than 7 days, once daily
-  const executionRetentionTimer = setInterval(() => {
-    try {
-      executionLog.enforceRetention(7);
-    } catch (err) {
-      logger.error(
-        { error: err instanceof Error ? err.message : String(err) },
-        "Execution history retention enforcement failed",
-      );
-    }
-  }, 24 * 60 * 60 * 1000);
-  executionRetentionTimer.unref();
-
   const stateStore = new AutomationStateStore(db);
   stateStore.loadFromDb();
 
@@ -307,6 +295,19 @@ async function main(): Promise<void> {
   if (dataStore.isEnabled()) {
     dataStore.startRetentionTimer();
   }
+
+  // Retention for everything that grows on its own (src/core/housekeeping.ts). Runs
+  // now, after restart reconciliation has closed out interrupted commands, and then
+  // every six hours. It also covers a Data Store enabled at runtime, e.g. by the
+  // showcase seeder, which the hourly timer above only starts for at boot.
+  const housekeeping = createHousekeeping({
+    db,
+    executionLog,
+    commandHistory: config.commandHistory,
+    dataStore,
+    logger,
+  });
+  housekeeping.start();
 
   // 7. Automation Engine (with sandbox, command service, collector, and the
   // single Execution_Owner that records history/metrics/completion/audit).
@@ -631,6 +632,7 @@ async function main(): Promise<void> {
       // 3. Stop all active timers (retention timers, polling intervals, cron schedules)
       await metricsHistoryService.dispose();
       dataStore.dispose();
+      housekeeping.stop();
       await connectorManager.disposeAll();
 
       // 4. Stop automation engine (cron timers)
