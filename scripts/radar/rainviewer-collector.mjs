@@ -2,8 +2,17 @@
 // Fetch RainViewer tile PNGs outside the Aeolus iframe, render them to a bounded
 // geographic colour grid, publish one retained MQTT message containing four frames.
 // The custom UI draws its own SVG. Never put radar URLs or images in the UI.
+import net from 'node:net';
 import { regionalRadarGrid } from './rainviewer-grid.mjs';
 import { INDEX_URL, describeFetchError, selectFrames, tileCoordinates, tileURL } from './rainviewer-api.mjs';
+
+// RainViewer is served from Germany, more than 250 ms away from Australia. When DNS
+// returns both an IPv4 and an IPv6 address, Node tries them in turn and gives each
+// connection attempt only 250 ms by default. On a Pi with no IPv6 route that cut the
+// IPv4 attempt off before its handshake finished, then failed IPv6 with ENETUNREACH,
+// and every fetch failed with ETIMEDOUT. Give each attempt 2.5 s; the whole request
+// is still bounded by the 12 s timeout below.
+net.setDefaultAutoSelectFamilyAttemptTimeout(2500);
 
 const TOPIC = 'aeolus/local/radar/northern-rivers';
 const INTERVAL_MS = 10 * 60_000;
