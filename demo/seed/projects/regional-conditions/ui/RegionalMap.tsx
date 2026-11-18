@@ -1,4 +1,5 @@
 import { LAND } from './coastline';
+import { LABELS as RIVER_LABELS, RIVERS } from './rivers';
 import RadarLayer from './RadarLayer';
 import { heightBadges } from './height-labels';
 import { RAIN_CURRENT_MS, RIVER_CURRENT_MS, freshness, trendOf } from './freshness';
@@ -34,6 +35,14 @@ const LAND_PATH = LAND.map((ring) => ring.map(([lon, lat], i) => {
   const c = project(lon, lat);
   return (i === 0 ? 'M' : 'L') + c.x.toFixed(1) + ',' + c.y.toFixed(1);
 }).join(' ') + ' Z').join(' ');
+
+const linePath = (points: [number, number][]) => points.map(([lon, lat], i) => {
+  const c = project(lon, lat);
+  return (i === 0 ? 'M' : 'L') + c.x.toFixed(1) + ',' + c.y.toFixed(1);
+}).join(' ');
+// Projected once: the geometry is fixed, and the map re-renders every radar frame.
+const RIVER_PATHS = RIVERS.map((river) => ({ ...river, d: river.paths.map(linePath).join(' ') }));
+const RIVER_LABEL_POINTS = RIVER_LABELS.map((label) => ({ name: label.name, ...project(label.lon, label.lat) }));
 
 export type Selection = { kind: 'river' | 'rain' | 'fire'; id: string } | null;
 type Layers = { river: boolean; rain: boolean; fires: boolean; radar: boolean; heights: boolean };
@@ -82,10 +91,16 @@ export default function RegionalMap({ gauges, rain, incidents, now, layers, sele
     ? heightBadges(gauges.filter((g) => riverDrawn.has(g.id)), project, WIDTH, HEIGHT,
       selected?.kind === 'river' ? selected.id : undefined) : [];
 
-  return <svg role="img" aria-label="Northern Rivers map with measured river heights, measured rainfall and RFS incidents"
+  return <svg role="img" aria-label="Northern Rivers map with the main rivers, measured river heights, measured rainfall and RFS incidents"
     viewBox={`0 0 ${WIDTH} ${HEIGHT}`} style={{ display: 'block', width: '100%', height: 'auto', background: '#0A2430', borderRadius: 10 }}>
     <path d={LAND_PATH} fill="#17342D" stroke="#4C796D" strokeWidth={1.6} fillRule="evenodd" />
     {layers.radar && <RadarLayer frame={radarFrame} project={project} />}
+    {/* Rivers above radar, so heavy rain cannot hide them, and under every marker.
+        They take no clicks. */}
+    <g pointerEvents="none" aria-hidden="true">
+      {RIVER_PATHS.map((river) => <path key={river.name} d={river.d} fill="none" stroke="#4FA3C7"
+        strokeOpacity={river.main ? 0.8 : 0.5} strokeWidth={river.main ? 2.2 : 1.3} strokeLinecap="round" strokeLinejoin="round" />)}
+    </g>
     {[152.5, 153, 153.5, 154].map((lon) => <line key={'lon' + lon} x1={project(lon, 0).x} x2={project(lon, 0).x} y1={0} y2={HEIGHT} stroke="#B3C4D0" strokeOpacity={0.08} strokeDasharray="4 8" />)}
     {[-28, -28.5, -29, -29.5, -30].map((lat) => <line key={'lat' + lat} x1={0} x2={WIDTH} y1={project(0, lat).y} y2={project(0, lat).y} stroke="#B3C4D0" strokeOpacity={0.08} strokeDasharray="4 8" />)}
 
@@ -131,6 +146,10 @@ export default function RegionalMap({ gauges, rain, incidents, now, layers, sele
         <FireGlyph x={c.x} y={c.y} colour={fireColour(incident.alert)} />
       </Marker>;
     })}
+
+    {/* River names, italic and blue so they read as water rather than places. */}
+    {RIVER_LABEL_POINTS.map((label) => <text key={'rl' + label.name} x={label.x + 4} y={label.y - 3} pointerEvents="none"
+      fontSize={12} fontStyle="italic" fill="#8FCBE3" stroke="#071821" strokeWidth={3} paintOrder="stroke">{label.name}</text>)}
 
     {/* Town labels are not interactive. */}
     {TOWNS.map(([name, lon, lat]) => {

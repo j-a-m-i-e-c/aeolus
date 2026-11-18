@@ -160,6 +160,6 @@ export default function RegionalConditionsDashboard({ model, actions }: { model:
       <div style={heading}>OFFICIAL INFORMATION</div>
       <div style={caption}>This is a software demonstration, not a warning service. Flood and fire warnings come from the issuing agencies: NSW RFS Fires Near Me (rfs.nsw.gov.au), NSW SES and Hazards Near Me (hazardwatch.gov.au), and Bureau of Meteorology flood warnings (bom.gov.au).</div>
     </section>
-    <footer style={{ ...caption, marginTop: 12 }}>River and rainfall data © State of New South Wales through WaterNSW. Fire data © State of New South Wales (NSW Rural Fire Service). Land outline: Natural Earth, public domain. Radar data by RainViewer (rainviewer.com). Layers rendered by Aeolus.</footer>
+    <footer style={{ ...caption, marginTop: 12 }}>River and rainfall data © State of New South Wales through WaterNSW. Fire data © State of New South Wales (NSW Rural Fire Service). Land outline: Natural Earth, public domain. Rivers: © Commonwealth of Australia (Geoscience Australia), CC BY 4.0. Radar data by RainViewer (rainviewer.com). Layers rendered by Aeolus.</footer>
   </div>;
 }

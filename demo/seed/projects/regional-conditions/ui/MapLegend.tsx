@@ -40,6 +40,6 @@ export default function MapLegend({ layers }: Props) {
       <Swatch label="Watch and Act"><FireGlyph x={12} y={12} r={10} colour={FIRE.watchAndAct} /></Swatch>
       <Swatch label="Emergency Warning"><FireGlyph x={12} y={12} r={10} colour={FIRE.emergency} /></Swatch>
     </div>
-    <div style={{ ...caption, marginTop: 8 }}>Where a rain gauge shares a site with a river gauge, the raindrop sits just above and to the right of the circle.</div>
+    <div style={{ ...caption, marginTop: 8 }}>Blue lines are the gauged rivers; the heavier, named ones are the main rivers. Where a rain gauge shares a site with a river gauge, the raindrop sits just above and to the right of the circle.</div>
   </div>;
 }
