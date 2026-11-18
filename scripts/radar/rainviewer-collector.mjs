@@ -3,7 +3,7 @@
 // geographic colour grid, publish one retained MQTT message containing four frames.
 // The custom UI draws its own SVG. Never put radar URLs or images in the UI.
 import { regionalRadarGrid } from './rainviewer-grid.mjs';
-import { INDEX_URL, selectFrames, tileCoordinates, tileURL } from './rainviewer-api.mjs';
+import { INDEX_URL, describeFetchError, selectFrames, tileCoordinates, tileURL } from './rainviewer-api.mjs';
 
 const TOPIC = 'aeolus/local/radar/northern-rivers';
 const INTERVAL_MS = 10 * 60_000;
@@ -14,8 +14,13 @@ let lastPublished = '';
 let running = false;
 
 async function getBytes(url, maxBytes = MAX_IMAGE_BYTES) {
-  const response = await fetch(url, { signal: AbortSignal.timeout(12_000), redirect: 'error',
-    headers: { 'User-Agent': 'Aeolus-RegionalConditions/0.1 (+https://aeolus.com.au)' } });
+  let response;
+  try {
+    response = await fetch(url, { signal: AbortSignal.timeout(12_000), redirect: 'error',
+      headers: { 'User-Agent': 'Aeolus-RegionalConditions/0.1 (+https://aeolus.com.au)' } });
+  } catch (error) {
+    throw new Error(describeFetchError(url, error));
+  }
   if (!response.ok) throw new Error(`RainViewer request returned HTTP ${response.status}`);
   if (Number(response.headers.get('content-length')) > maxBytes) throw new Error('Oversized radar response');
   const data = Buffer.from(await response.arrayBuffer());

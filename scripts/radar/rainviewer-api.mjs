@@ -50,3 +50,18 @@ export function tileURL(path, { x, y }, host = TILE_HOST) {
   }
   return `${TILE_HOST}${path}/${TILE_SIZE}/${ZOOM}/${x}/${y}/${PALETTE_ID}/0_0.png`;
 }
+
+/**
+ * Node's fetch reports every network-level failure as "fetch failed" and keeps the
+ * reason (DNS, TLS, refused, redirect) in `cause`. Name the host and that reason, or a
+ * failure on a deployed collector cannot be diagnosed from its log.
+ */
+export function describeFetchError(url, error) {
+  let host = 'RainViewer';
+  try { host = new URL(url).host; } catch { /* keep the generic name */ }
+  if (error?.name === 'TimeoutError') return `${host}: no answer within 12 s`;
+  const message = error instanceof Error ? error.message : String(error);
+  const cause = error?.cause;
+  const detail = cause ? [cause.code, cause.message].filter(Boolean).join(' ') : '';
+  return `${host}: ${message}${detail ? ` (${detail})` : ''}`;
+}

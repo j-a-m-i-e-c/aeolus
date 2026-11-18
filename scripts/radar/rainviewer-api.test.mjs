@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { REGION, ZOOM, tileCoordinates, tilePoint, tileURL, selectFrames } from './rainviewer-api.mjs';
+import { REGION, ZOOM, describeFetchError, tileCoordinates, tilePoint, tileURL, selectFrames } from './rainviewer-api.mjs';
 
 test('northern rivers spans exactly two z7 tiles, with correct Web Mercator geometry', () => {
   assert.equal(ZOOM, 7);
@@ -26,4 +26,12 @@ test('rejects arbitrary hosts or paths and creates a fixed tile URL', () => {
     'https://tilecache.rainviewer.com/v2/radar/abcd/512/7/118/74/2/0_0.png');
   assert.throws(() => tileURL('/v2/radar/../../secret', {x:118,y:74}), /Untrusted/);
   assert.throws(() => tileURL('/v2/radar/a', {x:-1,y:74}), /Invalid/);
+});
+test('names the host and the network cause behind "fetch failed"', () => {
+  const dns = new TypeError('fetch failed', { cause: Object.assign(new Error('getaddrinfo EAI_AGAIN api.rainviewer.com'), { code: 'EAI_AGAIN' }) });
+  assert.equal(describeFetchError('https://api.rainviewer.com/public/weather-maps.json', dns),
+    'api.rainviewer.com: fetch failed (EAI_AGAIN getaddrinfo EAI_AGAIN api.rainviewer.com)');
+  const timeout = Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' });
+  assert.equal(describeFetchError('https://tilecache.rainviewer.com/v2/x.png', timeout), 'tilecache.rainviewer.com: no answer within 12 s');
+  assert.equal(describeFetchError('not a url', new Error('boom')), 'RainViewer: boom');
 });
