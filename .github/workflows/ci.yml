@@ -54,6 +54,10 @@ jobs:
         # list lives in package.json so it cannot drift from release-validation.yml.
         run: npm run test:coverage:no-broker
 
+      - name: Radar collector tests
+        # scripts/radar runs outside src/, so vitest (rooted at src/) never sees it.
+        run: npm run test:radar
+
   frontend:
     runs-on: ubuntu-latest
     defaults:

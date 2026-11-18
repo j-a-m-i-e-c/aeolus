@@ -766,37 +766,6 @@ export class CommandHistoryStore {
   }
 }
 
-/**
- * Delete completed commands older than `maxAgeDays`, with their transitions, and
- * return how many commands were deleted.
- *
- * Only completed commands are eligible (`terminal_at IS NOT NULL`). A command still
- * waiting for its evidence is never removed, so a live confirmation can always be
- * recorded against its row. Transitions are deleted explicitly with their command
- * rather than relying on ON DELETE CASCADE, which only fires when the connection has
- * foreign keys enabled.
- *
- * A free function rather than a CommandHistoryStore method so the store's constructor
- * contract and every existing test double stay unchanged.
- */
-export function pruneCommandHistory(db: DatabaseType, maxAgeDays: number, now: number): number {
-  const cutoff = now - maxAgeDays * 86_400_000;
-  const ids = (db
-    .prepare("SELECT command_id FROM command_records WHERE terminal_at IS NOT NULL AND terminal_at < ?")
-    .all(cutoff) as Array<{ command_id: string }>).map((row) => row.command_id);
-  if (ids.length === 0) return 0;
-
-  const deleteTransitions = db.prepare("DELETE FROM command_transitions WHERE command_id = ?");
-  const deleteRecord = db.prepare("DELETE FROM command_records WHERE command_id = ?");
-  db.transaction(() => {
-    for (const id of ids) {
-      deleteTransitions.run(id);
-      deleteRecord.run(id);
-    }
-  })();
-  return ids.length;
-}
-
 function clampLimit(limit?: number): number {
   if (limit === undefined || !Number.isFinite(limit)) return DEFAULT_COMMAND_LIST_LIMIT;
   const floored = Math.floor(limit);

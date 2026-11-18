@@ -32,8 +32,8 @@ function LevelHistory({ samples }: { samples: any[] }) {
       <path d={path} fill="none" stroke="#6CC5DD" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" />
       {data.filter((s) => s.suspect).map((s) => { const p = pt(s); return <circle key={s.t} cx={p.x} cy={p.y} r={3.5} fill="#0E1B24" stroke={TONE.warn} strokeWidth={1.5} />; })}
       <line x1={12} x2={288} y1={88} y2={88} stroke="#426070" strokeWidth={1} />
-      <text x={13} y={10} fontSize={10} fill="#B2CFDC">{max.toFixed(2)} m</text>
-      <text x={13} y={93} fontSize={10} fill="#B2CFDC">{min.toFixed(2)} m</text>
+      <text x={13} y={10} fontSize={12} fill="#B2CFDC">{max.toFixed(2)} m</text>
+      <text x={13} y={93} fontSize={12} fill="#B2CFDC">{min.toFixed(2)} m</text>
     </svg>
     <div style={caption}>{data.length} readings kept by Aeolus over {ago(t0, data[data.length - 1].t).replace(' ago', '')} · {delta >= 0 ? '+' : ''}{delta.toFixed(2)} m</div>
   </div>;
@@ -49,13 +49,13 @@ function RainHours({ hours }: { hours: any[] }) {
       {data.map((h, i) => {
         const height = h.mm > 0 ? Math.max(2, h.mm / peak * 60) : 1;
         const x = 12 + (24 - data.length + i) * w;
-        return <rect key={h.t} x={x + 1} y={68 - height} width={w - 2} height={height} fill={h.mm > 0 ? rainColour(h.mm) : '#2E4552'} />;
+        return <rect key={h.t} x={x + 1} y={68 - height} width={w - 2} height={height} fill={h.suspect ? TONE.warn : h.mm > 0 ? rainColour(h.mm) : '#2E4552'} />;
       })}
       <line x1={12} x2={288} y1={68} y2={68} stroke="#426070" strokeWidth={1} />
-      <text x={13} y={10} fontSize={10} fill="#B2CFDC">{peak.toFixed(1)} mm/h</text>
-      <text x={288} y={79} fontSize={10} fill="#B2CFDC" textAnchor="end">latest hour</text>
+      <text x={13} y={10} fontSize={12} fill="#B2CFDC">{peak.toFixed(1)} mm/h</text>
+      <text x={288} y={79} fontSize={12} fill="#B2CFDC" textAnchor="end">latest hour</text>
     </svg>
-    <div style={caption}>{data.length} complete hour{data.length === 1 ? '' : 's'} kept by Aeolus</div>
+    <div style={caption}>{data.length} complete hour{data.length === 1 ? '' : 's'} kept by Aeolus{data.some((h) => h.suspect) ? ' · amber bars are quality flagged' : ''}</div>
   </div>;
 }
 
@@ -83,7 +83,7 @@ export default function SelectionDetail({ selected, gauges, rain, incidents, riv
         <div style={{ fontWeight: 700, fontSize: 14 }}>{station.name}</div>
         <div style={big}>{Number(station.lastHourMm).toFixed(1)} <span style={{ fontSize: 14 }}>mm in the latest complete hour</span></div>
         <div style={caption}>{Number(station.total24h).toFixed(1)} mm over the {station.hoursCovered} hour{station.hoursCovered === 1 ? '' : 's'} Aeolus has kept</div>
-        <FreshnessLine observedAt={station.observedAt} now={now} limit={RAIN_CURRENT_MS} />
+        <FreshnessLine observedAt={station.observedAt} now={now} limit={RAIN_CURRENT_MS} quality={station.suspect ? 'suspect' : undefined} note={station.suspect ? 'Latest hourly total flagged by WaterNSW' : undefined} />
         <div style={{ marginTop: 10 }}><RainHours hours={Array.isArray(rainHistory?.[station.id]) ? rainHistory[station.id] : []} /></div>
         <div style={{ ...caption, marginTop: 8 }}>Measured by a WaterNSW rain gauge. Not radar and not a forecast.</div>
       </div>;

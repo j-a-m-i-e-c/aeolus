@@ -171,6 +171,28 @@ services:
     mem_limit: 256m
     cpus: 0.5
 
+  # Optional external radar collector. Enable only after confirming the hosted
+  # showcase's use is consistent with RainViewer community API terms. No ports,
+  # no DB mount and no Aeolus admin credentials; only internal MQTT publishing.
+  radar-collector:
+    <<: *hardening
+    profiles: ["radar"]
+    image: ${AEOLUS_APP_IMAGE:-aeolus-demo-app:current}
+    container_name: aeolus-demo-radar-collector
+    user: "${AEOLUS_RUNTIME_UID:-1000}:${AEOLUS_RUNTIME_GID:-1000}"
+    networks:
+      - demo
+    environment:
+      MQTT_BROKER_URL: mqtt://mosquitto:1883
+    command: ["node", "scripts/radar/rainviewer-collector.mjs"]
+    depends_on:
+      - mosquitto
+      - backend
+    healthcheck:
+      disable: true
+    mem_limit: 192m
+    cpus: 0.3
+
   # Cloudflare Tunnel — the ONLY public ingress. It makes outbound connections to
   # Cloudflare (no inbound ports on the VM). The recommended deployment manages
   # the tunnel, DNS and ingress rules from demo/infrastructure/terraform/. Manual

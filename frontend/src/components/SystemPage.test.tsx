@@ -77,7 +77,7 @@ describe("SystemPage", () => {
       }
       if (url.includes("/api/system/version")) return jsonResponse(VERSION_INFO);
       if (url.includes("/api/system/logs")) return jsonResponse([]);
-      if (url.includes("/api/system/retention")) return jsonResponse({ executionHistoryDays: 7, commandHistoryDays: 7 });
+      if (url.includes("/api/system/retention")) return jsonResponse({ executionHistoryDays: 7 });
       if (url.includes("/api/system")) return systemResponse();
       return jsonResponse({});
     });

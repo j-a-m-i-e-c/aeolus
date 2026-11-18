@@ -12,7 +12,7 @@ The System area shows:
 - host CPU, memory, disk, temperature and uptime;
 - current devices and recent activity;
 - logs;
-- history retention: how long execution and command history are kept (admin; see [history retention](data-and-storage.md#history-retention));
+- history retention: how long execution logs are kept (admin); command evidence does not expire (see [history retention](data-and-storage.md#history-retention));
 - metrics and sparklines;
 - MQTT traffic inspection;
 - version and update availability.

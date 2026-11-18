@@ -15,7 +15,7 @@ const devices = [];
 const automations = [{
   "key": "regional-conditions",
   "name": "Regional Conditions",
-  "cron": "*/10 * * * *",
+  "cron": "*/2 * * * *",
   "demoAccess": {
     "fireEvents": [
       "refresh"

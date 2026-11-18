@@ -95,3 +95,27 @@ services:
       options:
         max-size: "10m"
         max-file: "5"
+
+  # Live external radar for this demo environment. Separate process, no Aeolus
+  # permissions and no inbound ports. It publishes only a compact MQTT colour
+  # grid from RainViewer for the Regional Conditions showcase.
+  radar-collector:
+    image: aeolus-app:local
+    container_name: aeolus-radar-collector
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      MQTT_BROKER_URL: mqtt://localhost:1883
+      MQTT_USERNAME: ${MQTT_USERNAME:-}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:-}
+    command: ["node", "scripts/radar/rainviewer-collector.mjs"]
+    depends_on:
+      - mosquitto
+      - backend
+    healthcheck:
+      disable: true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

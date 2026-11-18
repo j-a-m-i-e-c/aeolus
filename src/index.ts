@@ -298,13 +298,11 @@ async function main(): Promise<void> {
   }
 
   // History retention (src/core/housekeeping.ts), using the periods an admin sets on
-  // the System page (default 7 days each). Runs now, after restart reconciliation has
-  // closed out interrupted commands, then every six hours and whenever the setting
-  // changes. It also covers a Data Store enabled at runtime, e.g. by the showcase
-  // seeder, which the hourly timer above only starts for at boot.
+  // the System page (execution logs default to 7 days). Command evidence is never
+  // pruned. Runs at startup, every six hours, and on an admin retention change.
+  // It also covers Data Store retention if the store was enabled after boot.
   const retentionSettings = createRetentionSettings(db);
   const housekeeping = createHousekeeping({
-    db,
     executionLog,
     retention: () => retentionSettings.get(),
     dataStore,

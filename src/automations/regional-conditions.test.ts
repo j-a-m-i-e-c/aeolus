@@ -56,6 +56,8 @@ function makeWorld(respond: Responder) {
     warnings,
     /** Replaceable between runs, so a test can make a source fail after it has worked. */
     respond,
+    radarDevice: null as Record<string, unknown> | null,
+    devices: { list: () => world.radarDevice ? [{topic: 'aeolus/local/radar/northern-rivers', state: world.radarDevice}] : [] },
     http: {
       get: async (url: string, options?: { headers?: Record<string, string>; timeoutMs?: number }) => {
         const headers = options?.headers ?? {};
@@ -75,16 +77,17 @@ function makeWorld(respond: Responder) {
 
 type World = ReturnType<typeof makeWorld>;
 
-async function run(world: World, topic = "cron") {
+async function run(world: World, topic = "cron", deviceState: Record<string, unknown> = {}) {
   let actions: Array<(ctx: unknown) => unknown> = [];
   const automation = (config: { actions: Array<(ctx: unknown) => unknown> }) => { actions = config.actions; };
-  const load = new Function("automation", "http", "state", "log", `${await compiledLogic()}\nreturn null;`);
-  load(automation, world.http, world.state, world.log);
+  const load = new Function("automation", "http", "state", "log", "devices", `${await compiledLogic()}\nreturn null;`);
+  load(automation, world.http, world.state, world.log, world.devices);
   expect(actions).toHaveLength(1);
-  await actions[0]({ topic, state: {}, deviceId: "test", timestamp: Date.now() });
+  await actions[0]({ topic, state: deviceState, deviceId: "test", timestamp: Date.now() });
 }
 
 const get = (world: World, key: string) => world.store.get(key) as any;
+const history = (world: World, key: string) => Object.assign({}, ...Array.from({length: 8}, (_, i) => get(world, `${key}:${i}`) || {}));
 const gauge = (world: World, id: string) => (get(world, "riverGauges") as any[]).find((g) => g.id === id);
 
 describe("Regional Conditions against real feed responses", () => {
@@ -111,7 +114,7 @@ describe("Regional Conditions against real feed responses", () => {
     const hydstra = world.requests.filter((r) => r.url.includes("waternsw"));
     expect(hydstra).toHaveLength(2);
     // WaterNSW regularly takes longer than the 10 s default; the RFS feeds do not.
-    for (const request of hydstra) expect(request.timeoutMs).toBe(25000);
+    for (const request of hydstra) expect(request.timeoutMs).toBe(22000);
     for (const request of world.requests.filter((r) => r.url.includes("rfs.nsw"))) expect(request.timeoutMs).toBeUndefined();
     for (const request of hydstra) {
       // `.pl` answers 301 and automations do not follow redirects.
@@ -183,14 +186,14 @@ describe("Regional Conditions against real feed responses", () => {
   it("retains river history across runs at most every 30 minutes, without duplicates", async () => {
     const world = makeWorld(liveFeeds());
     await run(world);
-    const first = get(world, "riverHistory")["203004"] as { t: number }[];
+    const first = history(world, "riverHistory")["203004"] as { t: number }[];
     expect(first.length).toBeGreaterThan(1);
-    for (let i = 1; i < first.length; i++) expect(first[i]!.t - first[i - 1]!.t).toBeGreaterThanOrEqual(30 * 60 * 1000);
+    for (let i = 1; i < first.length; i++) expect(Math.floor(first[i]!.t / (30 * 60 * 1000))).toBeGreaterThan(Math.floor(first[i - 1]!.t / (30 * 60 * 1000)));
 
     // Ten minutes later the same readings come back: nothing is added twice.
     vi.setSystemTime(CAPTURED.hydstraCapturedAt + 10 * 60 * 1000);
     await run(world);
-    expect(get(world, "riverHistory")["203004"]).toEqual(first);
+    expect(history(world, "riverHistory")["203004"]).toEqual(first);
   });
 
   it("projects rainfall from complete hours only, observed at the end of the hour", async () => {
@@ -260,13 +263,13 @@ describe("Regional Conditions against real feed responses", () => {
     // rain, both exactly as http.get reports them.
     vi.setSystemTime(CAPTURED.hydstraCapturedAt + 11 * 60 * 1000);
     world.respond = liveFeeds({
-      level: () => ({ status: 0, body: "Outbound request timed out after 25000 ms" }),
+      level: () => ({ status: 0, body: "Outbound request timed out after 22000 ms" }),
       rain: () => ({ status: 408, body: '{"error_num":218,"error_msg":"Request timeout"}' }),
     });
     await run(world);
 
     // The reason http.get reports for an outbound timeout, reworded for the pane.
-    expect(get(world, "riverError")).toBe("No answer within 25 s");
+    expect(get(world, "riverError")).toBe("No answer within 22 s");
     expect(get(world, "rainError")).toBe("Source did not answer in time (HTTP 408)");
     expect(get(world, "riverGauges")).toEqual(goodGauges);
     expect(get(world, "riverUpdated")).toBe(CAPTURED.hydstraCapturedAt);
@@ -285,7 +288,7 @@ describe("Regional Conditions against real feed responses", () => {
     expect(levelCalls).toBe(2);
     expect(get(world, "riverError")).toBe("");
     const levelRequests = world.requests.filter((r) => r.url.includes("waternsw") && r.url.includes("%22varfrom%22%3A%22100%22"));
-    expect(levelRequests.map((r) => r.timeoutMs)).toEqual([25000, 20000]);
+    expect(levelRequests.map((r) => r.timeoutMs)).toEqual([22000, 20000]);
   });
 
   it("reports an error page or a changed schema as a source error, never as data", async () => {
@@ -309,5 +312,79 @@ describe("Regional Conditions against real feed responses", () => {
     vi.setSystemTime(CAPTURED.hydstraCapturedAt + 4 * 60 * 1000);
     await run(world, "ui/rule/refresh");
     expect(world.requests.length).toBe(before);
+  });
+  it("migrates a full 24-hour history into bounded state shards without dropping observations", async () => {
+    const world = makeWorld(liveFeeds());
+    const now = CAPTURED.hydstraCapturedAt;
+    const old: Record<string, Array<{t: number; v: number; suspect: boolean}>> = {};
+    // Deliberately larger than 64 KiB as one JSON value.
+    for (let station = 0; station < 52; station++) {
+      const id = String(203000 + station);
+      old[id] = Array.from({length: 48}, (_, i) => ({t: now - (48 - i) * 30 * 60000, v: station / 10, suspect: false}));
+    }
+    expect(JSON.stringify(old).length).toBeGreaterThan(64 * 1024);
+    world.store.set('riverHistory', old); // Upgrade from unsharded Build 68 state.
+    await run(world);
+    expect(world.store.get('riverHistory')).toBeNull();
+    for (let i = 0; i < 8; i++) {
+      const part = get(world, `riverHistory:${i}`);
+      expect(JSON.stringify(part).length).toBeLessThan(64 * 1024);
+    }
+    expect(history(world, 'riverHistory')['203010']).toHaveLength(48);
+  });
+
+  it("ingests four validated RainViewer frames from the MQTT snapshot", async () => {
+    const world = makeWorld(liveFeeds());
+    const frame = { capturedAt: CAPTURED.hydstraCapturedAt, size: 80,
+      palette: ['0b60ff'], grid: Buffer.alloc(6400, 1).toString('base64'),
+      bounds: [152, -30.2, 154.2, -27.7] };
+    const bundle = { product: 'RAINVIEWER', frames: Array.from({ length: 4 }, (_, i) =>
+      ({ ...frame, capturedAt: frame.capturedAt - (3 - i) * 10 * 60000 })) };
+    world.radarDevice = bundle;
+    await run(world);
+    expect(world.requests).toHaveLength(4);
+    expect(get(world, 'radarFrames')).toHaveLength(4);
+    expect(get(world, 'radarFrames')[3].capturedAt).toBe(frame.capturedAt);
+    const receivedAt = get(world, 'radarReceivedAt');
+
+    // Identical retained MQTT snapshot must not rewrite Automation State.
+    vi.setSystemTime(CAPTURED.hydstraCapturedAt + 2 * 60000);
+    await run(world);
+    expect(world.requests).toHaveLength(4);
+    expect(get(world, 'radarReceivedAt')).toBe(receivedAt);
+
+    // One invalid frame must not replace the previous known-good animation.
+    world.radarDevice = { ...bundle, frames: [...bundle.frames.slice(0, 3),
+      { ...frame, grid: 'invalid' }] };
+    await run(world);
+    expect(get(world, 'radarFrames')).toHaveLength(4);
+    expect(get(world, 'radarReceivedAt')).toBe(receivedAt);
+
+    world.radarDevice = { ...bundle, frames: [{ ...frame, bounds: [0, 0, 1, 1] }] };
+    await run(world);
+    expect(get(world, 'radarReceivedAt')).toBe(receivedAt);
+    world.radarDevice = { ...bundle, frames: [...bundle.frames, frame] };
+    await run(world);
+    expect(get(world, 'radarReceivedAt')).toBe(receivedAt);
+  });
+
+  it("replaces a previously reported hourly rainfall value and its quality flag", async () => {
+    const world = makeWorld(liveFeeds());
+    await run(world);
+    const rain = structuredClone(JSON.parse(fixture('hydstra-rain.json')));
+    const trace = rain.return.traces.find((t: any) => t.trace?.some((p: any) => p.q !== 255));
+    const sample = trace.trace.find((p: any) => p.q !== 255);
+    const original = history(world, 'rainHistory')[trace.site].find((h: any) => h.t === Date.UTC(
+      +String(sample.t).slice(0,4), +String(sample.t).slice(4,6)-1, +String(sample.t).slice(6,8),
+      +String(sample.t).slice(8,10)-10, 0, 0));
+    expect(original).toBeDefined();
+    sample.v = String(Number(sample.v) + 2);
+    sample.q = 59;
+    vi.setSystemTime(CAPTURED.hydstraCapturedAt + 11 * 60000);
+    world.respond = liveFeeds({rain: () => ({status: 200, body: JSON.stringify(rain)})});
+    await run(world);
+    const revised = history(world, 'rainHistory')[trace.site].find((h: any) => h.t === original.t);
+    expect(revised.mm).toBeCloseTo(Number(sample.v));
+    expect(revised.suspect).toBe(true);
   });
 });

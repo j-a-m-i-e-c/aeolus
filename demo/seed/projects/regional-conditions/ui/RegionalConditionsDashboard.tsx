@@ -11,7 +11,7 @@ const panel = { background: '#0E1B24', border: '1px solid #284150', borderRadius
 const caption = { color: '#A2B6C1', fontSize: 12, lineHeight: 1.55 };
 const heading = { fontWeight: 750, fontSize: 13, letterSpacing: '.03em', marginBottom: 10 };
 // Expected gap between successful refreshes before a source is called overdue: the
-// cron interval plus slack for one missed run.
+// maximum source refresh interval plus slack for a missed run.
 const REFRESH_EXPECT_MS = 25 * 60 * 1000;
 
 const list = (value: unknown): any[] => Array.isArray(value) ? value : [];
@@ -80,10 +80,20 @@ function FireDanger({ model, now }: { model: Model; now: number }) {
 
 export default function RegionalConditionsDashboard({ model, actions }: { model: Model; actions: { refresh: () => void } }) {
   const [now, setNow] = useState(Date.now());
-  const [layers, setLayers] = useState({ river: true, rain: true, fires: true });
+  const [layers, setLayers] = useState({ river: true, rain: true, fires: true, radar: true, heights: true });
+  const [frameIndex, setFrameIndex] = useState(0);
   const [selected, setSelected] = useState<Selection>(null);
   useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 30000); return () => clearInterval(timer); }, []);
 
+  const retainedFrames = list(model.radarFrames).filter((f) => f && f.size === 80 && typeof f.grid === 'string');
+  // A disconnected collector must never leave yesterday's radar animating as current.
+  const frames = retainedFrames.filter((f) => Number.isFinite(f.capturedAt) && f.capturedAt <= now + 5 * 60000 && now - f.capturedAt <= 2 * 3600 * 1000);
+  useEffect(() => {
+    if (frames.length <= 1 || !layers.radar) return;
+    const timer = setInterval(() => setFrameIndex((i) => i + 1), 800);
+    return () => clearInterval(timer);
+  }, [frames.length, layers.radar]);
+  const radarFrame = frames.length ? frames[frameIndex % frames.length] : undefined;
   const gauges = list(model.riverGauges);
   const rain = list(model.rainGauges);
   const incidents = list(model.incidents);
@@ -102,9 +112,9 @@ export default function RegionalConditionsDashboard({ model, actions }: { model:
       <div>
         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 9 }}>
           <strong style={{ fontSize: 22, letterSpacing: '.02em' }}>NORTHERN RIVERS CONDITIONS</strong>
-          <span style={{ fontSize: 11, borderRadius: 12, color: TONE.good, border: '1px solid #316650', padding: '3px 9px' }}>MEASURED PUBLIC DATA</span>
+          <span style={{ fontSize: 11, borderRadius: 12, color: TONE.good, border: '1px solid #316650', padding: '3px 9px' }}>LIVE PUBLIC SOURCES</span>
         </div>
-        <div style={{ ...caption, marginTop: 4 }}>NSW · river heights and rainfall from WaterNSW gauges · NSW RFS fire danger and incidents</div>
+        <div style={{ ...caption, marginTop: 4 }}>Current gauge heights (m), 1-hour trends and 24-hour history · RFS fires · RainViewer radar</div>
       </div>
       <RefreshButton lastAttempt={model.lastFetchAttempt} now={now} onRefresh={actions.refresh} />
     </header>
@@ -112,13 +122,17 @@ export default function RegionalConditionsDashboard({ model, actions }: { model:
     <div className="regional-layout" style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.3fr) minmax(280px,1fr)', gap: 12 }}>
       <section style={{ ...panel, padding: 12 }}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, margin: '2px 2px 10px' }}>
-          {([['river', 'River heights'], ['rain', 'Rainfall'], ['fires', 'RFS incidents']] as const).map(([key, label]) =>
+          {([['river', 'River gauges'], ['rain', 'Rainfall gauges'], ['fires', 'RFS incidents'], ['radar', 'Animated radar'], ['heights', 'Height labels (m)']] as const).map(([key, label]) =>
             <label key={key} style={{ fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer', color: '#D4E5EB' }}>
               <input type="checkbox" checked={layers[key]} onChange={(e) => setLayers((s) => ({ ...s, [key]: e.target.checked }))} />{label}
             </label>)}
         </div>
-        <RegionalMap gauges={gauges} rain={rain} incidents={incidents} now={now} layers={layers} selected={selected} onSelect={setSelected} />
+        <RegionalMap gauges={gauges} rain={rain} incidents={incidents} now={now} layers={layers} selected={selected} onSelect={setSelected} radarFrame={radarFrame} />
         <MapLegend layers={layers} />
+        <div style={{ ...caption, marginTop: 6 }}>
+          {frames.length ? `RainViewer radar · frame ${new Date(radarFrame.capturedAt).toLocaleString('en-AU', { timeZone: 'Australia/Sydney' })} · ${frames.length} frames`
+            : retainedFrames.length ? 'Radar is stale. The collector has not supplied recent RainViewer frames.' : 'Radar is not connected on this installation.'}
+        </div>
       </section>
 
       <div style={{ display: 'grid', gap: 12, alignContent: 'start' }}>
@@ -137,7 +151,7 @@ export default function RegionalConditionsDashboard({ model, actions }: { model:
           <Source name="NSW RFS incidents" updated={model.incidentsUpdated} error={model.incidentsError} now={now} />
           {unmapped.slice(0, 5).map((item) => <button key={item.id} type="button" onClick={() => setSelected({ kind: 'fire', id: item.id })}
             style={{ display: 'block', textAlign: 'left', width: '100%', marginTop: 6, padding: '5px 8px', borderRadius: 5, border: '1px solid #36505F', background: '#10222B', color: '#CEE0E8', cursor: 'pointer', fontSize: 11 }}>{item.title}</button>)}
-          <div style={{ ...caption, marginTop: 8 }}>Sources are polled every 10 minutes, and Refresh asks again at most every 5. A source that fails keeps its last readings, marked by their age.</div>
+          <div style={{ ...caption, marginTop: 8 }}>Public sources are polled at most every 5 minutes. The radar device is checked every 2 minutes. A source that fails retains its last observations, marked by age. Radar is an informational overlay, not an emergency warning.</div>
         </section>
       </div>
     </div>
@@ -146,6 +160,6 @@ export default function RegionalConditionsDashboard({ model, actions }: { model:
       <div style={heading}>OFFICIAL INFORMATION</div>
       <div style={caption}>This is a software demonstration, not a warning service. Flood and fire warnings come from the issuing agencies: NSW RFS Fires Near Me (rfs.nsw.gov.au), NSW SES and Hazards Near Me (hazardwatch.gov.au), and Bureau of Meteorology flood warnings (bom.gov.au).</div>
     </section>
-    <footer style={{ ...caption, marginTop: 12 }}>River and rainfall data © State of New South Wales through WaterNSW. Fire data © State of New South Wales (NSW Rural Fire Service). Land outline: Natural Earth, public domain. Measured observations, mapped by Aeolus.</footer>
+    <footer style={{ ...caption, marginTop: 12 }}>River and rainfall data © State of New South Wales through WaterNSW. Fire data © State of New South Wales (NSW Rural Fire Service). Land outline: Natural Earth, public domain. Radar data by RainViewer (rainviewer.com). Layers rendered by Aeolus.</footer>
   </div>;
 }

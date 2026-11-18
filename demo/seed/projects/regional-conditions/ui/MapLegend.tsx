@@ -20,7 +20,7 @@ export default function MapLegend({ layers }: Props) {
   const dim = (on: boolean) => ({ opacity: on ? 1 : 0.4, marginTop: 10 });
   return <div role="group" aria-label="Map legend">
     <div style={dim(layers.river)}>
-      <div style={title}>River gauges · circle, coloured by change over the last hour</div>
+      <div style={title}>River gauges · number is height (m), circle colour shows 1-hour trend</div>
       <Swatch label="rising"><RiverGlyph x={12} y={12} r={8} fill={RIVER.rising} /></Swatch>
       <Swatch label="steady"><RiverGlyph x={12} y={12} r={8} fill={RIVER.steady} /></Swatch>
       <Swatch label="falling"><RiverGlyph x={12} y={12} r={8} fill={RIVER.falling} /></Swatch>

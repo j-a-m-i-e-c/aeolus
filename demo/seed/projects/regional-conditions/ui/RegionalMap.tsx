@@ -1,4 +1,6 @@
 import { LAND } from './coastline';
+import RadarLayer from './RadarLayer';
+import { heightBadges } from './height-labels';
 import { RAIN_CURRENT_MS, RIVER_CURRENT_MS, freshness, trendOf } from './freshness';
 import { FireGlyph, RAIN_DRY, RAIN_STALE, RIVER, RainGlyph, RiverGlyph, fireColour, rainColour } from './markers';
 
@@ -34,11 +36,12 @@ const LAND_PATH = LAND.map((ring) => ring.map(([lon, lat], i) => {
 }).join(' ') + ' Z').join(' ');
 
 export type Selection = { kind: 'river' | 'rain' | 'fire'; id: string } | null;
-type Layers = { river: boolean; rain: boolean; fires: boolean };
+type Layers = { river: boolean; rain: boolean; fires: boolean; radar: boolean; heights: boolean };
 
 type Props = {
   gauges: any[]; rain: any[]; incidents: any[]; now: number; layers: Layers;
   selected: Selection; onSelect: (selection: Selection) => void;
+  radarFrame?: { capturedAt: number; grid: string; palette: string[]; size: number; bounds: number[] };
 };
 
 function Marker({ x, y, label, chosen, onPick, children }: { x: number; y: number; label: string; chosen: boolean; onPick: () => void; children: any }) {
@@ -69,16 +72,20 @@ function emptyNotes(layers: Layers, riverCount: number, rainCount: number, fireC
   return notes;
 }
 
-export default function RegionalMap({ gauges, rain, incidents, now, layers, selected, onSelect }: Props) {
+export default function RegionalMap({ gauges, rain, incidents, now, layers, selected, onSelect, radarFrame }: Props) {
   const isChosen = (kind: string, id: string) => selected?.kind === kind && selected.id === id;
   const riverDrawn = new Set(layers.river ? gauges.filter((g) => drawable(g, now)).map((g) => g.id) : []);
   const rainShown = rain.filter((s) => onMap(s.lon, s.lat) && freshness(s.observedAt, now, RAIN_CURRENT_MS) !== 'unavailable');
   const firesShown = incidents.filter((i) => onMap(i.lon, i.lat));
   const notes = emptyNotes(layers, riverDrawn.size, rainShown.length, firesShown.length);
+  const numericBadges = layers.river && layers.heights
+    ? heightBadges(gauges.filter((g) => riverDrawn.has(g.id)), project, WIDTH, HEIGHT,
+      selected?.kind === 'river' ? selected.id : undefined) : [];
 
   return <svg role="img" aria-label="Northern Rivers map with measured river heights, measured rainfall and RFS incidents"
     viewBox={`0 0 ${WIDTH} ${HEIGHT}`} style={{ display: 'block', width: '100%', height: 'auto', background: '#0A2430', borderRadius: 10 }}>
     <path d={LAND_PATH} fill="#17342D" stroke="#4C796D" strokeWidth={1.6} fillRule="evenodd" />
+    {layers.radar && <RadarLayer frame={radarFrame} project={project} />}
     {[152.5, 153, 153.5, 154].map((lon) => <line key={'lon' + lon} x1={project(lon, 0).x} x2={project(lon, 0).x} y1={0} y2={HEIGHT} stroke="#B3C4D0" strokeOpacity={0.08} strokeDasharray="4 8" />)}
     {[-28, -28.5, -29, -29.5, -30].map((lat) => <line key={'lat' + lat} x1={0} x2={WIDTH} y1={project(0, lat).y} y2={project(0, lat).y} stroke="#B3C4D0" strokeOpacity={0.08} strokeDasharray="4 8" />)}
 
@@ -107,6 +114,16 @@ export default function RegionalMap({ gauges, rain, incidents, now, layers, sele
       </Marker>;
     })}
 
+    {/* Gauge badges show ACTUAL metres at each station, in addition to the trend
+        encoded by the circle colour. Selected details retain the exact reading,
+        24-hour graph and datum warning. Collision handling avoids marker crowding. */}
+    {numericBadges.map((badge) => <g key={'height' + badge.id} pointerEvents="none">
+      <rect x={badge.x} y={badge.y} width={54} height={21} rx={5} fill="#071821" fillOpacity={0.92}
+        stroke={selected?.kind === 'river' && selected.id === badge.id ? '#FFFFFF' : '#547788'} strokeWidth={1} />
+      <text x={badge.x + 27} y={badge.y + 14.5} textAnchor="middle" fontSize={12}
+        fontWeight={700} fill="#E5F2FA">{badge.text}</text>
+    </g>)}
+
     {layers.fires && firesShown.map((incident: any, i: number) => {
       const c = project(incident.lon, incident.lat);
       return <Marker key={'fire' + (incident.id || i)} x={c.x} y={c.y} label={`RFS incident ${incident.title}${incident.alert ? ', ' + incident.alert : ''}`}
@@ -115,7 +132,7 @@ export default function RegionalMap({ gauges, rain, incidents, now, layers, sele
       </Marker>;
     })}
 
-    {/* Towns last, so a marker never hides a name. They take no clicks. */}
+    {/* Town labels are not interactive. */}
     {TOWNS.map(([name, lon, lat]) => {
       const c = project(lon, lat);
       return <g key={name} pointerEvents="none">

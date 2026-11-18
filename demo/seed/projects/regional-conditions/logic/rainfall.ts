@@ -5,6 +5,7 @@
 // honestly, and a smooth field between them would show rain nobody measured.
 
 import { reason } from './feeds';
+import { readHistory, writeHistory } from './history-state';
 import { RAIN_STATIONS } from './stations';
 import { getTraces, readings, type HydstraTrace } from './waternsw';
 
@@ -16,7 +17,7 @@ const WINDOW_HOURS = 6;
 const HISTORY_MS = 24 * HOUR_MS;
 const MAX_HOURLY_MM = 300;
 
-type Hour = { t: number; mm: number };
+type Hour = { t: number; mm: number; suspect: boolean };
 
 /**
  * Merge one response of hourly totals into the retained 24 hours for each gauge.
@@ -33,21 +34,18 @@ export function projectRain(traces: HydstraTrace[], previousGauges: unknown, pre
 
   const gauges = RAIN_STATIONS.map((station) => {
     const base = { id: station.id, name: station.name, lon: station.lon, lat: station.lat };
-    const hours = new Map<number, number>();
+    const hours = new Map<number, Hour>();
     for (const h of Array.isArray(old[station.id]) ? old[station.id] : []) {
-      if (Number.isFinite(h?.t) && Number.isFinite(h?.mm)) hours.set(h.t, h.mm);
+      if (Number.isFinite(h?.t) && Number.isFinite(h?.mm)) hours.set(h.t, { t: h.t, mm: h.mm, suspect: Boolean((h as Hour).suspect) });
     }
     const trace = byId.get(station.id);
-    let suspect = false;
     for (const point of trace && trace.error_num === 0 ? readings(trace, 0, MAX_HOURLY_MM) : []) {
-      hours.set(point.t, point.v);
-      if (point.quality === 'suspect') suspect = true;
+      hours.set(point.t, { t: point.t, mm: point.v, suspect: point.quality === 'suspect' });
     }
     // Retain an hour while any of it is inside the last 24 hours.
-    const kept = [...hours.entries()]
-      .filter(([t]) => now - (t + HOUR_MS) < HISTORY_MS)
-      .sort((a, b) => a[0] - b[0])
-      .map(([t, mm]) => ({ t, mm }));
+    const kept = [...hours.values()]
+      .filter((h) => h.t <= now && now - (h.t + HOUR_MS) < HISTORY_MS)
+      .sort((a, b) => a.t - b.t);
     history[station.id] = kept;
 
     const last = kept[kept.length - 1];
@@ -64,7 +62,7 @@ export function projectRain(traces: HydstraTrace[], previousGauges: unknown, pre
       observedAt: last.t + HOUR_MS,
       total24h: Number(kept.reduce((sum, h) => sum + h.mm, 0).toFixed(1)),
       hoursCovered: kept.length,
-      suspect,
+      suspect: last.suspect,
     };
   });
 
@@ -74,9 +72,9 @@ export function projectRain(traces: HydstraTrace[], previousGauges: unknown, pre
 export async function updateRainfall(now: number) {
   try {
     const traces = await getTraces(RAIN_STATIONS.map((s) => s.id), '10', 'tot', now, WINDOW_HOURS);
-    const { gauges, history } = projectRain(traces, state.get('rainGauges'), state.get('rainHistory'), now);
+    const { gauges, history } = projectRain(traces, state.get('rainGauges'), readHistory('rainHistory'), now);
     state.set('rainGauges', gauges);
-    state.set('rainHistory', history);
+    writeHistory('rainHistory', history);
     state.set('rainUpdated', now);
     state.set('rainError', '');
   } catch (error) {

@@ -105,8 +105,7 @@ disclose device names and behaviour.
 | `GET` | `/api/commands/:commandId` | One command with its chronological transition timeline |
 
 The list never returns an unbounded result; `limit` defaults to 50 and is
-clamped to a maximum of 200. Completed commands are kept for the period set
-in `/api/system/retention` (default 7 days).
+clamped to a maximum of 200. Completed commands and their evidence are retained indefinitely: `/api/system/retention` only configures execution-log retention (seven days by default).
 
 ## Connectors
 
@@ -198,7 +197,7 @@ keeping its own id, payload and timestamp — not synthesised bucket averages.
 | `GET` | `/api/system/logs` | Recent structured logs |
 | `GET` | `/api/system/version` | Local build information, without any network request |
 | `POST` | `/api/system/version/check` | Admin-only; compares the installed version against the latest published release |
-| `GET`, `PUT` | `/api/system/retention` | Admin-only; read or change how many days execution and command history are kept (`null` keeps forever). A `PUT` applies at once |
+| `GET`, `PUT` | `/api/system/retention` | Admin-only; read or change execution log retention only (`null` keeps execution logs forever; command evidence never expires). A `PUT` applies at once |
 | `GET` | `/api/health` | Service health |
 | `GET` | `/api/metrics/summary` | Dashboard metrics summary |
 | `GET`, `PUT` | `/api/layout` | Read or replace dashboard layout |

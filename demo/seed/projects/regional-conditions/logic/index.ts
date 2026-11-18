@@ -1,19 +1,26 @@
 // Regional Conditions — orchestration entry point.
-// Four independent public sources for the Northern Rivers, each refreshed and tracked on
-// its own: river heights and rainfall measured by WaterNSW gauges, and NSW RFS fire
-// danger and incidents. Nothing here is simulated, modelled or radar.
+// Four independent public sources for the Northern Rivers, plus an optional local
+// RainViewer radar collector. Radar comes through the local MQTT device registry, never
+// through a remote source request from this Automation Project.
 
 import { updateFireDanger, updateIncidents } from './rfs';
+import { ingestRadar } from './radar';
 import { updateRainfall } from './rainfall';
 import { updateRiverLevels } from './river';
 
-// Cron runs every ten minutes; the pane's Refresh button can ask sooner. Both pass
-// through this floor, so visitors pressing Refresh cannot hammer public services.
+// Cron runs every two minutes to pick up locally published radar frames, while the
+// four public feeds retain a separate five-minute minimum. Manual Refresh is subject
+// to the same public-feed limit.
 // The pane disables Refresh for the same period (ui/freshness.ts REFRESH_FLOOR_MS).
 const MIN_REFRESH_MS = 5 * 60 * 1000;
 
-export default async function run(_context: EventContext) {
+export default async function run() {
   const now = Date.now();
+  // Showcase seed rules have ONE trigger type: cron or MQTT, not both. Read the
+  // latest radar device snapshot each run instead of assuming an MQTT trigger was
+  // registered. A second run with the same frame does not write duplicate state.
+  const radar = devices.list().find((device) => device.topic === 'aeolus/local/radar/northern-rivers');
+  ingestRadar(radar?.state, now);
   const previous = Number(state.get('lastFetchAttempt')) || 0;
   if (now - previous < MIN_REFRESH_MS) return;
   state.set('lastFetchAttempt', now);

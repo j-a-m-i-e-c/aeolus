@@ -115,15 +115,14 @@ export function createSystemRoutes(deps: SystemRouteDeps = {}): Router {
   if (deps.retention) {
     const { settings, applyNow } = deps.retention;
 
-    /** GET /api/system/retention — how long execution and command history are kept (admin only). */
+    /** GET /api/system/retention — how long automation execution logs are kept (admin only). */
     router.get("/retention", requireAdmin, (_req, res) => {
       res.json(settings.get());
     });
 
     /**
      * PUT /api/system/retention — change history retention (admin only).
-     * Shortening it deletes the older history straight away, so the change is applied
-     * immediately rather than left for the next six-hourly run.
+     * Shortening it prunes old execution logs immediately. Never affects command evidence.
      */
     router.put("/retention", requireAdmin, validate({ body: retentionSettingsBodySchema }), (req, res) => {
       const updated = settings.set(req.body);

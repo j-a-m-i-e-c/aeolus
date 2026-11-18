@@ -3,16 +3,18 @@
 // WaterNSW gauges and NSW RFS incidents, beside fire danger, the selected gauge's retained
 // history and the status of every source. Rendering detail lives in Files.
 
+import { readHistory } from "./history";
 import RegionalConditionsDashboard from "./RegionalConditionsDashboard";
 
 export default function RegionalConditions(aeolus: CustomComponentProps) {
   const model = {
+    radarFrames: aeolus.read("radarFrames"),
     riverGauges: aeolus.read("riverGauges"),
-    riverHistory: aeolus.read("riverHistory"),
+    riverHistory: readHistory((key) => aeolus.read(key), "riverHistory"),
     riverUpdated: aeolus.read("riverUpdated"),
     riverError: aeolus.read("riverError"),
     rainGauges: aeolus.read("rainGauges"),
-    rainHistory: aeolus.read("rainHistory"),
+    rainHistory: readHistory((key) => aeolus.read(key), "rainHistory"),
     rainUpdated: aeolus.read("rainUpdated"),
     rainError: aeolus.read("rainError"),
     fireDanger: aeolus.read("fireDanger"),

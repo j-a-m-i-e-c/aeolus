@@ -85,13 +85,14 @@ These variables are shown in `.env.example` and are read by the backend configur
 
 ## Storage limits
 
-Aeolus is meant to run unattended for months, including with the showcase left on. Every
-table that grows by itself is pruned or bounded:
+Aeolus is meant to run unattended for months, including with the showcase left on.
+High-volume diagnostic data is pruned or bounded automatically. Command evidence is kept
+indefinitely:
 
 | What | Kept | Set by |
 |---|---|---|
 | Execution history (one row per automation run) | 7 days by default, or forever | **System → History retention** (admin) |
-| Command history (completed commands and their transitions) | 7 days by default, or forever | **System → History retention** (admin) |
+| Command history (completed commands and their transitions) | Indefinitely; no automatic pruning | no expiry setting |
 | Device state history | `STATE_HISTORY_MAX` entries per device | environment |
 | Data Store Collections | per-collection retention, plus the record and size limits set when the store is enabled | Data Store settings |
 | Automation State, Shared State | one value per key, overwritten in place | — |
@@ -99,24 +100,27 @@ table that grows by itself is pruned or bounded:
 
 ### History retention
 
-Execution history and command history each keep a whole number of days, from 1 to 3650,
-or keep everything. Both default to 7 days. An admin changes them on the System page
-(`GET`/`PUT /api/system/retention`); the values are stored in `system_settings` and
-survive restarts and upgrades. Installations that need a longer audit trail of device
-commands, such as critical systems, should raise the command-history period or keep it
-forever. Nothing else caps these tables, so the period chosen is the period kept.
+Execution history keeps 1 to 3650 days, or everything. The default is seven days. An
+admin changes it on the System page (`GET`/`PUT /api/system/retention`); the value is
+stored in `system_settings` and survives restarts and upgrades.
 
 Retention runs at startup, every six hours, and straight after the setting is saved
 (`src/core/housekeeping.ts`), so it applies even to a backend that is restarted often.
-Shortening a period therefore deletes the older history immediately, and the System page
-asks for confirmation first. Command history is only pruned once a command is complete:
-one still waiting for its acknowledgement or observation is never removed.
+Shortening the period therefore deletes older execution history immediately, and the
+System page asks for confirmation first.
+
+**Command evidence is never pruned automatically.** There is no command-history
+retention setting and no background deletion, so `command_records` and
+`command_transitions` grow for as long as commands are sent. Monitor disk space and keep
+backups. An install that ran the short-lived build with a 7-day command-history default
+(`bf50274`) may already have lost older completed commands; this does not restore them.
 
 Size follows the period and how often automations run. Measured on SQLite including
 indexes, an execution row takes about 270 bytes, or about 465 bytes when the run issued
 two device commands, and a completed command with three transitions about 1.3 KB. An
 automation triggered every two seconds adds 43,200 runs a day, about 12–20 MB a day of
-execution history. History kept forever grows without limit.
+execution history. An automation that sends 1,000 commands a day adds about 1.3 MB a day
+of command history, kept indefinitely.
 
 Freed space is reused by SQLite rather than returned to the filesystem, so the database
 file stays at its largest size. Plan around the size the chosen periods reach, not the

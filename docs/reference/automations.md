@@ -494,7 +494,7 @@ Source: `src/automations/automation-event-service.ts`.
 - failure reason;
 - command completion/lifecycle state where relevant.
 
-Runs are written to SQLite (`execution_history`) and the most recent 200 are also held in memory for the dashboard. Execution history and completed command history are each kept for 7 days by default; an admin can change either period, or keep it forever, on the System page. See [history retention](data-and-storage.md#history-retention). Only the live pending-command registry is process memory.
+Runs are written to SQLite (`execution_history`) and the most recent 200 are also held in memory for the dashboard. Execution history is kept for 7 days by default; completed command evidence is retained indefinitely without automatic pruning. See [history retention](data-and-storage.md#history-retention). Only the live pending-command registry is process memory.
 
 ## Main source files
 

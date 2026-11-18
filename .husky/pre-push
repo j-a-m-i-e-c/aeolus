@@ -9,6 +9,9 @@ echo "→ pre-push: running tests with coverage (same command as CI's backend jo
 # run. Run them explicitly with `make test-integration` when you need them.
 npm run test:coverage:no-broker || exit 1
 
+echo "→ pre-push: radar collector tests (scripts/radar, outside vitest's src/ root)..."
+npm run test:radar || exit 1
+
 echo "→ pre-push: frontend type check + tests with coverage..."
 # Run frontend tests WITH coverage so the local gate matches CI (which enforces
 # the coverage thresholds). Plain `npm test` skips the threshold check.

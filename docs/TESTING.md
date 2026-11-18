@@ -123,6 +123,9 @@ npm run test:coverage:no-broker
 # Broker-backed integration suites, serially (needs Docker; self-skips without it)
 npm run test:integration
 
+# RainViewer radar collector (scripts/radar, node:test; outside vitest's src/ root)
+npm run test:radar
+
 # Frontend tests and coverage
 cd frontend
 npm test

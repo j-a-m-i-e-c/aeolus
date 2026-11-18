@@ -184,12 +184,12 @@ describe("system.routes", () => {
   });
 
   describe("/api/system/retention", () => {
-    let current: { executionHistoryDays: number | null; commandHistoryDays: number | null };
+    let current: { executionHistoryDays: number | null };
     let applyNow: ReturnType<typeof vi.fn>;
     let set: ReturnType<typeof vi.fn>;
 
     beforeEach(() => {
-      current = { executionHistoryDays: 7, commandHistoryDays: 7 };
+      current = { executionHistoryDays: 7 };
       applyNow = vi.fn();
       set = vi.fn((update: Partial<typeof current>) => {
         current = { ...current, ...update };
@@ -209,29 +209,30 @@ describe("system.routes", () => {
     it("returns the current periods", async () => {
       const res = await request(app, "GET", "/api/system/retention");
       expect(res.status).toBe(200);
-      expect(res.body).toEqual({ executionHistoryDays: 7, commandHistoryDays: 7 });
+      expect(res.body).toEqual({ executionHistoryDays: 7 });
     });
 
     it("saves a new period and applies it straight away", async () => {
-      const res = await request(app, "PUT", "/api/system/retention", { commandHistoryDays: 365 });
+      const res = await request(app, "PUT", "/api/system/retention", { executionHistoryDays: 365 });
       expect(res.status).toBe(200);
-      expect(res.body).toEqual({ executionHistoryDays: 7, commandHistoryDays: 365 });
+      expect(res.body).toEqual({ executionHistoryDays: 365 });
       expect(applyNow).toHaveBeenCalledTimes(1);
     });
 
     it("accepts null as keep forever", async () => {
-      const res = await request(app, "PUT", "/api/system/retention", { executionHistoryDays: null, commandHistoryDays: null });
+      const res = await request(app, "PUT", "/api/system/retention", { executionHistoryDays: null });
       expect(res.status).toBe(200);
-      expect(res.body).toEqual({ executionHistoryDays: null, commandHistoryDays: null });
+      expect(res.body).toEqual({ executionHistoryDays: null });
     });
 
     it.each([
       ["zero days", { executionHistoryDays: 0 }],
-      ["over ten years", { commandHistoryDays: 3651 }],
-      ["a fraction", { commandHistoryDays: 1.5 }],
-      ["a string", { commandHistoryDays: "30" }],
-      ["an unknown field", { commandHistoryDays: 30, rowLimit: 10 }],
+      ["over ten years", { executionHistoryDays: 3651 }],
+      ["a fraction", { executionHistoryDays: 1.5 }],
+      ["a string", { executionHistoryDays: "30" }],
+      ["an unknown field", { executionHistoryDays: 30, rowLimit: 10 }],
       ["an empty body", {}],
+      ["command pruning is forbidden", { commandHistoryDays: 7 }],
     ])("rejects %s with 400 and changes nothing", async (_label, body) => {
       const res = await request(app, "PUT", "/api/system/retention", body);
       expect(res.status).toBe(400);
@@ -242,7 +243,7 @@ describe("system.routes", () => {
     it("is admin-only for reading and changing", async () => {
       testUser = { role: "user" };
       expect((await request(app, "GET", "/api/system/retention")).status).toBe(403);
-      expect((await request(app, "PUT", "/api/system/retention", { commandHistoryDays: 30 })).status).toBe(403);
+      expect((await request(app, "PUT", "/api/system/retention", { executionHistoryDays: 30 })).status).toBe(403);
       expect(set).not.toHaveBeenCalled();
     });
 

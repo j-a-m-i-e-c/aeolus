@@ -6,6 +6,7 @@
 // alone would be a claim Aeolus cannot back.
 
 import { reason } from './feeds';
+import { readHistory, writeHistory } from './history-state';
 import { LEVEL_STATIONS } from './stations';
 import { getTraces, qualityNote, readings, type HydstraTrace } from './waternsw';
 
@@ -43,15 +44,23 @@ export function projectRiver(traces: HydstraTrace[], previousGauges: unknown, pr
     const trace = byId.get(station.id);
     const points = trace && trace.error_num === 0 ? readings(trace, MIN_LEVEL_M, MAX_LEVEL_M) : [];
 
-    const kept = (Array.isArray(old[station.id]) ? old[station.id] : [])
-      .filter((s) => Number.isFinite(s?.t) && Number.isFinite(s?.v) && now - s.t <= HISTORY_MS);
+    // Merge by observation time, replacing old values and quality when WaterNSW
+    // revises a previously reported sample. Preserve 30-minute chart density.
+    const samples = new Map<number, Sample>();
+    for (const sample of Array.isArray(old[station.id]) ? old[station.id] : []) {
+      if (Number.isFinite(sample?.t) && Number.isFinite(sample?.v)
+          && sample.t <= now && now - sample.t <= HISTORY_MS) samples.set(sample.t, sample);
+    }
     for (const point of points) {
-      const last = kept[kept.length - 1];
-      if (!last || point.t - last.t >= HISTORY_SPACING_MS) {
-        kept.push({ t: point.t, v: point.v, suspect: point.quality === 'suspect' });
+      if (point.t <= now && now - point.t <= HISTORY_MS) {
+        samples.set(point.t, { t: point.t, v: point.v, suspect: point.quality === 'suspect' });
       }
     }
-    history[station.id] = kept;
+    const byBucket = new Map<number, Sample>();
+    for (const sample of [...samples.values()].sort((a, b) => a.t - b.t)) {
+      byBucket.set(Math.floor(sample.t / HISTORY_SPACING_MS), sample);
+    }
+    history[station.id] = [...byBucket.values()].sort((a, b) => a.t - b.t);
 
     const latest = points[points.length - 1];
     if (!latest) {
@@ -84,9 +93,9 @@ export function projectRiver(traces: HydstraTrace[], previousGauges: unknown, pr
 export async function updateRiverLevels(now: number) {
   try {
     const traces = await getTraces(LEVEL_STATIONS.map((s) => s.id), '100', 'point', now, WINDOW_HOURS);
-    const { gauges, history } = projectRiver(traces, state.get('riverGauges'), state.get('riverHistory'), now);
+    const { gauges, history } = projectRiver(traces, state.get('riverGauges'), readHistory('riverHistory'), now);
     state.set('riverGauges', gauges);
-    state.set('riverHistory', history);
+    writeHistory('riverHistory', history);
     state.set('riverUpdated', now);
     state.set('riverError', '');
   } catch (error) {

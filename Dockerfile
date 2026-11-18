@@ -42,6 +42,8 @@ COPY --from=builder /app/dist ./dist/
 COPY --from=builder /tmp/build-info.json ./dist/build-info.json
 COPY src/automations/sandbox-types.d.ts ./dist/automations/sandbox-types.d.ts
 COPY src/automations/ui-types.d.ts ./dist/automations/ui-types.d.ts
+# Optional radar collector sidecar uses the same deployed image and runtime deps.
+COPY scripts/radar/ ./scripts/radar/
 
 RUN mkdir -p /app/data && chown -R aeolus:aeolus /app
 

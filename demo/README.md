@@ -114,12 +114,16 @@ outbound internet access and stay empty without it:
 - **Northern Rivers** (Regional Conditions): WaterNSW river heights and rainfall gauges, and NSW RFS fire
   danger and incidents, for the Northern Rivers. WaterNSW's real-time service can take
   more than 10 seconds to answer, so these requests use the `timeoutMs` option on
-  `http.get` (see [automations reference](../docs/reference/automations.md)).
+  `http.get` (see [automations reference](../docs/reference/automations.md)). Optional
+  RainViewer radar comes from a separate collector container that `make showcase`
+  starts; see [scripts/radar/README.md](../scripts/radar/README.md), including the
+  RainViewer terms to check before using it on the hosted demo.
 
 Both refresh on a schedule and keep their last readings, marked stale, when a source
-fails. Leaving the showcase running does not fill storage: Collections and retained readings
-are bounded, and execution and command history are pruned after 7 days unless an admin
-changes that on the System page. See
+fails. Collections and retained readings are bounded, and execution history is pruned
+after 7 days unless an admin changes that on the System page. Command evidence from
+showcase automations is kept indefinitely like any other, so it grows slowly while the
+showcase runs. See
 [storage limits](../docs/reference/data-and-storage.md#storage-limits). WaterNSW data must carry "© State of New South Wales through WaterNSW", which the
 tab shows. Its copyright terms also require permission to include it in advertising or
 a product for sale; confirm that with WaterNSW before showing the tab on a hosted demo
