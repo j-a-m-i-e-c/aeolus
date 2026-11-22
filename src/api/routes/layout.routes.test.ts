@@ -250,6 +250,61 @@ describe("layout.routes", () => {
       expect(rows).toEqual([{ automation_id: "rule-live", tab_id: "tab-new" }]);
     });
 
+    describe("tab-scoped automation ownership", () => {
+      // A tab-scoped automation's authority comes from automation_rules.owner_tab_id
+      // (ADR-0019). Layout saves used to delete and reinsert every tab, which fired
+      // ON DELETE SET NULL and stripped every scoped automation of its scope on any
+      // save, including a reorder.
+      const tab = (id: string, order: number, extra: Record<string, unknown> = {}) =>
+        ({ id, name: id, icon: "x", order, pinned: false, createdAt: 1, ...extra });
+      const owner = (id: string) =>
+        (db.prepare("SELECT owner_tab_id FROM automation_rules WHERE id = ?").get(id) as { owner_tab_id: string | null }).owner_tab_id;
+      const save = async (tabs: unknown[]) => {
+        const res = await request(app, "PUT", "/api/layout", { tabs, panes: [] });
+        expect(res.status).toBe(200);
+      };
+
+      beforeEach(async () => {
+        await save([tab("tab-a", 0), tab("tab-b", 1)]);
+        db.prepare(
+          "INSERT INTO automation_rules (id, name, trigger_topic, rule_type, enabled, authored_unrestricted, owner_tab_id, created_at) VALUES (?, ?, 't', 'script', 1, 0, ?, 1)",
+        ).run("scoped-a", "Scoped A", "tab-a");
+      });
+
+      it("survives saving the same layout again", async () => {
+        await save([tab("tab-a", 0), tab("tab-b", 1)]);
+        expect(owner("scoped-a")).toBe("tab-a");
+      });
+
+      it("survives reordering, renaming, re-iconing and pinning the owning tab", async () => {
+        await save([tab("tab-b", 0), tab("tab-a", 1, { name: "Renamed", icon: "y", pinned: true })]);
+        expect(owner("scoped-a")).toBe("tab-a");
+        const row = db.prepare('SELECT name, icon, "order", pinned FROM tabs WHERE id = ?').get("tab-a");
+        expect(row).toEqual({ name: "Renamed", icon: "y", order: 1, pinned: 1 });
+      });
+
+      it("survives adding and removing other tabs", async () => {
+        await save([tab("tab-a", 0), tab("tab-c", 1)]);
+        expect(owner("scoped-a")).toBe("tab-a");
+        expect(db.prepare("SELECT id FROM tabs ORDER BY id").all()).toEqual([{ id: "tab-a" }, { id: "tab-c" }]);
+      });
+
+      it("is removed when the owning tab is deleted, and is not restored by re-adding the id", async () => {
+        await save([tab("tab-b", 0)]);
+        expect(owner("scoped-a")).toBeNull();
+
+        await save([tab("tab-a", 0), tab("tab-b", 1)]);
+        expect(owner("scoped-a")).toBeNull();
+      });
+
+      it("rejects a layout that repeats a tab id, changing nothing", async () => {
+        const res = await request(app, "PUT", "/api/layout", { tabs: [tab("tab-a", 0), tab("tab-a", 1)], panes: [] });
+        expect(res.status).toBe(400);
+        expect(owner("scoped-a")).toBe("tab-a");
+        expect(db.prepare("SELECT COUNT(*) AS n FROM tabs").get()).toEqual({ n: 2 });
+      });
+    });
+
     it("ignores pane references to automations that no longer exist", async () => {
       // A layout can outlive the automation a pane points at. Writing an
       // assignment for a deleted rule would grant a tab authority over nothing

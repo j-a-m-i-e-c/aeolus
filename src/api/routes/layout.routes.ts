@@ -103,6 +103,12 @@ export function createLayoutRoutes(
     if (!Array.isArray(tabs) || !Array.isArray(panes)) {
       throw new BadRequestError("Invalid layout payload: tabs and panes must be arrays");
     }
+    // Reinserting every tab used to reject a repeated id through the primary key.
+    // An upsert would let the last copy win instead, so refuse it explicitly.
+    const tabIds = tabs.map((tab: { id?: unknown }) => tab?.id);
+    if (new Set(tabIds).size !== tabIds.length) {
+      throw new BadRequestError("Invalid layout payload: tab ids must be unique");
+    }
     const expectedRevision = requireIfMatchRevision(req);
 
     // Atomic replace using better-sqlite3 transaction
@@ -115,13 +121,26 @@ export function createLayoutRoutes(
       }
 
       db.prepare("DELETE FROM panes").run();
-      db.prepare("DELETE FROM tabs").run();
 
-      const insertTab = db.prepare(
-        `INSERT INTO tabs (id, name, icon, "order", pinned, created_at) VALUES (?, ?, ?, ?, ?, ?)`
+      // Update tabs in place and delete only the ones this layout drops. Deleting
+      // every tab and reinserting it fired `owner_tab_id ... ON DELETE SET NULL` for
+      // every tab-scoped automation on every save, even when its tab was unchanged,
+      // so a reorder or rename silently stripped those automations of their scope.
+      // A tab that is really removed still clears ownership through that same
+      // constraint, and re-adding the id later does not restore it (fail closed).
+      const keep = new Set(tabsData.map((tab) => String(tab.id)));
+      const deleteTab = db.prepare("DELETE FROM tabs WHERE id = ?");
+      for (const { id } of db.prepare("SELECT id FROM tabs").all() as { id: string }[]) {
+        if (!keep.has(id)) deleteTab.run(id);
+      }
+
+      const upsertTab = db.prepare(
+        `INSERT INTO tabs (id, name, icon, "order", pinned, created_at) VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET name = excluded.name, icon = excluded.icon,
+           "order" = excluded."order", pinned = excluded.pinned, created_at = excluded.created_at`
       );
       for (const tab of tabsData) {
-        insertTab.run(tab.id, tab.name, tab.icon, tab.order, tab.pinned ? 1 : 0, tab.createdAt);
+        upsertTab.run(tab.id, tab.name, tab.icon, tab.order, tab.pinned ? 1 : 0, tab.createdAt);
       }
 
       const insertPane = db.prepare(

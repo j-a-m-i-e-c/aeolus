@@ -14,6 +14,7 @@ Aeolus follows semantic versioning for published releases. Until the first stabl
 
 ### Security and reliability
 
+* Saving the dashboard layout no longer strips tab-scoped automations of their owning tab. Every save used to delete and reinsert all tabs, which cleared `owner_tab_id` through its `ON DELETE SET NULL` constraint, so a reorder or rename left those automations with no devices or collections in scope. Deleting the owning tab still clears ownership, and re-adding a tab with the same id does not restore it.
 * WebSocket access tokens are sent only in the first authenticated message and are no longer accepted from query strings.
 * Refresh cookie security can be selected explicitly or left in automatic mode for local HTTP versus public HTTPS deployments.
 * High rate device state now uses keep latest execution coalescing while discrete Automation Events remain separate and are never coalesced.
