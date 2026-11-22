@@ -1,14 +1,17 @@
 // RainViewer radar pixel colours, converted to a numeric grid outside the sandbox.
 // The region is georeferenced by Web Mercator at ingestion and drawn in SVG here.
 // There are no external images, map tiles, scripts or network requests in this UI.
-type Frame = { capturedAt: number; grid: string; palette: string[]; size: number; bounds: number[] };
+import { MAP_BOUNDS } from './map-config';
+import type { RadarFrame } from './model';
+
 type Point = { x: number; y: number };
 
-export default function RadarLayer({ frame, project }: { frame: Frame | undefined; project: (lon: number, lat: number) => Point }) {
+export default function RadarLayer({ frame, project }: { frame: RadarFrame | undefined; project: (lon: number, lat: number) => Point }) {
   if (!frame || frame.size !== 80 || !Array.isArray(frame.palette) || frame.palette.length > 30 || frame.bounds?.length !== 4) return null;
   const [west, south, east, north] = frame.bounds;
-  if (Math.abs(west - 152) > 0.001 || Math.abs(south + 30.2) > 0.001 ||
-      Math.abs(east - 154.2) > 0.001 || Math.abs(north + 27.7) > 0.001) return null;
+  // A frame georeferenced for any other area would be drawn in the wrong place.
+  if (Math.abs(west - MAP_BOUNDS.west) > 0.001 || Math.abs(south - MAP_BOUNDS.south) > 0.001 ||
+      Math.abs(east - MAP_BOUNDS.east) > 0.001 || Math.abs(north - MAP_BOUNDS.north) > 0.001) return null;
   let cells: string;
   try { cells = atob(frame.grid); } catch { return null; }
   if (cells.length !== 6400) return null;

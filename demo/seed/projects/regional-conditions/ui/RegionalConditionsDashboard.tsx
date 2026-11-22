@@ -4,8 +4,8 @@ import RegionalMap, { type Selection } from './RegionalMap';
 import SelectionDetail from './SelectionDetail';
 import MapLegend from './MapLegend';
 import { RAIN_CURRENT_MS, REFRESH_FLOOR_MS, RIVER_CURRENT_MS, TONE, ago, freshness, sourceStatus } from './freshness';
+import type { ConditionsModel } from './model';
 
-type Model = Record<string, any>;
 const root = { minHeight: '100%', padding: 16, background: '#081119', color: '#E7F0F5', fontFamily: 'inherit' };
 const panel = { background: '#0E1B24', border: '1px solid #284150', borderRadius: 12, padding: 14, minWidth: 0 };
 const caption = { color: '#A2B6C1', fontSize: 12, lineHeight: 1.55 };
@@ -14,9 +14,7 @@ const heading = { fontWeight: 750, fontSize: 13, letterSpacing: '.03em', marginB
 // maximum source refresh interval plus slack for a missed run.
 const REFRESH_EXPECT_MS = 25 * 60 * 1000;
 
-const list = (value: unknown): any[] => Array.isArray(value) ? value : [];
-
-function count(items: any[], limit: number, now: number) {
+function count(items: { observedAt: number | null }[], limit: number, now: number) {
   const tally = { current: 0, stale: 0, unavailable: 0 };
   for (const item of items) tally[freshness(item.observedAt, now, limit)]++;
   return tally;
@@ -62,8 +60,8 @@ function dangerTone(rating: string) {
   return r.includes('catastrophic') ? '#F2D4E9' : r.includes('extreme') ? '#F08A94' : r.includes('high') ? '#E8B772' : r.includes('moderate') ? '#9FD49A' : '#A6B9C3';
 }
 
-function FireDanger({ model, now }: { model: Model; now: number }) {
-  const danger = model.fireDanger && typeof model.fireDanger === 'object' ? model.fireDanger : null;
+function FireDanger({ model, now }: { model: ConditionsModel; now: number }) {
+  const danger = model.fireDanger;
   if (!danger) return <div style={caption}>Waiting for the NSW RFS fire danger feed.</div>;
   return <div>
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
@@ -78,14 +76,14 @@ function FireDanger({ model, now }: { model: Model; now: number }) {
   </div>;
 }
 
-export default function RegionalConditionsDashboard({ model, actions }: { model: Model; actions: { refresh: () => void } }) {
+export default function RegionalConditionsDashboard({ model, actions }: { model: ConditionsModel; actions: { refresh: () => void } }) {
   const [now, setNow] = useState(Date.now());
   const [layers, setLayers] = useState({ river: true, rain: true, fires: true, radar: true, heights: true });
   const [frameIndex, setFrameIndex] = useState(0);
   const [selected, setSelected] = useState<Selection>(null);
   useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 30000); return () => clearInterval(timer); }, []);
 
-  const retainedFrames = list(model.radarFrames).filter((f) => f && f.size === 80 && typeof f.grid === 'string');
+  const retainedFrames = model.radarFrames.filter((f) => f.size === 80 && typeof f.grid === 'string');
   // A disconnected collector must never leave yesterday's radar animating as current.
   const frames = retainedFrames.filter((f) => Number.isFinite(f.capturedAt) && f.capturedAt <= now + 5 * 60000 && now - f.capturedAt <= 2 * 3600 * 1000);
   useEffect(() => {
@@ -94,9 +92,9 @@ export default function RegionalConditionsDashboard({ model, actions }: { model:
     return () => clearInterval(timer);
   }, [frames.length, layers.radar]);
   const radarFrame = frames.length ? frames[frameIndex % frames.length] : undefined;
-  const gauges = list(model.riverGauges);
-  const rain = list(model.rainGauges);
-  const incidents = list(model.incidents);
+  const gauges = model.riverGauges;
+  const rain = model.rainGauges;
+  const incidents = model.incidents;
   const unmapped = incidents.filter((i) => i.lon === null || i.lat === null);
   const river = count(gauges, RIVER_CURRENT_MS, now);
   const rainTally = count(rain, RAIN_CURRENT_MS, now);
@@ -130,7 +128,7 @@ export default function RegionalConditionsDashboard({ model, actions }: { model:
         <RegionalMap gauges={gauges} rain={rain} incidents={incidents} now={now} layers={layers} selected={selected} onSelect={setSelected} radarFrame={radarFrame} />
         <MapLegend layers={layers} />
         <div style={{ ...caption, marginTop: 6 }}>
-          {frames.length ? `RainViewer radar · frame ${new Date(radarFrame.capturedAt).toLocaleString('en-AU', { timeZone: 'Australia/Sydney' })} · ${frames.length} frames`
+          {radarFrame ? `RainViewer radar · frame ${new Date(radarFrame.capturedAt).toLocaleString('en-AU', { timeZone: 'Australia/Sydney' })} · ${frames.length} frames`
             : retainedFrames.length ? 'Radar is stale. The collector has not supplied recent RainViewer frames.' : 'Radar is not connected on this installation.'}
         </div>
       </section>

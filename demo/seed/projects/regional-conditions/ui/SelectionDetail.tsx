@@ -1,5 +1,6 @@
 import { RAIN_CURRENT_MS, RIVER_CURRENT_MS, TONE, ago, clock, freshness, trendOf } from './freshness';
 import { RIVER, fireColour, rainColour } from './markers';
+import type { FireIncident, GaugeHistory, RainGauge, RainSample, RiverGauge, RiverSample } from './model';
 import type { Selection } from './RegionalMap';
 
 const caption = { color: '#A2B6C1', fontSize: 12, lineHeight: 1.55 };
@@ -17,14 +18,14 @@ function FreshnessLine({ observedAt, now, limit, quality, note }: { observedAt: 
 }
 
 /** The retained readings as a line. Suspect samples are drawn as hollow points, not removed. */
-function LevelHistory({ samples }: { samples: any[] }) {
+function LevelHistory({ samples }: { samples: RiverSample[] }) {
   const data = samples.filter((s) => Number.isFinite(s?.t) && Number.isFinite(s?.v));
   if (data.length < 2) return <div style={caption}>Aeolus has kept {data.length} reading{data.length === 1 ? '' : 's'} so far. A history line appears from the second.</div>;
   const values = data.map((s) => Number(s.v));
   let min = Math.min(...values), max = Math.max(...values);
   if (max - min < 0.05) { max += 0.025; min -= 0.025; }
   const t0 = data[0].t, span = Math.max(1, data[data.length - 1].t - t0);
-  const pt = (s: any) => ({ x: 12 + (s.t - t0) / span * 276, y: 78 - (Number(s.v) - min) / (max - min) * 64 });
+  const pt = (s: RiverSample) => ({ x: 12 + (s.t - t0) / span * 276, y: 78 - (Number(s.v) - min) / (max - min) * 64 });
   const path = data.map((s, i) => { const p = pt(s); return (i === 0 ? 'M' : 'L') + p.x.toFixed(1) + ' ' + p.y.toFixed(1); }).join(' ');
   const delta = values[values.length - 1] - values[0];
   return <div>
@@ -39,7 +40,7 @@ function LevelHistory({ samples }: { samples: any[] }) {
   </div>;
 }
 
-function RainHours({ hours }: { hours: any[] }) {
+function RainHours({ hours }: { hours: RainSample[] }) {
   const data = hours.filter((h) => Number.isFinite(h?.t) && Number.isFinite(h?.mm)).slice(-24);
   if (!data.length) return <div style={caption}>No complete hours retained yet.</div>;
   const peak = Math.max(1, ...data.map((h) => h.mm));
@@ -59,7 +60,10 @@ function RainHours({ hours }: { hours: any[] }) {
   </div>;
 }
 
-type Props = { selected: Selection; gauges: any[]; rain: any[]; incidents: any[]; riverHistory: any; rainHistory: any; now: number };
+type Props = {
+  selected: Selection; gauges: RiverGauge[]; rain: RainGauge[]; incidents: FireIncident[];
+  riverHistory: GaugeHistory<RiverSample>; rainHistory: GaugeHistory<RainSample>; now: number;
+};
 
 export default function SelectionDetail({ selected, gauges, rain, incidents, riverHistory, rainHistory, now }: Props) {
   if (selected?.kind === 'river') {

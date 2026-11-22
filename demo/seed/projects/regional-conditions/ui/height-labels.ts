@@ -1,7 +1,9 @@
 // Place numeric gauge-height labels without covering neighbouring station markers.
 // Every gauge remains selectable even if density prevents displaying its badge.
+import type { RiverGauge } from './model';
+
 export type HeightBadge = { id: string; x: number; y: number; text: string };
-export function heightBadges(gauges: any[], project: (lon: number, lat: number) => { x: number; y: number },
+export function heightBadges(gauges: RiverGauge[], project: (lon: number, lat: number) => { x: number; y: number },
   width: number, height: number, selectedId?: string): HeightBadge[] {
   const occupied: { x: number; y: number; w: number; h: number }[] = [];
   const result: HeightBadge[] = [];

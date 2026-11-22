@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { FIRE, RAIN_BINS, RAIN_DRY, RAIN_STALE, RIVER, FireGlyph, RainGlyph, RiverGlyph } from './markers';
 
 // The legend draws the same glyphs the map does, so a symbol on the map can be matched
@@ -7,7 +8,7 @@ import { FIRE, RAIN_BINS, RAIN_DRY, RAIN_STALE, RIVER, FireGlyph, RainGlyph, Riv
 const caption = { color: '#A2B6C1', fontSize: 11, lineHeight: 1.4 };
 const title = { color: '#DCE9EF', fontSize: 12, fontWeight: 700, marginBottom: 6 };
 
-function Swatch({ children, label }: { children: any; label: string }) {
+function Swatch({ children, label }: { children: ReactNode; label: string }) {
   return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, marginRight: 12, marginBottom: 4 }}>
     <svg width={24} height={24} viewBox="0 0 24 24" aria-hidden="true">{children}</svg>
     <span style={caption}>{label}</span>

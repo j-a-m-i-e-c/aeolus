@@ -4,27 +4,12 @@
 // history and the status of every source. Rendering detail lives in Files.
 
 import { readHistory } from "./history";
+import { toModel } from "./model";
 import RegionalConditionsDashboard from "./RegionalConditionsDashboard";
 
 export default function RegionalConditions(aeolus: CustomComponentProps) {
-  const model = {
-    radarFrames: aeolus.read("radarFrames"),
-    riverGauges: aeolus.read("riverGauges"),
-    riverHistory: readHistory((key) => aeolus.read(key), "riverHistory"),
-    riverUpdated: aeolus.read("riverUpdated"),
-    riverError: aeolus.read("riverError"),
-    rainGauges: aeolus.read("rainGauges"),
-    rainHistory: readHistory((key) => aeolus.read(key), "rainHistory"),
-    rainUpdated: aeolus.read("rainUpdated"),
-    rainError: aeolus.read("rainError"),
-    fireDanger: aeolus.read("fireDanger"),
-    fireDangerUpdated: aeolus.read("fireDangerUpdated"),
-    fireDangerError: aeolus.read("fireDangerError"),
-    incidents: aeolus.read("incidents"),
-    incidentsUpdated: aeolus.read("incidentsUpdated"),
-    incidentsError: aeolus.read("incidentsError"),
-    lastFetchAttempt: aeolus.read("lastFetchAttempt"),
-  };
+  const read = (key: string) => aeolus.read(key);
+  const model = toModel(read, (key) => readHistory(read, key) as Record<string, unknown>);
 
   const actions = {
     refresh: () => aeolus.fire("refresh"),

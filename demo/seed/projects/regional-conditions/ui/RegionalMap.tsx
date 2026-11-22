@@ -1,4 +1,7 @@
+import type { ReactNode } from 'react';
 import { LAND } from './coastline';
+import { MAP_BOUNDS, MAP_NAME, TOWNS } from './map-config';
+import type { FireIncident, RadarFrame, RainGauge, RiverGauge } from './model';
 import { LABELS as RIVER_LABELS, RIVERS } from './rivers';
 import RadarLayer from './RadarLayer';
 import { heightBadges } from './height-labels';
@@ -8,7 +11,7 @@ import { FireGlyph, RAIN_DRY, RAIN_STALE, RIVER, RainGlyph, RiverGlyph, fireColo
 // Drawn entirely in SVG from coordinates: no tiles, iframes, images or external scripts.
 // Equirectangular, with longitude scaled by cos(latitude) at the frame's centre so the
 // region keeps its true shape instead of being stretched sideways.
-const BOUNDS = { west: 152, east: 154.2, south: -30.2, north: -27.7 };
+const BOUNDS = MAP_BOUNDS;
 const LON_SCALE = Math.cos(((BOUNDS.north + BOUNDS.south) / 2) * Math.PI / 180);
 const WIDTH = 800;
 const HEIGHT = Math.round(WIDTH * (BOUNDS.north - BOUNDS.south) / ((BOUNDS.east - BOUNDS.west) * LON_SCALE));
@@ -24,12 +27,6 @@ function onMap(lon: unknown, lat: unknown) {
   return lon !== null && lat !== null && Number.isFinite(x) && Number.isFinite(y)
     && x >= BOUNDS.west && x <= BOUNDS.east && y >= BOUNDS.south && y <= BOUNDS.north;
 }
-
-const TOWNS: [string, number, number][] = [
-  ['Tweed Heads', 153.54, -28.18], ['Murwillumbah', 153.40, -28.33], ['Byron Bay', 153.61, -28.65],
-  ['Lismore', 153.28, -28.81], ['Ballina', 153.56, -28.87], ['Casino', 153.05, -28.86],
-  ['Kyogle', 153.00, -28.62], ['Yamba', 153.36, -29.44], ['Grafton', 152.94, -29.69],
-];
 
 const LAND_PATH = LAND.map((ring) => ring.map(([lon, lat], i) => {
   const c = project(lon, lat);
@@ -48,12 +45,12 @@ export type Selection = { kind: 'river' | 'rain' | 'fire'; id: string } | null;
 type Layers = { river: boolean; rain: boolean; fires: boolean; radar: boolean; heights: boolean };
 
 type Props = {
-  gauges: any[]; rain: any[]; incidents: any[]; now: number; layers: Layers;
+  gauges: RiverGauge[]; rain: RainGauge[]; incidents: FireIncident[]; now: number; layers: Layers;
   selected: Selection; onSelect: (selection: Selection) => void;
-  radarFrame?: { capturedAt: number; grid: string; palette: string[]; size: number; bounds: number[] };
+  radarFrame?: RadarFrame;
 };
 
-function Marker({ x, y, label, chosen, onPick, children }: { x: number; y: number; label: string; chosen: boolean; onPick: () => void; children: any }) {
+function Marker({ x, y, label, chosen, onPick, children }: { x: number; y: number; label: string; chosen: boolean; onPick: () => void; children: ReactNode }) {
   return <g className="regional-marker" role="button" tabIndex={0} aria-label={label} aria-pressed={chosen} style={{ cursor: 'pointer' }}
     onClick={onPick} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onPick(); } }}>
     {chosen && <circle cx={x} cy={y} r={17} fill="none" stroke="#FFFFFF" strokeWidth={2} strokeOpacity={0.85} />}
@@ -67,7 +64,7 @@ function Marker({ x, y, label, chosen, onPick, children }: { x: number; y: numbe
 // and to the right of the river gauge instead. The offset is drawing only.
 const BADGE_OFFSET = { x: 14, y: -14 };
 
-function drawable(gauge: any, now: number) {
+function drawable(gauge: RiverGauge, now: number) {
   return onMap(gauge.lon, gauge.lat) && Number.isFinite(Number(gauge.level))
     && freshness(gauge.observedAt, now, RIVER_CURRENT_MS) !== 'unavailable';
 }
@@ -104,7 +101,7 @@ export default function RegionalMap({ gauges, rain, incidents, now, layers, sele
     {[152.5, 153, 153.5, 154].map((lon) => <line key={'lon' + lon} x1={project(lon, 0).x} x2={project(lon, 0).x} y1={0} y2={HEIGHT} stroke="#B3C4D0" strokeOpacity={0.08} strokeDasharray="4 8" />)}
     {[-28, -28.5, -29, -29.5, -30].map((lat) => <line key={'lat' + lat} x1={0} x2={WIDTH} y1={project(0, lat).y} y2={project(0, lat).y} stroke="#B3C4D0" strokeOpacity={0.08} strokeDasharray="4 8" />)}
 
-    {layers.river && gauges.map((gauge: any) => {
+    {layers.river && gauges.map((gauge) => {
       if (!riverDrawn.has(gauge.id)) return null;
       const fresh = freshness(gauge.observedAt, now, RIVER_CURRENT_MS);
       const c = project(gauge.lon, gauge.lat);
@@ -116,7 +113,7 @@ export default function RegionalMap({ gauges, rain, incidents, now, layers, sele
       </Marker>;
     })}
 
-    {layers.rain && rainShown.map((station: any) => {
+    {layers.rain && rainShown.map((station) => {
       const fresh = freshness(station.observedAt, now, RAIN_CURRENT_MS);
       const site = project(station.lon, station.lat);
       const c = riverDrawn.has(station.id) ? { x: site.x + BADGE_OFFSET.x, y: site.y + BADGE_OFFSET.y } : site;
@@ -139,8 +136,9 @@ export default function RegionalMap({ gauges, rain, incidents, now, layers, sele
         fontWeight={700} fill="#E5F2FA">{badge.text}</text>
     </g>)}
 
-    {layers.fires && firesShown.map((incident: any, i: number) => {
-      const c = project(incident.lon, incident.lat);
+    {layers.fires && firesShown.map((incident, i) => {
+      // onMap() above has already ruled out a null position.
+      const c = project(Number(incident.lon), Number(incident.lat));
       return <Marker key={'fire' + (incident.id || i)} x={c.x} y={c.y} label={`RFS incident ${incident.title}${incident.alert ? ', ' + incident.alert : ''}`}
         chosen={isChosen('fire', incident.id)} onPick={() => onSelect({ kind: 'fire', id: incident.id })}>
         <FireGlyph x={c.x} y={c.y} colour={fireColour(incident.alert)} />
@@ -165,7 +163,7 @@ export default function RegionalMap({ gauges, rain, incidents, now, layers, sele
       <text x={24} y={31 + i * 30} fontSize={13} fill="#C9DCE4">{note}</text>
     </g>)}
 
-    <text x={18} y={HEIGHT - 16} fill="#B5CAD3" fontSize={13}>NORTHERN RIVERS · NSW</text>
+    <text x={18} y={HEIGHT - 16} fill="#B5CAD3" fontSize={13}>{MAP_NAME}</text>
     <text x={WIDTH - 18} y={HEIGHT - 16} textAnchor="end" fill="#B5CAD3" fontSize={13}>North ↑</text>
   </svg>;
 }
