@@ -8,9 +8,36 @@ const SILENT_PATHS = [
   "/api/health",
 ];
 
+const MAX_LOGGED_PATH = 512;
+
+/**
+ * The request path as it may be logged: no query string or fragment, credential-shaped
+ * segments masked, and length-capped.
+ *
+ * Request logs reach stdout, container logs and the admin-visible log buffer
+ * (`/api/system/logs`). `req.originalUrl` includes the query string, so a caller that
+ * put a token there, even one the route then rejects, used to have it written to all
+ * three. Masking covers a credential pasted into the path itself: an Aeolus API key
+ * (`aeo_…`) or a JWT (`eyJ…` with three dot-separated parts).
+ */
+export function loggablePath(req: Pick<Request, "originalUrl" | "url">): string {
+  const raw = String(req.originalUrl ?? req.url ?? "");
+  const end = raw.search(/[?#]/);
+  const masked = maskCredentialSegments(end === -1 ? raw : raw.slice(0, end));
+  return masked.length > MAX_LOGGED_PATH ? masked.slice(0, MAX_LOGGED_PATH) + "…" : masked;
+}
+
+/** Mask an Aeolus API key or a JWT anywhere in a path. Also used for metrics labels. */
+export function maskCredentialSegments(path: string): string {
+  return path
+    .replace(/aeo_[A-Za-z0-9_-]+/g, "aeo_[redacted]")
+    .replace(/eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, "[redacted-jwt]");
+}
+
 export function requestLogger(req: Request, res: Response, next: NextFunction): void {
+  const path = loggablePath(req);
   // Skip logging for high-frequency polling endpoints to avoid noise
-  if (SILENT_PATHS.some((p) => req.originalUrl.startsWith(p))) {
+  if (SILENT_PATHS.some((p) => path.startsWith(p))) {
     next();
     return;
   }
@@ -22,11 +49,11 @@ export function requestLogger(req: Request, res: Response, next: NextFunction): 
     logger.info(
       {
         method: req.method,
-        url: req.originalUrl,
+        path,
         statusCode: res.statusCode,
         responseTime: `${duration}ms`,
       },
-      `${req.method} ${req.originalUrl} ${res.statusCode} ${duration}ms`,
+      `${req.method} ${path} ${res.statusCode} ${duration}ms`,
     );
   });
 

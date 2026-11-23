@@ -74,6 +74,12 @@ The server holds the connection in a pending-auth state for up to five seconds. 
 
 First-message auth is the only accepted path. A `?token=` query parameter is ignored, so a client that sends one and nothing else is closed at the end of the pending-auth window like any other unauthenticated connection. Access tokens are kept out of the URL because reverse proxies and access logs routinely record request targets.
 
+## Credentials in URLs
+
+Credentials go in the `Authorization` header, or, for the refresh token, its httpOnly cookie. They never go in a URL. A URL ends up in browser history, proxy and server logs, and `Referer` headers whether the request succeeds or not.
+
+- A request whose query string has a credential-shaped parameter (`token`, `access_token`, `api_key`, `password`, `secret` and similar, compared case-insensitively) is refused with `400` before authentication. A value that looks like an Aeolus API key (`aeo_...`) or a JWT is refused under any parameter name. The list is in `src/api/middleware/url-credential-guard.ts`.
+- Request logs record the path only, never the query string. An API key or JWT pasted into the path itself is masked in request logs and in Prometheus metrics labels. Headers, cookies and request bodies are never logged.
 ## CORS and rate limits
 
 CORS accepts configured origins and local development/LAN origins according to `src/api/middleware/cors-config.ts`.

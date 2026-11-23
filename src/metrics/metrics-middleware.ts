@@ -1,8 +1,9 @@
-// src/metrics/metrics-middleware.ts — HTTP metrics middleware with route normalization
+// src/metrics/metrics-middleware.ts â€” HTTP metrics middleware with route normalization
 
 import type { Request, Response, NextFunction, RequestHandler } from "express";
 import { metricsService } from "./metrics-service.js";
 import logger from "../logger.js";
+import { maskCredentialSegments } from "../api/middleware/request-logger.js";
 
 /** UUID pattern: 8-4-4-4-12 hex characters */
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -29,9 +30,9 @@ const KNOWN_RESOURCE_PATHS = new Set([
  * Exported for unit testing.
  *
  * Rules (applied in order):
- * - UUID patterns (e.g., `550e8400-e29b-41d4-a716-446655440000`) → `:id`
- * - Numeric-only segments (e.g., `12345`) → `:id`
- * - Segments after known resource paths (devices, automations, connectors, etc.) → `:id`
+ * - UUID patterns (e.g., `550e8400-e29b-41d4-a716-446655440000`) â†’ `:id`
+ * - Numeric-only segments (e.g., `12345`) â†’ `:id`
+ * - Segments after known resource paths (devices, automations, connectors, etc.) â†’ `:id`
  *
  * The function is idempotent: normalizing an already-normalized path produces the same result.
  */
@@ -48,25 +49,25 @@ export function normalizeRoutePath(path: string, _method: string): string {
       continue;
     }
 
-    // Already a placeholder — keep as-is (idempotency)
+    // Already a placeholder â€” keep as-is (idempotency)
     if (segment.startsWith(":")) {
       normalized.push(segment);
       continue;
     }
 
-    // UUID pattern → :id
+    // UUID pattern â†’ :id
     if (UUID_PATTERN.test(segment)) {
       normalized.push(":id");
       continue;
     }
 
-    // Numeric-only segment → :id
+    // Numeric-only segment â†’ :id
     if (NUMERIC_PATTERN.test(segment)) {
       normalized.push(":id");
       continue;
     }
 
-    // Segment after a known resource path → :id
+    // Segment after a known resource path â†’ :id
     const previousSegment = i > 0 ? normalized[i - 1] : undefined;
     if (previousSegment && KNOWN_RESOURCE_PATHS.has(previousSegment)) {
       normalized.push(":id");
@@ -105,7 +106,9 @@ export function metricsMiddleware(): RequestHandler {
           const durationSeconds = seconds + nanoseconds / 1e9;
 
           const method = request.method;
-          const route = normalizeRoutePath(request.path, method);
+          // request.path never includes the query string; a credential pasted into
+          // the path is masked so it cannot become a Prometheus label.
+          const route = normalizeRoutePath(maskCredentialSegments(request.path), method);
           const statusCode = response.statusCode;
 
           metricsService.recordHttpRequest(method, route, statusCode, durationSeconds);

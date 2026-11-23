@@ -49,6 +49,7 @@ import { requireDevicePermission, requireAutomationPermission } from "./auth/aut
 import type { PermissionLevel } from "./auth/permission-service.js";
 
 import { requestLogger } from "./api/middleware/request-logger.js";
+import { urlCredentialGuard } from "./api/middleware/url-credential-guard.js";
 import { errorHandler } from "./api/middleware/error-handler.js";
 import { corsMiddleware } from "./api/middleware/cors-config.js";
 import { apiRateLimiter } from "./api/middleware/rate-limiter.js";
@@ -382,6 +383,8 @@ async function main(): Promise<void> {
   app.use(express.json({ limit: "1mb" }));
   app.use(cookieParser());
   app.use(requestLogger);
+  // After the logger, so a refused request is still logged (by path only).
+  app.use(urlCredentialGuard);
 
   // Global API rate limiter (per-IP). The login route adds its own stricter limiter.
   app.use(apiRateLimiter);
