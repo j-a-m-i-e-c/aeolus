@@ -664,6 +664,32 @@ describe("automation.routes", () => {
       expect(mockEngine.unregister).toHaveBeenCalledWith("rule-to-delete");
       expect(mockStateStore.deleteAll).toHaveBeenCalledWith("rule-to-delete");
     });
+
+    it("removes the automation's Project API with the deleting user recorded (ADR-0027)", async () => {
+      mockDb._rows.push({
+        id: "rule-with-api", name: "Has API", trigger_topic: "t", condition_type: null, condition_value: null,
+        action_type: null, action_target: null, action_params: null, rule_type: "script", script_source: null,
+        compiled_js: null, structured_metadata: null, ui_source: null, compiled_ui: null, trigger_type: "mqtt",
+        cron_expression: null, enabled: 1, created_at: 1000, revision: 1, authored_unrestricted: 1,
+      });
+      const projectApis = { deleteForAutomation: vi.fn() };
+      const withApis = express();
+      withApis.use(express.json());
+      withApis.use((req, _res, next) => { (req as any).user = { userId: "u-admin", username: "admin", role: "admin", groupId: null }; next(); });
+      withApis.use("/api/automations", createAutomationRoutes(
+        mockEngine as unknown as AutomationEngine, mockDb as unknown as DatabaseType, mockDeviceRegistry as unknown as DeviceRegistry,
+        mockCommandService as unknown as CommandService, mockExecutionLog as unknown as ExecutionLog, "", passthroughGuard, stubResolver,
+        undefined, mockStateStore as unknown as AutomationStateStore, mockConditionRegistry as unknown as ConditionRegistry,
+        mockCommandHistoryStore, projectApis,
+      ));
+      withApis.use(errorHandler);
+      const res = await request(withApis, "DELETE", "/api/automations/rule-with-api", undefined, 1);
+      expect(res.status).toBe(200);
+      expect(projectApis.deleteForAutomation).toHaveBeenCalledWith("rule-with-api", {
+        actor: { userId: "u-admin", username: "admin" },
+        requestId: expect.any(String),
+      });
+    });
   });
 
   // ─── Revision conflicts (ADR-0026) ───────────────────────────────────────

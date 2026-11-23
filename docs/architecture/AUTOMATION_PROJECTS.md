@@ -17,6 +17,30 @@ Automation Project
  isolated Logic / opaque-origin UI runtimes
 ```
 
+### API endpoints and `lib/` (in development)
+
+A project can also declare read-only HTTP endpoints for other programs, including another
+Aeolus installation ([ADR-0027](../adr/0027-project-apis.md)). That uses two more
+conventional folders:
+
+- `api/routes.json` declares the endpoints, as data, never code. `api/handlers.ts` exports
+  the handler each route names. A project without `api/routes.json` is unaffected, even if it
+  has other files under `api/`.
+- `lib/` holds modules that both Logic and API handlers may import.
+
+API handlers may import only from `api/` and `lib/`, never `logic/`, `ui/` or `shared/`.
+This is checked across the whole import graph when the project is saved. Existing projects
+keep their `shared/` folder as before; move a module to `lib/` only if an API handler needs
+it. Importing a module still runs its top-level code, so handlers run in their own sandbox
+with read-only access to the automation's state and nothing else.
+
+These folders hold reusable **source code**. Shared Automation State (`shared.get`/`set`) is
+unrelated: it is runtime data shared between automations, and API handlers cannot reach it.
+
+Saving a project validates its API but serves nothing. An admin publishes an immutable
+snapshot from the Endpoints section (in development), and later edits change nothing that is
+served until an admin publishes again.
+
 ## Authoring model
 
 The editor has one consistent hierarchy:

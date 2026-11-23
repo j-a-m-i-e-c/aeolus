@@ -6,7 +6,7 @@
 // satisfy. Phase 0 proof of concept: not yet wired into compilation or routing.
 
 import { z } from "zod";
-import { AutomationProjectCompileError, type ProjectCompileError } from "../automations/automation-project.js";
+import { AutomationProjectCompileError, type ProjectCompileError } from "../automations/project-compile-error.js";
 
 export const API_MANIFEST_PATH = "api/routes.json";
 export const MAX_API_ROUTES = 16;

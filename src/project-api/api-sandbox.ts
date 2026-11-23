@@ -36,6 +36,14 @@ export interface ApiLimits {
   maxConcurrent: number;
 }
 
+/**
+ * Version of what a handler can rely on: the globals in API_BOOTSTRAP, the request
+ * shape, the statuses it may choose and the manifest rules. A published snapshot
+ * records the version it was reviewed against, and stops being served when this
+ * changes, until an admin reviews it again. Bump it with any change to those.
+ */
+export const API_RUNTIME_CONTRACT = 1;
+
 export const DEFAULT_API_LIMITS: ApiLimits = {
   deadlineMs: 5000,
   memoryMb: 32,

@@ -1,6 +1,6 @@
 # ADR-0027: Project APIs — published, read-only HTTP endpoints for Automation Projects
 
-- **Status:** Proposed (Phase 0 complete, awaiting review before Phase 1)
+- **Status:** Proposed. Phase 0 decisions approved; Phase 1 complete, awaiting review before Phase 2
 - **Date:** 2026-11-19
 - **Plan:** [Project APIs implementation plan](../architecture/project-apis-plan.md)
 
@@ -68,10 +68,15 @@ are not dashboard users.
   compile error.
 - The API bundle may import only files under `api/` and `lib/`, and only `.ts`, `.js` and
   `.json`. Every import, including those made by `lib/` files, goes through the resolver
-  that enforces this, so the whole import graph is checked. Nothing under `logic/` or `ui/`
-  and no packages. `lib/` is the explicit directory for code shared with Logic. It is not
-  called `shared/`, to avoid confusion with Shared Automation State. A `lib/` module's
-  top-level code does run, but only inside the API sandbox described below.
+  that enforces this, so the whole import graph is checked. Nothing under `logic/`, `ui/`
+  or `shared/`, no packages, no Node built-ins and no dynamic imports. `lib/` is the explicit
+  directory for code shared with Logic. Existing projects keep their `shared/` folder (code
+  shared between Logic and UI) unchanged; neither folder has anything to do with Shared
+  Automation State. A `lib/` module's top-level code does run, but only inside the API
+  sandbox described below. The folder rule is a structure rule, not the security boundary:
+  the sandbox is.
+- A project declares an API only by having `api/routes.json`. Other files under `api/` in
+  a project saved before this feature stay ordinary files and change nothing.
 
 ### Execution
 
@@ -102,9 +107,31 @@ or the engine.
 ### Publication
 
 - **What is served is an immutable publication snapshot**, not the project's current
-  source. Publishing copies the compiled manifest, API bundle, content hash, the automation
-  revision it came from, and the API runtime contract version into a snapshot row. Only an
-  admin can publish, and only for an admin-authored (unrestricted) automation in the MVP.
+  source. A snapshot records:
+  - the manifest (endpoint definitions and response schemas);
+  - the source of every file in the handlers' transitive import graph;
+  - the compiled bundle, with its SHA-256 hash, which is checked before the snapshot is
+    served;
+  - a content hash over the manifest and those sources;
+  - the automation revision it was compiled from, and the API runtime contract version.
+
+  A database trigger rejects any `UPDATE` to a snapshot. Only a real admin can publish, and
+  only for an admin-authored (unrestricted) automation in the MVP.
+- **A publish is bound to what was reviewed.** The admin submits the content hash they saw,
+  and the transaction also checks that the automation's revision has not moved. An edit that
+  lands between review and publish therefore gets `409` rather than being published unseen.
+- **Code is snapshotted; authority is not.** Every resolve re-checks live facts and fails
+  closed if any is false:
+  - the automation exists, is enabled and is still admin-authored;
+  - **the admin who published is still an admin** (a demoted or deleted publisher stops the
+    API until another admin republishes);
+  - the snapshot's runtime contract matches the server's;
+  - the bundle hash matches.
+
+  Client, key and grant state (Phase 2) will also be live.
+- **Publishing never revives an old snapshot.** Unpublishing keeps the snapshot as history.
+  If the source is later reverted to identical content, nothing is served until an admin
+  publishes again, and that publish records a new snapshot by that admin.
 - Saving the project never changes what is served, so a tab writer's edit cannot run under
   an existing grant. When the current source's API content hash differs from the published
   snapshot, the Endpoints section shows **unpublished changes**. Serving them requires an
@@ -123,11 +150,16 @@ or the engine.
   unique), independent of the automation's UUID and name. Renaming the automation or
   editing the project never changes the URL.
 - Changing a slug is an explicit admin action. The old slug stops resolving and is
-  **retired permanently**, so another project can never take over a URL an integration
-  still calls.
-- The showcase is the documented exception: reseeding deletes and recreates its
-  automations, which deletes their APIs, publications and grants. Reseeding never creates
-  publications or grants, and never carries old credentials forward.
+  **retired**, so another project cannot silently take over a URL an integration still
+  calls. Retirement is enforced by database triggers on rename and delete, including the
+  foreign-key cascade when the automation is deleted.
+- An admin can deliberately reuse a retired slug with `reclaim: true`, which is audited.
+  That is the supported way to point a known URL at a new API, for example after reseeding
+  the showcase.
+- The showcase is the documented exception to stable URLs: reseeding deletes and
+  recreates its automations, which deletes their APIs, publications and (from Phase 2)
+  grants, audited as `api.deleted`. Reseeding never creates publications or grants, and
+  never carries old credentials forward.
 
 ### Clients, keys and authorization
 
@@ -150,10 +182,18 @@ or the engine.
   per-IP limiter and metrics, and **before** the global `authenticate`. It answers every
   `/api/exposed/*` request itself and never calls `next()` except with an error, so no
   request falls through to dashboard routes.
-- CORS is off for this router and cookies are ignored. GET and HEAD only: any other method
-  gets 405.
+- CORS is off for this router and cookies are ignored. GET and HEAD only. Any other method,
+  including OPTIONS, gets the same `405` for every path under `/api/exposed`, before the key
+  or route is looked at, so the response never depends on whether a route exists. There is
+  no `Allow` header listing routes, and no CORS preflight approval.
+- **Error bodies are uniform.** `401` for a missing, malformed, unknown, wrong, expired or
+  revoked key, all with the same body. `404` for an unknown slug, a retired slug, an unknown
+  route or an ungranted route, all with the same body. Only a caller granted the route sees
+  its endpoint-specific errors. Generated documentation is admin-only.
 - Requests with a query string are rejected in the MVP. The router logs the path, never the
-  query.
+  query, and credentials anywhere in a URL are refused globally (`url-credential-guard.ts`,
+  on `main` in `a083caa`). Future query parameters must be declared per route in the
+  manifest, validated and documented; arbitrary query input will never reach handlers.
 - **Order:** method → size bounds → feature enabled → key (401 for missing or invalid) →
   grant and route (404 when not granted or not found, so a key holder cannot probe for
   APIs it was not given) → publication live (503) → rate limit (429 with `Retry-After`) →
@@ -177,8 +217,18 @@ the server. Limits reset when the backend restarts and are not distributed guara
 - Plaintext HTTP is allowed only for a trusted LAN, and only by explicit opt-in on the
   calling side, with a conspicuous warning that the key crosses the network unencrypted. A
   stolen key works until it is revoked, however it is stored. The Aeolus-to-Aeolus connector
-  (Phase 5) defaults to HTTPS, never downgrades HTTPS to HTTP, and follows no
-  cross-origin redirect.
+  (Phase 5) defaults to HTTPS, never downgrades HTTPS to HTTP, never disables certificate
+  verification, and follows no cross-origin redirect.
+- **Optional server-side enforcement: `EXPOSED_API_REQUIRE_HTTPS`** (off by default for
+  LAN use). When on, a request is served only if Express establishes that the transport is
+  HTTPS (`req.secure`), and is refused otherwise.
+  - `req.secure` is true for a direct TLS connection, or when `X-Forwarded-Proto: https`
+    arrives through a proxy hop that `TRUST_PROXY_HOPS` explicitly trusts.
+  - With no trusted proxy configured, a client-supplied `X-Forwarded-Proto` is ignored.
+  - Security is never inferred from the caller's IP address.
+  - The documentation will say that the proxy must overwrite forwarded protocol headers,
+    and that the backend port must not be reachable except through it.
+- The management UI warns whenever bearer keys would be used over plaintext HTTP.
 
 ## Alternatives considered
 
@@ -209,9 +259,21 @@ the server. Limits reset when the backend restarts and are not distributed guara
 - External clients can read only what an admin deliberately published and granted, through
   code an admin approved.
 - A project gains a second compiled artifact (the API bundle) and new tables: APIs,
-  snapshots, clients, credentials, grants, retired slugs and an append-only audit of
-  publication, client, credential and grant changes. The audit is new because Aeolus has no
-  admin audit log.
+  snapshots, retired slugs and an audit log (Phase 1, migration 021), then clients,
+  credentials and grants (Phase 2). The audit log is new because Aeolus has no admin audit
+  log.
+  - Every publication, client, credential and grant change writes its audit record **in
+    the same transaction**, so a change whose record cannot be written does not happen.
+  - Each record holds the acting admin, the operation, the targets, the old and new
+    content hashes, a correlation id (the request's `X-Aeolus-Mutation-Id`, or a generated
+    one) and structured metadata. It never holds keys or source.
+  - The history is **append-only at the application level**. No route updates or deletes
+    it, and triggers reject `UPDATE` and `DELETE`. It is not tamper-proof against someone
+    with write access to the SQLite file.
+  - Per-request API metrics stay separate from this administrative history.
+- The editor works out whether the source has changed since publication on demand, by
+  compiling the current source and comparing content hashes. The project save path is
+  unchanged apart from validating `api/routes.json`.
 - Republishing is a deliberate admin step after every API source change. That is friction
   by design.
 - Rate limits and recent-activity data reset on restart.
@@ -231,9 +293,13 @@ the server. Limits reset when the backend restarts and are not distributed guara
 - A key must be usable without a network secret, such as mTLS or signed requests.
 - Aeolus is intended to be exposed directly to the internet.
 
-## Implementation anchors (Phase 0)
+## Implementation anchors
 
 - `src/project-api/manifest.ts`: manifest schema, path rules, overlap check, matching, response validation
 - `src/project-api/api-compiler.ts`: API bundle, import-graph restriction, content hash
 - `src/project-api/api-sandbox.ts`: `invokeApiHandler()`, setup script, deadline and limits
 - `src/__integration__/project-api-sandbox.integration.test.ts`: real-isolate security and termination proofs
+- `src/project-api/publication-store.ts`: slugs, snapshots, live fail-closed resolution, audit
+- `src/db/migrations/021-project-api-publications.ts`: tables and the immutability, append-only and slug-retirement triggers
+- `src/api/routes/project-api.routes.ts`: admin-only publication management and audit read
+- `src/__integration__/project-api-publication.integration.test.ts`: edits during an active request, restart, disable

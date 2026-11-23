@@ -30,6 +30,7 @@ import type { PermissionLevel } from "../../auth/permission-service.js";
 import type { PermissionResolver } from "../../auth/permission-resolver.js";
 import { eventBus, AUTOMATION_STATE_CHANGE, CONFIGURATION_INVALIDATED, DEVICE_STATE_CHANGE } from "../../core/event-bus.js";
 import type { AutomationStateStore } from "../../automations/automation-state-store.js";
+import type { ProjectApiStore } from "../../project-api/publication-store.js";
 import logger from "../../logger.js";
 
 interface StoredRule {
@@ -81,6 +82,7 @@ export function createAutomationRoutes(
   stateStore?: AutomationStateStore,
   conditionRegistry?: ConditionRegistry,
   commandHistoryStore?: Pick<CommandHistoryStore, "listForRule">,
+  projectApis?: Pick<ProjectApiStore, "deleteForAutomation">,
 ): Router {
   const router = Router();
 
@@ -637,12 +639,20 @@ export function createAutomationRoutes(
     );
     if (existing.owner_tab_id) tombstoneTabIds.add(existing.owner_tab_id);
 
-    const deleted = db.prepare(
-      "DELETE FROM automation_rules WHERE id = ? AND revision = ?",
-    ).run(id, expectedRevision);
-    if (deleted.changes !== 1) {
-      throw new ConflictError("This automation changed on the server before it could be deleted");
-    }
+    db.transaction(() => {
+      // A published API goes with its automation, audited in this transaction; the
+      // foreign-key cascade alone would remove it without a record (ADR-0027).
+      projectApis?.deleteForAutomation(id, {
+        actor: { userId: req.user?.userId ?? "unknown", username: req.user?.username ?? "unknown" },
+        requestId: mutationIdFromRequest(req) ?? randomUUID(),
+      });
+      const deleted = db.prepare(
+        "DELETE FROM automation_rules WHERE id = ? AND revision = ?",
+      ).run(id, expectedRevision);
+      if (deleted.changes !== 1) {
+        throw new ConflictError("This automation changed on the server before it could be deleted");
+      }
+    })();
 
     if (stateStore) {
       stateStore.deleteAll(id);

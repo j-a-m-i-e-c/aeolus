@@ -112,9 +112,30 @@ describe("compileProjectApi", () => {
     expect(errors).toMatch(/only import \.ts, \.js or \.json/);
   });
 
-  it("requires a manifest for handlers and handlers for a manifest", async () => {
-    expect(await compileErrors([{ path: "api/handlers.ts", content: "export const x = 1;" }])).toMatch(/no api\/routes\.json/);
+  it("treats api/ files without a manifest as ordinary project files", async () => {
+    // A project saved before Project APIs may already use api/ for its own code.
+    expect(await compileProjectApi([{ path: "api/handlers.ts", content: "export const x = 1;" }])).toBeNull();
+  });
+
+  it("requires handlers for a manifest", async () => {
     expect(await compileErrors([{ path: "api/routes.json", content: ROUTES }])).toMatch(/Handlers file not found/);
+  });
+
+  it("records the manifest and exactly the files in the import graph", async () => {
+    const api = await compileProjectApi(project({
+      "api/handlers.ts": `import { value } from "../lib/v";\nexport function getTank() { return value; }`,
+      "api/unused.ts": `export const unused = 1;`,
+      "lib/v.ts": `export const value = 1;`,
+      "lib/other.ts": `export const other = 1;`,
+    }));
+    expect(api?.sources.map((file) => file.path)).toEqual(["api/handlers.ts", "api/routes.json", "lib/v.ts"]);
+    expect(api?.bundleHash).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("does not change the content hash for files outside the graph", async () => {
+    const base = await compileProjectApi(project());
+    const withLogicEdit = await compileProjectApi(project({ "logic/index.ts": `export default function run() {}` , "lib/other.ts": "export const x = 2;" }));
+    expect(withLogicEdit?.contentHash).toBe(base?.contentHash);
   });
 
   it("reports a syntax error in a handler with its file and line", async () => {

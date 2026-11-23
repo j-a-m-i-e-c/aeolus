@@ -61,6 +61,8 @@ import { createAuthRoutes } from "./api/routes/auth.routes.js";
 import { ensureBackendCredential } from "./auth/mqtt-credential-service.js";
 
 import { createSystemRoutes } from "./api/routes/system.routes.js";
+import { createProjectApiRoutes } from "./api/routes/project-api.routes.js";
+import { createProjectApiStore } from "./project-api/publication-store.js";
 import { createLayoutRoutes } from "./api/routes/layout.routes.js";
 import { createDataStoreRoutes } from "./api/routes/data-store.routes.js";
 import { createSharedStateRoutes } from "./api/routes/shared-state.routes.js";
@@ -469,7 +471,10 @@ async function main(): Promise<void> {
     createProvisioningRoutes(provisioningService, { brokerManagementAvailable }),
   );
   const sandboxTypesPath = path.resolve(import.meta.dirname, "automations/sandbox-types.d.ts");
-  app.use("/api/automations", createAutomationRoutes(engine, db, registry, commandService, executionLog, sandboxTypesPath, requireAutomation, permissionResolver, connectorRegistry, stateStore, conditionRegistry, commandHistoryStore));
+  // Project API publications (ADR-0027). Admin-only management; nothing is served yet.
+  const projectApis = createProjectApiStore(db);
+  app.use("/api/project-apis", createProjectApiRoutes(db, projectApis));
+  app.use("/api/automations", createAutomationRoutes(engine, db, registry, commandService, executionLog, sandboxTypesPath, requireAutomation, permissionResolver, connectorRegistry, stateStore, conditionRegistry, commandHistoryStore, projectApis));
   app.use("/api/connectors", createConnectorRoutes(connectorManager, connectorRegistry));
   app.use("/api/metrics", createMetricsSummaryRoute(metricsService));
   app.use("/api/commands", createCommandRoutes(commandHistoryStore));

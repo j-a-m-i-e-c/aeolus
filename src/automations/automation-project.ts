@@ -3,6 +3,8 @@
 import path from "node:path";
 import type { Database as DatabaseType } from "better-sqlite3";
 import { build, type Loader, type Message, type Plugin } from "esbuild";
+import { AutomationProjectCompileError, type ProjectCompileError } from "./project-compile-error.js";
+import { compileProjectApi, type CompiledProjectApi } from "../project-api/api-compiler.js";
 
 export const DEFAULT_LOGIC_ENTRY = "logic/index.ts";
 export const DEFAULT_UI_ENTRY = "ui/index.tsx";
@@ -46,19 +48,7 @@ export interface StoredAutomationProject {
   legacyProjection: boolean;
 }
 
-export interface ProjectCompileError {
-  path?: string;
-  line: number;
-  column: number;
-  message: string;
-}
-
-export class AutomationProjectCompileError extends Error {
-  constructor(public readonly details: ProjectCompileError[]) {
-    super("Automation Project compilation failed");
-    this.name = "AutomationProjectCompileError";
-  }
-}
+export { AutomationProjectCompileError, type ProjectCompileError } from "./project-compile-error.js";
 
 export interface CompiledAutomationProject {
   compiledJs: string;
@@ -68,6 +58,8 @@ export interface CompiledAutomationProject {
   files: AutomationProjectFile[];
   logicEntry: string;
   uiEntry: string | null;
+  /** The project's API, when it declares `api/routes.json`. Never served directly. */
+  api: CompiledProjectApi | null;
 }
 
 function normalizeProjectPath(input: string): string {
@@ -227,9 +219,14 @@ export async function compileAutomationProject(project: AutomationProject): Prom
   const normalized = normalizeProject(project);
   const compiledJs = await bundle(normalized.map, "logic", normalized.logicEntry);
   const compiledUi = normalized.uiEntry ? await bundle(normalized.map, "ui", normalized.uiEntry) : null;
+  // Validated on every save so a bad manifest or import is reported in the editor.
+  // Compiling it changes nothing that is served: only an admin publishing a snapshot
+  // does that (ADR-0027).
+  const api = await compileProjectApi(normalized.files);
   return {
     compiledJs,
     compiledUi,
+    api,
     logicSource: normalized.map.get(normalized.logicEntry)!,
     uiSource: normalized.uiEntry ? normalized.map.get(normalized.uiEntry)! : null,
     files: normalized.files,

@@ -202,6 +202,25 @@ keeping its own id, payload and timestamp — not synthesised bucket averages.
 | `GET` | `/api/metrics/summary` | Dashboard metrics summary |
 | `GET`, `PUT` | `/api/layout` | Read or replace dashboard layout |
 
+## Project API management
+
+These routes manage published Automation Project endpoints ([ADR-0027](../adr/0027-project-apis.md)). They
+require a real admin: a public-demo session is refused on every method, and none of them is
+on the public-demo allowlist. Serving the endpoints (`/api/exposed/v1/...`), API clients and
+keys are not built yet.
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/api/project-apis/:automationId` | What the current source declares (routes, files, `contentHash`, compile errors), the slug, the published snapshot, `unpublishedChanges`, and why it is or is not being served |
+| `PUT` | `/api/project-apis/:automationId/slug` | `{ slug, reclaim? }`: create the API or change its slug. A changed slug stops resolving and is retired; reusing a retired slug requires `reclaim: true` |
+| `POST` | `/api/project-apis/:automationId/publish` | `{ contentHash }`: publish the current source as a new immutable snapshot. `contentHash` must be the hash returned by `GET`; if the source changed since, `409` |
+| `POST` | `/api/project-apis/:automationId/unpublish` | Stop serving immediately. The snapshot is kept as history |
+| `GET` | `/api/project-apis/audit` | Append-only publication history, newest first: `?limit=` (1–200), `?before=<event id>`, `?apiId=`. Includes storage use |
+
+Only admin-authored automations can have an API. Each change writes its audit record in the
+same transaction, recording the admin, the request's `X-Aeolus-Mutation-Id` (or a generated
+id) and the old and new content hashes.
+
 ## Authentication and MQTT provisioning
 
 The auth and provisioning endpoints are documented under [Security](../security/README.md).

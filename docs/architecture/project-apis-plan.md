@@ -1,6 +1,6 @@
 # Project APIs: implementation plan
 
-**Status:** Phase 0 complete on `feat/project-apis`, awaiting review before Phase 1.
+**Status:** Phases 0 and 1 complete on `feat/project-apis`, awaiting review before Phase 2.
 **Decision record:** [ADR-0027](../adr/0027-project-apis.md). This plan is the
 implementation detail behind it, and replaces the original "Aeolus Project APIs —
 Implementation Specification" (reviewed against `f0cf75d`).
@@ -97,48 +97,77 @@ needed.
 **Phase 0 is not:** wired into project compilation, routing, storage or the UI. Nothing in
 it is reachable at runtime.
 
-## Phase 1: declarative compilation, snapshots and storage
+## Phase 1: compilation, snapshots, storage and audit (complete)
 
-**Compilation**
-- `compileAutomationProject()` calls `compileProjectApi()` when `api/routes.json` or
-  `api/handlers.ts` exists. API errors use the existing `details` shape, so the editor
-  shows them with file and line.
-- Projects without an API compile exactly as today.
-- `automationProjectSchema` needs no new field: the API is found by its fixed paths, which
-  avoids a second source of truth.
+**Delivered**
+- **Compilation.** `compileAutomationProject()` compiles the API whenever `api/routes.json`
+  exists and returns it as `api`. Every save therefore reports manifest and import errors in
+  the editor's existing `details` shape. Projects without a manifest compile exactly as
+  before, including ones with other files under `api/`.
+  - The compile error class moved to `src/automations/project-compile-error.ts`, and is
+    re-exported from its old module, to avoid an import cycle.
+- **The API compile records its whole transitive import graph**:
+  - `sources`: the manifest plus every file esbuild loaded;
+  - `contentHash`: over those sources, so an esbuild upgrade does not count as a code
+    change;
+  - `bundleHash`.
+- **Migration 021:**
+  - `project_apis`, `project_api_snapshots`, `project_api_retired_slugs` and
+    `project_api_audit`;
+  - triggers that make snapshots immutable, make the audit append-only, retire a slug on
+    rename or delete (including the foreign-key cascade), and refuse a retired slug unless
+    it is reclaimed.
+- **`src/project-api/publication-store.ts`:**
+  - `setSlug`, with explicit, audited `reclaim`;
+  - `publish`, bound to the reviewed content hash and automation revision;
+  - `unpublish` and `deleteForAutomation`;
+  - `resolve`, which checks every live fact on every call;
+  - `listAudit`, keyset-paged, and `storageStats`.
 
-**Migration 021** (registered in `src/db/migrations/index.ts`, with a colocated test, and
-`src/db/database.ts` legacy path reviewed)
-- `project_apis`
-  - `id` (random, permanent)
-  - `automation_id` UNIQUE, `REFERENCES automation_rules ON DELETE CASCADE`
-  - `slug` UNIQUE
-  - `enabled` default 0
-  - `current_content_hash`
-  - `created_at`, `updated_at`
-- `project_api_retired_slugs`: `slug` PK, `api_id`, `retired_at`. Never deleted.
-- `project_api_snapshots` (immutable)
-  - `id`, `api_id`
-  - `manifest`, `bundle`, `content_hash`
-  - `automation_revision`, `runtime_contract`
-  - `published_by`, `published_at`
-- `project_apis.published_snapshot_id` points to the snapshot being served, or is null when
-  nothing is published.
+  Each mutation writes its audit record in the same transaction.
+- **`/api/project-apis` management routes:**
+  - GET status, PUT slug, POST publish and POST unpublish;
+  - GET audit, with `limit`/`before`/`apiId` and storage use.
 
-**Save flow** (unchanged contract: compile outside the transaction, then one transaction
-guarded by `revision = ?`, with the invalidation emitted only after commit)
-- The same transaction updates `current_content_hash`.
-- It never creates, alters or enables a snapshot.
+  A real admin is required, which refuses public-demo sessions even on GET. Nothing under
+  `/api/project-apis` or `/api/exposed` is on the demo allowlist, which is asserted by a test.
+- **Automation delete** removes the API (snapshots cascade, slug retired), audited with the
+  deleting user, in the same transaction as the rule delete.
+- **Docs:** this plan, ADR-0027, `reference/api.md` and `architecture/AUTOMATION_PROJECTS.md`
+  (`api/`, `lib/` and `shared/`, and how they differ from Shared Automation State).
 
-**Acceptance**
-- A valid manifest compiles, and an invalid, overlapping or reserved one fails with a
-  location.
-- A failed save leaves the previous Logic, UI, API source and snapshot intact.
-- `If-Match` conflicts still return 409.
-- Deleting the automation removes its API, snapshots and grants, and the slug moves to
-  retired.
-- Every existing seed project compiles unchanged, and the showcase compile test covers
-  `api/` when present.
+**On `main`, separately:** `a083caa`. Request logs record the path only. Credentials in
+query strings are refused with 400. API keys and JWTs pasted into a path are masked in logs
+and metrics labels.
+
+**Departures from the plan as previously written** (none changes an approved decision)
+1. **Publication management routes moved from Phase 2 to Phase 1.** Publishing, slugs and
+   the admin audit read interface need them. Clients, keys, grants and the `/api/exposed`
+   router stay in Phase 2.
+2. **No `current_content_hash` column.** Whether the source has changed since publication
+   is worked out on demand by compiling the current source in the admin status route. The
+   project save path is unchanged apart from validating `api/routes.json`.
+3. **`api/handlers.ts` without a manifest is not an error.** Only the manifest declares an
+   API, so a project saved before this feature cannot start failing.
+4. **The publisher must still be an admin.** This is how the decision "do not snapshot an
+   administrator's permissions" is implemented: a demoted or deleted publisher stops the API
+   until another admin republishes it.
+5. **Retired slugs can be reclaimed explicitly** (`reclaim: true`, audited), so a showcase
+   reseed or a deliberate migration can point a known URL at a new API.
+
+**Requested Phase 1 tests**
+
+| Requested | Where | Status |
+|---|---|---|
+| Editing published code while requests are active | `project-api-publication.integration.test.ts` | Done: an in-flight request and later requests run the snapshot; the new code runs only after a republish |
+| Restarting Aeolus with an existing snapshot | same file (SQLite file reopened) | Done: same snapshot served; unpublished state also survives restart |
+| Disabling and revoking access while an old snapshot exists | store tests and integration | Disable, unpublish, lost authority, demoted or deleted publisher, contract mismatch and bundle tampering all fail closed. **Key revocation needs Phase 2 keys** |
+| Accessing an ungranted endpoint | — | **Phase 2** (needs keys, grants and the router) |
+| Forged HTTPS forwarding headers | — | **Phase 2** (`EXPOSED_API_REQUIRE_HTTPS` is part of the router) |
+| Credentials in query strings | `request-logger.test.ts` on `main` | Done for logging and global refusal. The exposed-router case is **Phase 2** |
+| Invalid transitive imports | compiler tests; management route test | Done: `lib/` importing `logic/` is refused with file and line, and cannot be published |
+| Failed transaction involving audit records | store tests | Done for create slug, rename, publish, unpublish and automation delete: no change when the audit insert fails |
+| Reverting source without reactivating historical grants | store tests | Done for publications: identical reverted content stays unpublished, and republishing creates a new snapshot. **Grant behaviour is Phase 2**, where grants will be revoked on unpublish so none can be reactivated |
 
 ## Phase 2: clients, keys, grants and the request pipeline
 
@@ -150,49 +179,58 @@ guarded by `revision = ?`, with the invalidation emitted only after commit)
   - `last_used_at`, updated at most once a minute
 - `api_grants`
   - `client_id`, `api_id`, `route_id`
+  - a `route_fingerprint` (path, handler and response schema hash)
   - `access` (`read`), `granted_by`, `granted_at`
   - Unique on (`client_id`, `api_id`, `route_id`).
-- `api_audit_events` (append-only)
-  - `at`, `actor_user_id`, `action`, `client_id`, `api_id`, `route_id`, `detail`
-  - No secrets.
+- Client, credential and grant changes are audited in `project_api_audit` (from
+  migration 021), in the same transaction. No secret material is ever written there.
 
-**Management API** (`/api/project-apis/…`, under the normal JWT stack)
-- A **real-admin** guard: `requireAdmin` lets a demo session through on GET, so it is not
-  used here.
-- Operations:
-  - publish and unpublish, which snapshot the current compile
-  - set and rename the slug
-  - create and disable clients
-  - issue, rotate (with explicit overlap) and revoke keys
-  - grant and revoke routes
-  - read recent activity
-- A key is returned once from issue and rotate. Machine keys are refused on every
+**Management API** (added to `/api/project-apis`, same real-admin guard)
+- Create and disable clients.
+- Issue, rotate (with an explicit overlap) and revoke keys.
+- Grant and revoke routes.
+- Read recent activity.
+- A key is returned once, from issue or rotate. Machine keys are refused on every
   management route.
 
 **`/api/exposed/v1/:slug/*` router**, mounted before `authenticate` in `src/index.ts`
 - Terminal: it never falls through to dashboard routes.
-- CORS off, cookies ignored, GET/HEAD only, query strings rejected.
+- CORS off and cookies ignored. Query strings are rejected.
+- A uniform `405` for any non-GET/HEAD method (OPTIONS included), before any lookup.
 - Request URL and header bounds.
 - Not mounted in public-demo mode.
-- Pipeline order and status codes as in ADR-0027.
+- Pipeline order and uniform error bodies as in ADR-0027.
+- `EXPOSED_API_REQUIRE_HTTPS`: when on, a request is served only if `req.secure` is true,
+  meaning direct TLS or `X-Forwarded-Proto` from a hop trusted through `TRUST_PROXY_HOPS`.
 - Responses carry `X-Request-Id`, `Cache-Control: no-store` and
   `X-Content-Type-Options: nosniff`.
 - Metrics label the route as `/api/exposed/:slug/:route`.
 
-**Republish grant rule:** a grant survives only for routes whose path, handler name and
-response schema are unchanged.
+**Grant rules**
+- Credentials, revocation, client status and grants are always read live, never from a
+  snapshot.
+- On republish, a grant survives only for routes whose fingerprint is unchanged.
+- On unpublish, all grants for the API are revoked, so a later publish (including one of
+  reverted source) never reactivates old access.
 
 **Negative security tests** (all required)
-- No key, a malformed key, an unknown key id, a wrong secret (same 401 for each), an
-  expired key, a revoked key and a disabled client never reach the sandbox.
+- No key, a malformed key, an unknown key id or a wrong secret gets the same `401` and
+  body. So do an expired key, a revoked key and a disabled client. None of them reaches
+  the sandbox.
+- Revoking a key, disabling a client or revoking a grant takes effect on the next request
+  while the old snapshot is still published.
 - A key in the query string, a dashboard JWT, a refresh cookie and a demo session are all
   refused.
-- A valid key reaching an ungranted route, an unknown slug, a retired slug or a removed
-  route gets 404, indistinguishable from a nonexistent one.
-- A new route on a republished snapshot is not callable under the old grant.
-- An API key on any `/api/...` management or dashboard route gets 401, and a request with a
+- A valid key reaching an ungranted route, an unknown slug, a retired slug, a removed route
+  or **another project's API** gets the same `404` and body as a route that doesn't exist.
+- A new route on a republished snapshot is not callable under the old grant. Unpublishing,
+  reverting the source and republishing restores no grant.
+- An API key on any `/api/...` management or dashboard route gets `401`. A request with a
   valid JWT to `/api/exposed/*` doesn't fall through.
-- POST, PUT, DELETE and PATCH get 405, and OPTIONS gets no CORS approval.
+- POST, PUT, DELETE, PATCH and OPTIONS get the same `405` for existing and non-existent
+  paths, and OPTIONS gets no CORS approval.
+- With `EXPOSED_API_REQUIRE_HTTPS` on, a forged `X-Forwarded-Proto: https` is refused when
+  no proxy is trusted, and when it arrives from an untrusted hop.
 - `{ "role": "admin" }` or `__proto__` in headers or the path changes nothing.
 - An oversized URL or headers are refused.
 - No key material appears in logs, the admin log buffer, metrics, audit rows or error
@@ -317,17 +355,14 @@ billing and Kong integration.
 | Source deleted or edited during a request | Phase 3 (the snapshot is read once per request) |
 | SSRF through the outbound connector | Phase 5 (configured host only, redirect rules) |
 
-## Review points for the end of Phase 0
+## Review points for the end of Phase 1
 
-1. **Snapshots instead of auto-disable.** Edits never change what is served, and the
-   Endpoints section reports unpublished changes. Auto-disable is reserved for a lost
-   authority, a disabled automation and a runtime-contract mismatch.
-2. **Ungranted routes return 404 rather than 403,** so a key holder cannot probe for APIs
-   it was not given.
-3. **The server cannot tell LAN from VPN, or know whether a client used TLS through a
-   proxy.** The HTTPS requirement is enforced on the calling side, in the Phase 5
-   connector. An optional server setting could refuse requests not marked secure by a
-   trusted proxy (`req.secure`); proposed as off by default for LAN use.
-4. **Query strings are rejected in the MVP** rather than passed to handlers.
-5. **The shared-code directory is `lib/`.**
-6. **A new append-only audit table** for publication, client, credential and grant changes.
+The six Phase 0 decisions were approved with the refinements recorded in ADR-0027. For
+Phase 1, please confirm the departures listed in the Phase 1 section, in particular:
+
+1. **A demoted or deleted publisher stops the API** until another admin republishes it.
+2. **Retired slugs can be reclaimed** explicitly, with an audit record.
+3. **Grants are revoked on unpublish** (Phase 2), so no publish can reactivate old access.
+4. **Phase 2 next**: keys, grants and the `/api/exposed` router, together with the four
+   requested tests that need them (ungranted endpoints, forged HTTPS headers, query-string
+   credentials at the router, and key revocation under an old snapshot).

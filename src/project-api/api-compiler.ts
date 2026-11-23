@@ -13,12 +13,14 @@
 //     project's Logic (and its top-level side effects) out of request handling;
 //   - is never executed here. esbuild only parses and transforms.
 //
-// Phase 0 proof of concept: not yet called from compileAutomationProject().
+// Called from compileAutomationProject() on every save, for validation. What is served
+// is a published snapshot of this output (publication-store.ts), never the live result.
 
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { build, type Loader, type Message, type Plugin } from "esbuild";
-import { AutomationProjectCompileError, type AutomationProjectFile, type ProjectCompileError } from "../automations/automation-project.js";
+import type { AutomationProjectFile } from "../automations/automation-project.js";
+import { AutomationProjectCompileError, type ProjectCompileError } from "../automations/project-compile-error.js";
 import { API_MANIFEST_PATH, parseApiManifest, type ApiManifest, type CompiledApiRoute } from "./manifest.js";
 
 export const API_HANDLERS_ENTRY = "api/handlers.ts";
@@ -38,8 +40,12 @@ export interface CompiledProjectApi {
   routes: CompiledApiRoute[];
   /** IIFE script for isolated-vm. Publishes {@link API_HANDLER_TABLE}. */
   bundle: string;
-  /** SHA-256 of the manifest and bundle: what a publication snapshot approves. */
+  /** The manifest and every file in the handlers' import graph, sorted by path. */
+  sources: AutomationProjectFile[];
+  /** {@link hashSources} of `sources`: what a publication snapshot approves. */
   contentHash: string;
+  /** SHA-256 of `bundle`, checked before a stored snapshot is executed. */
+  bundleHash: string;
 }
 
 const insideRoots = (file: string) => API_IMPORT_ROOTS.some((root) => file.startsWith(root));
@@ -104,12 +110,10 @@ function mapErrors(messages: Message[]): ProjectCompileError[] {
 export async function compileProjectApi(files: AutomationProjectFile[]): Promise<CompiledProjectApi | null> {
   const map = new Map(files.map((file) => [file.path, file.content]));
   const manifestSource = map.get(API_MANIFEST_PATH);
-  if (manifestSource === undefined) {
-    if (map.has(API_HANDLERS_ENTRY)) {
-      throw new AutomationProjectCompileError([{ path: API_HANDLERS_ENTRY, line: 1, column: 0, message: `${API_HANDLERS_ENTRY} has no ${API_MANIFEST_PATH} declaring its routes` }]);
-    }
-    return null;
-  }
+  // The manifest alone declares an API. Projects saved before Project APIs may hold
+  // files under api/ for their own reasons; without a manifest those stay ordinary
+  // project files and the project compiles exactly as before.
+  if (manifestSource === undefined) return null;
   const { manifest, routes } = parseApiManifest(manifestSource);
   if (!map.has(API_HANDLERS_ENTRY)) {
     throw new AutomationProjectCompileError([{ path: API_MANIFEST_PATH, line: 1, column: 0, message: `Handlers file not found: ${API_HANDLERS_ENTRY}` }]);
@@ -117,6 +121,7 @@ export async function compileProjectApi(files: AutomationProjectFile[]): Promise
 
   const handlers = [...new Set(routes.map((route) => route.handler))];
   let bundle: string;
+  let graph: string[];
   try {
     const result = await build({
       entryPoints: [ENTRY],
@@ -131,15 +136,38 @@ export async function compileProjectApi(files: AutomationProjectFile[]): Promise
       banner: { js: '"use strict";' },
       sourcemap: false,
       logLevel: "silent",
+      metafile: true,
       plugins: [apiPlugin(map, handlers)],
     });
     bundle = result.outputFiles[0]?.text ?? "";
+    // Every project file esbuild loaded, i.e. the whole transitive import graph.
+    graph = Object.keys(result.metafile?.inputs ?? {})
+      .map((input) => input.replace(/^aeolus-api:/, ""))
+      .filter((file) => file !== ENTRY && map.has(file));
   } catch (error) {
     const failure = error as { errors?: Message[] };
     if (failure.errors?.length) throw new AutomationProjectCompileError(mapErrors(failure.errors));
     throw error;
   }
 
-  const contentHash = createHash("sha256").update(manifestSource).update("\0").update(bundle).digest("hex");
-  return { manifest, routes, bundle, contentHash };
+  const sources = [API_MANIFEST_PATH, ...graph]
+    .filter((file, i, all) => all.indexOf(file) === i)
+    .sort()
+    .map((file) => ({ path: file, content: map.get(file)! }));
+  return { manifest, routes, bundle, sources, contentHash: hashSources(sources), bundleHash: sha256(bundle) };
+}
+
+const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
+
+/**
+ * Identity of what an admin reviews: the manifest and the source of every file in the
+ * handlers' import graph, by path. Source rather than bundle, so an esbuild upgrade
+ * that changes the output byte for byte does not read as an unreviewed code change.
+ */
+export function hashSources(sources: AutomationProjectFile[]): string {
+  const hash = createHash("sha256");
+  for (const { path: file, content } of [...sources].sort((a, b) => a.path.localeCompare(b.path))) {
+    hash.update(file).update("\0").update(String(Buffer.byteLength(content, "utf8"))).update("\0").update(content);
+  }
+  return hash.digest("hex");
 }

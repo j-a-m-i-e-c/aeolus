@@ -127,4 +127,10 @@ describe("buildDemoPolicy", () => {
       expect(policy.some((e) => e.method === m && e.pattern === p)).toBe(false);
     }
   });
+
+  it("allows nothing under Project API management or the exposed API, for any method (ADR-0027)", () => {
+    const policy = buildDemoPolicy(deps());
+    const exposed = policy.filter((e) => e.pattern.startsWith("/api/project-apis") || e.pattern.startsWith("/api/exposed"));
+    expect(exposed).toEqual([]);
+  });
 });
