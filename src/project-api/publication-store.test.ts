@@ -7,7 +7,7 @@ import type { Database as DatabaseType } from "better-sqlite3";
 import { runMigrations } from "../db/migration-runner.js";
 import { migrations } from "../db/migrations/index.js";
 import { compileProjectApi, type CompiledProjectApi } from "./api-compiler.js";
-import { createProjectApiStore, ProjectApiError, type AuditContext, type ProjectApiStore } from "./publication-store.js";
+import { createProjectApiStore, ProjectApiError, withdrawApprovalsBy, type AuditContext, type ProjectApiStore } from "./publication-store.js";
 
 let db: DatabaseType;
 let store: ProjectApiStore;
@@ -176,12 +176,60 @@ describe("serving fails closed on live facts", () => {
     expect(store.resolve("tank-levels")).toEqual({ ok: false, reason: "authority-lost" });
   });
 
-  it("stops when the publishing admin is demoted or removed: their permission is not snapshotted", async () => {
+  it("withdraws approval durably when the publisher is demoted, so promotion back restores nothing", async () => {
+    const { snapshot } = await published();
+    // Demote and promote again, with no request resolving the API in between.
+    db.prepare("UPDATE users SET role = 'user' WHERE id = 'u-admin'").run();
+    db.prepare("UPDATE users SET role = 'admin' WHERE id = 'u-admin'").run();
+    expect(store.resolve("tank-levels")).toEqual({ ok: false, reason: "unpublished" });
+    expect(store.get("a1")?.publishedSnapshotId).toBeNull();
+    expect(store.snapshotSummary(snapshot.id)).not.toBeNull();
+    const revoked = store.listAudit().events.find((e) => e.action === "api.approval.revoked")!;
+    expect(revoked).toMatchObject({ actorUserId: "system", snapshotId: snapshot.id, metadata: { reason: "publisher-demoted", publisherUserId: "u-admin" } });
+  });
+
+  it("withdraws approval when the publisher is deleted", async () => {
+    await published();
+    db.prepare("DELETE FROM users WHERE id = 'u-admin'").run();
+    expect(store.resolve("tank-levels")).toEqual({ ok: false, reason: "unpublished" });
+    expect(store.listAudit().events[0]).toMatchObject({ action: "api.approval.revoked", metadata: { reason: "publisher-deleted" } });
+  });
+
+  it("records the acting admin when user management withdraws approval itself", async () => {
+    await published();
+    db.transaction(() => {
+      expect(withdrawApprovalsBy(db, "u-admin", OTHER_ADMIN, "publisher-demoted")).toBe(1);
+      db.prepare("UPDATE users SET role = 'user' WHERE id = 'u-admin'").run();
+    })();
+    const events = store.listAudit().events.filter((e) => e.action === "api.approval.revoked");
+    // The trigger found nothing left to withdraw, so there is exactly one record, by the admin.
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ actorUserId: "u-admin-2", requestId: "req-2" });
+  });
+
+  it("leaves other admins' publications alone", async () => {
+    addAutomation("a2");
+    store.setSlug("a2", "pump-status", OTHER_ADMIN);
+    const other = await compileApi("return { pump: true };");
+    store.publish("a2", other, 1, other.contentHash, OTHER_ADMIN);
     await published();
     db.prepare("UPDATE users SET role = 'user' WHERE id = 'u-admin'").run();
+    expect(store.resolve("pump-status").ok).toBe(true);
+    expect(store.resolve("tank-levels").ok).toBe(false);
+  });
+
+  it("still refuses to serve while the publisher is not an admin, even if the triggers were removed", async () => {
+    await published();
+    db.exec("DROP TRIGGER project_api_publisher_demoted");
+    db.prepare("UPDATE users SET role = 'user' WHERE id = 'u-admin'").run();
     expect(store.resolve("tank-levels")).toEqual({ ok: false, reason: "publisher-not-admin" });
-    db.prepare("DELETE FROM users WHERE id = 'u-admin'").run();
-    expect(store.resolve("tank-levels")).toEqual({ ok: false, reason: "publisher-not-admin" });
+  });
+
+  it("does not withdraw anything when a non-admin is demoted or deleted", async () => {
+    await published();
+    db.prepare("DELETE FROM users WHERE id = 'u-user'").run();
+    expect(store.resolve("tank-levels").ok).toBe(true);
+    expect(withdrawApprovalsBy(db, "u-user", ADMIN, "publisher-deleted")).toBe(0);
   });
 
   it("stops when this server's runtime contract differs from the snapshot's", async () => {

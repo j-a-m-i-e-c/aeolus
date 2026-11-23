@@ -202,24 +202,43 @@ keeping its own id, payload and timestamp — not synthesised bucket averages.
 | `GET` | `/api/metrics/summary` | Dashboard metrics summary |
 | `GET`, `PUT` | `/api/layout` | Read or replace dashboard layout |
 
-## Project API management
+## Project APIs
 
-These routes manage published Automation Project endpoints ([ADR-0027](../adr/0027-project-apis.md)). They
-require a real admin: a public-demo session is refused on every method, and none of them is
-on the public-demo allowlist. Serving the endpoints (`/api/exposed/v1/...`), API clients and
-keys are not built yet.
+Published, read-only Automation Project endpoints ([ADR-0027](../adr/0027-project-apis.md)).
+The [Project APIs reference](project-apis.md) covers declaring routes, statuses and limits.
+
+### Serving
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET`, `HEAD` | `/api/exposed/v1/:slug/*` | Call a published route with `Authorization: Bearer aeo_<keyId>_<secret>`. Mounted before dashboard authentication; dashboard JWTs, cookies and demo sessions are not accepted. Not served in public-demo mode |
+
+### Management
+
+These routes require a real admin: a public-demo session is refused on every method, and none
+of them is on the public-demo allowlist. Machine keys are refused by dashboard
+authentication.
 
 | Method | Path | Purpose |
 |---|---|---|
 | `GET` | `/api/project-apis/:automationId` | What the current source declares (routes, files, `contentHash`, compile errors), the slug, the published snapshot, `unpublishedChanges`, and why it is or is not being served |
-| `PUT` | `/api/project-apis/:automationId/slug` | `{ slug, reclaim? }`: create the API or change its slug. A changed slug stops resolving and is retired; reusing a retired slug requires `reclaim: true` |
+| `PUT` | `/api/project-apis/:automationId/slug` | `{ slug, reclaim? }`: create the API or change its slug. A changed slug is retired; reusing one requires `reclaim: true`, and the response's `reclaimedFrom` names the previous API |
 | `POST` | `/api/project-apis/:automationId/publish` | `{ contentHash }`: publish the current source as a new immutable snapshot. `contentHash` must be the hash returned by `GET`; if the source changed since, `409` |
-| `POST` | `/api/project-apis/:automationId/unpublish` | Stop serving immediately. The snapshot is kept as history |
-| `GET` | `/api/project-apis/audit` | Append-only publication history, newest first: `?limit=` (1–200), `?before=<event id>`, `?apiId=`. Includes storage use |
+| `POST` | `/api/project-apis/:automationId/unpublish` | Stop serving and revoke every grant to the API. Returns `revokedGrants` |
+| `POST` | `/api/project-apis/:automationId/grants` | `{ clientId, routeId }`: grant one route of the live publication |
+| `POST` | `/api/project-apis/:automationId/grants/revoke` | `{ clientId, routeId }`: revoke one grant |
+| `GET`, `POST` | `/api/project-apis/clients` | List clients, or create one: `{ name }` |
+| `GET` | `/api/project-apis/clients/:clientId` | A client's keys (id, last four, expiry, last used; never secrets) and grants, revoked ones included |
+| `POST` | `/api/project-apis/clients/:clientId/disable`, `/enable` | Stop or restore every key of the client |
+| `POST` | `/api/project-apis/clients/:clientId/keys` | `{ expiresAt? }`: issue a key. The response holds the full key once |
+| `POST` | `/api/project-apis/clients/:clientId/keys/:credentialId/rotate` | `{ overlapSeconds? }`: issue a replacement. `0` (default) revokes the old key at once; otherwise it keeps working for up to a week |
+| `POST` | `/api/project-apis/clients/:clientId/keys/:credentialId/revoke` | Revoke a key |
+| `GET` | `/api/project-apis/audit` | Append-only history of publication, client, key and grant changes, newest first: `?limit=` (1–200), `?before=<event id>`, `?apiId=`. Includes storage use |
 
 Only admin-authored automations can have an API. Each change writes its audit record in the
 same transaction, recording the admin, the request's `X-Aeolus-Mutation-Id` (or a generated
-id) and the old and new content hashes.
+id) and, where relevant, the old and new content hashes. Audit records never hold keys or
+source.
 
 ## Authentication and MQTT provisioning
 

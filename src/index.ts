@@ -63,6 +63,9 @@ import { ensureBackendCredential } from "./auth/mqtt-credential-service.js";
 import { createSystemRoutes } from "./api/routes/system.routes.js";
 import { createProjectApiRoutes } from "./api/routes/project-api.routes.js";
 import { createProjectApiStore } from "./project-api/publication-store.js";
+import { createApiAccessStore } from "./project-api/access-store.js";
+import { createDisabledExposedApiRouter, createExposedApiRouter } from "./project-api/exposed-router.js";
+import { createRequestLimiter } from "./project-api/request-limits.js";
 import { createLayoutRoutes } from "./api/routes/layout.routes.js";
 import { createDataStoreRoutes } from "./api/routes/data-store.routes.js";
 import { createSharedStateRoutes } from "./api/routes/shared-state.routes.js";
@@ -381,7 +384,9 @@ async function main(): Promise<void> {
   // Prometheus metrics endpoint — BEFORE authenticate (uses its own bearer token auth)
   app.use(createPrometheusMetricsRoute(metricsService));
 
-  app.use(corsMiddleware);
+  // CORS is for the dashboard. Machine callers of /api/exposed send no Origin and get no
+  // CORS approval, preflight included (ADR-0027).
+  app.use((req, res, next) => (req.path.startsWith("/api/exposed") ? next() : corsMiddleware(req, res, next)));
   app.use(express.json({ limit: "1mb" }));
   app.use(cookieParser());
   app.use(requestLogger);
@@ -393,6 +398,22 @@ async function main(): Promise<void> {
 
   // HTTP metrics middleware — records request duration for all subsequent routes
   app.use(metricsMiddleware());
+
+  // Published Project APIs (ADR-0027): machine API keys, never dashboard sessions, so
+  // mounted before authenticate. Terminal, so nothing falls through to dashboard routes.
+  // Not served at all in public-demo mode.
+  const projectApis = createProjectApiStore(db);
+  const projectApiAccess = createApiAccessStore(db);
+  app.use("/api/exposed", config.publicDemo.enabled
+    ? createDisabledExposedApiRouter()
+    : createExposedApiRouter({
+        publications: projectApis,
+        access: projectApiAccess,
+        stateFor: (automationId) => ({ get: (key) => stateStore.get(automationId, key), getAll: () => stateStore.getAll(automationId) }),
+        limiter: createRequestLimiter({ perMinute: config.exposedApi.requestsPerMinute, concurrentPerClient: config.exposedApi.concurrentPerClient }),
+        requireHttps: config.exposedApi.requireHttps,
+        logger,
+      }));
 
   app.use(authenticate);
 
@@ -471,9 +492,8 @@ async function main(): Promise<void> {
     createProvisioningRoutes(provisioningService, { brokerManagementAvailable }),
   );
   const sandboxTypesPath = path.resolve(import.meta.dirname, "automations/sandbox-types.d.ts");
-  // Project API publications (ADR-0027). Admin-only management; nothing is served yet.
-  const projectApis = createProjectApiStore(db);
-  app.use("/api/project-apis", createProjectApiRoutes(db, projectApis));
+  // Project API management (ADR-0027): real admins only.
+  app.use("/api/project-apis", createProjectApiRoutes(db, projectApis, projectApiAccess));
   app.use("/api/automations", createAutomationRoutes(engine, db, registry, commandService, executionLog, sandboxTypesPath, requireAutomation, permissionResolver, connectorRegistry, stateStore, conditionRegistry, commandHistoryStore, projectApis));
   app.use("/api/connectors", createConnectorRoutes(connectorManager, connectorRegistry));
   app.use("/api/metrics", createMetricsSummaryRoute(metricsService));

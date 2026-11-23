@@ -15,3 +15,16 @@ export const auditQuerySchema = z.object({
   before: z.coerce.number().int().positive().optional(),
   limit: z.coerce.number().int().min(1).max(200).optional(),
 }).strict();
+
+export const clientBodySchema = z.object({ name: z.string().min(1).max(100) }).strict();
+
+/** Expiry as a millisecond timestamp, or null/absent for a key that does not expire. */
+export const issueKeyBodySchema = z.object({ expiresAt: z.number().int().positive().nullable().optional() }).strict();
+
+/** 0 revokes the old key at once; otherwise it keeps working for this many seconds. */
+export const rotateKeyBodySchema = z.object({ overlapSeconds: z.number().int().min(0).max(7 * 24 * 3600).optional() }).strict();
+
+export const grantBodySchema = z.object({
+  clientId: z.string().min(1).max(64),
+  routeId: z.string().regex(/^[a-z][a-z0-9-]{0,62}$/),
+}).strict();

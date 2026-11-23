@@ -270,7 +270,7 @@ export function createAuthRoutes(): Router {
     asyncHandler(async (req, res) => {
       const id = req.params.id as string;
       const updates = req.body;
-      const user = await userService.updateUser(id, updates);
+      const user = await userService.updateUser(id, updates, { userId: req.user!.userId, username: req.user!.username, requestId: req.header("x-aeolus-mutation-id") ?? undefined });
       res.json({
         id: user.id,
         username: user.username,
@@ -290,7 +290,7 @@ export function createAuthRoutes(): Router {
     requireAdmin,
     asyncHandler((req, res) => {
       const id = req.params.id as string;
-      userService.deleteUser(id);
+      userService.deleteUser(id, { userId: req.user!.userId, username: req.user!.username, requestId: req.header("x-aeolus-mutation-id") ?? undefined });
       res.json({ success: true });
     }),
   );

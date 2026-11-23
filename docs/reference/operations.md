@@ -25,6 +25,9 @@ The backend uses host networking in Docker so it can reach LAN products and perf
 | `RATE_LIMIT_RPM` | `1000` | Global requests per minute per IP |
 | `CORS_ORIGINS` | empty | Additional allowed origins |
 | `TRUST_PROXY_HOPS` | `0` | Trusted reverse-proxy hops; `1` behind exactly one local HTTPS proxy |
+| `EXPOSED_API_REQUIRE_HTTPS` | `false` | Serve published Project APIs only when Express establishes HTTPS: direct TLS, or `X-Forwarded-Proto` from a hop trusted by `TRUST_PROXY_HOPS` |
+| `EXPOSED_API_REQUESTS_PER_MINUTE` | `60` | Project API requests per key and per client per minute (1–600). In memory: resets on restart |
+| `EXPOSED_API_CONCURRENT_PER_CLIENT` | `2` | Project API requests one client may have running at once (1–8) |
 | `AUTH_COOKIE_SECURE` | `auto` | Refresh-cookie `Secure` policy (`auto`, `true`, `false`) |
 | `JWT_SECRET` | generated and stored | Optional explicit JWT signing key |
 | `METRICS_TOKEN` | unset | Optional bearer token for `/metrics` |

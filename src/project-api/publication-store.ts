@@ -17,15 +17,12 @@ import type { AutomationProjectFile } from "../automations/automation-project.js
 import type { CompiledProjectApi } from "./api-compiler.js";
 import { API_RUNTIME_CONTRACT } from "./api-sandbox.js";
 import { parseApiManifest, type CompiledApiRoute } from "./manifest.js";
+import { revokeActiveGrants, routeFingerprint, writeAudit, type AuditContext, type AuditFields } from "./audit.js";
 
 export const SLUG_PATTERN = /^[a-z0-9](?:[a-z0-9-]{1,46})[a-z0-9]$/;
 const MAX_AUDIT_PAGE = 200;
 
-export interface AuditContext {
-  actor: { userId: string; username: string };
-  /** Correlates the audit record with the HTTP request that caused it. */
-  requestId: string;
-}
+export type { AuditContext } from "./audit.js";
 
 export interface ProjectApiRecord {
   id: string;
@@ -134,30 +131,7 @@ export function createProjectApiStore(db: DatabaseType, options: ProjectApiStore
   const runtimeContract = options.runtimeContract ?? API_RUNTIME_CONTRACT;
   const now = options.now ?? Date.now;
 
-  const insertAudit = db.prepare(`
-    INSERT INTO project_api_audit (at, actor_user_id, actor_username, action, automation_id, api_id, snapshot_id,
-      client_id, credential_id, route_id, old_hash, new_hash, request_id, metadata)
-    VALUES (@at, @actorUserId, @actorUsername, @action, @automationId, @apiId, @snapshotId,
-      @clientId, @credentialId, @routeId, @oldHash, @newHash, @requestId, @metadata)`);
-
-  function audit(ctx: AuditContext, action: string, fields: Partial<Omit<AuditEvent, "id" | "at" | "actorUserId" | "actorUsername" | "action" | "requestId">>): void {
-    insertAudit.run({
-      at: now(),
-      actorUserId: ctx.actor.userId,
-      actorUsername: ctx.actor.username,
-      action,
-      automationId: fields.automationId ?? null,
-      apiId: fields.apiId ?? null,
-      snapshotId: fields.snapshotId ?? null,
-      clientId: fields.clientId ?? null,
-      credentialId: fields.credentialId ?? null,
-      routeId: fields.routeId ?? null,
-      oldHash: fields.oldHash ?? null,
-      newHash: fields.newHash ?? null,
-      requestId: ctx.requestId,
-      metadata: JSON.stringify(fields.metadata ?? {}),
-    });
-  }
+  const audit = (ctx: AuditContext, action: string, fields: AuditFields) => writeAudit(db, ctx, action, fields, now());
 
   const apiByAutomation = (automationId: string) =>
     db.prepare("SELECT * FROM project_apis WHERE automation_id = ?").get(automationId) as ApiRow | undefined;
@@ -199,7 +173,7 @@ export function createProjectApiStore(db: DatabaseType, options: ProjectApiStore
      * audited: it is how an admin deliberately points an old URL at a new API, such as
      * after reseeding the showcase.
      */
-    setSlug(automationId: string, slug: string, ctx: AuditContext, reclaim = false): ProjectApiRecord {
+    setSlug(automationId: string, slug: string, ctx: AuditContext, reclaim = false): ProjectApiRecord & { reclaimedFrom?: string } {
       validSlug(slug);
       return db.transaction(() => {
         requireAdminAuthored(automationId);
@@ -217,13 +191,15 @@ export function createProjectApiStore(db: DatabaseType, options: ProjectApiStore
         if (existing) {
           db.prepare("UPDATE project_apis SET slug = ?, updated_at = ? WHERE id = ?").run(slug, at, existing.id);
           audit(ctx, "api.slug.changed", { automationId, apiId: existing.id, metadata: { from: existing.slug, to: slug } });
-          return toApi({ ...existing, slug, updated_at: at });
+          // A reclaimed slug now names this API. Grants, keys and publications belong to
+        // API ids, so nothing of the previous holder's carries over.
+        return { ...toApi({ ...existing, slug, updated_at: at }), ...(retired ? { reclaimedFrom: retired.api_id } : {}) };
         }
         const row: ApiRow = { id: randomUUID(), automation_id: automationId, slug, published_snapshot_id: null, created_at: at, updated_at: at };
         db.prepare("INSERT INTO project_apis (id, automation_id, slug, published_snapshot_id, created_at, updated_at) VALUES (?, ?, ?, NULL, ?, ?)")
           .run(row.id, automationId, slug, at, at);
         audit(ctx, "api.created", { automationId, apiId: row.id, metadata: { slug } });
-        return toApi(row);
+        return { ...toApi(row), ...(retired ? { reclaimedFrom: retired.api_id } : {}) };
       })();
     },
 
@@ -256,6 +232,9 @@ export function createProjectApiStore(db: DatabaseType, options: ProjectApiStore
           .run(id, record.id, automationRevision, runtimeContract, api.contentHash, api.bundleHash, manifest,
             JSON.stringify(api.sources), api.bundle, ctx.actor.userId, at);
         db.prepare("UPDATE project_apis SET published_snapshot_id = ?, updated_at = ? WHERE id = ?").run(id, at, record.id);
+        // A grant carries over only to a route that still does exactly what it did.
+        const fingerprints = new Map(api.routes.map((route) => [route.id, routeFingerprint(route)]));
+        revokeActiveGrants(db, ctx, record.id, "route-changed", at, (routeId, fingerprint) => fingerprints.get(routeId) === fingerprint);
         audit(ctx, "api.published", {
           automationId, apiId: record.id, snapshotId: id, oldHash: previous?.content_hash ?? null, newHash: api.contentHash,
           metadata: {
@@ -268,15 +247,23 @@ export function createProjectApiStore(db: DatabaseType, options: ProjectApiStore
       })();
     },
 
-    /** Stop serving. The snapshot is kept as history and is never served again. */
-    unpublish(automationId: string, ctx: AuditContext): void {
-      db.transaction(() => {
+    /**
+     * Stop serving, and revoke every client's grant to this API in the same
+     * transaction. The snapshot is kept as history and is never served again, and no
+     * later publish, even of identical source, restores a revoked grant. Clients and
+     * their keys are untouched: they may hold grants to other APIs.
+     */
+    unpublish(automationId: string, ctx: AuditContext): { revokedGrants: number } {
+      return db.transaction(() => {
         const record = apiByAutomation(automationId);
         if (!record) throw new ProjectApiError("not-found", "This automation has no API");
-        if (!record.published_snapshot_id) return;
+        const at = now();
+        const revokedGrants = revokeActiveGrants(db, ctx, record.id, "unpublished", at);
+        if (!record.published_snapshot_id) return { revokedGrants };
         const previous = snapshotRow(record.published_snapshot_id);
-        db.prepare("UPDATE project_apis SET published_snapshot_id = NULL, updated_at = ? WHERE id = ?").run(now(), record.id);
-        audit(ctx, "api.unpublished", { automationId, apiId: record.id, snapshotId: record.published_snapshot_id, oldHash: previous?.content_hash ?? null, metadata: { slug: record.slug } });
+        db.prepare("UPDATE project_apis SET published_snapshot_id = NULL, updated_at = ? WHERE id = ?").run(at, record.id);
+        audit(ctx, "api.unpublished", { automationId, apiId: record.id, snapshotId: record.published_snapshot_id, oldHash: previous?.content_hash ?? null, metadata: { slug: record.slug, revokedGrants } });
+        return { revokedGrants };
       })();
     },
 
@@ -288,8 +275,16 @@ export function createProjectApiStore(db: DatabaseType, options: ProjectApiStore
     deleteForAutomation(automationId: string, ctx: AuditContext): void {
       const record = apiByAutomation(automationId);
       if (!record) return;
+      // Recorded before the cascade removes the grant rows with the API.
+      revokeActiveGrants(db, ctx, record.id, "api-deleted", now());
       audit(ctx, "api.deleted", { automationId, apiId: record.id, snapshotId: record.published_snapshot_id, metadata: { slug: record.slug, reason: "automation-deleted" } });
       db.prepare("DELETE FROM project_apis WHERE id = ?").run(record.id);
+    },
+
+    /** The API record behind a slug, published or not. */
+    getBySlug(slug: string): ProjectApiRecord | null {
+      const row = db.prepare("SELECT * FROM project_apis WHERE slug = ?").get(slug) as ApiRow | undefined;
+      return row ? toApi(row) : null;
     },
 
     /** Decide from current facts whether the API at `slug` may be served, and with what. */
@@ -348,3 +343,41 @@ export function createProjectApiStore(db: DatabaseType, options: ProjectApiStore
 }
 
 export type ProjectApiStore = ReturnType<typeof createProjectApiStore>;
+
+/**
+ * Withdraw every publication approved by `publisherUserId`, because that user is about
+ * to stop being an admin (demoted or deleted). Call inside the user-management
+ * transaction, before the change, so the acting admin is recorded.
+ *
+ * This is not the same as an automation being disabled. Disabling makes an API
+ * temporarily unavailable and leaves its approval and grants in place. Losing the
+ * publisher's admin role withdraws the approval itself: the API is unpublished and
+ * its grants revoked, and promoting the user back to admin restores nothing. An admin
+ * must republish and regrant. Snapshots and audit history are kept.
+ *
+ * A database trigger (migration 022) does the same for any path that changes the user
+ * without calling this, recording the actor as `system`.
+ */
+export function withdrawApprovalsBy(
+  db: DatabaseType,
+  publisherUserId: string,
+  ctx: AuditContext,
+  reason: "publisher-demoted" | "publisher-deleted",
+  now: () => number = Date.now,
+): number {
+  // Databases built without migrations (some unit-test schemas) have no API tables.
+  if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'project_apis'").get()) return 0;
+  const approved = db.prepare(`SELECT a.id, a.automation_id, a.slug, s.id AS snapshot_id, s.content_hash
+      FROM project_apis a JOIN project_api_snapshots s ON s.id = a.published_snapshot_id
+      WHERE s.published_by = ?`).all(publisherUserId) as Array<{ id: string; automation_id: string; slug: string; snapshot_id: string; content_hash: string }>;
+  const at = now();
+  for (const api of approved) {
+    const revokedGrants = revokeActiveGrants(db, ctx, api.id, "publication-withdrawn", at);
+    db.prepare("UPDATE project_apis SET published_snapshot_id = NULL, updated_at = ? WHERE id = ?").run(at, api.id);
+    writeAudit(db, ctx, "api.approval.revoked", {
+      automationId: api.automation_id, apiId: api.id, snapshotId: api.snapshot_id, oldHash: api.content_hash,
+      metadata: { reason, publisherUserId, slug: api.slug, revokedGrants },
+    }, at);
+  }
+  return approved.length;
+}

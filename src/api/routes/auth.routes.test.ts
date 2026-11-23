@@ -603,7 +603,7 @@ describe("auth.routes", () => {
       const body = res.body as any;
       expect(body.id).toBe("u1");
       expect(body.groupId).toBe("group-2");
-      expect(mocks.updateUser).toHaveBeenCalledWith("u1", { groupId: "group-2" });
+      expect(mocks.updateUser).toHaveBeenCalledWith("u1", { groupId: "group-2" }, expect.objectContaining({ userId: "test-user-id", username: "testuser" }));
     });
 
     it("passes a role change through to updateUser", async () => {
@@ -619,7 +619,7 @@ describe("auth.routes", () => {
       });
       expect(res.status).toBe(200);
       expect((res.body as any).role).toBe("admin");
-      expect(mocks.updateUser).toHaveBeenCalledWith("u1", { role: "admin" });
+      expect(mocks.updateUser).toHaveBeenCalledWith("u1", { role: "admin" }, expect.objectContaining({ userId: "test-user-id", username: "testuser" }));
     });
 
     it("returns 400 for an invalid role value", async () => {
@@ -649,7 +649,7 @@ describe("auth.routes", () => {
       expect(res.status).toBe(200);
       const body = res.body as any;
       expect(body.success).toBe(true);
-      expect(mocks.deleteUser).toHaveBeenCalledWith("u1");
+      expect(mocks.deleteUser).toHaveBeenCalledWith("u1", expect.objectContaining({ userId: "test-user-id", username: "testuser" }));
     });
 
     it("returns 409 when deleting the last admin", async () => {

@@ -1,6 +1,6 @@
 # ADR-0027: Project APIs — published, read-only HTTP endpoints for Automation Projects
 
-- **Status:** Proposed. Phase 0 decisions approved; Phase 1 complete, awaiting review before Phase 2
+- **Status:** Accepted for Phases 0 to 2 (published, read-only GET endpoints with clients, keys and grants). Phase 2 awaiting review before Phase 3
 - **Date:** 2026-11-19
 - **Plan:** [Project APIs implementation plan](../architecture/project-apis-plan.md)
 
@@ -123,12 +123,24 @@ or the engine.
 - **Code is snapshotted; authority is not.** Every resolve re-checks live facts and fails
   closed if any is false:
   - the automation exists, is enabled and is still admin-authored;
-  - **the admin who published is still an admin** (a demoted or deleted publisher stops the
-    API until another admin republishes);
+  - the admin who published is still an admin (defence in depth: see the next point);
   - the snapshot's runtime contract matches the server's;
   - the bundle hash matches.
 
-  Client, key and grant state (Phase 2) will also be live.
+  Client, key and grant state are also read live on every request.
+- **Two kinds of "not serving" are deliberately different.**
+  - *Temporarily unavailable:* the automation is disabled, or a runtime-contract mismatch
+    after an upgrade. The approval and grants are kept, granted callers get `503`, and
+    serving resumes when the cause is gone.
+  - *Approval withdrawn:* the admin who published is demoted or deleted. This is a durable
+    transition, not a live check. In the same transaction as the role change or deletion,
+    every publication that admin approved is unpublished and its grants revoked, each with
+    an audit record naming the acting admin. Promoting the user back restores nothing; an
+    authorised admin must republish and grant again. Snapshots and audit history are kept.
+  - `user-service.ts` does this inside `updateUser` and `deleteUser`, which now take the
+    acting admin. Database triggers on `users` (migration 022) do the same for any other
+    path that changes a user, such as direct SQL or emergency admin recovery. They record
+    the actor as `system`, and find nothing to do when the application has already done it.
 - **Publishing never revives an old snapshot.** Unpublishing keeps the snapshot as history.
   If the source is later reverted to identical content, nothing is served until an admin
   publishes again, and that publish records a new snapshot by that admin.
@@ -140,7 +152,12 @@ or the engine.
   disabled, when it is no longer admin-authored, when the snapshot's runtime contract no
   longer matches the server's (an Aeolus upgrade that changes the sandbox capabilities),
   or when the snapshot is missing. Deleting the automation deletes its API, snapshots and
-  grants.
+  grants, with each grant revocation audited first.
+- **Unpublishing revokes every grant to the API** in the same transaction, each audited,
+  keeping the grant rows as history. Republishing, even identical source, restores none.
+  Keys and clients are untouched, because a client may hold grants to other APIs. The
+  management UI must warn that unpublishing withdraws client access and that regranting
+  will be needed.
 - Snapshots are also the foundation for the planned project versioning and rollback work:
   a snapshot is a compiled, reviewable revision.
 
@@ -157,8 +174,8 @@ or the engine.
   That is the supported way to point a known URL at a new API, for example after reseeding
   the showcase.
 - The showcase is the documented exception to stable URLs: reseeding deletes and
-  recreates its automations, which deletes their APIs, publications and (from Phase 2)
-  grants, audited as `api.deleted`. Reseeding never creates publications or grants, and
+  recreates its automations, which deletes their APIs, publications and grants, audited as
+  `api.deleted` and `grant.revoked`. Reseeding never creates publications or grants, and
   never carries old credentials forward.
 
 ### Clients, keys and authorization
@@ -173,8 +190,15 @@ or the engine.
 - **Grants** name a client, an API, a stable route id and an access category (`read`). A
   request needs a valid key, a grant for that exact route, and a live publication that
   declares it. A new route is never added to an existing grant. On republish, a grant
-  survives only for routes whose path, handler name and response schema are unchanged;
-  otherwise the admin must grant again.
+  survives only for routes whose method, path, handler name and response schema are
+  unchanged (the route fingerprint); otherwise it is revoked as `route-changed` and the
+  admin must grant again. A reclaimed slug inherits nothing: grants, keys and
+  publications belong to API ids, not slugs, and the slug response reports the previous
+  API id.
+- **Revocation applies to new requests.** Revoking a key or grant, disabling a client or
+  unpublishing refuses the next request. A request that was already authorised and is
+  running is allowed to finish, which takes at most the 5 s handler deadline. For read-only
+  GET handlers this is intended, and it is tested.
 
 ### Request pipeline
 
@@ -303,3 +327,9 @@ the server. Limits reset when the backend restarts and are not distributed guara
 - `src/db/migrations/021-project-api-publications.ts`: tables and the immutability, append-only and slug-retirement triggers
 - `src/api/routes/project-api.routes.ts`: admin-only publication management and audit read
 - `src/__integration__/project-api-publication.integration.test.ts`: edits during an active request, restart, disable
+- `src/db/migrations/022-project-api-access.ts`: clients, keys, grants, and the publisher demotion and deletion triggers
+- `src/project-api/access-store.ts`, `api-keys.ts`, `audit.ts`: clients, keys, grants and the shared audit writer
+- `src/project-api/exposed-router.ts`, `request-limits.ts`: the `/api/exposed` router and in-memory limits
+- `src/auth/user-service.ts`: withdraws a demoted or deleted admin's publications in the same transaction
+- `src/__integration__/project-api-exposed.integration.test.ts`: the router end to end
+- `docs/reference/project-apis.md`: author and operator reference

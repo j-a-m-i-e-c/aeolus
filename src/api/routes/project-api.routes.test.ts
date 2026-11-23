@@ -9,6 +9,7 @@ import { runMigrations } from "../../db/migration-runner.js";
 import { migrations } from "../../db/migrations/index.js";
 import { compileAutomationProject, saveAutomationProject, type AutomationProjectFile } from "../../automations/automation-project.js";
 import { createProjectApiStore } from "../../project-api/publication-store.js";
+import { createApiAccessStore } from "../../project-api/access-store.js";
 import { errorHandler } from "../middleware/error-handler.js";
 import { createProjectApiRoutes } from "./project-api.routes.js";
 
@@ -39,7 +40,7 @@ async function request(method: string, path: string, body?: unknown) {
   const app = express();
   app.use(express.json());
   app.use((req, _res, next) => { if (user) (req as unknown as { user: User }).user = user; next(); });
-  app.use("/api/project-apis", createProjectApiRoutes(db, createProjectApiStore(db)));
+  app.use("/api/project-apis", createProjectApiRoutes(db, createProjectApiStore(db), createApiAccessStore(db)));
   app.use(errorHandler);
   const server = app.listen(0);
   const port = (server.address() as { port: number }).port;
@@ -74,6 +75,9 @@ describe("access", () => {
     ["PUT", "/api/project-apis/a1/slug", { slug: "tank-levels" }],
     ["POST", "/api/project-apis/a1/publish", { contentHash: "0".repeat(64) }],
     ["POST", "/api/project-apis/a1/unpublish"],
+    ["GET", "/api/project-apis/clients"],
+    ["POST", "/api/project-apis/clients", { name: "x" }],
+    ["POST", "/api/project-apis/a1/grants", { clientId: "c", routeId: "level" }],
   ];
 
   it.each(routes)("%s %s is refused to a non-admin", async (method, path, body) => {

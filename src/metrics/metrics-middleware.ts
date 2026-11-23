@@ -37,6 +37,9 @@ const KNOWN_RESOURCE_PATHS = new Set([
  * The function is idempotent: normalizing an already-normalized path produces the same result.
  */
 export function normalizeRoutePath(path: string, _method: string): string {
+  // One label for every published Project API request: slugs and route paths are
+  // caller-chosen and would otherwise each become their own Prometheus series.
+  if (path === "/api/exposed" || path.startsWith("/api/exposed/")) return "/api/exposed/:slug/:route";
   const segments = path.split("/");
   const normalized: string[] = [];
 
@@ -106,9 +109,12 @@ export function metricsMiddleware(): RequestHandler {
           const durationSeconds = seconds + nanoseconds / 1e9;
 
           const method = request.method;
-          // request.path never includes the query string; a credential pasted into
-          // the path is masked so it cannot become a Prometheus label.
-          const route = normalizeRoutePath(maskCredentialSegments(request.path), method);
+          // The full path, without the query string. Not request.path: inside a mounted
+          // router that answers asynchronously, Express has stripped the mount prefix
+          // by the time the response finishes. A credential pasted into the path is
+          // masked so it cannot become a Prometheus label.
+          const fullPath = request.originalUrl ? request.originalUrl.split(/[?#]/)[0]! : request.path;
+          const route = normalizeRoutePath(maskCredentialSegments(fullPath), method);
           const statusCode = response.statusCode;
 
           metricsService.recordHttpRequest(method, route, statusCode, durationSeconds);

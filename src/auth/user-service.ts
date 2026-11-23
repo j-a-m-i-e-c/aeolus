@@ -5,6 +5,8 @@
 import crypto from "node:crypto";
 import bcrypt from "bcrypt";
 import { getDatabase } from "../db/database.js";
+import { withdrawApprovalsBy } from "../project-api/publication-store.js";
+import type { AuditContext } from "../project-api/audit.js";
 import {
   BadRequestError,
   ConflictError,
@@ -196,6 +198,7 @@ export async function updateUser(
     sessionDays?: number;
     inactivityMinutes?: number;
   },
+  actor?: UserChangeActor,
 ): Promise<User> {
   const db = getDatabase();
 
@@ -209,8 +212,15 @@ export async function updateUser(
   if (updates.role !== undefined && updates.role !== existing.role) {
     if (existing.role === "admin" && updates.role === "user") {
       assertNotLastAdmin();
+      // A demoted admin's Project API approvals are withdrawn in the same
+      // transaction; promoting them back later restores none (ADR-0027).
+      db.transaction(() => {
+        withdrawApprovalsBy(db, id, auditContext(actor), "publisher-demoted");
+        db.prepare("UPDATE users SET role = ? WHERE id = ?").run(updates.role, id);
+      })();
+    } else {
+      db.prepare("UPDATE users SET role = ? WHERE id = ?").run(updates.role, id);
     }
-    db.prepare("UPDATE users SET role = ? WHERE id = ?").run(updates.role, id);
   }
 
   if (updates.sessionDays !== undefined || updates.inactivityMinutes !== undefined) {
@@ -252,7 +262,7 @@ export async function updateUser(
  * Throws NotFoundError if user doesn't exist.
  * Cascades deletion to refresh_tokens via ON DELETE CASCADE.
  */
-export function deleteUser(id: string): void {
+export function deleteUser(id: string, actor?: UserChangeActor): void {
   const db = getDatabase();
 
   const user = getUser(id);
@@ -265,8 +275,26 @@ export function deleteUser(id: string): void {
     assertNotLastAdmin();
   }
 
-  // Delete user — refresh_tokens cascade via ON DELETE CASCADE
-  db.prepare("DELETE FROM users WHERE id = ?").run(id);
+  // Delete user — refresh_tokens cascade via ON DELETE CASCADE. A deleted admin's
+  // Project API approvals are withdrawn in the same transaction (ADR-0027).
+  db.transaction(() => {
+    if (user.role === "admin") withdrawApprovalsBy(db, id, auditContext(actor), "publisher-deleted");
+    db.prepare("DELETE FROM users WHERE id = ?").run(id);
+  })();
+}
+
+/** Who made a user-management change, for the Project API audit history. */
+export interface UserChangeActor {
+  userId: string;
+  username: string;
+  requestId?: string;
+}
+
+function auditContext(actor: UserChangeActor | undefined): AuditContext {
+  return {
+    actor: actor ? { userId: actor.userId, username: actor.username } : { userId: "system", username: "user-management" },
+    requestId: actor?.requestId ?? crypto.randomUUID(),
+  };
 }
 
 /**

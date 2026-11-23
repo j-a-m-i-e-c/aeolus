@@ -13,7 +13,7 @@ They contain:
 
 The lifetime is 15 minutes. The frontend keeps the access token in memory rather than localStorage.
 
-API clients send:
+Dashboard clients send:
 
 ```http
 Authorization: Bearer <access-token>
@@ -73,6 +73,24 @@ The frontend connects to the WebSocket endpoint without including the token in t
 The server holds the connection in a pending-auth state for up to five seconds. If no valid auth message arrives within that window, the connection is closed with code 4001. Once authenticated, the server verifies the token and its expiry, then closes the connection when the token expires so the client can refresh and reconnect.
 
 First-message auth is the only accepted path. A `?token=` query parameter is ignored, so a client that sends one and nothing else is closed at the end of the pending-auth window like any other unauthenticated connection. Access tokens are kept out of the URL because reverse proxies and access logs routinely record request targets.
+
+## Project API keys
+
+Machine clients of published Project APIs use API keys, not JWTs
+([ADR-0027](../adr/0027-project-apis.md), [reference](../reference/project-apis.md)).
+
+- **Format.** `aeo_<keyId>_<secret>`: a public 16-hex-character key id and a 256-bit random
+  secret.
+- **Storage.** Only SHA-256(secret) is stored, and the comparison is constant-time. An
+  unknown key id costs the same comparison, so timing does not reveal which ids exist.
+- **Issue and rotation.** A key is shown once when it is issued or rotated. Keys can expire,
+  be revoked, and be rotated with an explicit overlap.
+- **Where they are accepted.** Only in `Authorization: Bearer` on `/api/exposed/...`. A
+  machine key is refused (`401`) by dashboard authentication on every other route, and
+  dashboard JWTs, refresh cookies and demo sessions are refused on `/api/exposed`.
+- **Not users.** API clients are not dashboard users. They have no role, session or refresh
+  token, and never appear as `req.user`.
+- **Liveness.** Revocation, expiry, client status and grants are read on every request.
 
 ## Credentials in URLs
 

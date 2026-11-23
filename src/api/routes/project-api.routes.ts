@@ -6,7 +6,7 @@
 //
 // Nothing here serves an API. It decides what /api/exposed (Phase 2) may serve.
 
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { Router, type NextFunction, type Request, type Response } from "express";
 import type { Database as DatabaseType } from "better-sqlite3";
 import { AutomationProjectCompileError, compileAutomationProject, readAutomationProject, type ProjectCompileError } from "../../automations/automation-project.js";
@@ -16,7 +16,8 @@ import { asyncHandler } from "../middleware/async-handler.js";
 import { BadRequestError, ConflictError, ForbiddenError, NotFoundError } from "../middleware/error-handler.js";
 import { mutationIdFromRequest } from "../middleware/revision-precondition.js";
 import { validate } from "../middleware/validate.js";
-import { auditQuerySchema, publishBodySchema, slugBodySchema } from "../schemas/project-api.schemas.js";
+import { auditQuerySchema, clientBodySchema, grantBodySchema, issueKeyBodySchema, publishBodySchema, rotateKeyBodySchema, slugBodySchema } from "../schemas/project-api.schemas.js";
+import type { ApiAccessStore } from "../../project-api/access-store.js";
 
 /** A real admin: not a public-demo session, whatever the method. */
 function requireRealAdmin(req: Request, _res: Response, next: NextFunction): void {
@@ -48,22 +49,42 @@ type CurrentApi =
   | { revision: number; api: CompiledProjectApi | null; errors: null }
   | { revision: number; api: null; errors: ProjectCompileError[] };
 
-/** Compile the automation's current source, as a save would. */
+/**
+ * Compile the automation's current source, as a save would. Results are cached by
+ * automation and revision: every save bumps the revision, so a cached compile is never
+ * stale, and an Endpoints view that polls status costs one compile per revision.
+ */
+const compileCache = new Map<string, Promise<CurrentApi>>();
+const MAX_CACHED_COMPILES = 32;
+
 async function compileCurrent(db: DatabaseType, automationId: string): Promise<CurrentApi | null> {
   const stored = readAutomationProject(db, automationId);
   if (!stored) return null;
-  try {
-    const compiled = await compileAutomationProject({ files: stored.files, logicEntry: stored.logicEntry, uiEntry: stored.uiEntry });
-    return { revision: stored.revision, api: compiled.api, errors: null };
-  } catch (error) {
-    if (error instanceof AutomationProjectCompileError) return { revision: stored.revision, api: null, errors: error.details };
-    throw error;
+  // Keyed by what would be compiled, not only by revision, so an edit that bypassed
+  // the revision (direct SQL, a future import path) can never be served from cache.
+  const source = createHash("sha256");
+  for (const file of stored.files) source.update(file.path).update("\0").update(file.content).update("\0");
+  const key = `${automationId}:${stored.revision}:${stored.logicEntry}:${stored.uiEntry ?? ""}:${source.digest("hex")}`;
+  let pending = compileCache.get(key);
+  if (!pending) {
+    pending = compileAutomationProject({ files: stored.files, logicEntry: stored.logicEntry, uiEntry: stored.uiEntry })
+      .then((compiled): CurrentApi => ({ revision: stored.revision, api: compiled.api, errors: null }))
+      .catch((error: unknown): CurrentApi => {
+        if (error instanceof AutomationProjectCompileError) return { revision: stored.revision, api: null, errors: error.details };
+        compileCache.delete(key);
+        throw error;
+      });
+    if (compileCache.size >= MAX_CACHED_COMPILES) compileCache.delete(compileCache.keys().next().value!);
+    compileCache.set(key, pending);
   }
+  return pending;
 }
 
-export function createProjectApiRoutes(db: DatabaseType, store: ProjectApiStore): Router {
+export function createProjectApiRoutes(db: DatabaseType, store: ProjectApiStore, access?: ApiAccessStore): Router {
   const router = Router();
   router.use(requireRealAdmin);
+
+  if (access) mountAccessRoutes(router, access);
 
   /** GET /api/project-apis/audit — publication history, newest first, with storage use. */
   router.get("/audit", validate({ query: auditQuerySchema }), (req, res) => {
@@ -124,15 +145,65 @@ export function createProjectApiRoutes(db: DatabaseType, store: ProjectApiStore)
     }
   }));
 
-  /** POST /api/project-apis/:automationId/unpublish — stop serving at once. */
+  /**
+   * POST /api/project-apis/:automationId/unpublish — stop serving at once and revoke
+   * every client grant to this API. Republishing restores none of them.
+   */
   router.post("/:automationId/unpublish", (req, res) => {
     try {
-      store.unpublish(String(req.params.automationId), auditContext(req));
-      res.json({ success: true });
+      const { revokedGrants } = store.unpublish(String(req.params.automationId), auditContext(req));
+      res.json({ success: true, revokedGrants });
+    } catch (error) {
+      rethrow(error);
+    }
+  });
+
+  /** POST /api/project-apis/:automationId/grants — grant a client one published route. */
+  router.post("/:automationId/grants", validate({ body: grantBodySchema }), (req, res) => {
+    if (!access) throw new NotFoundError("Not found");
+    const body = req.body as { clientId: string; routeId: string };
+    try {
+      res.status(201).json(access.grant(body.clientId, String(req.params.automationId), body.routeId, auditContext(req)));
+    } catch (error) {
+      rethrow(error);
+    }
+  });
+
+  /** POST /api/project-apis/:automationId/grants/revoke — withdraw one grant; the next request is refused. */
+  router.post("/:automationId/grants/revoke", validate({ body: grantBodySchema }), (req, res) => {
+    if (!access) throw new NotFoundError("Not found");
+    const body = req.body as { clientId: string; routeId: string };
+    try {
+      res.json({ revoked: access.revokeGrant(body.clientId, String(req.params.automationId), body.routeId, auditContext(req)) });
     } catch (error) {
       rethrow(error);
     }
   });
 
   return router;
+}
+
+/** Clients and keys. Registered before /:automationId so /clients is never read as an id. */
+function mountAccessRoutes(router: Router, access: ApiAccessStore): void {
+  const handle = (fn: (req: Request) => unknown, status = 200) => (req: Request, res: Response) => {
+    try {
+      res.status(status).json(fn(req));
+    } catch (error) {
+      rethrow(error);
+    }
+  };
+
+  router.get("/clients", handle(() => ({ clients: access.listClients() })));
+  router.post("/clients", validate({ body: clientBodySchema }), handle((req) => access.createClient((req.body as { name: string }).name, auditContext(req)), 201));
+  router.get("/clients/:clientId", handle((req) => access.getClient(String(req.params.clientId))));
+  router.post("/clients/:clientId/disable", handle((req) => access.setClientStatus(String(req.params.clientId), "disabled", auditContext(req))));
+  router.post("/clients/:clientId/enable", handle((req) => access.setClientStatus(String(req.params.clientId), "active", auditContext(req))));
+
+  /** The response carries the full key once. It is not stored and cannot be shown again. */
+  router.post("/clients/:clientId/keys", validate({ body: issueKeyBodySchema }), handle((req) =>
+    access.issueKey(String(req.params.clientId), (req.body as { expiresAt?: number | null }).expiresAt ?? null, auditContext(req)), 201));
+  router.post("/clients/:clientId/keys/:credentialId/rotate", validate({ body: rotateKeyBodySchema }), handle((req) =>
+    access.rotateKey(String(req.params.clientId), String(req.params.credentialId), (req.body as { overlapSeconds?: number }).overlapSeconds ?? 0, auditContext(req)), 201));
+  router.post("/clients/:clientId/keys/:credentialId/revoke", handle((req) =>
+    access.revokeKey(String(req.params.clientId), String(req.params.credentialId), auditContext(req))));
 }

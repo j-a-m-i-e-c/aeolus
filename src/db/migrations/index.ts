@@ -59,6 +59,7 @@ import { commandTriggerProvenance } from "./018-command-trigger-provenance.js";
 import { sessionPolicies } from "./019-session-policies.js";
 import { mutationRevisions } from "./020-mutation-revisions.js";
 import { projectApiPublications } from "./021-project-api-publications.js";
+import { projectApiAccess } from "./022-project-api-access.js";
 
 export const migrations: Migration[] = [
   baseline,                      // id 1
@@ -82,4 +83,5 @@ export const migrations: Migration[] = [
   sessionPolicies,                  // id 19
   mutationRevisions,                // id 20
   projectApiPublications,           // id 21
+  projectApiAccess,                 // id 22
 ];

@@ -1,15 +1,15 @@
 # Project APIs: implementation plan
 
-**Status:** Phases 0 and 1 complete on `feat/project-apis`, awaiting review before Phase 2.
+**Status:** Phases 0 to 2 complete on `main`, awaiting review before Phase 3.
 **Decision record:** [ADR-0027](../adr/0027-project-apis.md). This plan is the
 implementation detail behind it, and replaces the original "Aeolus Project APIs —
 Implementation Specification" (reviewed against `f0cf75d`).
 
 ## Ground rules
 
-- Development happens on `feat/project-apis`. Each phase gets separate commits and its
-  own tests, and merges to `main` only after review. Phase 0 stops for architecture and
-  security review.
+- Each phase is committed to `main` once it passes every gate, then stops for review before
+  the next phase starts. Unfinished work stays local. (Phases 0 and 1 were developed on
+  `feat/project-apis` and fast-forwarded into `main` at `414c1e8`; the branch is deleted.)
 - The existing gates all pass: `tsc` (root, e2e, frontend), ESLint, backend and frontend
   coverage suites, project compiler and migration tests, and the real-isolate sandbox
   tests. **A skipped isolate test is not a passing security check.**
@@ -169,7 +169,75 @@ and metrics labels.
 | Failed transaction involving audit records | store tests | Done for create slug, rename, publish, unpublish and automation delete: no change when the audit insert fails |
 | Reverting source without reactivating historical grants | store tests | Done for publications: identical reverted content stays unpublished, and republishing creates a new snapshot. **Grant behaviour is Phase 2**, where grants will be revoked on unpublish so none can be reactivated |
 
-## Phase 2: clients, keys, grants and the request pipeline
+## Phase 2: clients, keys, grants and the request pipeline (complete)
+
+**Delivered**
+- **Durable publisher withdrawal.** Demoting or deleting the admin who published
+  unpublishes their APIs and revokes those grants in the same transaction as the user
+  change, audited against the acting admin. Promoting them back restores nothing. Triggers
+  on `users` (migration 022) cover every other path. The live publisher check in `resolve()`
+  stays as defence in depth.
+- **Migration 022:** `api_clients`, `api_credentials` and `api_grants`. Grant rows are
+  kept after revocation, with who, when and why.
+- **Stores:**
+  - `access-store.ts`: clients, keys (issue, rotate with overlap, revoke) and grants, each
+    audited in its transaction.
+  - `api-keys.ts`: key format, SHA-256 and constant-time comparison.
+  - `audit.ts`: the shared audit writer and route fingerprints.
+- **Grant lifecycle:**
+  - unpublish revokes all of an API's grants;
+  - republish revokes grants whose route fingerprint changed;
+  - automation delete revokes before the cascade;
+  - disable and runtime-contract mismatch revoke nothing.
+- **`/api/exposed` router** (`exposed-router.ts`), mounted before `authenticate`:
+  - terminal, with CORS skipped for its prefix;
+  - a uniform 405, 401 and 404, each with one fixed body;
+  - `EXPOSED_API_REQUIRE_HTTPS` through `req.secure`;
+  - in-memory per-key and per-client rate and concurrency limits;
+  - the snapshot executed in the API sandbox, with the 200 body checked against its schema;
+  - a fixed 404 for everything in public-demo mode.
+- **Metrics** label all exposed traffic `/api/exposed/:slug/:route`, from the full original
+  path.
+- **Management routes** for clients, keys and grants. `unpublish` returns `revokedGrants`,
+  and a reclaimed slug reports `reclaimedFrom`. The status route caches compiles by
+  revision and source hash.
+- **Configuration:** `EXPOSED_API_REQUIRE_HTTPS`, `EXPOSED_API_REQUESTS_PER_MINUTE` and
+  `EXPOSED_API_CONCURRENT_PER_CLIENT` in `config.ts`, `docker-compose.yml`, `.env.example`
+  and `reference/operations.md`.
+- **Docs:** the new `reference/project-apis.md`; `reference/api.md`;
+  `security/tokens-and-api.md`, which separates dashboard clients from API keys; and
+  ADR-0027.
+
+**Departures**
+1. **Handler execution, response validation and limits landed in Phase 2**, because your
+   Phase 2 requirements include "every request executes the immutable approved snapshot"
+   and an in-flight revocation test. Phase 3 shrinks to what is listed there.
+2. **A withdrawn approval also revokes that API's grants.** It is treated as an unpublish,
+   so the rule "no publication, no grants" has no exception, and a republish by another
+   admin needs regranting.
+3. **A granted caller sees `503` for an unavailable API. A caller with no grant to it sees
+   `404`**, so an API's state is visible only to its grantees.
+
+**Requested tests**
+
+| Requested | Where |
+|---|---|
+| Demote then promote with no request in between | `user-service.project-api.test.ts`, `publication-store.test.ts` |
+| Uniform 401 (12 kinds of bad credential) | `project-api-exposed.integration.test.ts` |
+| Indistinguishable 404, including other projects' APIs | same |
+| No enumeration through OPTIONS or method errors | same: one 405 body for all methods and paths, with no CORS approval |
+| Revocation during an in-flight request | same: the running request finishes, the next is refused |
+| Key, grant, client and unpublish revocation on the next request | same |
+| Unpublish revokes grants for good, keys keep working elsewhere | same |
+| Forged `X-Forwarded-Proto` | same: refused without a trusted proxy, accepted only from a trusted hop |
+| Keys in URLs, logs or metrics | same, plus `request-logger.test.ts` |
+| Public-demo mode | same, plus `demo-policy.test.ts` |
+| Machine key on a management route | `project-api.access.routes.test.ts` (real `authenticate`) |
+| Reclaimed slug inherits nothing | integration and route tests |
+| Transactional audit | store tests: every mutation rolls back when its audit insert fails |
+
+### Phase 2 design notes kept from the plan
+
 
 **Migration 022**
 - `api_clients`: `id`, `name`, `status` (`active` | `disabled`), `created_by`, timestamps.
@@ -355,14 +423,8 @@ billing and Kong integration.
 | Source deleted or edited during a request | Phase 3 (the snapshot is read once per request) |
 | SSRF through the outbound connector | Phase 5 (configured host only, redirect rules) |
 
-## Review points for the end of Phase 1
+## Review points for the end of Phase 2
 
-The six Phase 0 decisions were approved with the refinements recorded in ADR-0027. For
-Phase 1, please confirm the departures listed in the Phase 1 section, in particular:
-
-1. **A demoted or deleted publisher stops the API** until another admin republishes it.
-2. **Retired slugs can be reclaimed** explicitly, with an audit record.
-3. **Grants are revoked on unpublish** (Phase 2), so no publish can reactivate old access.
-4. **Phase 2 next**: keys, grants and the `/api/exposed` router, together with the four
-   requested tests that need them (ungranted endpoints, forged HTTPS headers, query-string
-   credentials at the router, and key revocation under an old snapshot).
+1. **Withdrawn approval revokes grants** (departure 2 in the Phase 2 section).
+2. **503 only for grantees** (departure 3).
+3. **Phase 3 is now small:** measuring on a Pi, the bridge-spy test proving a GET never writes state, publishes MQTT, sends a command or makes an outbound request, and caching compiled scripts per snapshot if the Pi measurements need it.

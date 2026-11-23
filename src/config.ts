@@ -64,6 +64,18 @@ export interface Config {
    * allowlist. OFF by default and never inferred from hostname/NODE_ENV — a
    * normal Aeolus install must never behave as a public demo.
    */
+  /** Published Project APIs at /api/exposed (ADR-0027). */
+  exposedApi: {
+    /**
+     * Serve only requests Express establishes as HTTPS (`req.secure`): direct TLS, or
+     * X-Forwarded-Proto from a hop trusted by TRUST_PROXY_HOPS. Default false (LAN).
+     */
+    requireHttps: boolean;
+    /** Per key and per client, fixed one-minute window. Default 60, 1–600. */
+    requestsPerMinute: number;
+    /** Requests one client may have running at once. Default 2, 1–8. */
+    concurrentPerClient: number;
+  };
   publicDemo: {
     /** Master switch. Default false. */
     enabled: boolean;
@@ -72,6 +84,12 @@ export interface Config {
     /** Local time (HH:MM) the nightly reset runs, for display/scheduling. Default "03:30". */
     resetTime: string;
   };
+}
+
+/** An integer setting clamped to [min, max]; unset or unparseable means the default. */
+function boundedInt(raw: string | undefined, fallback: number, min: number, max: number): number {
+  const value = Number.parseInt(raw ?? "", 10);
+  return Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback;
 }
 
 export const config: Config = {
@@ -106,6 +124,11 @@ export const config: Config = {
   mqttPublish: {
     userNamespacePrefix: process.env.MQTT_PUBLISH_USER_NAMESPACE || "aeolus/pub/",
     maxPayloadBytes: parseInt(process.env.MQTT_PUBLISH_MAX_BYTES || "262144", 10),
+  },
+  exposedApi: {
+    requireHttps: process.env.EXPOSED_API_REQUIRE_HTTPS === "true",
+    requestsPerMinute: boundedInt(process.env.EXPOSED_API_REQUESTS_PER_MINUTE, 60, 1, 600),
+    concurrentPerClient: boundedInt(process.env.EXPOSED_API_CONCURRENT_PER_CLIENT, 2, 1, 8),
   },
   publicDemo: {
     enabled: process.env.AEOLUS_PUBLIC_DEMO === "true",
