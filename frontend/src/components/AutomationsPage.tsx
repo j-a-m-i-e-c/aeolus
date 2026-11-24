@@ -45,7 +45,7 @@ import { useDashboardStore } from "../store/dashboard-store";
 import { useConfigurationInvalidationStore } from "../store/configuration-invalidation-store";
 import { createMutationId } from "../lib/mutation-id";
 
-import { API_URL } from "../lib/env";
+import { API_URL, PUBLIC_DEMO } from "../lib/env";
 
 interface AutomationRule {
   id: string;
@@ -107,6 +107,8 @@ export function AutomationsPage() {
   // Editing state
   const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
   const serverRevisionAtOpen = useRef<number | null>(null);
+  /** The project as last loaded or saved, to tell the Endpoints view about unsaved edits. */
+  const savedProjectJson = useRef<string | null>(null);
   /**
    * The newest invalidation already acted on.
    *
@@ -223,6 +225,7 @@ export function AutomationsPage() {
     setProjectLoadError(null);
     setEditingRuleId(null);
     serverRevisionAtOpen.current = null;
+    savedProjectJson.current = null;
   };
 
   const saveScript = async () => {
@@ -283,6 +286,7 @@ export function AutomationsPage() {
           setEditingRuleId(saved.id);
         }
         serverRevisionAtOpen.current = saved.revision;
+        savedProjectJson.current = JSON.stringify(draftPayload.project);
         setProjectLoadError("The submitted version was saved, but you made newer edits during the request. They are retained locally; save again when ready.");
         fetchRules();
         return;
@@ -339,6 +343,7 @@ export function AutomationsPage() {
       const loaded = await response.json() as AutomationProjectSource & { revision: number };
       const { revision, ...project } = loaded;
       serverRevisionAtOpen.current = revision;
+      savedProjectJson.current = JSON.stringify(project);
       setProjectSource(project);
     } catch {
       // Fail closed rather than opening the editor with a stale/default Project:
@@ -456,6 +461,11 @@ export function AutomationsPage() {
                     onChange={setProjectSource}
                     onSave={saveScript}
                     errors={transpileErrors}
+                    endpoints={editingRuleId && isAdmin && !PUBLIC_DEMO ? {
+                      automationId: editingRuleId,
+                      savedRevision: serverRevisionAtOpen.current,
+                      unsavedChanges: savedProjectJson.current !== null && JSON.stringify(projectSource) !== savedProjectJson.current,
+                    } : undefined}
                   />
                 </div>
               </Suspense>

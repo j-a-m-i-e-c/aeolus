@@ -17,7 +17,7 @@ Automation Project
  isolated Logic / opaque-origin UI runtimes
 ```
 
-### API endpoints and `lib/` (in development)
+### API endpoints and `lib/`
 
 A project can also declare read-only HTTP endpoints for other programs, including another
 Aeolus installation ([ADR-0027](../adr/0027-project-apis.md)). That uses two more
@@ -38,7 +38,7 @@ These folders hold reusable **source code**. Shared Automation State (`shared.ge
 unrelated: it is runtime data shared between automations, and API handlers cannot reach it.
 
 Saving a project validates its API but serves nothing. An admin publishes an immutable
-snapshot from the Endpoints section (in development), and later edits change nothing that is
+snapshot from the editor's Endpoints view, and later edits change nothing that is
 served until an admin publishes again.
 
 ## Authoring model

@@ -1,6 +1,6 @@
 # Project APIs: implementation plan
 
-**Status:** Phases 0 to 3 complete and approved on `main`; Phase 4 in progress.
+**Status:** Phases 0 to 3 complete and approved on `main`; Phase 4 implemented, awaiting review.
 Outstanding release validation: Raspberry Pi measurements (see
 [Release validation](#release-validation)). Script caching stays disabled until they exist.
 **Decision record:** [ADR-0027](../adr/0027-project-apis.md). This plan is the
@@ -446,37 +446,91 @@ and public-demo policy unchanged.
 | An isolate constructor that throws releases its slot | `api-sandbox.construction.test.ts` |
 | The response limit is UTF-8 bytes, not string length | `project-api-sandbox.integration.test.ts` |
 
-## Phase 4: OpenAPI, Endpoints UI and documentation
+## Phase 4: Endpoints view, OpenAPI and documentation (implemented, awaiting review)
 
-- An OpenAPI 3.1 document is generated from the **published snapshot** (paths, parameters,
-  response schemas via `z.toJSONSchema`, bearer auth, the error responses, and
-  `operationId` taken from the route id). It is admin-only to download and validated in
-  tests with a standard OpenAPI parser, added as a dev dependency only.
-- **Endpoints** section in the Automation Project editor: a new component covered by the
-  frontend gate. It keeps separate panels for:
-  - declared routes and compile errors
-  - publication status, slug, effective URL, and the published-versus-current difference
-    with a Publish button
-  - API clients and their grants
-  - credentials (key id, last four characters, expiry, last used), issued with a one-time
-    reveal and copy
-  - recent activity
+The goal was the complete administrator experience in the Aeolus UI: open an Automation
+Project, inspect its endpoints, publish them, create a machine client, grant a route, obtain
+a key and test the endpoint. `e2e/project-endpoints.spec.ts` drives exactly that in a real
+browser and then calls the endpoint as a client would.
 
-  Non-admins see it read-only; the server enforces this regardless. Read-only in public
-  demo. A curl example uses a placeholder key.
-- **Documentation**
-  - `docs/reference/api.md`
-  - a new `docs/reference/project-apis.md` covering the author guide, statuses and limits
-  - `docs/security/tokens-and-api.md`, which currently defines API clients as JWT holders
-    and has a stale public-route table
-  - the threat model
-  - operations: LAN/VPN, a reverse-proxy example, backups, and key rotation and revocation
-  - the CHANGELOG
-- **Acceptance**
-  - The OpenAPI document validates.
-  - The documentation matches the published snapshot.
-  - The demo build cannot publish or create clients.
-  - Disabling publication takes effect on the next request.
+**Delivered**
+- **Endpoints view** in the Automation Project editor, a tab beside Logic and UI. The **API**
+  reference panel is unchanged. Hosts (`AutomationPane`, `AutomationsPage`) show it for a
+  saved automation to an admin outside the public demo; the server enforces that anyway.
+  Monaco stays mounted underneath, so switching back loses no editor state. Sections:
+  - *Publication*: the status in words, temporary or permanent; the slug and effective URL;
+    the saved source and the immutable snapshot side by side; route-by-route effect of a
+    republish; Publish and Unpublish with confirmations; the reclaim warning for a retired
+    slug.
+  - *Declared routes*: method, path, route id, handler, description, response schema and
+    whether each is in the snapshot; compile errors; the API bundle's files; an example
+    manifest and handler when none is declared.
+  - *Access*: per published route, which clients hold it; grant one route to one active
+    client; revoke with confirmation.
+  - *API clients*: create; status, key and grant counts; keys with their safe identifiers,
+    creation, expiry, last use and state (active, expired, revoked); issue with an explicit
+    expiry; rotate with a separately chosen new expiry and old-key overlap; revoke; disable
+    (confirmed, temporary) and enable; the client's grants including revoked history.
+  - *Calling the API*: URLs, `curl` with a `$AEOLUS_API_KEY` placeholder, the OpenAPI
+    document, a test request, LAN/VPN and HTTPS guidance with a plain-HTTP warning, and what
+    200, 400, 401, 404, 429, 500, 503 and 504 mean.
+  - *Activity*: this API's audit history.
+- **Backend additions**, reusing the existing publication, credential, grant and audit
+  contracts:
+  - `GET /:automationId` also returns `publishedRoutes`, `routeChanges` and
+    `lastPublicationEvent` (to explain a withdrawn approval or an unpublish).
+  - `GET /:automationId/openapi.json`: OpenAPI 3.1 from the snapshot (`openapi.ts`).
+  - `GET /:automationId/grants`: the API's live grants with client names.
+  - `POST /:automationId/try`: a test request through the real pipeline over loopback.
+  - Stable `details.reason` on refusals the UI acts on (`slug-retired`, `slug-taken`,
+    `content-changed`, `revision-changed`, `no-slug`).
+  - `Cache-Control: no-store` and `Pragma: no-cache` on every management response.
+  - On a public-demo server, `403` from every management route to every session.
+- **Documentation**: `reference/project-apis.md` (editor walkthrough), `reference/api.md`,
+  `reference/operations.md` (network, reverse-proxy example, backups, rotation),
+  `security/tokens-and-api.md`, `architecture/AUTOMATION_PROJECTS.md`, ADR-0027, the
+  CHANGELOG.
+
+**Departures**
+1. **A test request goes through the server** (`POST .../try`). `/api/exposed` allows no
+   CORS by design, so the browser cannot call it. The server calls itself over loopback, so
+   the test meets every real check. The key is sent once in the request body and is never
+   stored, logged, audited or returned. With `EXPOSED_API_REQUIRE_HTTPS=true` the loopback
+   call is plain HTTP and reports 403; that is documented.
+2. **A public-demo server refuses management to real admins too.** Before, a real admin on
+   the demo server could create clients and publish, although `/api/exposed` there serves
+   nothing. Now every management route answers 403, and the demo build hides the view.
+3. **"Recent activity" is the audit history, not per-request traffic.** Requests stay in
+   logs and metrics; a key's last use is shown with the key. An in-memory request list
+   would reset on restart and add state for little gain.
+4. **Non-admins do not see the view at all**, rather than read-only. Every management route,
+   reads included, is admin-only, so a read-only view would have nothing to show.
+
+**Tests**
+
+| Requested | Where |
+|---|---|
+| Destructive-action confirmation (unpublish, revoke grant, revoke key, disable client, grant-revoking republish); Escape and Cancel do nothing | `EndpointsPanel.test.tsx` |
+| Expired, revoked and active keys shown apart, with only safe identifiers | same |
+| Rotation with a separate new expiry and old-key overlap; past dates refused | same |
+| Revoked grants: per-API list, client history with reason | same, `project-api.endpoints.routes.test.ts` |
+| Stale publication state: unpublished changes, route changes, grants a republish revokes | same, both |
+| Failed publication because the content hash changed | same, both (`content-changed`) |
+| One-time key: shown once, gone from the DOM after close, not in console or storage | `EndpointsPanel.test.tsx`, `project-api.test.ts` |
+| No-store on key responses and refusals; no key in later responses or audit | `project-api.endpoints.routes.test.ts` |
+| Management refused to non-admins, public-demo sessions, and on a public-demo server | same, `project-api.routes.test.ts` |
+| OpenAPI 3.1 validity, from the snapshot not the source | same, validated with `@seriousme/openapi-schema-validator` |
+| Test request: real pipeline, grant enforced, key never stored or echoed | same |
+| The whole workflow in a browser, then called as a client | `e2e/project-endpoints.spec.ts` |
+
+**Walkthrough.** `e2e/project-endpoints.spec.ts` runs against any running stack
+(`npm run test:e2e`, or `E2E_BASE_URL`/`E2E_API_URL` for dev servers). It saves a screenshot
+at each step in its `test-results/` folder: declared routes, the publish confirmation,
+published, the one-time key, the route granted, a test request, activity, the unpublish
+warning, and unpublished.
+
+**Phase 4 is not:** the Aeolus-to-Aeolus connector (Phase 5), POST or command endpoints,
+federation or a new authentication system.
 
 ## Phase 5: Aeolus-to-Aeolus connector
 
@@ -544,6 +598,9 @@ billing and Kong integration.
 | Proxy trust spoofing | Phase 2 (existing `TRUST_PROXY_HOPS`; limits keyed by credential, not IP) |
 | Concurrent quota admission | Phase 2 (limiter), Phase 3 (per-client and server-wide caps under load) |
 | Source deleted or edited during a request | Phase 1 (`project-api-publication.integration.test.ts`; the snapshot is read once per request) |
+| A one-time key kept by the dashboard (storage, drafts, console, HTTP caches) | Phase 4 (component state only; `no-store`; tests) |
+| An admin misled about what is served, or about what unpublishing or republishing removes | Phase 4 (snapshot shown apart from source; route changes; confirmations) |
+| Managing APIs on the public demo | Phase 2 (demo sessions refused), Phase 4 (refused on a demo server to every session) |
 | SSRF through the outbound connector | Phase 5 (configured host only, redirect rules) |
 
 ## Release validation

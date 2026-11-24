@@ -298,3 +298,35 @@ Before changing a production installation:
 The migration runner creates its own pre-migration database checkpoint, but this does not replace an off-host deployment backup.
 
 See [Production deployment](../production-deployment.md).
+
+## Project APIs in operation
+
+Published Project APIs ([reference](project-apis.md)) are served by the backend port at
+`/api/exposed/v1/<slug>/...`.
+
+- **Network.** The supported deployment is a private LAN or a VPN. Plain HTTP on a trusted
+  LAN is an explicit development choice: API keys cross it unencrypted. Otherwise terminate
+  TLS in a reverse proxy, set `TRUST_PROXY_HOPS=1` and `EXPOSED_API_REQUIRE_HTTPS=true`, and
+  keep the backend port unreachable except through the proxy. The proxy must overwrite
+  `X-Forwarded-Proto`, never pass on a client's. A Caddy example:
+
+  ```text
+  aeolus.example.lan {
+      reverse_proxy /api/exposed/* 127.0.0.1:3001 {
+          header_up X-Forwarded-Proto https
+      }
+  }
+  ```
+
+- **Backups.** Publications, snapshots, clients, key hashes, grants and the audit log are all
+  in the SQLite database, so the normal database backup covers them. Keys cannot be
+  recovered from a backup, only their hashes. **Restoring an older backup restores the access
+  it recorded**: a key or grant revoked after the backup was taken is valid again. After a
+  restore, review the Endpoints view and revoke again anything revoked since.
+- **Rotation and revocation.** Rotate a key from the Endpoints view, choosing the new key's
+  expiry and how long the old one overlaps; revoke a key the moment it may have leaked.
+  Both take effect on the next request, without a restart.
+- **Limits** are in memory and reset when the backend restarts.
+- **Testing from the UI** sends the request from the backend to itself over loopback HTTP.
+  With `EXPOSED_API_REQUIRE_HTTPS=true` such a test reports `403`; test through the proxy
+  with `curl` instead.

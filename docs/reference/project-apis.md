@@ -64,9 +64,45 @@ schema, a small JSON Schema subset without `pattern`, `$ref` or `format`.
 
 Saving the project validates all of this and serves nothing.
 
-## Publishing and access
+## Publishing and access in the editor
 
-Everything below is admin-only, under `/api/project-apis` (see [API reference](api.md)).
+Open an automation's project in the editor and choose **Endpoints**, next to **Logic** and
+**UI**. It appears for admins only, and never in the public demo; the server refuses every
+management action to anyone else whatever the UI shows. The **API** button beside it is the
+unchanged Logic and UI API reference.
+
+1. **Inspect.** *Declared routes* lists each route's method, path, route id, handler and
+   response schema from the **saved** source, and any compile errors. Unsaved editor changes
+   are not included; save first. With no `api/routes.json` it shows an example manifest and
+   handler to copy.
+2. **Create the API.** Under *Publication*, choose the slug. Changing it later retires the
+   old URL. A retired slug can be reclaimed only after a warning that it names a different
+   API, and nothing (publication, keys, grants) carries over from the API that held it.
+3. **Publish.** *Publication* shows the saved source and the published snapshot side by
+   side. **Publish** asks for confirmation of the exact revision and content hash you are
+   approving. If the saved source changed in the meantime, nothing is published and the
+   view reloads. Before a republish it lists each route as unchanged, changed, removed or
+   new, and which grants a republish would revoke.
+4. **Create a client and a key.** Under *API clients*, create a client, open it and **Issue
+   key** with an expiry (30 days, 90 days, a year, a date, or never). The key is shown once,
+   with a copy button; after you close that dialog only its id and last four characters are
+   ever shown. **Rotate** chooses the replacement's expiry and, separately, how long the old
+   key keeps working. **Revoke** and **Disable** ask for confirmation first; disabling is
+   temporary and keeps keys and grants.
+5. **Grant a route.** Under *Access*, choose a client and a published route.
+6. **Test it.** *Calling the API* shows each route's URL and a `curl` example with a
+   placeholder key, generates the snapshot's OpenAPI 3.1 document, and sends a test
+   request through the real pipeline with a key you paste in. The test key is used for that
+   one request and kept nowhere.
+7. **Unpublish** asks for confirmation that names how many grants are revoked for good.
+   Clients and keys are untouched.
+
+*Activity* lists this API's publication and access changes from the audit log.
+
+## Publishing and access through the API
+
+Everything below is admin-only, under `/api/project-apis` (see [API reference](api.md)). The
+Endpoints view uses the same routes.
 1. **Slug.** `PUT /api/project-apis/:automationId/slug { "slug": "tank-levels" }` gives the
    API its permanent URL: `/api/exposed/v1/tank-levels/...`.
 2. **Publish.** `GET /api/project-apis/:automationId` shows the declared routes and their
@@ -89,6 +125,11 @@ Then the client calls:
 ```bash
 curl -H "Authorization: Bearer <api-key>" https://aeolus.local/api/exposed/v1/tank-levels/tanks/main
 ```
+
+Use HTTPS unless the network is fully trusted. Plain HTTP on a trusted LAN is an explicit
+development choice: the key crosses the network unencrypted, and the Endpoints view says so
+whenever the dashboard itself is reached over HTTP. `GET .../openapi.json` returns an OpenAPI
+3.1 document of the published snapshot for generating clients.
 
 ## What changes take effect, and when
 

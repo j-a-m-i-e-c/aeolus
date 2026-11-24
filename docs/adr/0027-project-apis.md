@@ -1,6 +1,6 @@
 # ADR-0027: Project APIs — published, read-only HTTP endpoints for Automation Projects
 
-- **Status:** Accepted for Phases 0 to 3 (published, read-only GET endpoints with clients, keys and grants, and the Phase 3 boundary, resilience and performance validation). Raspberry Pi measurements are an outstanding release-validation item; script caching stays disabled until they exist
+- **Status:** Accepted for Phases 0 to 3 (published, read-only GET endpoints with clients, keys and grants, and the Phase 3 boundary, resilience and performance validation). Phase 4 (the Endpoints view, OpenAPI and documentation) is implemented and awaiting review. Raspberry Pi measurements are an outstanding release-validation item; script caching stays disabled until they exist
 - **Date:** 2026-11-19
 - **Plan:** [Project APIs implementation plan](../architecture/project-apis-plan.md)
 
@@ -114,7 +114,9 @@ or the engine.
   schema, or the caller receives a 500 that does not leak details.
 - No `execution_history` row is written and no automation events are emitted. Requests are
   attributed in structured logs (request id, API, route, client, status, duration, reason).
-  A bounded in-memory recent-activity list for the Endpoints UI is planned for Phase 4.
+  The Endpoints view's *Activity* shows the administrative audit history (publication and
+  access changes). It does not list individual requests; those stay in logs and metrics,
+  and a key's `last_used_at` shows whether it is in use.
 - **What a GET cannot do is tested from both sides** (Phase 3). A hostile handler in a real
   isolate tries every escape. Meanwhile the host spies on every method of the state, Shared
   State, Data Store, command, MQTT, automation-event, engine, device and connector classes,
@@ -258,9 +260,41 @@ or the engine.
   route gets `404` for every other route whether the API is serving, disabled, has lost
   authority or fails its integrity check. If the stored manifest no longer parses, no
   route can be identified and every caller gets `404`.
-- In public-demo mode the router is not mounted, and the client-management routes are not
-  on the demo allowlist. They use a real-admin guard, because `requireAdmin` lets a demo
-  session through on GET.
+- In public-demo mode `/api/exposed` answers a fixed `404` to everything, and every
+  management route answers `403` to every session, a real admin's included, so nothing
+  can be published on a server that will never serve it. Elsewhere the management routes
+  use a real-admin guard, because `requireAdmin` lets a demo session through on GET.
+- Every management response carries `Cache-Control: no-store`, the one-time key responses
+  above all.
+
+### Administration in the editor (Phase 4)
+
+- The **Endpoints** view of the Automation Project editor, beside Logic and UI, is the
+  administrator's surface for all of the above. It is a separate, unit-tested component
+  (`frontend/src/components/endpoints/`) over the same management routes; the existing
+  API reference panel is unchanged. Hosts show it only to admins outside the public demo,
+  and the server enforces that regardless.
+- It reads status when opened, after each action, after a save and on Refresh. It never
+  polls, so the status route compiles at most once per saved revision.
+- It shows the **saved** source against the published snapshot, never unsaved editor
+  edits, and says when there are unsaved edits. The status route reports `routeChanges`,
+  so the view can say before a republish which grants a changed or removed route would
+  lose and that new routes start with none.
+- Destructive or access-reducing actions (unpublish, revoke grant, revoke key, disable
+  client, a republish that revokes grants) need a confirmation that says what is lost.
+  Destructive confirmations focus Cancel. Unpublishing names the grants revoked for good
+  and points to disabling the automation for a temporary pause.
+- A new key is held in component state only, shown once, and dropped when its dialog
+  closes. Afterwards only `aeo_<keyId>_…<last4>` and dates are shown.
+- **Testing a route from the UI** goes through `POST .../try`, which calls this server's own
+  `/api/exposed` pipeline over loopback. A browser cannot call `/api/exposed` directly,
+  because it allows no CORS by design. The test therefore meets the same key, grant, limit
+  and sandbox checks as a client, counts against the key's rate limit, and never stores,
+  logs, audits or returns the key.
+- An **OpenAPI 3.1** document (`GET .../openapi.json`) is generated from the published
+  snapshot's manifest only. Route response schemas are already JSON Schema 2020-12, so
+  they are used as they are. Tests validate it with `@seriousme/openapi-schema-validator`,
+  a dev dependency only.
 
 ### Limits
 
@@ -371,4 +405,8 @@ the server. Limits reset when the backend restarts and are not distributed guara
 - `src/__integration__/project-api-boundary.integration.test.ts`: a hostile GET against host-side spies
 - `src/__integration__/project-api-resilience.integration.test.ts`: failures, concurrency, disconnects and restart, with slot release
 - `scripts/bench/project-api-bench.ts`, `make bench-project-api`: latency, CPU and memory measurement
+- `src/project-api/openapi.ts`: the OpenAPI 3.1 document of a published snapshot
+- `src/api/routes/project-api.endpoints.routes.test.ts`: route changes, publication events, grants, OpenAPI validity, test requests, no-store, refusal reasons, public demo
+- `frontend/src/components/endpoints/`: the Endpoints view, with `EndpointsPanel.test.tsx`
+- `e2e/project-endpoints.spec.ts`: the whole workflow in a real browser, with screenshots
 - `docs/reference/project-apis.md`: author and operator reference

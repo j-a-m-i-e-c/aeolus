@@ -14,6 +14,10 @@ vi.mock("@monaco-editor/react", () => ({
   },
 }));
 vi.mock("../lib/monaco-setup", () => ({}));
+vi.mock("./endpoints/EndpointsPanel", () => ({
+  EndpointsPanel: (props: { automationId: string; savedRevision: number | null; unsavedChanges: boolean }) =>
+    createElement("div", { "data-testid": "endpoints-panel" }, `${props.automationId}:${props.savedRevision}:${props.unsavedChanges}`),
+}));
 
 import { AutomationProjectEditor, type AutomationProjectSource } from "./AutomationProjectEditor";
 
@@ -90,5 +94,41 @@ describe("AutomationProjectEditor local editing model switching", () => {
 
     expect(editorHarness.props?.value).toBeUndefined();
     expect(editorHarness.props?.onChange).toEqual(expect.any(Function));
+  });
+});
+
+describe("AutomationProjectEditor Endpoints view", () => {
+  it("is absent unless the host offers it", () => {
+    render(createElement(AutomationProjectEditor, { project: PROJECT, projectKey: "farm-water", onChange: vi.fn() }));
+    expect(screen.queryByRole("button", { name: /Endpoints/ })).not.toBeInTheDocument();
+    // The API reference stays where it was.
+    fireEvent.click(screen.getByRole("button", { name: "API" }));
+    expect(screen.getByText("Logic API")).toBeInTheDocument();
+  });
+
+  it("replaces the code area without unmounting Monaco, and Logic returns to it", () => {
+    render(createElement(AutomationProjectEditor, {
+      project: PROJECT,
+      projectKey: "farm-water",
+      onChange: vi.fn(),
+      endpoints: { automationId: "farm-water", savedRevision: 7, unsavedChanges: true },
+    }));
+    const tab = screen.getByRole("button", { name: /Endpoints/ });
+    expect(tab).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(tab);
+    expect(tab).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("endpoints-panel")).toHaveTextContent("farm-water:7:true");
+    // Still mounted, only hidden, so the editor's models and undo history survive.
+    expect(screen.getByTestId("monaco-editor").closest("section")).toHaveClass("hidden");
+
+    // A tool closes the Endpoints view and opens on the code.
+    fireEvent.click(screen.getByRole("button", { name: "API" }));
+    expect(screen.queryByTestId("endpoints-panel")).not.toBeInTheDocument();
+    expect(screen.getByText("Logic API")).toBeInTheDocument();
+
+    fireEvent.click(tab);
+    fireEvent.click(screen.getByRole("button", { name: "Logic" }));
+    expect(screen.queryByTestId("endpoints-panel")).not.toBeInTheDocument();
+    expect(screen.getByTestId("monaco-editor").closest("section")).not.toHaveClass("hidden");
   });
 });

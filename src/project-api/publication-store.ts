@@ -94,10 +94,25 @@ export interface AuditEvent {
 
 /** A refused change. `code` maps to an HTTP status in the routes. */
 export class ProjectApiError extends Error {
-  constructor(public readonly code: "invalid" | "not-found" | "conflict" | "forbidden", message: string) {
+  constructor(
+    public readonly code: "invalid" | "not-found" | "conflict" | "forbidden",
+    message: string,
+    /** A stable, machine-readable cause the UI can act on, such as offering to reclaim. */
+    public readonly reason?: ProjectApiRefusal,
+  ) {
     super(message);
     this.name = "ProjectApiError";
   }
+}
+
+export type ProjectApiRefusal = "slug-taken" | "slug-retired" | "content-changed" | "revision-changed" | "no-slug";
+
+/** The most recent change to whether an API is published, for explaining its state. */
+export interface PublicationEvent {
+  action: "api.published" | "api.unpublished" | "api.approval.revoked";
+  at: number;
+  actorUsername: string;
+  reason: string | null;
 }
 
 interface ApiRow { id: string; automation_id: string; slug: string; published_snapshot_id: string | null; created_at: number; updated_at: number }
@@ -190,9 +205,9 @@ export function createProjectApiStore(db: DatabaseType, options: ProjectApiStore
         const existing = apiByAutomation(automationId);
         if (existing?.slug === slug) return toApi(existing);
         const live = db.prepare("SELECT automation_id FROM project_apis WHERE slug = ?").get(slug) as { automation_id: string } | undefined;
-        if (live) throw new ProjectApiError("conflict", "Slug is already used by another API");
+        if (live) throw new ProjectApiError("conflict", "Slug is already used by another API", "slug-taken");
         const retired = db.prepare("SELECT api_id FROM project_api_retired_slugs WHERE slug = ?").get(slug) as { api_id: string } | undefined;
-        if (retired && !reclaim) throw new ProjectApiError("conflict", "Slug was used before and is retired; reclaim it explicitly to reuse it");
+        if (retired && !reclaim) throw new ProjectApiError("conflict", "Slug was used before and is retired; reclaim it explicitly to reuse it", "slug-retired");
         if (retired) {
           db.prepare("DELETE FROM project_api_retired_slugs WHERE slug = ?").run(slug);
           audit(ctx, "api.slug.reclaimed", { automationId, apiId: existing?.id, metadata: { slug, previousApiId: retired.api_id } });
@@ -224,15 +239,15 @@ export function createProjectApiStore(db: DatabaseType, options: ProjectApiStore
      */
     publish(automationId: string, api: CompiledProjectApi, automationRevision: number, reviewedHash: string, ctx: AuditContext): SnapshotSummary {
       if (api.contentHash !== reviewedHash) {
-        throw new ProjectApiError("conflict", "The API source changed after it was reviewed; review it again before publishing");
+        throw new ProjectApiError("conflict", "The API source changed after it was reviewed; review it again before publishing", "content-changed");
       }
       return db.transaction(() => {
         const automation = requireAdminAuthored(automationId);
         if (automation.revision !== automationRevision) {
-          throw new ProjectApiError("conflict", "The automation changed after it was reviewed; review it again before publishing");
+          throw new ProjectApiError("conflict", "The automation changed after it was reviewed; review it again before publishing", "revision-changed");
         }
         const record = apiByAutomation(automationId);
-        if (!record) throw new ProjectApiError("conflict", "Choose a slug before publishing");
+        if (!record) throw new ProjectApiError("conflict", "Choose a slug before publishing", "no-slug");
         const previous = record.published_snapshot_id ? snapshotRow(record.published_snapshot_id) : undefined;
         const at = now();
         const id = randomUUID();
@@ -289,6 +304,33 @@ export function createProjectApiStore(db: DatabaseType, options: ProjectApiStore
       revokeActiveGrants(db, ctx, record.id, "api-deleted", now());
       audit(ctx, "api.deleted", { automationId, apiId: record.id, snapshotId: record.published_snapshot_id, metadata: { slug: record.slug, reason: "automation-deleted" } });
       db.prepare("DELETE FROM project_apis WHERE id = ?").run(record.id);
+    },
+
+    /**
+     * The snapshot an automation's API currently publishes and the routes its manifest
+     * declares, whether or not it can be served right now. Null when nothing is
+     * published, or when the stored manifest no longer parses.
+     */
+    published(automationId: string): { api: ProjectApiRecord; snapshot: SnapshotSummary; routes: CompiledApiRoute[] } | null {
+      const row = apiByAutomation(automationId);
+      if (!row?.published_snapshot_id) return null;
+      const snap = snapshotRow(row.published_snapshot_id);
+      if (!snap) return null;
+      try {
+        return { api: toApi(row), snapshot: toSummary(snap), routes: parseApiManifest(snap.manifest).routes };
+      } catch {
+        return null;
+      }
+    },
+
+    /** The latest publish, unpublish or withdrawn approval of an API, if any. */
+    lastPublicationEvent(apiId: string): PublicationEvent | null {
+      const row = db.prepare(`SELECT action, at, actor_username, metadata FROM project_api_audit
+          WHERE api_id = ? AND action IN ('api.published', 'api.unpublished', 'api.approval.revoked')
+          ORDER BY id DESC LIMIT 1`).get(apiId) as { action: PublicationEvent["action"]; at: number; actor_username: string; metadata: string } | undefined;
+      if (!row) return null;
+      const metadata = JSON.parse(row.metadata) as { reason?: unknown };
+      return { action: row.action, at: row.at, actorUsername: row.actor_username, reason: typeof metadata.reason === "string" ? metadata.reason : null };
     },
 
     /** The API record behind a slug, published or not. */

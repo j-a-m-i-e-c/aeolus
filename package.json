@@ -59,6 +59,7 @@
   "devDependencies": {
     "@fast-check/vitest": "^0.5.0",
     "@playwright/test": "^1.61.0",
+    "@seriousme/openapi-schema-validator": "^2.12.0",
     "@types/bcrypt": "^6.0.0",
     "@types/better-sqlite3": "^7.6.13",
     "@types/cookie-parser": "^1.4.10",

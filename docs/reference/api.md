@@ -216,16 +216,22 @@ The [Project APIs reference](project-apis.md) covers declaring routes, statuses 
 ### Management
 
 These routes require a real admin: a public-demo session is refused on every method, and none
-of them is on the public-demo allowlist. Machine keys are refused by dashboard
-authentication.
+of them is on the public-demo allowlist. On a public-demo server every one of them answers
+`403` to every session, a real admin's included. Machine keys are refused by dashboard
+authentication. Every response, refusals included, carries `Cache-Control: no-store`. A
+refusal the Endpoints UI can act on carries a stable `details.reason`: `slug-retired`,
+`slug-taken`, `content-changed`, `revision-changed` or `no-slug`.
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/api/project-apis/:automationId` | What the current source declares (routes, files, `contentHash`, compile errors), the slug, the published snapshot, `unpublishedChanges`, and why it is or is not being served |
+| `GET` | `/api/project-apis/:automationId` | What the saved source declares (routes, files, `contentHash`, compile errors), the slug, the published snapshot and its routes (`publishedRoutes`), `unpublishedChanges`, `routeChanges` (each published or declared route as `unchanged`, `changed`, `removed` or `added`, which decides whether its grants survive a republish), why it is or is not being served (`status`), and the last publish, unpublish or withdrawn approval (`lastPublicationEvent`) |
+| `GET` | `/api/project-apis/:automationId/openapi.json` | An OpenAPI 3.1 document of the published snapshot, never the editable source. `404` when nothing is published |
+| `GET` | `/api/project-apis/:automationId/grants` | The API's live grants, with each client's name and status |
+| `POST` | `/api/project-apis/:automationId/try` | `{ routeId, params?, key }`: call one published route through this server's own `/api/exposed` pipeline over loopback, as a client would, and return `{ path, status, durationMs, requestId, retryAfter, body }`. The key is used for that request only: not stored, logged, audited or returned. It counts against the key's rate limit. With `EXPOSED_API_REQUIRE_HTTPS=true` the loopback request is plain HTTP, so it reports `403` |
 | `PUT` | `/api/project-apis/:automationId/slug` | `{ slug, reclaim? }`: create the API or change its slug. A changed slug is retired; reusing one requires `reclaim: true`, and the response's `reclaimedFrom` names the previous API |
 | `POST` | `/api/project-apis/:automationId/publish` | `{ contentHash }`: publish the current source as a new immutable snapshot. `contentHash` must be the hash returned by `GET`; if the source changed since, `409` |
 | `POST` | `/api/project-apis/:automationId/unpublish` | Stop serving and revoke every grant to the API. Returns `revokedGrants` |
-| `POST` | `/api/project-apis/:automationId/grants` | `{ clientId, routeId }`: grant one route of the live publication |
+| `POST` | `/api/project-apis/:automationId/grants` | `{ clientId, routeId }`: grant one route of the current publication |
 | `POST` | `/api/project-apis/:automationId/grants/revoke` | `{ clientId, routeId }`: revoke one grant |
 | `GET`, `POST` | `/api/project-apis/clients` | List clients, or create one: `{ name }` |
 | `GET` | `/api/project-apis/clients/:clientId` | A client's keys (id, last four, expiry, last used; never secrets) and grants, revoked ones included |

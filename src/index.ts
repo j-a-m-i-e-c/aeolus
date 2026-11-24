@@ -493,7 +493,12 @@ async function main(): Promise<void> {
   );
   const sandboxTypesPath = path.resolve(import.meta.dirname, "automations/sandbox-types.d.ts");
   // Project API management (ADR-0027): real admins only.
-  app.use("/api/project-apis", createProjectApiRoutes(db, projectApis, projectApiAccess));
+  // Test requests from the Endpoints UI go back through this server's own /api/exposed
+  // router over loopback, so they meet exactly what a client would.
+  app.use("/api/project-apis", createProjectApiRoutes(db, projectApis, projectApiAccess, {
+    exposedBaseUrl: `http://127.0.0.1:${config.port}`,
+    publicDemo: config.publicDemo.enabled,
+  }));
   app.use("/api/automations", createAutomationRoutes(engine, db, registry, commandService, executionLog, sandboxTypesPath, requireAutomation, permissionResolver, connectorRegistry, stateStore, conditionRegistry, commandHistoryStore, projectApis));
   app.use("/api/connectors", createConnectorRoutes(connectorManager, connectorRegistry));
   app.use("/api/metrics", createMetricsSummaryRoute(metricsService));

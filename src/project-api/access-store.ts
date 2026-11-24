@@ -253,6 +253,14 @@ export function createApiAccessStore(db: DatabaseType, options: { now?: () => nu
       };
     },
 
+    /** An API's live grants, with each client's name and status, oldest first. */
+    listGrantsForApi(apiId: string): Array<ApiGrant & { clientName: string; clientStatus: ApiClient["status"] }> {
+      const rows = db.prepare(`SELECT g.*, c.name AS client_name, c.status AS client_status
+          FROM api_grants g JOIN api_clients c ON c.id = g.client_id
+          WHERE g.api_id = ? AND g.revoked_at IS NULL ORDER BY g.granted_at, g.id`).all(apiId) as Array<GrantRow & { client_name: string; client_status: ApiClient["status"] }>;
+      return rows.map((r) => ({ ...toGrant(r), clientName: r.client_name, clientStatus: r.client_status }));
+    },
+
     /** True when the client holds a live grant to this route, for exactly this route behaviour. */
     isGranted(clientId: string, apiId: string, routeId: string, fingerprint: string): boolean {
       return Boolean(db.prepare(`SELECT 1 FROM api_grants WHERE client_id = ? AND api_id = ? AND route_id = ?

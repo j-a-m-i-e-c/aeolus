@@ -92,6 +92,14 @@ Machine clients of published Project APIs use API keys, not JWTs
 - **Not users.** API clients are not dashboard users. They have no role, session or refresh
   token, and never appear as `req.user`.
 - **Liveness.** Revocation, expiry, client status and grants are read on every request.
+- **Never cached, never kept by the dashboard.** Every `/api/project-apis` response carries
+  `Cache-Control: no-store`. The Endpoints view holds a new key in component state only,
+  shows it once, and drops it when the dialog closes. It is not written to IndexedDB drafts,
+  browser storage, the URL or the console. A key pasted into the test-request form is sent
+  once in a request body to `POST .../try`, which uses it for that one loopback request and
+  does not store, log, audit or return it.
+- **Public demo.** A public-demo server answers `403` to every management route, for every
+  session including a real admin's, and `404` to everything under `/api/exposed`.
 
 ## Credentials in URLs
 

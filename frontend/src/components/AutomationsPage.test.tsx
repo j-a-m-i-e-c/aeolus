@@ -10,7 +10,7 @@ import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
 
 const { mockAuthFetch } = vi.hoisted(() => ({ mockAuthFetch: vi.fn() }));
 vi.mock("../lib/auth-fetch", () => ({ authFetch: mockAuthFetch }));
-vi.mock("../lib/env", () => ({ API_URL: "http://test.local:3001" }));
+vi.mock("../lib/env", () => ({ API_URL: "http://test.local:3001", PUBLIC_DEMO: false }));
 
 // New and existing script automations author through the multi-file Project editor.
 // Stub it so this test focuses on page behaviour rather than Monaco.

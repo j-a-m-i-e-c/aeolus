@@ -13,11 +13,24 @@ import { AutomationProjectCompileError, compileAutomationProject, readAutomation
 import type { CompiledProjectApi } from "../../project-api/api-compiler.js";
 import { ProjectApiError, type AuditContext, type ProjectApiStore } from "../../project-api/publication-store.js";
 import { asyncHandler } from "../middleware/async-handler.js";
-import { BadRequestError, ConflictError, ForbiddenError, NotFoundError } from "../middleware/error-handler.js";
+import { AppError, BadRequestError, ConflictError, ForbiddenError, NotFoundError } from "../middleware/error-handler.js";
 import { mutationIdFromRequest } from "../middleware/revision-precondition.js";
 import { validate } from "../middleware/validate.js";
-import { auditQuerySchema, clientBodySchema, grantBodySchema, issueKeyBodySchema, publishBodySchema, rotateKeyBodySchema, slugBodySchema } from "../schemas/project-api.schemas.js";
+import { auditQuerySchema, clientBodySchema, grantBodySchema, issueKeyBodySchema, publishBodySchema, rotateKeyBodySchema, slugBodySchema, tryRequestBodySchema } from "../schemas/project-api.schemas.js";
 import type { ApiAccessStore } from "../../project-api/access-store.js";
+import { routeFingerprint } from "../../project-api/audit.js";
+import type { ApiRoute, CompiledApiRoute } from "../../project-api/manifest.js";
+import { buildOpenApiDocument } from "../../project-api/openapi.js";
+
+/**
+ * Nothing here may be cached: responses carry one-time API keys, and every other one
+ * describes access that can change at any moment.
+ */
+function noStore(_req: Request, res: Response, next: NextFunction): void {
+  res.setHeader("Cache-Control", "no-store");
+  res.setHeader("Pragma", "no-cache");
+  next();
+}
 
 /** A real admin: not a public-demo session, whatever the method. */
 function requireRealAdmin(req: Request, _res: Response, next: NextFunction): void {
@@ -37,13 +50,35 @@ function auditContext(req: Request): AuditContext {
 
 function rethrow(error: unknown): never {
   if (error instanceof ProjectApiError) {
-    if (error.code === "invalid") throw new BadRequestError(error.message);
-    if (error.code === "not-found") throw new NotFoundError(error.message);
-    if (error.code === "forbidden") throw new ForbiddenError(error.message);
-    throw new ConflictError(error.message);
+    const mapped = error.code === "invalid" ? new BadRequestError(error.message)
+      : error.code === "not-found" ? new NotFoundError(error.message)
+        : error.code === "forbidden" ? new ForbiddenError(error.message)
+          : new ConflictError(error.message);
+    // A stable reason the Endpoints UI can act on, such as offering to reclaim a slug.
+    if (error.reason) mapped.details = { reason: error.reason };
+    throw mapped;
   }
   throw error;
 }
+
+/**
+ * How each route would change if the current source were published over the current
+ * snapshot. A grant survives a republish only for an `unchanged` route; `changed` and
+ * `removed` routes lose their grants, and `added` routes start with none.
+ */
+function routeChanges(published: ApiRoute[] | null, declared: ApiRoute[] | null): Array<{ routeId: string; change: "unchanged" | "changed" | "removed" | "added" }> {
+  if (!published || !declared) return [];
+  const current = new Map(declared.map((route) => [route.id, routeFingerprint(route)]));
+  const changes: Array<{ routeId: string; change: "unchanged" | "changed" | "removed" | "added" }> = published.map((route) => {
+    const next = current.get(route.id);
+    return { routeId: route.id, change: next === undefined ? "removed" : next === routeFingerprint(route) ? "unchanged" : "changed" };
+  });
+  const before = new Set(published.map((route) => route.id));
+  for (const route of declared) if (!before.has(route.id)) changes.push({ routeId: route.id, change: "added" });
+  return changes;
+}
+
+const withoutSegments = ({ segments: _segments, ...route }: CompiledApiRoute): ApiRoute => route;
 
 type CurrentApi =
   | { revision: number; api: CompiledProjectApi | null; errors: null }
@@ -80,8 +115,30 @@ async function compileCurrent(db: DatabaseType, automationId: string): Promise<C
   return pending;
 }
 
-export function createProjectApiRoutes(db: DatabaseType, store: ProjectApiStore, access?: ApiAccessStore): Router {
+export interface ProjectApiRouteOptions {
+  /**
+   * Where this server's /api/exposed router answers over loopback, for test requests
+   * from the Endpoints UI. A browser cannot call /api/exposed itself: it allows no
+   * CORS. Without it the test route answers 404.
+   */
+  exposedBaseUrl?: string | (() => string);
+  /**
+   * A public-demo server refuses every management route, to every session including a
+   * real admin's: its /api/exposed serves nothing, so nothing may be published there.
+   */
+  publicDemo?: boolean;
+}
+
+const TRY_TIMEOUT_MS = 10_000;
+const TRY_MAX_BODY_CHARS = 70_000;
+
+export function createProjectApiRoutes(db: DatabaseType, store: ProjectApiStore, access?: ApiAccessStore, options: ProjectApiRouteOptions = {}): Router {
   const router = Router();
+  router.use(noStore);
+  if (options.publicDemo) {
+    router.use((_req, _res, next) => next(new ForbiddenError("Project APIs are not available in the public demo")));
+    return router;
+  }
   router.use(requireRealAdmin);
 
   if (access) mountAccessRoutes(router, access);
@@ -102,20 +159,96 @@ export function createProjectApiRoutes(db: DatabaseType, store: ProjectApiStore,
     if (!current) throw new NotFoundError("Automation not found");
     const record = store.get(automationId);
     const published = record?.publishedSnapshotId ? store.snapshotSummary(record.publishedSnapshotId) : null;
+    const publishedRoutes = store.published(automationId)?.routes.map(withoutSegments) ?? null;
+    const declaredRoutes = current.api ? current.api.routes.map(withoutSegments) : null;
     const servable = record ? store.resolve(record.slug) : null;
     res.json({
       automationId,
       revision: current.revision,
-      declared: current.api
-        ? { contentHash: current.api.contentHash, routes: current.api.routes.map(({ segments: _segments, ...route }) => route), files: current.api.sources.map((file) => file.path) }
+      declared: current.api && declaredRoutes
+        ? { contentHash: current.api.contentHash, routes: declaredRoutes, files: current.api.sources.map((file) => file.path) }
         : null,
       compileErrors: current.errors,
       api: record ? { id: record.id, slug: record.slug, path: `/api/exposed/v1/${record.slug}` } : null,
       published,
+      publishedRoutes,
+      routeChanges: routeChanges(publishedRoutes, declaredRoutes),
       unpublishedChanges: Boolean(published && current.api && published.contentHash !== current.api.contentHash),
       status: !record ? "no-api" : servable?.ok ? "serving" : servable?.reason,
+      lastPublicationEvent: record ? store.lastPublicationEvent(record.id) : null,
     });
   }));
+
+  /**
+   * GET /api/project-apis/:automationId/openapi.json — an OpenAPI 3.1 document for
+   * what is published. Built from the immutable snapshot, never the editable source.
+   */
+  router.get("/:automationId/openapi.json", (req, res) => {
+    const automationId = String(req.params.automationId);
+    const published = store.published(automationId);
+    if (!published) throw new NotFoundError("This automation has no published API");
+    const automation = db.prepare("SELECT name FROM automation_rules WHERE id = ?").get(automationId) as { name: string } | undefined;
+    res.setHeader("Content-Disposition", `attachment; filename="${published.api.slug}.openapi.json"`);
+    res.json(buildOpenApiDocument({
+      slug: published.api.slug,
+      automationName: automation?.name ?? published.api.slug,
+      snapshot: published.snapshot,
+      routes: published.routes.map(withoutSegments),
+    }));
+  });
+
+  /**
+   * POST /api/project-apis/:automationId/try — call one published route with a key,
+   * through the real /api/exposed pipeline (key, grant, limits, sandbox), and report
+   * what a client would receive. The key is used for this request only: it is not
+   * stored, logged, audited or echoed back.
+   */
+  router.post("/:automationId/try", validate({ body: tryRequestBodySchema }), asyncHandler(async (req, res) => {
+    const base = typeof options.exposedBaseUrl === "function" ? options.exposedBaseUrl() : options.exposedBaseUrl;
+    if (!base) throw new NotFoundError("Not found");
+    const body = req.body as { routeId: string; params?: Record<string, string>; key: string };
+    const published = store.published(String(req.params.automationId));
+    if (!published) throw new ConflictError("Publish the API before testing it");
+    const route = published.routes.find((candidate) => candidate.id === body.routeId);
+    if (!route) throw new NotFoundError(`The published API has no route ${body.routeId}`);
+    const parts: string[] = [];
+    for (const segment of route.segments) {
+      if (segment.kind === "literal") { parts.push(segment.value); continue; }
+      const value = body.params?.[segment.name];
+      if (value === undefined) throw new BadRequestError(`Fill in the path parameter ${segment.name}`);
+      parts.push(encodeURIComponent(value));
+    }
+    const path = `/api/exposed/v1/${published.api.slug}/${parts.join("/")}`;
+    const started = Date.now();
+    let response: globalThis.Response;
+    try {
+      response = await fetch(`${base}${path}`, {
+        headers: { Authorization: `Bearer ${body.key}`, Accept: "application/json" },
+        redirect: "manual",
+        signal: AbortSignal.timeout(TRY_TIMEOUT_MS),
+      });
+    } catch {
+      throw new AppError(502, "The test request could not reach this server's API endpoint");
+    }
+    const text = (await response.text()).slice(0, TRY_MAX_BODY_CHARS);
+    let parsed: unknown = text;
+    try { parsed = JSON.parse(text); } catch { /* reported as text */ }
+    res.json({
+      path,
+      status: response.status,
+      durationMs: Date.now() - started,
+      requestId: response.headers.get("x-request-id"),
+      retryAfter: response.headers.get("retry-after"),
+      body: parsed,
+    });
+  }));
+
+  /** GET /api/project-apis/:automationId/grants — the API's live grants, with client names. */
+  router.get("/:automationId/grants", (req, res) => {
+    if (!access) throw new NotFoundError("Not found");
+    const record = store.get(String(req.params.automationId));
+    res.json({ grants: record ? access.listGrantsForApi(record.id) : [] });
+  });
 
   /** PUT /api/project-apis/:automationId/slug — create the API or change its slug. */
   router.put("/:automationId/slug", validate({ body: slugBodySchema }), (req, res) => {

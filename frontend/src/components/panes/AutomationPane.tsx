@@ -123,6 +123,8 @@ export function AutomationPane({ config, paneId }: Props) {
   const [draftSavedAt, setDraftSavedAt] = useState<number | null>(null);
   const [evidenceOpen, setEvidenceOpen] = useState(false);
   const serverRevisionAtOpen = useRef<number | null>(null);
+  /** The project as loaded, to tell the Endpoints view about unsaved edits. */
+  const savedProjectJson = useRef<string | null>(null);
   const draftKey = `${userId}:pane:${ruleId || paneId || "new"}`;
   const draftPayload = { name, topic: triggerTopic, triggerType, cronExpression, project: projectSource };
   const draft = useAutomationDraft({
@@ -412,6 +414,7 @@ export function AutomationPane({ config, paneId }: Props) {
       const newer = draft.markSaved(draftPayload);
       if (newer) {
         serverRevisionAtOpen.current = data.revision ?? serverRevisionAtOpen.current;
+        savedProjectJson.current = JSON.stringify(draftPayload.project);
         setErrors([{ line: 0, column: 0, message: "The submitted version was saved, but newer edits remain in this editor. Save again when ready." }]);
         return;
       }
@@ -477,6 +480,7 @@ export function AutomationPane({ config, paneId }: Props) {
         const loaded = await response.json() as AutomationProjectSource & { revision: number };
         const { revision, ...project } = loaded;
         serverRevisionAtOpen.current = revision;
+        savedProjectJson.current = JSON.stringify(project);
         setProjectSource(project);
       } catch {
         setErrors([{ line: 0, column: 0, message: "Failed to load Automation Project source" }]);
@@ -717,6 +721,13 @@ export function AutomationPane({ config, paneId }: Props) {
               errors={errors}
               readOnly={isPublicVisitor && !isDemoDraft}
               liveState={ruleState}
+              // Admin-only, and never in the public demo, where the server refuses
+              // every Project API management route to every session.
+              endpoints={mode === "editing" && rule?.id && isAdmin && !PUBLIC_DEMO ? {
+                automationId: rule.id,
+                savedRevision: serverRevisionAtOpen.current,
+                unsavedChanges: savedProjectJson.current !== null && JSON.stringify(projectSource) !== savedProjectJson.current,
+              } : undefined}
             />
           </Suspense>
         </div>

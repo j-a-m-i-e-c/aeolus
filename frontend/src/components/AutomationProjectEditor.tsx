@@ -8,11 +8,13 @@ import {
   BookOpen,
   FileCode2,
   FolderTree,
+  Network,
   Plus,
   Trash2,
   WandSparkles,
   X,
 } from "lucide-react";
+import { EndpointsPanel, type EndpointsPanelProps } from "./endpoints/EndpointsPanel";
 import { authFetch } from "../lib/auth-fetch";
 import { API_URL } from "../lib/env";
 import { automationProjectModelUri } from "../lib/automation-project-model";
@@ -42,6 +44,11 @@ interface Props {
   projectKey?: string;
   /** Live state written by Logic. Shown contextually while authoring UI. */
   liveState?: Record<string, unknown>;
+  /**
+   * Shows the Endpoints view (Project APIs). Hosts pass it only for a saved automation
+   * and a real admin outside the public demo; the server enforces the same regardless.
+   */
+  endpoints?: EndpointsPanelProps;
 }
 
 const CODE_EXTENSIONS = [".ts", ".tsx", ".js", ".jsx", ".json"];
@@ -219,10 +226,15 @@ export function AutomationProjectEditor({
   readOnly = false,
   projectKey = "project",
   liveState = {},
+  endpoints,
 }: Props) {
   const firstPath = project.logicEntry || project.files[0]?.path || "logic/index.ts";
   const [activePath, setActivePath] = useState(firstPath);
   const [toolPanel, setToolPanel] = useState<ToolPanel>(null);
+  // "endpoints" replaces the code area with the Endpoints view. Monaco stays mounted
+  // underneath so its models, cursor and undo history survive the switch.
+  const [view, setView] = useState<"code" | "endpoints">("code");
+  const showingEndpoints = view === "endpoints" && endpoints !== undefined;
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
   const monacoRef = useRef<Monaco | null>(null);
 
@@ -233,6 +245,7 @@ export function AutomationProjectEditor({
   useEffect(() => {
     setActivePath(project.logicEntry || project.files[0]?.path || "logic/index.ts");
     setToolPanel(null);
+    setView("code");
     // Deliberately keyed on automation identity alone. `project` is a new object on
     // every keystroke, so depending on it would reset the open tab while typing.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -370,8 +383,10 @@ export function AutomationProjectEditor({
   const liveStateEntries = Object.entries(liveState);
 
   const toggleTool = (panel: Exclude<ToolPanel, null>) => {
+    setView("code");
     setToolPanel((current) => current === panel ? null : panel);
   };
+  const codeTabActive = !showingEndpoints && toolPanel !== "files";
 
   return (
     <div className="h-full min-h-[300px] flex flex-col overflow-hidden rounded-xl border border-[#2A3441] bg-[#0B0F14] shadow-[0_10px_30px_rgba(0,0,0,0.12)]">
@@ -379,25 +394,37 @@ export function AutomationProjectEditor({
       <div className="min-h-12 shrink-0 flex flex-wrap items-stretch border-b border-[#2A3441] bg-[#10161F]">
         <div className="flex items-stretch px-2">
           <button
-            onClick={() => { setActivePath(project.logicEntry); setToolPanel(null); }}
-            className={`relative min-w-24 px-4 text-xs font-semibold transition-colors ${logicSelected && toolPanel !== "files" ? "text-[#5CE1E6]" : "text-[#7E8A98] hover:text-[#C3CDD7]"}`}
+            onClick={() => { setView("code"); setActivePath(project.logicEntry); setToolPanel(null); }}
+            className={`relative min-w-24 px-4 text-xs font-semibold transition-colors ${logicSelected && codeTabActive ? "text-[#5CE1E6]" : "text-[#7E8A98] hover:text-[#C3CDD7]"}`}
           >
             Logic
-            {logicSelected && toolPanel !== "files" && <span className="absolute inset-x-3 bottom-0 h-0.5 rounded-full bg-[#5CE1E6]" />}
+            {logicSelected && codeTabActive && <span className="absolute inset-x-3 bottom-0 h-0.5 rounded-full bg-[#5CE1E6]" />}
           </button>
           <button
             onClick={() => {
+              setView("code");
               setToolPanel(null);
               if (project.uiEntry) setActivePath(project.uiEntry);
               else if (!readOnly) addUi();
             }}
             disabled={readOnly && !project.uiEntry}
-            className={`relative min-w-24 px-4 text-xs font-semibold transition-colors ${uiSelected && toolPanel !== "files" ? "text-[#3BA4FF]" : "text-[#7E8A98] hover:text-[#C3CDD7] disabled:opacity-40 disabled:hover:text-[#7E8A98]"}`}
+            className={`relative min-w-24 px-4 text-xs font-semibold transition-colors ${uiSelected && codeTabActive ? "text-[#3BA4FF]" : "text-[#7E8A98] hover:text-[#C3CDD7] disabled:opacity-40 disabled:hover:text-[#7E8A98]"}`}
             title={project.uiEntry ? "Edit automation UI" : readOnly ? "This automation has no custom UI" : "Create automation UI"}
           >
             UI
-            {uiSelected && toolPanel !== "files" && <span className="absolute inset-x-3 bottom-0 h-0.5 rounded-full bg-[#3BA4FF]" />}
+            {uiSelected && codeTabActive && <span className="absolute inset-x-3 bottom-0 h-0.5 rounded-full bg-[#3BA4FF]" />}
           </button>
+          {endpoints && (
+            <button
+              onClick={() => { setToolPanel(null); setView("endpoints"); }}
+              aria-pressed={showingEndpoints}
+              className={`relative min-w-24 px-4 text-xs font-semibold transition-colors flex items-center gap-1.5 justify-center ${showingEndpoints ? "text-[#5CE1E6]" : "text-[#7E8A98] hover:text-[#C3CDD7]"}`}
+              title="Publish this project's API endpoints and manage client access"
+            >
+              <Network size={12} /> Endpoints
+              {showingEndpoints && <span className="absolute inset-x-3 bottom-0 h-0.5 rounded-full bg-[#5CE1E6]" />}
+            </button>
+          )}
         </div>
 
         <div className="flex-1" />
@@ -456,7 +483,12 @@ export function AutomationProjectEditor({
       )}
 
       <div className="flex-1 min-h-0 flex overflow-hidden">
-        <section className="flex-1 min-w-0 flex flex-col">
+        {showingEndpoints && (
+          <div className="flex-1 min-w-0 bg-[#10161F]">
+            <EndpointsPanel {...endpoints} />
+          </div>
+        )}
+        <section className={`flex-1 min-w-0 flex flex-col ${showingEndpoints ? "hidden" : ""}`}>
           <div className="flex-1 min-h-0">
             <Editor
               path={automationProjectModelUri(projectKey, activeFile.path)}
@@ -511,7 +543,7 @@ export function AutomationProjectEditor({
           )}
         </section>
 
-        {toolPanel && (
+        {toolPanel && !showingEndpoints && (
           <aside className="w-[280px] max-w-[42%] shrink-0 border-l border-[#2A3441] bg-[#10161F] overflow-hidden">
             {toolPanel === "insert" && (
               <SnippetPicker

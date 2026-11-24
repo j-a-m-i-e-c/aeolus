@@ -31,6 +31,16 @@ export const rotateKeyBodySchema = z.object({
   overlapSeconds: z.number().int().min(0).max(7 * 24 * 3600).optional(),
 }).strict();
 
+/**
+ * A test request through the real /api/exposed pipeline, made by the server over
+ * loopback. `key` is used for that one request and is never stored, logged or audited.
+ */
+export const tryRequestBodySchema = z.object({
+  routeId: z.string().regex(/^[a-z][a-z0-9-]{0,62}$/),
+  params: z.record(z.string().regex(/^[a-zA-Z][a-zA-Z0-9_]{0,63}$/), z.string().min(1).max(128)).optional(),
+  key: z.string().min(1).max(200),
+}).strict();
+
 export const grantBodySchema = z.object({
   clientId: z.string().min(1).max(64),
   routeId: z.string().regex(/^[a-z][a-z0-9-]{0,62}$/),
