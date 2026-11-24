@@ -39,6 +39,18 @@ Frontend Vitest tests cover stores, utilities and practical component behaviour.
 
 Playwright starts against the Docker Compose stack and exercises first-run setup, authentication and user-visible workflows in a real browser.
 
+#### API keys in E2E artifacts
+
+`e2e/project-endpoints.spec.ts` issues a real Project API key, so its artifacts must not carry one:
+
+- the spec turns trace, video and automatic screenshots off;
+- `maskedScreenshot()` in `e2e/credential-safety.ts` is the only screenshot call in `e2e/`; it masks the key fields and refuses to capture if a key is visible anywhere else;
+- the key is entered without `fill()`, whose step title would contain it, and assertions about it are boolean so a failure message cannot print it;
+- on failure, the DOM is scrubbed before Playwright writes its page snapshot to `error-context.md`;
+- Playwright's global teardown runs `scripts/e2e/credential-scan.mjs` over `test-results/` and fails the run if it finds the `aeo_<16 hex>_<43 base64url>` format in a file, a ZIP entry (traces, the HTML report's embedded data), a gzip stream or a base64 run. An archive it cannot read also counts as a finding.
+
+Pixels cannot be scanned, which is why screenshots rely on masking. `npm run test:e2e-safety` tests the scanner and checks statically that every screenshot goes through the masked helper.
+
 ## Test pyramid
 
 ```text
@@ -126,6 +138,9 @@ npm run test:integration
 # RainViewer radar collector (scripts/radar, node:test; outside vitest's src/ root)
 npm run test:radar
 
+# E2E artifact credential scanner (scripts/e2e, node:test)
+npm run test:e2e-safety
+
 # Frontend tests and coverage
 cd frontend
 npm test
@@ -164,8 +179,9 @@ When `main` has changed in the previous 24 hours, the daily workflow:
 1. builds and starts Docker Compose;
 2. installs Chromium;
 3. runs Playwright;
-4. uploads reports and backend logs on failure;
-5. tears the stack down.
+4. scans `test-results/` and `playwright-report/` for API keys, failing the job on a finding;
+5. on failure, prints backend logs and uploads the report, unless the scan found a key;
+6. tears the stack down.
 
 The workflow can also be triggered manually.
 

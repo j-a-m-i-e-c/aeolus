@@ -28,6 +28,9 @@ export default defineConfig({
   timeout: 30_000,
   expect: { timeout: 10_000 },
   globalSetup: "./e2e/global-setup.ts",
+  // Fails the run if any artifact under test-results/ holds a Project API key.
+  // Specs that handle a key also turn trace and video off (e2e/credential-safety.ts).
+  globalTeardown: "./e2e/global-teardown.ts",
   reporter: process.env.CI
     ? [["list"], ["html", { open: "never" }]]
     : [["list"]],

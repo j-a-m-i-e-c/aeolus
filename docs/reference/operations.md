@@ -268,7 +268,8 @@ GitHub Actions runs:
 
 - Docker Compose startup;
 - Chromium Playwright end-to-end tests;
-- failure log and report upload.
+- an API-key scan of the test artifacts and report;
+- failure log and report upload, skipped when the scan finds a key.
 
 ## Build commands
 

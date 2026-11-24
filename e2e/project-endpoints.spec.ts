@@ -6,10 +6,17 @@
 // Each run seeds a fresh automation with a unique slug, because slugs are permanent
 // and a deleted API's slug is retired. Screenshots of each step are attached to the
 // test and written to its output directory (test-results/).
+//
+// The run handles a real API key, so it records nothing that could carry one
+// unmasked: trace, video and automatic screenshots are off, every screenshot masks
+// the key fields, the key is entered without `fill`, assertions never print it, and
+// global-teardown.ts scans test-results/ for the key format (e2e/credential-safety.ts).
 
 import { test, expect, type Page, type APIRequestContext, type TestInfo } from "@playwright/test";
 import { API_URL } from "./constants";
 import { adminAuth, layoutRevision } from "./helpers";
+import { enterSecret, maskedScreenshot, scrubCredentials } from "./credential-safety";
+import { API_KEY_PATTERN } from "../scripts/e2e/credential-scan.mjs";
 
 const TAB_ID = "tab-e2e-endpoints";
 const TAB_NAME = "E2E Endpoints";
@@ -90,16 +97,28 @@ async function seed(request: APIRequestContext): Promise<{ ruleId: string; auth:
   return { ruleId, auth };
 }
 
+// Traces record DOM snapshots and request headers, videos record the reveal dialog,
+// and the automatic failure screenshot is unmasked: none are safe in this file.
+// Playwright only accepts these at the top level, because they fix the worker.
+test.use({ trace: "off", video: "off", screenshot: "off" });
+
 let step = 0;
-async function snap(page: Page, testInfo: TestInfo, name: string): Promise<void> {
+/** A masked step screenshot; returns how many key fields were masked. */
+async function snap(page: Page, testInfo: TestInfo, name: string): Promise<number> {
   step += 1;
-  const file = testInfo.outputPath(`${String(step).padStart(2, "0")}-${name}.png`);
-  await page.screenshot({ path: file, fullPage: false });
-  await testInfo.attach(name, { path: file, contentType: "image/png" });
+  return maskedScreenshot(page, testInfo, `${String(step).padStart(2, "0")}-${name}.png`, name);
 }
 
 test.describe("Project API endpoints through the UI", () => {
   test.use({ viewport: { width: 1440, height: 1000 } });
+
+  // Runs before the page closes, so Playwright's failure page snapshot
+  // (error-context.md) sees no key. A masked screenshot replaces the automatic one.
+  test.afterEach(async ({ page }, testInfo) => {
+    if (testInfo.status === testInfo.expectedStatus) return;
+    await scrubCredentials(page).catch(() => undefined);
+    await maskedScreenshot(page, testInfo, "failure.png", "failure").catch(() => undefined);
+  });
 
   test("publish, create a client, issue a key, grant a route and call it", async ({ page, request }, testInfo) => {
     test.setTimeout(120_000);
@@ -150,13 +169,14 @@ test.describe("Project API endpoints through the UI", () => {
     const reveal = page.getByRole("dialog", { name: `New API key for ${clientName}` });
     await expect(reveal.getByText(/cannot be shown again/)).toBeVisible();
     const key = await reveal.getByRole("textbox", { name: "API key", exact: true }).inputValue();
-    expect(key).toMatch(/^aeo_[0-9a-f]{16}_[A-Za-z0-9_-]{43}$/);
-    await snap(page, testInfo, "key-revealed-once");
+    // Boolean checks, so a failure message cannot print the key.
+    expect(API_KEY_PATTERN.test(key) && key.length === 64, "the revealed key has the documented format").toBe(true);
+    expect(await snap(page, testInfo, "key-revealed-once"), "the revealed key field is masked").toBeGreaterThan(0);
     await reveal.getByRole("button", { name: "I have saved the key" }).click();
     await expect(reveal).toBeHidden();
     // Afterwards only the masked form is shown anywhere on the page.
     await expect(clients.getByText(new RegExp(`^aeo_${key.slice(4, 20)}_…`))).toBeVisible();
-    expect(await page.content()).not.toContain(key.slice(21));
+    expect((await page.content()).includes(key.slice(21)), "the secret part is gone from the page").toBe(false);
 
     // An ungranted key is refused with the uniform 404.
     const url = `${API_URL}/api/exposed/v1/${slug}/tanks/main`;
@@ -178,7 +198,7 @@ test.describe("Project API endpoints through the UI", () => {
     await calling.getByRole("combobox").last().selectOption("tank-status");
     await calling.getByLabel("id", { exact: true }).fill("main");
     // A password input has no textbox role, so it is found by its label.
-    await calling.getByLabel("API key", { exact: true }).fill(key);
+    await enterSecret(calling.getByLabel("API key", { exact: true }), key);
     await calling.getByRole("button", { name: /Send request/ }).click();
     await expect(calling.locator("span", { hasText: /^200$/ })).toBeVisible();
     await expect(calling.getByText(/"levelPercent"/)).toBeVisible();

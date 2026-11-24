@@ -526,8 +526,9 @@ browser and then calls the endpoint as a client would.
 **Walkthrough.** `e2e/project-endpoints.spec.ts` runs against any running stack
 (`npm run test:e2e`, or `E2E_BASE_URL`/`E2E_API_URL` for dev servers). It saves a screenshot
 at each step in its `test-results/` folder: declared routes, the publish confirmation,
-published, the one-time key, the route granted, a test request, activity, the unpublish
-warning, and unpublished.
+published, the one-time key dialog, the route granted, a test request, activity, the unpublish
+warning, and unpublished. Key fields are masked in every screenshot, and the run fails if an
+artifact contains a key (see "API keys in E2E artifacts" in `docs/TESTING.md`).
 
 **Phase 4 is not:** the Aeolus-to-Aeolus connector (Phase 5), POST or command endpoints,
 federation or a new authentication system.

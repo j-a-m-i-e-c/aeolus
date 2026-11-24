@@ -57,6 +57,9 @@ jobs:
       - name: Radar collector tests
         # scripts/radar runs outside src/, so vitest (rooted at src/) never sees it.
         run: npm run test:radar
+      - name: E2E artifact safety tests
+        # The scanner that keeps API keys out of Playwright artifacts (scripts/e2e).
+        run: npm run test:e2e-safety
 
   frontend:
     runs-on: ubuntu-latest

@@ -11,6 +11,8 @@ npm run test:coverage:no-broker || exit 1
 
 echo "→ pre-push: radar collector tests (scripts/radar, outside vitest's src/ root)..."
 npm run test:radar || exit 1
+echo "→ pre-push: E2E artifact credential-scan tests (scripts/e2e)..."
+npm run test:e2e-safety || exit 1
 
 echo "→ pre-push: frontend type check + tests with coverage..."
 # Run frontend tests WITH coverage so the local gate matches CI (which enforces
