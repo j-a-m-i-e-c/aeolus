@@ -50,7 +50,8 @@ export function DeveloperSection({ automationId, status }: { automationId: strin
                 );
               })}
             </div>
-            <OpenApiDocument automationId={automationId} slug={status.api!.slug} snapshotId={status.published?.id ?? ""} />
+            {/* Keyed by snapshot: a new snapshot remounts it, so neither its document nor a request still in flight for the old one survives. */}
+            <OpenApiDocument key={status.published?.id ?? ""} automationId={automationId} slug={status.api!.slug} />
             <TryRequest automationId={automationId} routes={routes} />
           </>
         )}
@@ -73,13 +74,11 @@ export function DeveloperSection({ automationId, status }: { automationId: strin
   );
 }
 
-function OpenApiDocument({ automationId, slug, snapshotId }: { automationId: string; slug: string; snapshotId: string }) {
+function OpenApiDocument({ automationId, slug }: { automationId: string; slug: string }) {
   const [document, setDocument] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [href, setHref] = useState<string | null>(null);
 
-  // A new snapshot means a new document; drop the old one.
-  useEffect(() => { setDocument(null); setError(null); }, [snapshotId]);
   useEffect(() => {
     if (!document || typeof URL.createObjectURL !== "function") return;
     const url = URL.createObjectURL(new Blob([document], { type: "application/json" }));

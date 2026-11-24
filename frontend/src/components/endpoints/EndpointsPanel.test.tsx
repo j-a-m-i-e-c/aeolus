@@ -582,12 +582,31 @@ describe("calling the API", () => {
     expect(revoke).toHaveBeenCalledWith("blob:openapi");
   });
 
+  // Regression: the document used to be cleared by an effect on the snapshot id. A
+  // click that landed before that effect's first run had its error wiped by it, so
+  // under load the failure was never shown. Waits are bounded at 5 s inside a 10 s
+  // test budget, so the wait, not the test timeout, reports a real failure.
   it("reports a document that cannot be generated", async () => {
     api.fetchOpenApiDocument.mockRejectedValue(new Error("This automation has no published API"));
     show();
-    fireEvent.click(await screen.findByRole("button", { name: "Generate document" }));
-    expect(await screen.findByText("This automation has no published API")).toBeInTheDocument();
-  });
+    fireEvent.click(await screen.findByRole("button", { name: "Generate document" }, { timeout: 5_000 }));
+    expect(await screen.findByText("This automation has no published API", undefined, { timeout: 5_000 })).toBeInTheDocument();
+    expect(api.fetchOpenApiDocument).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "Generate document" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Download .*\.openapi\.json/ })).not.toBeInTheDocument();
+  }, 10_000);
+
+  it("drops the document of a replaced snapshot", async () => {
+    Object.assign(URL, { createObjectURL: vi.fn(() => "blob:openapi"), revokeObjectURL: vi.fn() });
+    api.fetchOpenApiDocument.mockResolvedValue('{ "openapi": "3.1.0" }');
+    const { rerender } = show();
+    fireEvent.click(await screen.findByRole("button", { name: "Generate document" }, { timeout: 5_000 }));
+    expect(await screen.findByRole("link", { name: /Download tank-levels.openapi.json/ }, { timeout: 5_000 })).toBeInTheDocument();
+    serve({ s: status({ published: { ...status().published!, id: "snap-2" } }) });
+    rerender(<EndpointsPanel automationId="a1" savedRevision={5} unsavedChanges={false} />);
+    expect(await screen.findByRole("button", { name: "Generate document" }, { timeout: 5_000 })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Download .*\.openapi\.json/ })).not.toBeInTheDocument();
+  }, 10_000);
 
   it("tests a route through the server with a key that is then cleared", async () => {
     show();
