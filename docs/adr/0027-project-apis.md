@@ -1,6 +1,6 @@
 # ADR-0027: Project APIs — published, read-only HTTP endpoints for Automation Projects
 
-- **Status:** Accepted for Phases 0 to 3 (published, read-only GET endpoints with clients, keys and grants, and the Phase 3 boundary, resilience and performance validation). Phase 3 awaiting review before Phase 4; the script-caching decision waits on Raspberry Pi measurements
+- **Status:** Accepted for Phases 0 to 3 (published, read-only GET endpoints with clients, keys and grants, and the Phase 3 boundary, resilience and performance validation). Raspberry Pi measurements are an outstanding release-validation item; script caching stays disabled until they exist
 - **Date:** 2026-11-19
 - **Plan:** [Project APIs implementation plan](../architecture/project-apis-plan.md)
 
@@ -97,12 +97,18 @@ or the engine.
 - **A host wall-clock deadline (5 s) disposes the isolate.** That ends synchronous loops,
   CPU loops after an `await`, and promises that never settle. A caller that disconnects
   before its response is written has its isolate disposed at once rather than at the
-  deadline. Responses are capped at 64 KiB, checked inside the isolate before the result
-  is copied out and again on the host in UTF-8 bytes, and at most four isolates run at once.
+  deadline. At most four isolates run at once.
+- **Responses are capped at 64 KiB of UTF-8**, counted exactly on the host. Inside the
+  isolate a cheaper precheck refuses a result longer than the limit in UTF-16 code units
+  before it is copied out, so a huge string never crosses the boundary. The precheck is
+  not a byte count: a multibyte string can pass it at up to three times the limit in
+  bytes, and the host's byte check then refuses it. Because UTF-8 is never shorter than
+  the code-unit length, the precheck refuses nothing the byte limit would allow.
 - **Every admitted request gives back its slots.** Everything after rate-limit admission
   runs in one `try`/`finally`, so the per-client concurrency slot and the isolate slot are
   released after a timeout, a thrown error, memory exhaustion, an oversized response, a
-  disconnect, or a state reader that fails before the isolate starts.
+  disconnect, a state reader that fails before the isolate starts, or an isolate that
+  cannot be constructed. The last reports the sandbox `unavailable` rather than rejecting.
 - A handler returns a JSON value (200) or `api.response(status, body)` with status 400 or
   404. Every other status belongs to the host. A 200 body must satisfy the route's response
   schema, or the caller receives a 500 that does not leak details.
@@ -115,10 +121,11 @@ or the engine.
   on the event bus, on Node's network, process and filesystem entry points, and on every
   SQL statement. The only write a request makes is authentication's `last_used_at` stamp,
   at most once a minute per key; that is bookkeeping, not automation state.
-- **Compiled-script caching is not used.** Compiling a bundle is a small part of an
-  invocation on the development PC; isolate creation dominates, and a code cache cannot
-  remove that. Whether it is worth adding is decided on Raspberry Pi measurements
-  (`make bench-project-api`). If added, the cache must be keyed by snapshot id and bundle
+- **Compiled-script caching is not used, and stays disabled until Raspberry Pi
+  measurements exist.** Compiling a bundle is a small part of an invocation on the
+  development PC; isolate creation dominates, and a code cache cannot remove that.
+  Measuring on a Pi (`make bench-project-api`) is an outstanding release-validation item,
+  not a Phase 3 implementation gap. If added, the cache must be keyed by snapshot id and bundle
   hash and hold V8 code-cache data only, never a shared isolate or context, so each request
   still starts from a fresh isolate.
 

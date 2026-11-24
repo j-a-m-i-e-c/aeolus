@@ -12,8 +12,11 @@
 //     only bounds synchronous execution; CPU spent after an `await` runs on the
 //     isolate's own thread until the isolate is disposed;
 //   - values cross the boundary as JSON strings or ExternalCopy copies, never as
-//     callable references. An oversized result is refused inside the isolate, so
-//     the host never copies more than the response limit out of it;
+//     callable references. A result longer than the limit in UTF-16 code units is
+//     refused inside the isolate, so a huge string is never copied out. That is
+//     only a precheck: a multibyte string can pass it and still be up to three
+//     times the limit in bytes. The response limit itself is the exact UTF-8 byte
+//     count the host checks afterwards;
 //   - an AbortSignal (the caller disconnected) disposes the isolate early, so a
 //     client that hangs up does not keep an isolate running to the deadline.
 //
@@ -180,9 +183,8 @@ export async function invokeApiHandler(
   if (signal?.aborted) return { ok: false, reason: "aborted", detail: "The caller went away", durationMs: 0 };
   if (active >= limits.maxConcurrent) return { ok: false, reason: "busy", detail: "API sandbox is at its concurrency limit", durationMs: 0 };
 
-  active++;
   const runtime = ivm;
-  const isolate = new runtime.Isolate({ memoryLimit: limits.memoryMb });
+  let isolate: InstanceType<typeof runtime.Isolate> | undefined;
   let timedOut = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let onAbort: (() => void) | undefined;
@@ -190,74 +192,95 @@ export async function invokeApiHandler(
   // host's garbage collector, so their native memory is freed with the request.
   const handles: Array<{ release(): void }> = [];
   const hold = <T extends { release(): void }>(handle: T): T => { handles.push(handle); return handle; };
-  const dispose = () => { try { isolate.dispose(); } catch { /* already disposed */ } };
+  const dispose = () => { try { isolate?.dispose(); } catch { /* already disposed */ } };
 
-  const deadline = new Promise<ApiInvocationResult>((resolve) => {
-    timer = setTimeout(() => {
-      timedOut = true;
-      dispose();
-      resolve({ ok: false, reason: "timeout", detail: `Handler did not finish within ${limits.deadlineMs} ms`, durationMs: elapsed() });
-    }, limits.deadlineMs);
-  });
-  const abandoned = new Promise<ApiInvocationResult>((resolve) => {
-    if (!signal) return;
-    onAbort = () => {
-      dispose();
-      resolve({ ok: false, reason: "aborted", detail: "The caller went away", durationMs: elapsed() });
-    };
-    signal.addEventListener("abort", onAbort, { once: true });
-  });
-
-  const work = (async (): Promise<ApiInvocationResult> => {
-    const context = hold(await isolate.createContext());
-    const jail = hold(context.global);
-    for (const name of FORBIDDEN_GLOBALS) await jail.set(name, undefined);
-    await jail.set("__stateGetRef", hold(new runtime.Reference((key: string) => {
-      const value = state.get(key);
-      return value === undefined ? undefined : new runtime.ExternalCopy(value).copyInto({ release: true });
-    })));
-    await jail.set("__stateGetAllRef", hold(new runtime.Reference(() => new runtime.ExternalCopy(state.getAll()).copyInto({ release: true }))));
-
-    const remaining = () => Math.max(1, limits.deadlineMs - elapsed());
-    await hold(await isolate.compileScript(API_BOOTSTRAP)).run(context);
-    await hold(await isolate.compileScript(bundle)).run(context, { timeout: remaining() });
-
-    const invoke = hold(await jail.get("__aeolusInvoke", { reference: true }));
-    const envelopeLimit = limits.maxResponseBytes + 64;
-    const raw: unknown = await invoke.apply(undefined, [handler, JSON.stringify(request), envelopeLimit], {
-      timeout: remaining(),
-      result: { promise: true, copy: true },
-    });
-    const tooLarge = (): ApiInvocationResult =>
-      ({ ok: false, reason: "too-large", detail: `Response exceeds ${limits.maxResponseBytes} bytes`, durationMs: elapsed() });
-    if (typeof raw !== "string") return { ok: false, reason: "invalid-response", detail: "Handler result could not be serialized", durationMs: elapsed() };
-    if (Buffer.byteLength(raw, "utf8") > envelopeLimit) return tooLarge();
-
-    const envelope: unknown = JSON.parse(raw);
-    if (envelope && typeof envelope === "object" && "tooLarge" in envelope) return tooLarge();
-    if (envelope && typeof envelope === "object" && "missing" in envelope) {
-      return { ok: false, reason: "missing-handler", detail: `No exported handler named ${handler}`, durationMs: elapsed() };
-    }
-    const { status, body } = envelope as { status: unknown; body?: unknown };
-    if (!HANDLER_STATUSES.includes(status as HandlerStatus) || body === undefined) {
-      return { ok: false, reason: "invalid-response", detail: "Handler returned no JSON body", durationMs: elapsed() };
-    }
-    if (Buffer.byteLength(JSON.stringify(body), "utf8") > limits.maxResponseBytes) return tooLarge();
-    return { ok: true, status: status as HandlerStatus, body, durationMs: elapsed() };
-  })().catch((error: unknown): ApiInvocationResult => ({
-    ok: false,
-    reason: classify(error, timedOut, isolate.isDisposed),
-    detail: truncate(error instanceof Error ? error.message : String(error)),
-    durationMs: elapsed(),
-  }));
-
+  // The slot is taken and given back inside one try/finally, which also covers
+  // creating the isolate: a constructor that throws (V8 refusing the allocation)
+  // still frees the slot and reports a failure instead of rejecting.
+  active++;
   try {
+    const live = new runtime.Isolate({ memoryLimit: limits.memoryMb });
+    isolate = live;
+
+    const deadline = new Promise<ApiInvocationResult>((resolve) => {
+      timer = setTimeout(() => {
+        timedOut = true;
+        dispose();
+        resolve({ ok: false, reason: "timeout", detail: `Handler did not finish within ${limits.deadlineMs} ms`, durationMs: elapsed() });
+      }, limits.deadlineMs);
+    });
+    const abandoned = new Promise<ApiInvocationResult>((resolve) => {
+      if (!signal) return;
+      onAbort = () => {
+        dispose();
+        resolve({ ok: false, reason: "aborted", detail: "The caller went away", durationMs: elapsed() });
+      };
+      signal.addEventListener("abort", onAbort, { once: true });
+    });
+
+    const work = (async (): Promise<ApiInvocationResult> => {
+      const context = hold(await live.createContext());
+      const jail = hold(context.global);
+      for (const name of FORBIDDEN_GLOBALS) await jail.set(name, undefined);
+      await jail.set("__stateGetRef", hold(new runtime.Reference((key: string) => {
+        const value = state.get(key);
+        return value === undefined ? undefined : new runtime.ExternalCopy(value).copyInto({ release: true });
+      })));
+      await jail.set("__stateGetAllRef", hold(new runtime.Reference(() => new runtime.ExternalCopy(state.getAll()).copyInto({ release: true }))));
+
+      const remaining = () => Math.max(1, limits.deadlineMs - elapsed());
+      await hold(await live.compileScript(API_BOOTSTRAP)).run(context);
+      await hold(await live.compileScript(bundle)).run(context, { timeout: remaining() });
+
+      const invoke = hold(await jail.get("__aeolusInvoke", { reference: true }));
+      // The isolate refuses a result longer than this many UTF-16 code units before
+      // it is copied out. That is only a cheap precheck: a UTF-8 encoding is never
+      // shorter than the string's code-unit length, so it refuses nothing the byte
+      // limit below would allow. The limit itself is the exact UTF-8 byte count
+      // checked here on the host, which a multibyte string can exceed while passing
+      // the precheck.
+      const envelopeLimit = limits.maxResponseBytes + 64;
+      const raw: unknown = await invoke.apply(undefined, [handler, JSON.stringify(request), envelopeLimit], {
+        timeout: remaining(),
+        result: { promise: true, copy: true },
+      });
+      const tooLarge = (): ApiInvocationResult =>
+        ({ ok: false, reason: "too-large", detail: `Response exceeds ${limits.maxResponseBytes} bytes`, durationMs: elapsed() });
+      if (typeof raw !== "string") return { ok: false, reason: "invalid-response", detail: "Handler result could not be serialized", durationMs: elapsed() };
+      if (Buffer.byteLength(raw, "utf8") > envelopeLimit) return tooLarge();
+
+      const envelope: unknown = JSON.parse(raw);
+      if (envelope && typeof envelope === "object" && "tooLarge" in envelope) return tooLarge();
+      if (envelope && typeof envelope === "object" && "missing" in envelope) {
+        return { ok: false, reason: "missing-handler", detail: `No exported handler named ${handler}`, durationMs: elapsed() };
+      }
+      const { status, body } = envelope as { status: unknown; body?: unknown };
+      if (!HANDLER_STATUSES.includes(status as HandlerStatus) || body === undefined) {
+        return { ok: false, reason: "invalid-response", detail: "Handler returned no JSON body", durationMs: elapsed() };
+      }
+      if (Buffer.byteLength(JSON.stringify(body), "utf8") > limits.maxResponseBytes) return tooLarge();
+      return { ok: true, status: status as HandlerStatus, body, durationMs: elapsed() };
+    })().catch((error: unknown): ApiInvocationResult => ({
+      ok: false,
+      reason: classify(error, timedOut, live.isDisposed),
+      detail: truncate(error instanceof Error ? error.message : String(error)),
+      durationMs: elapsed(),
+    }));
+
     return await Promise.race([work, deadline, abandoned]);
+  } catch (error: unknown) {
+    // Only setup outside `work` can throw here, in practice the Isolate constructor.
+    return {
+      ok: false,
+      reason: "unavailable",
+      detail: truncate(`Could not create the API sandbox: ${error instanceof Error ? error.message : String(error)}`),
+      durationMs: elapsed(),
+    };
   } finally {
     clearTimeout(timer);
     if (onAbort) signal?.removeEventListener("abort", onAbort);
     for (const handle of handles) { try { handle.release(); } catch { /* the isolate is already gone */ } }
-    if (!isolate.isDisposed) dispose();
+    if (isolate && !isolate.isDisposed) dispose();
     active--;
   }
 }

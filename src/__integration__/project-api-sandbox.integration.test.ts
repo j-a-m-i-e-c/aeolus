@@ -170,6 +170,44 @@ describe("Project API sandbox (real isolated-vm)", () => {
     expect(result).toMatchObject({ ok: false, reason: "too-large" });
   });
 
+  describe("the response limit is UTF-8 bytes, not string length", () => {
+    // The default limit is 64 KiB. Each case is under it in UTF-16 code units, so
+    // only the host's exact byte count can decide it.
+    const LIMIT = DEFAULT_API_LIMITS.maxResponseBytes;
+    const bodyBytes = (body: unknown) => Buffer.byteLength(JSON.stringify(body), "utf8");
+
+    realIt("refuses two-byte characters that are under the limit in length but over it in bytes", async () => {
+      const count = 33 * 1024; // 33,792 characters, 67,586 bytes as a JSON string
+      expect(count + 2).toBeLessThan(LIMIT);
+      const result = await run(`export function handle() { return "\\u00e9".repeat(${count}); }`);
+      expect(result).toMatchObject({ ok: false, reason: "too-large" });
+    });
+
+    realIt("refuses three-byte and four-byte characters the same way", async () => {
+      // "€" is one code unit and three bytes; "😀" is two code units and four bytes.
+      for (const [char, count] of [["\\u20ac", 22 * 1024], ["\\ud83d\\ude00", 16 * 1024 + 1]] as const) {
+        const result = await run(`export function handle() { return "${char}".repeat(${count}); }`);
+        expect(result, char).toMatchObject({ ok: false, reason: "too-large" });
+      }
+    });
+
+    realIt("accepts a multibyte body just under the byte limit, unchanged", async () => {
+      const count = Math.floor((LIMIT - 2) / 2) - 8; // two bytes each, plus the quotes
+      const result = await run(`export function handle() { return "\\u00e9".repeat(${count}); }`);
+      expect(result).toMatchObject({ ok: true, status: 200 });
+      const body = (result as { body: string }).body;
+      expect(body).toBe("\u00e9".repeat(count));
+      expect(bodyBytes(body)).toBeLessThanOrEqual(LIMIT);
+      expect(bodyBytes(body)).toBeGreaterThan(LIMIT - 32);
+    });
+
+    realIt("counts the body, so an ASCII body of exactly the limit passes and one byte more does not", async () => {
+      const exact = LIMIT - 2; // the JSON quotes make up the rest
+      expect(await run(`export function handle() { return "a".repeat(${exact}); }`)).toMatchObject({ ok: true });
+      expect(await run(`export function handle() { return "a".repeat(${exact + 1}); }`)).toMatchObject({ ok: false, reason: "too-large" });
+    });
+  });
+
   realIt("fails a state read the host refuses, without crashing the host", async () => {
     const failing: ApiStateReader = { get: () => { throw new Error("database is locked"); }, getAll: () => ({}) };
     expect(await run(`export function handle() { return state.get("x"); }`, failing)).toMatchObject({ ok: false, reason: "runtime" });

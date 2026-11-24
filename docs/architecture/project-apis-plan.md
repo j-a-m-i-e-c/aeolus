@@ -1,8 +1,8 @@
 # Project APIs: implementation plan
 
-**Status:** Phases 0 to 3 complete on `main`, awaiting review before Phase 4. The Phase 3
-Raspberry Pi measurements, and the script-caching decision that depends on them, are
-outstanding.
+**Status:** Phases 0 to 3 complete and approved on `main`; Phase 4 in progress.
+Outstanding release validation: Raspberry Pi measurements (see
+[Release validation](#release-validation)). Script caching stays disabled until they exist.
 **Decision record:** [ADR-0027](../adr/0027-project-apis.md). This plan is the
 implementation detail behind it, and replaces the original "Aeolus Project APIs —
 Implementation Specification" (reviewed against `f0cf75d`).
@@ -306,7 +306,7 @@ and metrics labels.
 - No key material appears in logs, the admin log buffer, metrics, audit rows or error
   bodies (asserted by capturing log output).
 
-## Phase 3: validation and hardening (complete; Pi measurements outstanding)
+## Phase 3: validation and hardening (complete)
 
 Phase 2 already executes snapshots, maps statuses and enforces limits (departure 1), so
 Phase 3 validates and hardens what exists. No new capability was added.
@@ -340,8 +340,17 @@ Phase 3 validates and hardens what exists. No new capability was added.
 - **Disconnects end the isolate.** When the response closes before it is written, an
   `AbortSignal` disposes the isolate at once instead of letting it run to the 5 s deadline.
   The request is logged as `client-disconnected`.
-- **Oversized results are refused inside the isolate**, by length before the result is
-  copied out, and the exact UTF-8 byte check still runs on the host.
+- **Oversized results are prechecked inside the isolate.** A result longer than the limit
+  in UTF-16 code units is refused before it is copied out. That is not a byte count: the
+  64 KiB limit is the exact UTF-8 byte count the host checks afterwards, which catches a
+  multibyte string that passed the precheck. Tests cover two-, three- and four-byte
+  characters, a multibyte body just under the limit, and an ASCII body at exactly the
+  limit and one byte over (`project-api-sandbox.integration.test.ts`).
+- **Isolate construction is inside the slot's `try`/`finally`** (after the Phase 3 review).
+  The slot used to be taken before `new Isolate()`, outside the cleanup, so a constructor
+  that threw would have held it for good. A constructor failure now frees the slot and
+  reports the sandbox `unavailable` (`api-sandbox.construction.test.ts`, with a stubbed
+  `isolated-vm` whose constructor throws).
 - **Host handles are released explicitly.** References, the context, its global and the
   compiled scripts are released with the request rather than left to the host's garbage
   collector. On the development PC this halved RSS growth over 150,000 four-way invocations
@@ -417,10 +426,8 @@ say a fifth, of `fullInvocation` there. If it is added, it is keyed by snapshot 
 bundle hash, holds V8 code-cache data only, and never shares an isolate or context between
 requests.
 
-**Outstanding: the Raspberry Pi run.** Not yet measured on a Pi. On the Pi, from the
-repository root: `make bench-project-api` (Docker only; the first image build compiles the
-native modules). The JSON lands in `/tmp/aeolus-bench`. Its results, with the Pi model and
-storage type, and the caching decision are to be recorded here.
+The Raspberry Pi run is deferred to [release validation](#release-validation); it does not
+block Phase 4.
 
 **Compatibility.** Nothing outside `src/project-api`, its routes and `src/index.ts` (one
 line: the shared `automationStateReader`) changed. The full backend and frontend suites
@@ -436,6 +443,8 @@ and public-demo policy unchanged.
 | Rotation: explicit new expiry, separate overlap, both audited, past expiry refused | `access.unit.test.ts`, `project-api.access.routes.test.ts` |
 | A GET cannot reach state, events, MQTT, commands, network, Node.js, filesystem or environment | `project-api-boundary.integration.test.ts` |
 | Loops, unresolved promises, exceptions, oversized responses, memory, concurrency, disconnects, restart, slot release | `project-api-resilience.integration.test.ts` |
+| An isolate constructor that throws releases its slot | `api-sandbox.construction.test.ts` |
+| The response limit is UTF-8 bytes, not string length | `project-api-sandbox.integration.test.ts` |
 
 ## Phase 4: OpenAPI, Endpoints UI and documentation
 
@@ -537,16 +546,18 @@ billing and Kong integration.
 | Source deleted or edited during a request | Phase 1 (`project-api-publication.integration.test.ts`; the snapshot is read once per request) |
 | SSRF through the outbound connector | Phase 5 (configured host only, redirect rules) |
 
-## Review points for the end of Phase 3
+## Release validation
 
-The Phase 2 departures were approved. For Phase 3:
+Items to complete before a release that ships Project APIs. They are measurements, not
+missing implementation.
 
-1. **The rotate route now requires `expiresAt`.** That is a breaking change to a management
-   route with no UI and no known consumer yet. Making the choice explicit was preferred to
-   a default that could silently mirror the old key.
-2. **Pi measurements and the caching decision are outstanding**, pending a run of
-   `make bench-project-api` on the Pi.
-3. **Residual native memory growth** of about 0.5 MB per 1,000 requests under sustained
-   concurrent load on the PC, matching bare `isolated-vm`. Worth watching in the Pi soak
-   numbers. If it matters there, the remedy is outside the request path, for example a
-   periodic check of RSS in operations, not a change to isolation.
+1. **Raspberry Pi measurements.** On the Pi, from the repository root:
+   `make bench-project-api` (Docker only; the first image build compiles the native
+   modules). The JSON lands in `/tmp/aeolus-bench`. Record it here with the Pi model and
+   storage type, next to the PC table in Phase 3.
+2. **The script-caching decision**, from those numbers. Caching stays disabled until then;
+   the PC results do not justify it.
+3. **Native memory growth on the Pi.** On the PC, sustained concurrent load raised idle
+   RSS by about 0.5 MB per 1,000 requests, matching bare `isolated-vm`. Check the Pi soak
+   numbers. If it matters there, the remedy is operational (watching RSS), not a change to
+   isolation.
