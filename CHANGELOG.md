@@ -15,6 +15,9 @@ Aeolus follows semantic versioning for published releases. Until the first stabl
 ### Project APIs
 
 * Automation Projects can publish read-only HTTP endpoints for other programs, including another Aeolus installation: `api/routes.json` declares GET routes and `api/handlers.ts` implements them. Handlers run in their own sandbox with read-only access to their automation's state. An admin publishes an immutable snapshot under a permanent slug, creates API clients and keys (shown once, SHA-256 hashed), and grants them individual routes. Callers use `Authorization: Bearer` at `/api/exposed/v1/<slug>/...`. Unpublishing, or demoting the admin who published, revokes every grant. All changes are recorded in an append-only audit log. LAN and VPN are the supported networks; `EXPOSED_API_REQUIRE_HTTPS` enforces HTTPS behind a trusted proxy. Management is API-only until the Endpoints editor section ships. See [Project APIs](docs/reference/project-apis.md) and [ADR-0027](docs/adr/0027-project-apis.md).
+* A client granted some routes of an API gets `404`, never `503`, on its other routes, whatever the API's state. Only a granted route reports that its API is unavailable.
+* Rotating an API key now requires the new key's expiry (`expiresAt`, or `null`). It is no longer copied from the old key; `overlapSeconds` separately sets how long the old key keeps working.
+* A caller that disconnects has its handler's isolate disposed at once instead of at the 5 s deadline, oversized responses are refused inside the isolate before being copied out, and a state reader failing before the isolate starts no longer leaks the client's concurrency slot. `make bench-project-api` measures latency, CPU and memory on the host it runs on.
 
 ### Security and reliability
 

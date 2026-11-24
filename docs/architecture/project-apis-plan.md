@@ -1,6 +1,8 @@
 # Project APIs: implementation plan
 
-**Status:** Phases 0 to 2 complete on `main`, awaiting review before Phase 3.
+**Status:** Phases 0 to 3 complete on `main`, awaiting review before Phase 4. The Phase 3
+Raspberry Pi measurements, and the script-caching decision that depends on them, are
+outstanding.
 **Decision record:** [ADR-0027](../adr/0027-project-apis.md). This plan is the
 implementation detail behind it, and replaces the original "Aeolus Project APIs —
 Implementation Specification" (reviewed against `f0cf75d`).
@@ -90,9 +92,8 @@ Implementation Specification" (reviewed against `f0cf75d`).
    The project's Logic is not in the API bundle, so requests cannot run it.
 
 **Measured:** median 1.8 ms and p90 2.2 ms per request on the development PC (Windows,
-Node 24.14), including isolate creation, script compilation and invocation. This still needs
-measuring on a Pi 4/5 in Phase 3; caching compiled code per snapshot is available if
-needed.
+Node 24.14), including isolate creation, script compilation and invocation. Phase 3 adds a
+benchmark for the full HTTP path; see its performance section.
 
 **Phase 0 is not:** wired into project compilation, routing, storage or the UI. Nothing in
 it is reachable at runtime.
@@ -216,7 +217,8 @@ and metrics labels.
    so the rule "no publication, no grants" has no exception, and a republish by another
    admin needs regranting.
 3. **A granted caller sees `503` for an unavailable API. A caller with no grant to it sees
-   `404`**, so an API's state is visible only to its grantees.
+   `404`**, so an API's state is visible only to its grantees. Phase 3 narrowed this to the
+   route: only a route the caller is granted can answer `503`.
 
 **Requested tests**
 
@@ -304,26 +306,136 @@ and metrics labels.
 - No key material appears in logs, the admin log buffer, metrics, audit rows or error
   bodies (asserted by capturing log output).
 
-## Phase 3: runtime, limits and snapshot enforcement
+## Phase 3: validation and hardening (complete; Pi measurements outstanding)
 
-- The router executes the published snapshot through `invokeApiHandler()` with a state
-  reader bound to the API's automation id.
-- Mapping: 200 with a schema-validated body; the handler's 400 or 404; 500 for an invalid
-  body or a thrown error; 504 for the deadline; 503 for a disabled automation, a lost
-  authority, a runtime-contract mismatch, an unpublished API or a busy sandbox.
-- In-memory limits per credential and per client (default 60/min, 2 concurrent), plus the
-  server-wide isolate cap. Limits are configurable within ceilings, and responses carry 429
-  and `Retry-After`.
-- **Acceptance**
-  - Status mapping holds for each case above.
-  - Concurrent calls never exceed the configured limits.
-  - Hung handlers never exhaust the process.
-  - A GET never writes state, publishes MQTT, sends a command or makes an outbound request
-    (asserted with spies on every bridge).
-  - Editing the project after publishing serves the old snapshot, and the Endpoints section
-    reports unpublished changes.
-  - A restart resets limits, which is documented.
-  - Measured on a Pi.
+Phase 2 already executes snapshots, maps statuses and enforces limits (departure 1), so
+Phase 3 validates and hardens what exists. No new capability was added.
+
+**Refinements from the Phase 2 review**
+- **A. Only a granted route can answer `503`.** The router used to check that the client
+  held *any* grant to the API, then the API's health, then the route grant, so a client
+  granted one route got `503` on its ungranted routes while the API was unavailable. Now
+  `resolve()` returns the API record and the snapshot's routes for an unavailable
+  publication as well, and the router settles the exact route grant first. Ungranted
+  routes are `404` whether the API is serving, disabled, has lost authority, has a
+  publisher who is no longer an admin, mismatches the runtime contract or fails its
+  integrity check. A stored manifest that no longer parses identifies no route, so every
+  caller gets `404`. `hasAnyGrant` was removed.
+- **B. Rotation chooses the new key's expiry explicitly.** `rotateKey` copied the old key's
+  `expires_at` onto the replacement, so rotating a key about to expire issued one about to
+  expire too, and the overlap was the only lifetime the admin chose. Now the rotate body
+  requires `expiresAt` (a future timestamp, or `null`) for the new key, and `overlapSeconds`
+  only sets how long the old key keeps working. Both values are audited (`key.rotated`
+  and `key.expiring` metadata).
+
+**Hardening found while testing**
+- **A slot leak, fixed.** If the state reader threw before the isolate started, the
+  rejection escaped before `.finally()` was attached in the same chain, and the client's
+  concurrency slot stayed taken. Everything after admission now runs in one
+  `try`/`finally`.
+- **The limiter's pruning was quadratic when full.** Once 10,000 windows were tracked and
+  none had expired, every new key rescanned the whole map. It now scans at most once a
+  minute. Only authenticated keys reach the limiter (at most 200 clients with 10 keys
+  each), so this was found by its unit test timing out under coverage, not in use.
+- **Disconnects end the isolate.** When the response closes before it is written, an
+  `AbortSignal` disposes the isolate at once instead of letting it run to the 5 s deadline.
+  The request is logged as `client-disconnected`.
+- **Oversized results are refused inside the isolate**, by length before the result is
+  copied out, and the exact UTF-8 byte check still runs on the host.
+- **Host handles are released explicitly.** References, the context, its global and the
+  compiled scripts are released with the request rather than left to the host's garbage
+  collector. On the development PC this halved RSS growth over 150,000 four-way invocations
+  (75 to 264 MB before, 75 to 157 MB after), with the JS heap flat at 10 to 11 MB both
+  times. A bare `isolated-vm` create, compile, run and dispose loop with no Aeolus code grows
+  at the same remaining rate (39 to 119 MB over 150,000), so what is left is native
+  allocator retention in V8 or `isolated-vm`, not a leak in this code. The benchmark's soak
+  step measures it on the Pi.
+
+**Security boundary** (`project-api-boundary.integration.test.ts`). A hostile handler runs
+in a real isolate through the router and the `automationStateReader` that `src/index.ts`
+uses, while the host is watched:
+
+| A Project API GET cannot | Evidence |
+|---|---|
+| Modify Automation State or Shared State | No set or delete exists; `defineProperty` and assignment on `state` throw; a mutated copy leaves the stored value unchanged; spies on every method of `AutomationStateStore` (except `get`/`getAll`), `SharedStateStore` and `DataStore` record no call; a fingerprint of every table is unchanged |
+| Publish MQTT or an automation event | Every method of `MqttService` and `AutomationEventService` is spied, and `eventBus.emit` records nothing |
+| Dispatch a device command or bypass `CommandService` | Every method of `CommandService`, `DeviceRegistry`, `ConnectorRegistry`, `CommandHistoryStore`, `AutomationEngine`, `Sandbox` and `ExecutionLog` is spied and none is called; no SQL other than authentication's runs |
+| Make an outbound HTTP request | `fetch`, `http`/`https` `request` and `get`, `net`, `tls`, `dgram` and `dns` are spied; the test's own connection is the only network activity. Inside, `fetch`, `XMLHttpRequest`, `WebSocket` and dynamic `import()` of a URL are absent or refused |
+| Read another automation's private state | The reader is bound to the owning automation id on the host; path-like, prefixed and prototype keys all return nothing; only that automation id is ever read; the other automation's value never appears in the response |
+| Reach Node.js, the filesystem or the environment | `process`, `require`, `module`, `Buffer` and timers are absent, including through `Function` and constructor chains; `import("node:fs")` is refused; `fs` and `child_process` entry points record no call; a file canary and an environment canary never appear |
+
+The only SQL write during a request is authentication's `last_used_at` stamp, and the table
+fingerprint excludes that column alone. Prototype pollution inside the isolate does not
+reach the host.
+
+**Runtime resilience** (`project-api-resilience.integration.test.ts`). After every test, no
+client slot and no isolate is still held.
+
+| Case | Result |
+|---|---|
+| Synchronous loop, CPU loop after `await`, promise that never settles | `504` within the deadline plus 600 ms; the host event loop keeps ticking; other requests are served meanwhile |
+| Thrown `Error`, thrown string, rejection after `await`, stack overflow | The same `500` body, with no message, stack or detail |
+| Oversized response, long in characters or only in UTF-8 bytes | `500`, refused as `too-large` |
+| Memory exhaustion (16 MB isolate) | `500`; the next request is served normally |
+| State reader failing before the isolate starts, or inside it | `500`, and with one slot per client the next request is not `429` |
+| A mixed run of failures at one concurrent slot | Every slot comes back; the last request is `200` |
+| Eight concurrent requests | Each gets its own isolate and its own answer |
+| Over the server-wide isolate cap / the per-client cap | `503` with `Retry-After: 1` / `429`; both free up afterwards |
+| Caller disconnects during a CPU loop or a pending promise | The isolate is disposed within a second rather than at the 5 s deadline, and the slots are released |
+| Restart | The same snapshot, grants and keys are served from the file database; rate windows start again; a request in flight when the listener closes ends its isolate and leaves nothing persisted; a revocation made before the restart still holds |
+
+**Performance.** `scripts/bench/project-api-bench.ts` (`make bench-project-api`; see
+`scripts/bench/README.md`) runs the real router, stores and sandbox over HTTP against a
+WAL SQLite file holding about 9 KB of persisted automation state. Both handlers read it:
+`tank` reads one key, `summary` reads all of them. The server runs in its own process.
+
+Measured on the development PC only: AMD Ryzen 7 9700X (8 cores, 16 threads), 32 GB,
+Windows 11 (10.0.26300), Node 24.14.0, `isolated-vm` 6.2.0, NVMe. Medians move by about a
+millisecond between runs on this machine; these are from one run.
+
+| Measure | p50 | p95 | Other |
+|---|---|---|---|
+| Cold: first request after start, client side (5 fresh processes) | 25.8 ms | 27.8 ms | server's own timing 20 ms; second request 6.8 ms; start-up 404 ms |
+| Warm `tank`, sequential (300) | 3.6 ms | 4.6 ms | p99 5.5 ms; 99 % of one core; RSS 92 MB |
+| Warm `summary`, sequential (300) | 3.7 ms | 5.8 ms | p99 7.7 ms; RSS 95 MB |
+| 1 caller, 10 s | 3.3 ms | 4.6 ms | 285 req/s; 93 % CPU; RSS 115 MB |
+| 2 callers | 5.2 ms | 7.2 ms | 368 req/s; 121 % CPU; RSS 125 MB |
+| 4 callers (at the cap of 4 isolates) | 9.9 ms | 14.5 ms | 391 req/s; 132 % CPU; RSS 136 MB |
+| 8 callers (twice the cap) | 22.6 ms | 32.1 ms | 184 req/s served, 1,451 req/s refused with `503`; RSS 143 MB |
+| Idle RSS after GC, before and after load | | | 87 MB, then 144 MB; soak of 10,000 more requests: 137, 139, 118, 116, 120 MB |
+
+CPU is the server process's user and system time over wall time; 100 % is one core. Event
+loop delay p99 stayed between 12 and 19 ms throughout.
+
+**Script caching: not added.** Splitting one invocation on the PC (p50, 100 iterations):
+isolate and context creation 1.46 ms, compiling the 1 KB bundle 0.14 ms (0.08 ms from a V8
+code cache), running it 0.04 ms, the full invocation 2.97 ms. A cache would save about
+0.06 ms, or 2 %. For a 44 KB bundle it would save about 0.46 ms of 0.65 ms. Isolate
+creation dominates, and a code cache cannot remove it. So caching is decided on the Pi
+numbers: it is worth adding only if `compile` minus `compileFromCache` is a material share,
+say a fifth, of `fullInvocation` there. If it is added, it is keyed by snapshot id and
+bundle hash, holds V8 code-cache data only, and never shares an isolate or context between
+requests.
+
+**Outstanding: the Raspberry Pi run.** Not yet measured on a Pi. On the Pi, from the
+repository root: `make bench-project-api` (Docker only; the first image build compiles the
+native modules). The JSON lands in `/tmp/aeolus-bench`. Its results, with the Pi model and
+storage type, and the caching decision are to be recorded here.
+
+**Compatibility.** Nothing outside `src/project-api`, its routes and `src/index.ts` (one
+line: the shared `automationStateReader`) changed. The full backend and frontend suites
+cover the automation engine, MQTT processing, command evidence, dashboard authentication
+and public-demo policy unchanged.
+
+**Tests added in Phase 3**
+
+| Requested | Where |
+|---|---|
+| Ungranted route stays `404` while the API is disabled, has lost authority, has a contract mismatch or fails integrity; granted route `503` | `project-api-exposed.integration.test.ts` |
+| Unparseable stored manifest gives `404` | same |
+| Rotation: explicit new expiry, separate overlap, both audited, past expiry refused | `access.unit.test.ts`, `project-api.access.routes.test.ts` |
+| A GET cannot reach state, events, MQTT, commands, network, Node.js, filesystem or environment | `project-api-boundary.integration.test.ts` |
+| Loops, unresolved promises, exceptions, oversized responses, memory, concurrency, disconnects, restart, slot release | `project-api-resilience.integration.test.ts` |
 
 ## Phase 4: OpenAPI, Endpoints UI and documentation
 
@@ -409,7 +521,9 @@ billing and Kong integration.
 | Author code at compile time | Phase 0 (compiler tests) |
 | Logic or UI code reached from an API, including via `lib/` | Phase 0 |
 | Sandbox escape to `process`, `require`, MQTT, devices, HTTP, Shared State or the Data Store | Phase 0 (capability test) |
-| State mutation through a GET | Phase 0 (no set/delete, copies); Phase 3 (bridge spies) |
+| State mutation, events, MQTT, commands or outbound requests through a GET | Phase 0 (no set/delete, copies); Phase 3 (host-side spies and table fingerprint) |
+| Probing an unavailable API's health through an ungranted route | Phase 3 (route grant checked before health) |
+| A failing or abandoned request holding a concurrency slot or an isolate | Phase 3 (resilience tests, disconnect abort) |
 | Long-running promises, async CPU loops, memory exhaustion | Phase 0 |
 | `__proto__` keys, cyclic and oversized bodies | Phase 0 |
 | Encoded-path traversal and ambiguous routes | Phase 0 |
@@ -419,12 +533,20 @@ billing and Kong integration.
 | A changed handler or new route under an old grant | Phase 1 snapshots, Phase 2 republish rule |
 | CORS, OPTIONS, method confusion, fall-through to dashboard routes | Phase 2 |
 | Proxy trust spoofing | Phase 2 (existing `TRUST_PROXY_HOPS`; limits keyed by credential, not IP) |
-| Concurrent quota admission | Phase 3 |
-| Source deleted or edited during a request | Phase 3 (the snapshot is read once per request) |
+| Concurrent quota admission | Phase 2 (limiter), Phase 3 (per-client and server-wide caps under load) |
+| Source deleted or edited during a request | Phase 1 (`project-api-publication.integration.test.ts`; the snapshot is read once per request) |
 | SSRF through the outbound connector | Phase 5 (configured host only, redirect rules) |
 
-## Review points for the end of Phase 2
+## Review points for the end of Phase 3
 
-1. **Withdrawn approval revokes grants** (departure 2 in the Phase 2 section).
-2. **503 only for grantees** (departure 3).
-3. **Phase 3 is now small:** measuring on a Pi, the bridge-spy test proving a GET never writes state, publishes MQTT, sends a command or makes an outbound request, and caching compiled scripts per snapshot if the Pi measurements need it.
+The Phase 2 departures were approved. For Phase 3:
+
+1. **The rotate route now requires `expiresAt`.** That is a breaking change to a management
+   route with no UI and no known consumer yet. Making the choice explicit was preferred to
+   a default that could silently mirror the old key.
+2. **Pi measurements and the caching decision are outstanding**, pending a run of
+   `make bench-project-api` on the Pi.
+3. **Residual native memory growth** of about 0.5 MB per 1,000 requests under sustained
+   concurrent load on the PC, matching bare `isolated-vm`. Worth watching in the Pi soak
+   numbers. If it matters there, the remedy is outside the request path, for example a
+   periodic check of RSS in operations, not a change to isolation.

@@ -64,7 +64,7 @@ import { createSystemRoutes } from "./api/routes/system.routes.js";
 import { createProjectApiRoutes } from "./api/routes/project-api.routes.js";
 import { createProjectApiStore } from "./project-api/publication-store.js";
 import { createApiAccessStore } from "./project-api/access-store.js";
-import { createDisabledExposedApiRouter, createExposedApiRouter } from "./project-api/exposed-router.js";
+import { automationStateReader, createDisabledExposedApiRouter, createExposedApiRouter } from "./project-api/exposed-router.js";
 import { createRequestLimiter } from "./project-api/request-limits.js";
 import { createLayoutRoutes } from "./api/routes/layout.routes.js";
 import { createDataStoreRoutes } from "./api/routes/data-store.routes.js";
@@ -409,7 +409,7 @@ async function main(): Promise<void> {
     : createExposedApiRouter({
         publications: projectApis,
         access: projectApiAccess,
-        stateFor: (automationId) => ({ get: (key) => stateStore.get(automationId, key), getAll: () => stateStore.getAll(automationId) }),
+        stateFor: automationStateReader(stateStore),
         limiter: createRequestLimiter({ perMinute: config.exposedApi.requestsPerMinute, concurrentPerClient: config.exposedApi.concurrentPerClient }),
         requireHttps: config.exposedApi.requireHttps,
         logger,

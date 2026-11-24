@@ -203,7 +203,10 @@ function mountAccessRoutes(router: Router, access: ApiAccessStore): void {
   router.post("/clients/:clientId/keys", validate({ body: issueKeyBodySchema }), handle((req) =>
     access.issueKey(String(req.params.clientId), (req.body as { expiresAt?: number | null }).expiresAt ?? null, auditContext(req)), 201));
   router.post("/clients/:clientId/keys/:credentialId/rotate", validate({ body: rotateKeyBodySchema }), handle((req) =>
-    access.rotateKey(String(req.params.clientId), String(req.params.credentialId), (req.body as { overlapSeconds?: number }).overlapSeconds ?? 0, auditContext(req)), 201));
+    access.rotateKey(String(req.params.clientId), String(req.params.credentialId), {
+      expiresAt: (req.body as { expiresAt: number | null }).expiresAt,
+      overlapSeconds: (req.body as { overlapSeconds?: number }).overlapSeconds ?? 0,
+    }, auditContext(req)), 201));
   router.post("/clients/:clientId/keys/:credentialId/revoke", handle((req) =>
     access.revokeKey(String(req.params.clientId), String(req.params.credentialId), auditContext(req))));
 }

@@ -21,8 +21,15 @@ export const clientBodySchema = z.object({ name: z.string().min(1).max(100) }).s
 /** Expiry as a millisecond timestamp, or null/absent for a key that does not expire. */
 export const issueKeyBodySchema = z.object({ expiresAt: z.number().int().positive().nullable().optional() }).strict();
 
-/** 0 revokes the old key at once; otherwise it keeps working for this many seconds. */
-export const rotateKeyBodySchema = z.object({ overlapSeconds: z.number().int().min(0).max(7 * 24 * 3600).optional() }).strict();
+/**
+ * `expiresAt` is the replacement key's expiry and must be given: a millisecond
+ * timestamp, or null for none. It is never copied from the old key.
+ * `overlapSeconds` is how long the old key keeps working: 0 (default) revokes it at once.
+ */
+export const rotateKeyBodySchema = z.object({
+  expiresAt: z.number().int().positive().nullable(),
+  overlapSeconds: z.number().int().min(0).max(7 * 24 * 3600).optional(),
+}).strict();
 
 export const grantBodySchema = z.object({
   clientId: z.string().min(1).max(64),

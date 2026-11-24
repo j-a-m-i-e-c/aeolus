@@ -83,8 +83,9 @@ Machine clients of published Project APIs use API keys, not JWTs
   secret.
 - **Storage.** Only SHA-256(secret) is stored, and the comparison is constant-time. An
   unknown key id costs the same comparison, so timing does not reveal which ids exist.
-- **Issue and rotation.** A key is shown once when it is issued or rotated. Keys can expire,
-  be revoked, and be rotated with an explicit overlap.
+- **Issue and rotation.** A key is shown once when it is issued or rotated. Keys can expire
+  and be revoked. A rotation sets the replacement's expiry explicitly, never copying the old
+  key's, and separately how long the old key overlaps (revoked at once by default).
 - **Where they are accepted.** Only in `Authorization: Bearer` on `/api/exposed/...`. A
   machine key is refused (`401`) by dashboard authentication on every other route, and
   dashboard JWTs, refresh cookies and demo sessions are refused on `/api/exposed`.

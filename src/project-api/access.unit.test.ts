@@ -77,6 +77,19 @@ describe("request limiter", () => {
     const fresh = limiter.admit("late", "late");
     expect(fresh.ok).toBe(true);
   });
+
+  it("scans for expired windows at most once a minute while full of live ones", () => {
+    let now = 0;
+    const limiter = createRequestLimiter({ perMinute: 5, concurrentPerClient: 5 }, () => now);
+    const started = performance.now();
+    // Every key is new and none expires: 40,000 windows. A scan per new key would be
+    // quadratic; one scan per minute keeps this linear.
+    for (let i = 0; i < 20_000; i++) { const a = limiter.admit(`c${i}`, `k${i}`); if (a.ok) a.release(); }
+    expect(performance.now() - started).toBeLessThan(2000);
+    now = 60_000;
+    expect(limiter.admit("c0", "k0").ok).toBe(true);
+    expect(limiter.inFlight()).toBe(1);
+  });
 });
 
 describe("access store edge cases", () => {
@@ -102,10 +115,45 @@ describe("access store edge cases", () => {
     const access = store();
     const client = access.createClient("Farm", ADMIN);
     const { credential } = access.issueKey(client.id, now + 10_000, ADMIN);
-    const rotated = access.rotateKey(client.id, credential.id, 3600, ADMIN);
+    access.rotateKey(client.id, credential.id, { expiresAt: null, overlapSeconds: 3600 }, ADMIN);
     const old = access.getClient(client.id).credentials.find((c) => c.id === credential.id)!;
     expect(old.expiresAt).toBe(now + 10_000);
-    expect(rotated.credential.expiresAt).toBe(now + 10_000);
+  });
+
+  it("gives the replacement key the expiry chosen for it, never the old key's", () => {
+    const access = store();
+    const client = access.createClient("Farm", ADMIN);
+    const soon = access.issueKey(client.id, now + 60_000, ADMIN).credential;
+    const year = now + 365 * 24 * 3600 * 1000;
+
+    // Rotating a key about to expire hands out one that lasts as chosen.
+    const longer = access.rotateKey(client.id, soon.id, { expiresAt: year, overlapSeconds: 30 }, ADMIN);
+    expect(longer.credential.expiresAt).toBe(year);
+    const old = () => access.getClient(client.id).credentials.find((c) => c.id === soon.id)!;
+    // The old key's overlap is a separate lifetime: 30 s from now, not the new expiry.
+    expect(old().expiresAt).toBe(now + 30_000);
+    expect(old().revokedAt).toBeNull();
+
+    // A key that never expired can be replaced by one that does, and vice versa.
+    const forever = access.issueKey(client.id, null, ADMIN).credential;
+    expect(access.rotateKey(client.id, forever.id, { expiresAt: now + 5000, overlapSeconds: 0 }, ADMIN).credential.expiresAt).toBe(now + 5000);
+    expect(access.getClient(client.id).credentials.find((c) => c.id === forever.id)!.revokedAt).toBe(now);
+    expect(access.rotateKey(client.id, longer.credential.id, { expiresAt: null, overlapSeconds: 0 }, ADMIN).credential.expiresAt).toBeNull();
+
+    // Both lifetimes are in the audit trail.
+    const events = db.prepare("SELECT action, metadata FROM project_api_audit WHERE action IN ('key.rotated', 'key.expiring') ORDER BY id").all() as Array<{ action: string; metadata: string }>;
+    expect(events.map((e) => [e.action, JSON.parse(e.metadata).expiresAt])).toEqual([
+      ["key.expiring", now + 30_000], ["key.rotated", year], ["key.rotated", now + 5000], ["key.rotated", null],
+    ]);
+  });
+
+  it("refuses a replacement expiry that is not in the future, changing nothing", () => {
+    const access = store();
+    const client = access.createClient("Farm", ADMIN);
+    const { credential } = access.issueKey(client.id, null, ADMIN);
+    expect(() => access.rotateKey(client.id, credential.id, { expiresAt: now, overlapSeconds: 0 }, ADMIN)).toThrow(/future/);
+    expect(access.getClient(client.id).credentials).toHaveLength(1);
+    expect(access.getClient(client.id).credentials[0]!.revokedAt).toBeNull();
   });
 
   it("revoking a revoked key changes nothing; a bad overlap or unknown client is refused", () => {
@@ -114,8 +162,8 @@ describe("access store edge cases", () => {
     const { credential } = access.issueKey(client.id, null, ADMIN);
     const first = access.revokeKey(client.id, credential.id, ADMIN);
     expect(access.revokeKey(client.id, credential.id, ADMIN).revokedAt).toBe(first.revokedAt);
-    expect(() => access.rotateKey(client.id, credential.id, -1, ADMIN)).toThrow(ProjectApiError);
-    expect(() => access.rotateKey(client.id, credential.id, 1.5, ADMIN)).toThrow(ProjectApiError);
+    expect(() => access.rotateKey(client.id, credential.id, { expiresAt: null, overlapSeconds: -1 }, ADMIN)).toThrow(ProjectApiError);
+    expect(() => access.rotateKey(client.id, credential.id, { expiresAt: null, overlapSeconds: 1.5 }, ADMIN)).toThrow(ProjectApiError);
     expect(() => access.setClientStatus("missing", "disabled", ADMIN)).toThrow(/not found/);
     expect(() => access.createClient("   ", ADMIN)).toThrow(/1 to 100/);
   });
@@ -139,7 +187,6 @@ describe("access store edge cases", () => {
     expect(() => access.grant("missing", "a1", "level", ADMIN)).toThrow(/not found/);
     const client = access.createClient("Farm", ADMIN);
     expect(() => access.grant(client.id, "a1", "level", ADMIN)).toThrow(/Publish the API/);
-    expect(access.hasAnyGrant(client.id, "api")).toBe(false);
     expect(access.isGranted(client.id, "api", "level", "f")).toBe(false);
   });
 

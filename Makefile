@@ -1,4 +1,4 @@
-.PHONY: deploy deploy-demo public-demo-preflight public-demo-build public-demo-up public-demo-seed public-demo-golden public-demo-reset up showcase showcase-reset showcase-seed public-demo-local public-demo-local-seed simulator-republish down restart logs logs-backend status clean dev sim seed-image seed reset test test-integration e2e e2e-fresh lint check verify verify-all help
+.PHONY: deploy deploy-demo public-demo-preflight public-demo-build public-demo-up public-demo-seed public-demo-golden public-demo-reset up showcase showcase-reset showcase-seed public-demo-local public-demo-local-seed simulator-republish down restart logs logs-backend status clean dev sim seed-image seed reset test test-integration e2e e2e-fresh lint check verify verify-all bench-project-api help
 
 # `USER` is normally set by the shell (your login name), which would leak into
 # the seed command. Ignore the environment value and default to "admin" unless
@@ -253,6 +253,16 @@ check: ## TypeScript type check, backend + frontend (no emit)
 
 verify: check lint test ## Full local gate — type check + lint + tests with coverage (mirrors CI: lint, backend, frontend)
 verify-all: verify test-integration ## verify + broker-backed integration tests — the complete CI mirror (needs Docker)
+
+# Builds a throwaway image (scripts/bench/Dockerfile.project-api) and runs the Project
+# API benchmark in it. Results print to the terminal and are also written as JSON to
+# /tmp/aeolus-bench on the host, never into the repo, so `make deploy` still sees a
+# clean tree. Pass options through ARGS, e.g. ARGS="--seconds 30 --concurrency 1,2,4".
+bench-project-api: ## Measure Project API latency, CPU and memory on this host (needs Docker). Usage: make bench-project-api [ARGS="..."]
+	docker build -f scripts/bench/Dockerfile.project-api -t aeolus-project-api-bench:local .
+	mkdir -p /tmp/aeolus-bench
+	docker run --rm -v /tmp/aeolus-bench:/out aeolus-project-api-bench:local \
+		--out /out/project-api-$$(git rev-parse --short HEAD 2>/dev/null || echo local)-$$(date -u +%Y%m%dT%H%M%SZ).json $(ARGS)
 
 # ─── Help ─────────────────────────────────────────────────────────────────────
 

@@ -273,6 +273,46 @@ describe("authorization: one uniform 404", () => {
     expect((await call(URL("tank-levels", "/level"), { key: stranger.key })).status).toBe(404);
   });
 
+  realIt("an unavailable API answers 503 only on the routes the caller is granted; every other route stays 404", async () => {
+    const c = client("Remote farm", ["level"]);
+    const ungranted = [URL("tank-levels", "/secret"), URL("tank-levels", "/tanks/main"), URL("tank-levels", "/nope")];
+    const expectContract = async (label: string) => {
+      expect((await call(URL("tank-levels", "/level"), { key: c.key })).status, label).toBe(503);
+      for (const path of ungranted) expect((await call(path, { key: c.key })).status, `${label} ${path}`).toBe(404);
+    };
+
+    db.prepare("UPDATE automation_rules SET enabled = 0 WHERE id = 'a1'").run();
+    await expectContract("disabled");
+    db.prepare("UPDATE automation_rules SET enabled = 1 WHERE id = 'a1'").run();
+
+    db.prepare("UPDATE automation_rules SET authored_unrestricted = 0 WHERE id = 'a1'").run();
+    await expectContract("authority lost");
+    db.prepare("UPDATE automation_rules SET authored_unrestricted = 1 WHERE id = 'a1'").run();
+
+    const serving = publications;
+    publications = createProjectApiStore(db, { runtimeContract: 2 });
+    await expectContract("contract mismatch");
+    publications = serving;
+
+    // A bundle that no longer matches its hash. Snapshots are immutable, so the
+    // trigger is dropped to simulate on-disk corruption.
+    const triggers = db.prepare("SELECT name FROM sqlite_master WHERE type = 'trigger' AND tbl_name = 'project_api_snapshots'").all() as Array<{ name: string }>;
+    for (const { name } of triggers) db.exec(`DROP TRIGGER ${name}`);
+    db.prepare("UPDATE project_api_snapshots SET bundle = bundle || ' '").run();
+    await expectContract("integrity");
+
+    expect((await call(URL("tank-levels", "/level"), { key: c.key })).body).toEqual({ error: "API unavailable" });
+    expect(access.getClient(c.id).grants.every((g) => g.revokedAt === null)).toBe(true);
+  });
+
+  realIt("an unavailable API whose stored manifest no longer parses cannot identify a route, so answers 404", async () => {
+    const c = client("Remote farm", ["level"]);
+    const triggers = db.prepare("SELECT name FROM sqlite_master WHERE type = 'trigger' AND tbl_name = 'project_api_snapshots'").all() as Array<{ name: string }>;
+    for (const { name } of triggers) db.exec(`DROP TRIGGER ${name}`);
+    db.prepare("UPDATE project_api_snapshots SET manifest = '{'").run();
+    expect((await call(URL("tank-levels", "/level"), { key: c.key })).status).toBe(404);
+  });
+
   realIt("a reclaimed slug inherits nothing from the API that used to hold it", async () => {
     const c = client("Remote farm", ["level"]);
     publications.setSlug("a1", "water-levels", ADMIN);
@@ -443,7 +483,7 @@ describe("revocation and lifecycle take effect on the next request", () => {
 
   realIt("key rotation with an overlap keeps the old key working only until then", async () => {
     const c = client("Remote farm", ["level"]);
-    const rotated = access.rotateKey(c.id, c.credentialId, 1, ADMIN);
+    const rotated = access.rotateKey(c.id, c.credentialId, { expiresAt: null, overlapSeconds: 1 }, ADMIN);
     expect((await call(URL("tank-levels", "/level"), { key: c.key })).status).toBe(200);
     expect((await call(URL("tank-levels", "/level"), { key: rotated.key })).status).toBe(200);
     await new Promise((resolve) => setTimeout(resolve, 1100));

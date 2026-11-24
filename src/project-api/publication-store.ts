@@ -60,9 +60,19 @@ export type UnservableReason =
   | "contract-mismatch"
   | "integrity";
 
+/** A published API that exists but may not be served right now. Grants are untouched. */
+export type UnavailableReason = Exclude<UnservableReason, "not-found" | "unpublished">;
+
 export type Resolution =
   | { ok: true; api: ProjectApiRecord; snapshot: Snapshot; routes: CompiledApiRoute[] }
-  | { ok: false; reason: UnservableReason };
+  | { ok: false; reason: "not-found" | "unpublished" }
+  /**
+   * `routes` are the published snapshot's routes, so the router can tell whether the
+   * caller is granted the route it asked for before admitting the API is unavailable.
+   * Empty when the stored manifest no longer parses: then no route can be identified,
+   * and every caller gets 404.
+   */
+  | { ok: false; reason: UnavailableReason; api: ProjectApiRecord; routes: CompiledApiRoute[] };
 
 export interface AuditEvent {
   id: number;
@@ -296,25 +306,28 @@ export function createProjectApiStore(db: DatabaseType, options: ProjectApiStore
       if (!row.published_snapshot_id) return { ok: false, reason: "unpublished" };
       const snap = snapshotRow(row.published_snapshot_id);
       if (!snap || snap.api_id !== row.id) return { ok: false, reason: "unpublished" };
-      if (automation.enabled !== 1) return { ok: false, reason: "disabled" };
-      if (automation.authored_unrestricted !== 1) return { ok: false, reason: "authority-lost" };
-      const publisher = db.prepare("SELECT role FROM users WHERE id = ?").get(snap.published_by) as { role: string } | undefined;
-      if (publisher?.role !== "admin") return { ok: false, reason: "publisher-not-admin" };
-      if (snap.runtime_contract !== runtimeContract) return { ok: false, reason: "contract-mismatch" };
-      if (createHash("sha256").update(snap.bundle).digest("hex") !== snap.bundle_hash) return { ok: false, reason: "integrity" };
-      let routes: CompiledApiRoute[];
+      let routes: CompiledApiRoute[] | null;
       try {
         routes = parseApiManifest(snap.manifest).routes;
       } catch {
-        return { ok: false, reason: "contract-mismatch" };
+        routes = null;
       }
+      const api = toApi(row);
+      const unavailable = (reason: UnavailableReason): Resolution => ({ ok: false, reason, api, routes: routes ?? [] });
+      if (automation.enabled !== 1) return unavailable("disabled");
+      if (automation.authored_unrestricted !== 1) return unavailable("authority-lost");
+      const publisher = db.prepare("SELECT role FROM users WHERE id = ?").get(snap.published_by) as { role: string } | undefined;
+      if (publisher?.role !== "admin") return unavailable("publisher-not-admin");
+      if (snap.runtime_contract !== runtimeContract) return unavailable("contract-mismatch");
+      if (createHash("sha256").update(snap.bundle).digest("hex") !== snap.bundle_hash) return unavailable("integrity");
+      if (!routes) return unavailable("contract-mismatch");
       let sources: AutomationProjectFile[];
       try {
         sources = JSON.parse(snap.sources) as AutomationProjectFile[];
       } catch {
-        return { ok: false, reason: "integrity" };
+        return unavailable("integrity");
       }
-      return { ok: true, api: toApi(row), snapshot: { ...toSummary(snap), manifest: snap.manifest, sources, bundle: snap.bundle }, routes };
+      return { ok: true, api, snapshot: { ...toSummary(snap), manifest: snap.manifest, sources, bundle: snap.bundle }, routes };
     },
 
     /** Newest first. Pass the last event's id as `before` for the next page. */

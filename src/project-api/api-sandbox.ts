@@ -12,9 +12,12 @@
 //     only bounds synchronous execution; CPU spent after an `await` runs on the
 //     isolate's own thread until the isolate is disposed;
 //   - values cross the boundary as JSON strings or ExternalCopy copies, never as
-//     callable references.
+//     callable references. An oversized result is refused inside the isolate, so
+//     the host never copies more than the response limit out of it;
+//   - an AbortSignal (the caller disconnected) disposes the isolate early, so a
+//     client that hangs up does not keep an isolate running to the deadline.
 //
-// Phase 0 proof of concept: not yet reachable from any HTTP route.
+// Called by the /api/exposed router (exposed-router.ts) for every request.
 
 import { API_HANDLER_TABLE } from "./api-compiler.js";
 
@@ -73,7 +76,8 @@ export type ApiFailureReason =
   | "invalid-response"
   | "too-large"
   | "busy"
-  | "unavailable";
+  | "unavailable"
+  | "aborted";
 
 export type ApiInvocationResult =
   | { ok: true; status: HandlerStatus; body: unknown; durationMs: number }
@@ -120,7 +124,7 @@ const API_BOOTSTRAP = `
     }
   }));
 
-  define("__aeolusInvoke", async function (name, requestJson) {
+  define("__aeolusInvoke", async function (name, requestJson, maxChars) {
     var table = globalThis.${API_HANDLER_TABLE};
     var handler = table && Object.prototype.hasOwnProperty.call(table, name) ? table[name] : undefined;
     if (typeof handler !== "function") return JSON.stringify({ missing: true });
@@ -129,7 +133,11 @@ const API_BOOTSTRAP = `
     var envelope = result && typeof result === "object" && responses.has(result)
       ? { status: result.status, body: result.body }
       : { status: 200, body: result };
-    return JSON.stringify(envelope);
+    var json = JSON.stringify(envelope);
+    // UTF-8 never takes fewer bytes than UTF-16 code units, so this refuses only
+    // what the host's exact byte check would refuse anyway.
+    if (typeof json === "string" && json.length > maxChars) return JSON.stringify({ tooLarge: true });
+    return json;
   });
 })();
 `;
@@ -137,6 +145,11 @@ const API_BOOTSTRAP = `
 const FORBIDDEN_GLOBALS = ["require", "process", "fs", "child_process", "eval", "Function", "global"];
 
 let active = 0;
+
+/** Isolates running right now, across all requests. */
+export function activeApiInvocations(): number {
+  return active;
+}
 
 const truncate = (text: string) => (text.length > 300 ? text.slice(0, 300) + "…" : text);
 
@@ -158,10 +171,13 @@ export async function invokeApiHandler(
   request: ApiRequestData,
   state: ApiStateReader,
   limits: ApiLimits = DEFAULT_API_LIMITS,
+  options: { signal?: AbortSignal } = {},
 ): Promise<ApiInvocationResult> {
   const started = Date.now();
   const elapsed = () => Date.now() - started;
+  const { signal } = options;
   if (!ivm) return { ok: false, reason: "unavailable", detail: "isolated-vm is not available", durationMs: 0 };
+  if (signal?.aborted) return { ok: false, reason: "aborted", detail: "The caller went away", durationMs: 0 };
   if (active >= limits.maxConcurrent) return { ok: false, reason: "busy", detail: "API sandbox is at its concurrency limit", durationMs: 0 };
 
   active++;
@@ -169,40 +185,56 @@ export async function invokeApiHandler(
   const isolate = new runtime.Isolate({ memoryLimit: limits.memoryMb });
   let timedOut = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
+  // Host-side handles into the isolate. Released explicitly rather than left to the
+  // host's garbage collector, so their native memory is freed with the request.
+  const handles: Array<{ release(): void }> = [];
+  const hold = <T extends { release(): void }>(handle: T): T => { handles.push(handle); return handle; };
+  const dispose = () => { try { isolate.dispose(); } catch { /* already disposed */ } };
 
   const deadline = new Promise<ApiInvocationResult>((resolve) => {
     timer = setTimeout(() => {
       timedOut = true;
-      try { isolate.dispose(); } catch { /* already disposed */ }
+      dispose();
       resolve({ ok: false, reason: "timeout", detail: `Handler did not finish within ${limits.deadlineMs} ms`, durationMs: elapsed() });
     }, limits.deadlineMs);
   });
+  const abandoned = new Promise<ApiInvocationResult>((resolve) => {
+    if (!signal) return;
+    onAbort = () => {
+      dispose();
+      resolve({ ok: false, reason: "aborted", detail: "The caller went away", durationMs: elapsed() });
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
 
   const work = (async (): Promise<ApiInvocationResult> => {
-    const context = await isolate.createContext();
-    const jail = context.global;
+    const context = hold(await isolate.createContext());
+    const jail = hold(context.global);
     for (const name of FORBIDDEN_GLOBALS) await jail.set(name, undefined);
-    await jail.set("__stateGetRef", new runtime.Reference((key: string) => {
+    await jail.set("__stateGetRef", hold(new runtime.Reference((key: string) => {
       const value = state.get(key);
-      return value === undefined ? undefined : new runtime.ExternalCopy(value).copyInto();
-    }));
-    await jail.set("__stateGetAllRef", new runtime.Reference(() => new runtime.ExternalCopy(state.getAll()).copyInto()));
+      return value === undefined ? undefined : new runtime.ExternalCopy(value).copyInto({ release: true });
+    })));
+    await jail.set("__stateGetAllRef", hold(new runtime.Reference(() => new runtime.ExternalCopy(state.getAll()).copyInto({ release: true }))));
 
     const remaining = () => Math.max(1, limits.deadlineMs - elapsed());
-    await (await isolate.compileScript(API_BOOTSTRAP)).run(context);
-    await (await isolate.compileScript(bundle)).run(context, { timeout: remaining() });
+    await hold(await isolate.compileScript(API_BOOTSTRAP)).run(context);
+    await hold(await isolate.compileScript(bundle)).run(context, { timeout: remaining() });
 
-    const invoke = await jail.get("__aeolusInvoke", { reference: true });
-    const raw: unknown = await invoke.apply(undefined, [handler, JSON.stringify(request)], {
+    const invoke = hold(await jail.get("__aeolusInvoke", { reference: true }));
+    const envelopeLimit = limits.maxResponseBytes + 64;
+    const raw: unknown = await invoke.apply(undefined, [handler, JSON.stringify(request), envelopeLimit], {
       timeout: remaining(),
       result: { promise: true, copy: true },
     });
+    const tooLarge = (): ApiInvocationResult =>
+      ({ ok: false, reason: "too-large", detail: `Response exceeds ${limits.maxResponseBytes} bytes`, durationMs: elapsed() });
     if (typeof raw !== "string") return { ok: false, reason: "invalid-response", detail: "Handler result could not be serialized", durationMs: elapsed() };
-    if (Buffer.byteLength(raw, "utf8") > limits.maxResponseBytes + 64) {
-      return { ok: false, reason: "too-large", detail: `Response exceeds ${limits.maxResponseBytes} bytes`, durationMs: elapsed() };
-    }
+    if (Buffer.byteLength(raw, "utf8") > envelopeLimit) return tooLarge();
 
     const envelope: unknown = JSON.parse(raw);
+    if (envelope && typeof envelope === "object" && "tooLarge" in envelope) return tooLarge();
     if (envelope && typeof envelope === "object" && "missing" in envelope) {
       return { ok: false, reason: "missing-handler", detail: `No exported handler named ${handler}`, durationMs: elapsed() };
     }
@@ -210,9 +242,7 @@ export async function invokeApiHandler(
     if (!HANDLER_STATUSES.includes(status as HandlerStatus) || body === undefined) {
       return { ok: false, reason: "invalid-response", detail: "Handler returned no JSON body", durationMs: elapsed() };
     }
-    if (Buffer.byteLength(JSON.stringify(body), "utf8") > limits.maxResponseBytes) {
-      return { ok: false, reason: "too-large", detail: `Response exceeds ${limits.maxResponseBytes} bytes`, durationMs: elapsed() };
-    }
+    if (Buffer.byteLength(JSON.stringify(body), "utf8") > limits.maxResponseBytes) return tooLarge();
     return { ok: true, status: status as HandlerStatus, body, durationMs: elapsed() };
   })().catch((error: unknown): ApiInvocationResult => ({
     ok: false,
@@ -222,10 +252,12 @@ export async function invokeApiHandler(
   }));
 
   try {
-    return await Promise.race([work, deadline]);
+    return await Promise.race([work, deadline, abandoned]);
   } finally {
     clearTimeout(timer);
-    try { if (!isolate.isDisposed) isolate.dispose(); } catch { /* already disposed */ }
+    if (onAbort) signal?.removeEventListener("abort", onAbort);
+    for (const handle of handles) { try { handle.release(); } catch { /* the isolate is already gone */ } }
+    if (!isolate.isDisposed) dispose();
     active--;
   }
 }

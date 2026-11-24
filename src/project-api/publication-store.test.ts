@@ -165,7 +165,11 @@ describe("serving fails closed on live facts", () => {
   it("stops when the automation is disabled, and resumes when it is enabled again", async () => {
     await published();
     db.prepare("UPDATE automation_rules SET enabled = 0").run();
-    expect(store.resolve("tank-levels")).toEqual({ ok: false, reason: "disabled" });
+    const unavailable = store.resolve("tank-levels");
+    // The API and its routes come back too, so the router can check the caller's
+    // grant for the route before it admits the API is unavailable.
+    expect(unavailable).toMatchObject({ ok: false, reason: "disabled", api: { slug: "tank-levels" } });
+    expect("routes" in unavailable && unavailable.routes.length).toBeGreaterThan(0);
     db.prepare("UPDATE automation_rules SET enabled = 1").run();
     expect(store.resolve("tank-levels").ok).toBe(true);
   });
@@ -173,7 +177,7 @@ describe("serving fails closed on live facts", () => {
   it("stops when the automation loses admin authority", async () => {
     await published();
     db.prepare("UPDATE automation_rules SET authored_unrestricted = 0").run();
-    expect(store.resolve("tank-levels")).toEqual({ ok: false, reason: "authority-lost" });
+    expect(store.resolve("tank-levels")).toMatchObject({ ok: false, reason: "authority-lost" });
   });
 
   it("withdraws approval durably when the publisher is demoted, so promotion back restores nothing", async () => {
@@ -222,7 +226,7 @@ describe("serving fails closed on live facts", () => {
     await published();
     db.exec("DROP TRIGGER project_api_publisher_demoted");
     db.prepare("UPDATE users SET role = 'user' WHERE id = 'u-admin'").run();
-    expect(store.resolve("tank-levels")).toEqual({ ok: false, reason: "publisher-not-admin" });
+    expect(store.resolve("tank-levels")).toMatchObject({ ok: false, reason: "publisher-not-admin" });
   });
 
   it("does not withdraw anything when a non-admin is demoted or deleted", async () => {
@@ -234,14 +238,14 @@ describe("serving fails closed on live facts", () => {
 
   it("stops when this server's runtime contract differs from the snapshot's", async () => {
     await published();
-    expect(createProjectApiStore(db, { runtimeContract: 2 }).resolve("tank-levels")).toEqual({ ok: false, reason: "contract-mismatch" });
+    expect(createProjectApiStore(db, { runtimeContract: 2 }).resolve("tank-levels")).toMatchObject({ ok: false, reason: "contract-mismatch" });
   });
 
   it("stops when a stored bundle no longer matches its hash", async () => {
     await published();
     db.exec("DROP TRIGGER project_api_snapshots_immutable");
     db.prepare("UPDATE project_api_snapshots SET bundle = bundle || ' '").run();
-    expect(store.resolve("tank-levels")).toEqual({ ok: false, reason: "integrity" });
+    expect(store.resolve("tank-levels")).toMatchObject({ ok: false, reason: "integrity" });
   });
 
   it("stops on unpublish at once, keeping the snapshot as history", async () => {
@@ -260,7 +264,7 @@ describe("serving fails closed on live facts", () => {
     await published();
     db.exec("DROP TRIGGER project_api_snapshots_immutable");
     db.prepare("UPDATE project_api_snapshots SET manifest = '{\"version\": 9}'").run();
-    expect(store.resolve("tank-levels")).toEqual({ ok: false, reason: "contract-mismatch" });
+    expect(store.resolve("tank-levels")).toMatchObject({ ok: false, reason: "contract-mismatch" });
     const summary = store.snapshotSummary(store.get("a1")!.publishedSnapshotId!);
     expect(summary?.routeIds).toEqual([]);
     db.prepare("UPDATE project_api_snapshots SET manifest = 'not json'").run();
@@ -271,7 +275,7 @@ describe("serving fails closed on live facts", () => {
     await published();
     db.exec("DROP TRIGGER project_api_snapshots_immutable");
     db.prepare("UPDATE project_api_snapshots SET sources = 'not json'").run();
-    expect(store.resolve("tank-levels")).toEqual({ ok: false, reason: "integrity" });
+    expect(store.resolve("tank-levels")).toMatchObject({ ok: false, reason: "integrity" });
   });
 
   it("treats a pointer to a missing or foreign snapshot as unpublished", async () => {

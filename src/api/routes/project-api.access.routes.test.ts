@@ -84,21 +84,27 @@ describe("clients and keys", () => {
   it("rotates with or without overlap and revokes", async () => {
     const client = (await request("POST", "/api/project-apis/clients", { name: "Farm" })).body;
     const first = (await request("POST", `/api/project-apis/clients/${client.id}/keys`, {})).body;
-    const rotated = await request("POST", `/api/project-apis/clients/${client.id}/keys/${first.credential.id}/rotate`, { overlapSeconds: 3600 });
+    const expiresAt = Date.now() + 90 * 24 * 3600 * 1000;
+    const rotated = await request("POST", `/api/project-apis/clients/${client.id}/keys/${first.credential.id}/rotate`, { expiresAt, overlapSeconds: 3600 });
     expect(rotated.status).toBe(201);
     expect(rotated.body.key).not.toBe(first.key);
+    expect(rotated.body.credential.expiresAt).toBe(expiresAt);
     const detail = (await request("GET", `/api/project-apis/clients/${client.id}`)).body;
-    expect(detail.credentials.find((c: { id: string }) => c.id === first.credential.id).expiresAt).toBeGreaterThan(Date.now());
+    const old = detail.credentials.find((c: { id: string }) => c.id === first.credential.id);
+    expect(old.expiresAt).toBeGreaterThan(Date.now());
+    expect(old.expiresAt).toBeLessThanOrEqual(Date.now() + 3600 * 1000);
 
     expect((await request("POST", `/api/project-apis/clients/${client.id}/keys/${rotated.body.credential.id}/revoke`)).body.revokedAt).not.toBeNull();
-    expect((await request("POST", `/api/project-apis/clients/${client.id}/keys/${rotated.body.credential.id}/rotate`, {})).status).toBe(409);
+    expect((await request("POST", `/api/project-apis/clients/${client.id}/keys/${rotated.body.credential.id}/rotate`, { expiresAt: null })).status).toBe(409);
   });
 
   it.each([
     ["an empty name", "/api/project-apis/clients", { name: "" }],
     ["an unknown field", "/api/project-apis/clients", { name: "x", role: "admin" }],
     ["a past expiry", "KEYS", { expiresAt: 1 }],
-    ["an overlap over a week", "ROTATE", { overlapSeconds: 8 * 24 * 3600 }],
+    ["an overlap over a week", "ROTATE", { expiresAt: null, overlapSeconds: 8 * 24 * 3600 }],
+    ["a rotation that does not choose the new key's expiry", "ROTATE", { overlapSeconds: 60 }],
+    ["a rotation to a past expiry", "ROTATE", { expiresAt: 1 }],
   ])("rejects %s with 400", async (_label, path, body) => {
     const client = (await request("POST", "/api/project-apis/clients", { name: "Farm" })).body;
     const key = (await request("POST", `/api/project-apis/clients/${client.id}/keys`, {})).body;

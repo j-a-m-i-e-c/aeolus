@@ -129,7 +129,7 @@ describe("Project API publication (real isolated-vm, SQLite file)", () => {
     store.setSlug("a1", "tank-levels", ADMIN);
     await publishCurrent(store);
     db.prepare("UPDATE automation_rules SET enabled = 0").run();
-    expect(await call(store)).toEqual({ ok: false, reason: "disabled" });
+    expect(await call(store)).toMatchObject({ ok: false, reason: "disabled" });
     db.prepare("UPDATE automation_rules SET enabled = 1").run();
     expect(await call(store)).toMatchObject({ ok: true });
   });

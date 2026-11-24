@@ -147,14 +147,23 @@ export function createApiAccessStore(db: DatabaseType, options: { now?: () => nu
     },
 
     /**
-     * Replace a key. With no overlap the old key is revoked at once; with an overlap it
-     * keeps working until then (never longer than its own expiry), so a consumer can
-     * switch without downtime. Either way the old key's fate is in the audit record.
+     * Replace a key. Two separate lifetimes are chosen here:
+     *
+     *   - `expiresAt` is the replacement key's own expiry, chosen explicitly (`null`
+     *     for none). It is never inherited from the old key, so rotating a key that
+     *     is about to expire does not hand out one that is about to expire too;
+     *   - `overlapSeconds` is how long the OLD key keeps working. With 0 it is revoked
+     *     at once; otherwise it expires then, never later than its own expiry, so a
+     *     consumer can switch without downtime.
+     *
+     * Both are in the audit records.
      */
-    rotateKey(clientId: string, credentialId: string, overlapSeconds: number, ctx: AuditContext) {
+    rotateKey(clientId: string, credentialId: string, rotation: { expiresAt: number | null; overlapSeconds: number }, ctx: AuditContext) {
+      const { expiresAt, overlapSeconds } = rotation;
       if (!Number.isInteger(overlapSeconds) || overlapSeconds < 0 || overlapSeconds > MAX_ROTATION_OVERLAP_SECONDS) {
         throw new ProjectApiError("invalid", `Overlap must be 0 to ${MAX_ROTATION_OVERLAP_SECONDS} seconds`);
       }
+      if (expiresAt !== null && expiresAt <= now()) throw new ProjectApiError("invalid", "Expiry must be in the future");
       return db.transaction(() => {
         requireClient(clientId);
         const old = credentialOf(clientId, credentialId);
@@ -162,14 +171,13 @@ export function createApiAccessStore(db: DatabaseType, options: { now?: () => nu
         const at = now();
         if (overlapSeconds === 0) {
           db.prepare("UPDATE api_credentials SET revoked_at = ? WHERE id = ?").run(at, old.id);
+          audit(ctx, "key.revoked", { clientId, credentialId: old.id, metadata: { keyId: old.key_id, reason: "rotated", overlapSeconds } });
         } else {
           const until = Math.min(old.expires_at ?? Number.MAX_SAFE_INTEGER, at + overlapSeconds * 1000);
           db.prepare("UPDATE api_credentials SET expires_at = ? WHERE id = ?").run(until, old.id);
+          audit(ctx, "key.expiring", { clientId, credentialId: old.id, metadata: { keyId: old.key_id, reason: "rotated", overlapSeconds, expiresAt: until } });
         }
-        audit(ctx, overlapSeconds === 0 ? "key.revoked" : "key.expiring", {
-          clientId, credentialId: old.id, metadata: { keyId: old.key_id, reason: "rotated", overlapSeconds },
-        });
-        return issue(clientId, old.expires_at, ctx, old.id);
+        return issue(clientId, expiresAt, ctx, old.id);
       })();
     },
 
@@ -243,11 +251,6 @@ export function createApiAccessStore(db: DatabaseType, options: { now?: () => nu
         credentialId: row.id,
         client: toClient({ id: row.client_id, name: row.name, status: row.status, created_by: row.created_by, created_at: row.created_at, updated_at: row.updated_at }),
       };
-    },
-
-    /** True when the client has any live grant to this API. */
-    hasAnyGrant(clientId: string, apiId: string): boolean {
-      return Boolean(db.prepare("SELECT 1 FROM api_grants WHERE client_id = ? AND api_id = ? AND revoked_at IS NULL LIMIT 1").get(clientId, apiId));
     },
 
     /** True when the client holds a live grant to this route, for exactly this route behaviour. */

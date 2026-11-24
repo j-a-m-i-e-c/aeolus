@@ -1,0 +1,19 @@
+# Throwaway image for scripts/bench/project-api-bench.ts. Not part of any Aeolus
+# stack: `make bench-project-api` builds and runs it, and nothing else uses it.
+#
+# Same Node image and native-module toolchain as the backend's builder stage, so
+# isolated-vm and better-sqlite3 are the builds the backend runs. Dev dependencies are
+# kept because the benchmark runs the TypeScript source through tsx.
+FROM node:24.20.0-slim
+WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ \
+    && rm -rf /var/lib/apt/lists/*
+COPY package.json package-lock.json ./
+# HUSKY=0: there is no git checkout in the image for the prepare script to hook into.
+RUN HUSKY=0 npm ci --no-audit --no-fund
+COPY tsconfig.json ./
+COPY src/ ./src/
+COPY scripts/bench/ ./scripts/bench/
+ENV NODE_ENV=production LOG_LEVEL=warn
+# --no-node-snapshot is required by isolated-vm, exactly as in the backend image.
+ENTRYPOINT ["node", "--no-node-snapshot", "--import", "tsx", "scripts/bench/project-api-bench.ts"]

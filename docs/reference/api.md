@@ -231,7 +231,7 @@ authentication.
 | `GET` | `/api/project-apis/clients/:clientId` | A client's keys (id, last four, expiry, last used; never secrets) and grants, revoked ones included |
 | `POST` | `/api/project-apis/clients/:clientId/disable`, `/enable` | Stop or restore every key of the client |
 | `POST` | `/api/project-apis/clients/:clientId/keys` | `{ expiresAt? }`: issue a key. The response holds the full key once |
-| `POST` | `/api/project-apis/clients/:clientId/keys/:credentialId/rotate` | `{ overlapSeconds? }`: issue a replacement. `0` (default) revokes the old key at once; otherwise it keeps working for up to a week |
+| `POST` | `/api/project-apis/clients/:clientId/keys/:credentialId/rotate` | `{ expiresAt, overlapSeconds? }`: issue a replacement. `expiresAt` (required; a future millisecond timestamp or `null`) is the new key's expiry and is never copied from the old key. `overlapSeconds` is how long the old key keeps working: `0` (default) revokes it at once, at most a week, never past its own expiry |
 | `POST` | `/api/project-apis/clients/:clientId/keys/:credentialId/revoke` | Revoke a key |
 | `GET` | `/api/project-apis/audit` | Append-only history of publication, client, key and grant changes, newest first: `?limit=` (1–200), `?before=<event id>`, `?apiId=`. Includes storage use |
 

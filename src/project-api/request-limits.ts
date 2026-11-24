@@ -21,11 +21,16 @@ const MAX_TRACKED = 10_000;
 export function createRequestLimiter(limits: RequestLimits, now: () => number = Date.now) {
   const windows = new Map<string, { start: number; count: number }>();
   const active = new Map<string, number>();
+  let lastPrune = Number.NEGATIVE_INFINITY;
 
   function count(key: string, at: number): { count: number; start: number } {
     let window = windows.get(key);
     if (!window || at - window.start >= WINDOW_MS) {
-      if (windows.size >= MAX_TRACKED) {
+      // Scan for expired windows at most once per window length. Nothing can have
+      // expired sooner, so scanning on every new key while the map is full of live
+      // windows would cost the whole map each time and free nothing.
+      if (windows.size >= MAX_TRACKED && at - lastPrune >= WINDOW_MS) {
+        lastPrune = at;
         for (const [k, w] of windows) if (at - w.start >= WINDOW_MS) windows.delete(k);
       }
       window = { start: at, count: 0 };
@@ -35,6 +40,13 @@ export function createRequestLimiter(limits: RequestLimits, now: () => number = 
   }
 
   return {
+    /** Admitted requests not yet released, across all clients. */
+    inFlight(): number {
+      let total = 0;
+      for (const running of active.values()) total += running;
+      return total;
+    },
+
     admit(clientId: string, credentialId: string): Admission {
       const at = now();
       const byKey = count(`key:${credentialId}`, at);

@@ -8,8 +8,10 @@
 //   414  over-long URL;  400  any query string
 //   403  HTTPS required and Express could not establish it (EXPOSED_API_REQUIRE_HTTPS)
 //   401  no key, malformed, unknown, wrong, expired or revoked key, disabled client
-//   404  unknown version, slug, route, or any API or route the caller is not granted
-//   503  a granted API that is unavailable (disabled, approval lost, contract)
+//   404  unknown version, slug, route, or any route the caller is not granted, whatever
+//        the API's health
+//   503  a route the caller is granted, on an API that is unavailable (disabled,
+//        authority lost, publisher no longer admin, contract mismatch, integrity)
 //   429  over the rate or concurrency limit
 //   200 / handler 400 / handler 404, or 500 / 504 / 503 from the sandbox
 //
@@ -34,8 +36,8 @@ interface Logger {
 }
 
 export interface ExposedApiRouterDeps {
-  publications: Pick<ProjectApiStore, "getBySlug" | "resolve">;
-  access: Pick<ApiAccessStore, "authenticate" | "hasAnyGrant" | "isGranted">;
+  publications: Pick<ProjectApiStore, "resolve">;
+  access: Pick<ApiAccessStore, "authenticate" | "isGranted">;
   /** Read-only state of the automation that owns an API. */
   stateFor: (automationId: string) => ApiStateReader;
   limiter: RequestLimiter;
@@ -112,23 +114,20 @@ export function createExposedApiRouter(deps: ExposedApiRouterDeps): Router {
     if (!parts || !SLUG_PATTERN.test(parts[1]!)) { fixed(404, "path"); return; }
     const [, slug, rest] = parts as unknown as [string, string, string];
 
-    // A caller with no grant to this API learns nothing about it, not even its state.
-    const record = deps.publications.getBySlug(slug);
-    if (!record || !deps.access.hasAnyGrant(auth.client.id, record.id)) { fixed(404, "not-granted"); return; }
-    facts.apiId = record.id;
-
+    // The grant for the exact route asked for is settled before anything about the
+    // API's health is revealed. A route the caller is not granted is 404 whether the
+    // API is serving, disabled or broken; only a granted route can answer 503.
     const resolution = deps.publications.resolve(slug);
-    if (!resolution.ok) {
-      if (resolution.reason === "not-found" || resolution.reason === "unpublished") fixed(404, resolution.reason);
-      else fixed(503, resolution.reason);
-      return;
-    }
+    if (!("api" in resolution)) { fixed(404, resolution.reason); return; }
+    const record = resolution.api;
     const match = matchApiRoute(resolution.routes, rest);
     if (!match || !deps.access.isGranted(auth.client.id, record.id, match.route.id, routeFingerprint(match.route))) {
       fixed(404, "not-granted");
       return;
     }
+    facts.apiId = record.id;
     facts.routeId = match.route.id;
+    if (!resolution.ok) { fixed(503, resolution.reason); return; }
     facts.snapshotId = resolution.snapshot.id;
 
     const admission = deps.limiter.admit(auth.client.id, auth.credentialId);
@@ -138,29 +137,54 @@ export function createExposedApiRouter(deps: ExposedApiRouterDeps): Router {
       return;
     }
 
+    // A caller that disconnects before its response is written gets its isolate
+    // disposed now rather than at the deadline. Its slots are released either way.
+    const disconnected = new AbortController();
+    res.on("close", () => { if (!res.writableEnded) disconnected.abort(); });
+
     const { snapshot } = resolution;
-    void invokeApiHandler(
-      snapshot.bundle, match.route.handler, { routeId: match.route.id, params: match.params },
-      deps.stateFor(record.automationId), sandboxLimits,
-    ).then((result) => {
-      if (!result.ok) {
-        if (result.reason === "timeout") fixed(504, "timeout");
-        else if (result.reason === "busy") { res.setHeader("Retry-After", "1"); fixed(503, "busy"); }
-        else fixed(500, result.reason);
-        return;
+    // Everything after admission runs inside one try, so the slots are released
+    // whatever fails, including a state reader that throws before the isolate starts.
+    void (async () => {
+      try {
+        const result = await invokeApiHandler(
+          snapshot.bundle, match.route.handler, { routeId: match.route.id, params: match.params },
+          deps.stateFor(record.automationId), sandboxLimits, { signal: disconnected.signal },
+        );
+        if (!result.ok) {
+          if (result.reason === "aborted") {
+            deps.logger.info({ ...facts, reason: "client-disconnected", durationMs: Date.now() - started }, "Project API request");
+          } else if (result.reason === "timeout") fixed(504, "timeout");
+          else if (result.reason === "busy") { res.setHeader("Retry-After", "1"); fixed(503, "busy"); }
+          else fixed(500, result.reason);
+          return;
+        }
+        if (result.status === 200 && !validatorFor(snapshot.id, match.route)(result.body)) {
+          fixed(500, "invalid-response");
+          return;
+        }
+        finish(result.status, result.body);
+      } catch (error: unknown) {
+        deps.logger.warn({ ...facts, error: error instanceof Error ? error.message : String(error) }, "Project API request failed");
+        if (!res.headersSent) fixed(500, "internal");
+      } finally {
+        admission.release();
       }
-      if (result.status === 200 && !validatorFor(snapshot.id, match.route)(result.body)) {
-        fixed(500, "invalid-response");
-        return;
-      }
-      finish(result.status, result.body);
-    }).catch((error: unknown) => {
-      deps.logger.warn({ ...facts, error: error instanceof Error ? error.message : String(error) }, "Project API request failed");
-      if (!res.headersSent) fixed(500, "internal");
-    }).finally(() => admission.release());
+    })();
   });
 
   return router;
+}
+
+/**
+ * The state view a request gets: reads of the owning automation's own state, with the
+ * automation id fixed here on the host. Nothing a handler sends can choose another id.
+ */
+export function automationStateReader(store: {
+  get(automationId: string, key: string): unknown;
+  getAll(automationId: string): Record<string, unknown>;
+}): (automationId: string) => ApiStateReader {
+  return (automationId) => ({ get: (key) => store.get(automationId, key), getAll: () => store.getAll(automationId) });
 }
 
 /** For a public demo: the same prefix answers everything with the fixed 404, unmounted from the API. */

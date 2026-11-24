@@ -1,6 +1,6 @@
 # ADR-0027: Project APIs — published, read-only HTTP endpoints for Automation Projects
 
-- **Status:** Accepted for Phases 0 to 2 (published, read-only GET endpoints with clients, keys and grants). Phase 2 awaiting review before Phase 3
+- **Status:** Accepted for Phases 0 to 3 (published, read-only GET endpoints with clients, keys and grants, and the Phase 3 boundary, resilience and performance validation). Phase 3 awaiting review before Phase 4; the script-caching decision waits on Raspberry Pi measurements
 - **Date:** 2026-11-19
 - **Plan:** [Project APIs implementation plan](../architecture/project-apis-plan.md)
 
@@ -95,14 +95,32 @@ or the engine.
   JSON strings or `ExternalCopy` copies, never as callable references. The request is
   deep-frozen inside the isolate.
 - **A host wall-clock deadline (5 s) disposes the isolate.** That ends synchronous loops,
-  CPU loops after an `await`, and promises that never settle. Responses are capped at
-  64 KiB, and at most four isolates run at once.
+  CPU loops after an `await`, and promises that never settle. A caller that disconnects
+  before its response is written has its isolate disposed at once rather than at the
+  deadline. Responses are capped at 64 KiB, checked inside the isolate before the result
+  is copied out and again on the host in UTF-8 bytes, and at most four isolates run at once.
+- **Every admitted request gives back its slots.** Everything after rate-limit admission
+  runs in one `try`/`finally`, so the per-client concurrency slot and the isolate slot are
+  released after a timeout, a thrown error, memory exhaustion, an oversized response, a
+  disconnect, or a state reader that fails before the isolate starts.
 - A handler returns a JSON value (200) or `api.response(status, body)` with status 400 or
   404. Every other status belongs to the host. A 200 body must satisfy the route's response
   schema, or the caller receives a 500 that does not leak details.
 - No `execution_history` row is written and no automation events are emitted. Requests are
-  attributed in structured logs (request id, API, route, client, status, duration, reason)
-  and in a bounded in-memory activity list.
+  attributed in structured logs (request id, API, route, client, status, duration, reason).
+  A bounded in-memory recent-activity list for the Endpoints UI is planned for Phase 4.
+- **What a GET cannot do is tested from both sides** (Phase 3). A hostile handler in a real
+  isolate tries every escape. Meanwhile the host spies on every method of the state, Shared
+  State, Data Store, command, MQTT, automation-event, engine, device and connector classes,
+  on the event bus, on Node's network, process and filesystem entry points, and on every
+  SQL statement. The only write a request makes is authentication's `last_used_at` stamp,
+  at most once a minute per key; that is bookkeeping, not automation state.
+- **Compiled-script caching is not used.** Compiling a bundle is a small part of an
+  invocation on the development PC; isolate creation dominates, and a code cache cannot
+  remove that. Whether it is worth adding is decided on Raspberry Pi measurements
+  (`make bench-project-api`). If added, the cache must be keyed by snapshot id and bundle
+  hash and hold V8 code-cache data only, never a shared isolate or context, so each request
+  still starts from a fresh isolate.
 
 ### Publication
 
@@ -130,8 +148,8 @@ or the engine.
   Client, key and grant state are also read live on every request.
 - **Two kinds of "not serving" are deliberately different.**
   - *Temporarily unavailable:* the automation is disabled, or a runtime-contract mismatch
-    after an upgrade. The approval and grants are kept, granted callers get `503`, and
-    serving resumes when the cause is gone.
+    after an upgrade. The approval and grants are kept, a caller granted the requested
+    route gets `503`, and serving resumes when the cause is gone.
   - *Approval withdrawn:* the admin who published is demoted or deleted. This is a durable
     transition, not a live check. In the same transaction as the role change or deletion,
     every publication that admin approved is unpublished and its grants revoked, each with
@@ -148,7 +166,7 @@ or the engine.
   an existing grant. When the current source's API content hash differs from the published
   snapshot, the Endpoints section shows **unpublished changes**. Serving them requires an
   admin to review and republish. Nothing reactivates silently.
-- A publication **fails closed** (503 for a granted caller) when its automation is
+- A publication **fails closed** (503 for a caller granted the requested route) when its automation is
   disabled, when it is no longer admin-authored, when the snapshot's runtime contract no
   longer matches the server's (an Aeolus upgrade that changes the sandbox capabilities),
   or when the snapshot is missing. Deleting the automation deletes its API, snapshots and
@@ -185,8 +203,14 @@ or the engine.
 - **Keys** have the format `aeo_<keyId>_<secret>`. The secret has 256 random bits. Only a
   SHA-256 hash of it is stored; lookup is by `keyId`, and the hash comparison uses
   `crypto.timingSafeEqual`. A key is shown once, can expire, can be revoked, and can be
-  rotated with an explicit overlap. Keys are accepted only in `Authorization: Bearer`,
-  never in a URL, and are never logged.
+  rotated. Keys are accepted only in `Authorization: Bearer`, never in a URL, and are
+  never logged.
+- **Rotation chooses two lifetimes separately.** The admin chooses the replacement key's
+  expiry explicitly (a time, or none); it is never inherited from the old key, so rotating
+  a key that is about to expire never issues one that is about to expire too. The overlap
+  is how long the old key keeps working: `0` revokes it at once, otherwise it expires
+  after the overlap (at most a week, and never later than its own expiry). Both are
+  audited.
 - **Grants** name a client, an API, a stable route id and an access category (`read`). A
   request needs a valid key, a grant for that exact route, and a live publication that
   declares it. A new route is never added to an existing grant. On republish, a grant
@@ -219,9 +243,14 @@ or the engine.
   on `main` in `a083caa`). Future query parameters must be declared per route in the
   manifest, validated and documented; arbitrary query input will never reach handlers.
 - **Order:** method → size bounds → feature enabled → key (401 for missing or invalid) →
-  grant and route (404 when not granted or not found, so a key holder cannot probe for
-  APIs it was not given) → publication live (503) → rate limit (429 with `Retry-After`) →
-  handler (504 on timeout, 500 on failure).
+  grant for the exact route (404 when the slug, route or grant is missing) → publication
+  live (503) → rate limit (429 with `Retry-After`) → handler (504 on timeout, 500 on
+  failure).
+- **Only a granted route can answer `503`.** The grant is checked against the published
+  snapshot's routes before the publication's health is revealed, so a client granted one
+  route gets `404` for every other route whether the API is serving, disabled, has lost
+  authority or fails its integrity check. If the stored manifest no longer parses, no
+  route can be identified and every caller gets `404`.
 - In public-demo mode the router is not mounted, and the client-management routes are not
   on the demo allowlist. They use a real-admin guard, because `requireAdmin` lets a demo
   session through on GET.
@@ -332,4 +361,7 @@ the server. Limits reset when the backend restarts and are not distributed guara
 - `src/project-api/exposed-router.ts`, `request-limits.ts`: the `/api/exposed` router and in-memory limits
 - `src/auth/user-service.ts`: withdraws a demoted or deleted admin's publications in the same transaction
 - `src/__integration__/project-api-exposed.integration.test.ts`: the router end to end
+- `src/__integration__/project-api-boundary.integration.test.ts`: a hostile GET against host-side spies
+- `src/__integration__/project-api-resilience.integration.test.ts`: failures, concurrency, disconnects and restart, with slot release
+- `scripts/bench/project-api-bench.ts`, `make bench-project-api`: latency, CPU and memory measurement
 - `docs/reference/project-apis.md`: author and operator reference
