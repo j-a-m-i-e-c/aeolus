@@ -33,6 +33,7 @@ The backend uses host networking in Docker so it can reach LAN products and perf
 | `METRICS_TOKEN` | unset | Optional bearer token for `/metrics` |
 | `AEOLUS_PROJECT_DIR` | process working directory | Mosquitto config root used to locate broker files in a custom runtime |
 | `MQTT_PASSWORD_FILE` | `<project>/mosquitto/password_file` | Live broker password-file path; the standard Compose stack sets this itself |
+| `AEOLUS_E2E` | unset | `true` only on the disposable E2E stack (`e2e/docker-compose.e2e.yml`). Adds `"e2e": true` to `/api/health` so the destructive Playwright suite will run; changes no behaviour. Never set it on a real installation |
 
 Docker Compose also accepts deployment variables such as `API_PORT`, `FRONTEND_PORT`, `MQTT_PORT`, `BUILD_COMMIT` and `BUILD_DATE`. The browser endpoints `VITE_API_URL` and `VITE_WS_URL` are Vite build-time variables, not backend runtime variables.
 
@@ -266,7 +267,7 @@ GitHub Actions runs:
 
 ### Daily when main changed
 
-- Docker Compose startup;
+- startup of the disposable E2E stack (`e2e/docker-compose.e2e.yml`), not the base stack;
 - Chromium Playwright end-to-end tests;
 - an API-key scan of the test artifacts and report;
 - failure log and report upload, skipped when the scan finds a key.

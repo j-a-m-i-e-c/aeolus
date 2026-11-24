@@ -93,6 +93,17 @@ describe("config", () => {
     expect(config.trustedProxyHops).toBe(1);
   });
 
+  it("marks the installation disposable for E2E only when AEOLUS_E2E is exactly true", async () => {
+    delete process.env.AEOLUS_E2E;
+    expect((await import("./config.js")).config.e2eDisposable).toBe(false);
+    vi.resetModules();
+    process.env.AEOLUS_E2E = "1";
+    expect((await import("./config.js")).config.e2eDisposable).toBe(false);
+    vi.resetModules();
+    process.env.AEOLUS_E2E = "true";
+    expect((await import("./config.js")).config.e2eDisposable).toBe(true);
+  });
+
   it("handles a single MQTT topic without commas", async () => {
     delete process.env.MQTT_BROKER_URL;
     delete process.env.PORT;

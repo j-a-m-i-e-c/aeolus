@@ -49,15 +49,17 @@ jobs:
       - name: Install Playwright browser
         run: npx playwright install --with-deps chromium
 
-      - name: Start the stack
-        run: docker compose up -d --build
+      # The disposable stack (own project, volume and ports, AEOLUS_E2E=true). The
+      # suite refuses any backend without that marker (e2e/global-setup.ts).
+      - name: Start the disposable E2E stack
+        run: docker compose --project-directory . -f e2e/docker-compose.e2e.yml up -d --build
 
       - name: Run Playwright e2e
         run: npm run test:e2e
 
       - name: Backend logs (on failure)
         if: failure()
-        run: docker compose logs --no-color --tail 200
+        run: docker compose --project-directory . -f e2e/docker-compose.e2e.yml logs --no-color --tail 200
 
       # The Project API spec issues a real key. Playwright's global teardown already
       # scanned test-results/; the HTML report is written after it, so scan both here.
@@ -77,4 +79,4 @@ jobs:
 
       - name: Tear down
         if: always()
-        run: docker compose down -v
+        run: docker compose --project-directory . -f e2e/docker-compose.e2e.yml down -v

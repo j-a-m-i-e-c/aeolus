@@ -1,4 +1,4 @@
-.PHONY: deploy deploy-demo public-demo-preflight public-demo-build public-demo-up public-demo-seed public-demo-golden public-demo-reset up showcase showcase-reset showcase-seed public-demo-local public-demo-local-seed simulator-republish down restart logs logs-backend status clean dev sim seed-image seed reset test test-integration e2e e2e-fresh lint check verify verify-all bench-project-api help
+.PHONY: deploy deploy-demo public-demo-preflight public-demo-build public-demo-up public-demo-seed public-demo-golden public-demo-reset up showcase showcase-reset showcase-seed public-demo-local public-demo-local-seed simulator-republish down restart logs logs-backend status clean dev sim seed-image seed reset test test-integration e2e e2e-fresh e2e-up e2e-down lint check verify verify-all bench-project-api help
 
 # `USER` is normally set by the shell (your login name), which would leak into
 # the seed command. Ignore the environment value and default to "admin" unless
@@ -236,13 +236,24 @@ test-integration: ## Run broker-backed integration tests (needs Docker; self-ski
 	docker pull eclipse-mosquitto:2
 	npm run test:integration
 
-e2e: ## Run Playwright e2e against the running stack (adapts: sets up or logs in)
+# The suite is destructive, so it runs only against the disposable stack in
+# e2e/docker-compose.e2e.yml (own project, volume and ports 3100/3011, AEOLUS_E2E=true).
+# e2e/global-setup.ts refuses any other backend. None of these touch the base stack.
+E2E_COMPOSE := docker compose --project-directory . -f e2e/docker-compose.e2e.yml
+
+e2e-up: ## Build and start the disposable E2E stack (ports 3100/3011; never the base stack)
+	$(E2E_COMPOSE) up -d --build
+
+e2e: ## Run Playwright against the disposable E2E stack (refuses any other backend)
 	npm run test:e2e
 
-e2e-fresh: ## Wipe data, rebuild the stack, and run e2e (exercises the first-run setup path)
-	docker compose down -v
-	docker compose up -d --build
+e2e-fresh: ## Recreate the disposable E2E stack from an empty volume, then run e2e
+	$(E2E_COMPOSE) down -v
+	$(E2E_COMPOSE) up -d --build
 	npm run test:e2e
+
+e2e-down: ## Stop the disposable E2E stack and delete its volume
+	$(E2E_COMPOSE) down -v
 
 lint: ## Run ESLint across the repo — backend TS + frontend TSX, zero-warning gate
 	npx eslint . --max-warnings 0

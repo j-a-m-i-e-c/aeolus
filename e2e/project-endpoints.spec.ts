@@ -102,7 +102,26 @@ async function seed(request: APIRequestContext): Promise<{ ruleId: string; auth:
 // Playwright only accepts these at the top level, because they fix the worker.
 test.use({ trace: "off", video: "off", screenshot: "off" });
 
+/**
+ * Revoke every key of the run's client and disable it, so repeated runs leave no
+ * working credential behind even if the database outlives the run.
+ */
+async function retireClient(request: APIRequestContext, name: string): Promise<void> {
+  const auth = await adminAuth(request);
+  const listed = await (await request.get(`${API_URL}/api/project-apis/clients`, { headers: auth })).json() as { clients: Array<{ id: string; name: string }> };
+  for (const client of listed.clients.filter((candidate) => candidate.name === name)) {
+    const detail = await (await request.get(`${API_URL}/api/project-apis/clients/${client.id}`, { headers: auth })).json() as { credentials: Array<{ id: string; revokedAt: number | null }> };
+    for (const credential of detail.credentials.filter((candidate) => candidate.revokedAt === null)) {
+      const revoked = await request.post(`${API_URL}/api/project-apis/clients/${client.id}/keys/${credential.id}/revoke`, { headers: auth });
+      expect(revoked.ok(), `key revoke failed: ${revoked.status()}`).toBeTruthy();
+    }
+    const disabled = await request.post(`${API_URL}/api/project-apis/clients/${client.id}/disable`, { headers: auth });
+    expect(disabled.ok(), `client disable failed: ${disabled.status()}`).toBeTruthy();
+  }
+}
+
 let step = 0;
+let runClientName: string | undefined;
 /** A masked step screenshot; returns how many key fields were masked. */
 async function snap(page: Page, testInfo: TestInfo, name: string): Promise<number> {
   step += 1;
@@ -114,10 +133,14 @@ test.describe("Project API endpoints through the UI", () => {
 
   // Runs before the page closes, so Playwright's failure page snapshot
   // (error-context.md) sees no key. A masked screenshot replaces the automatic one.
-  test.afterEach(async ({ page }, testInfo) => {
-    if (testInfo.status === testInfo.expectedStatus) return;
-    await scrubCredentials(page).catch(() => undefined);
-    await maskedScreenshot(page, testInfo, "failure.png", "failure").catch(() => undefined);
+  // Also retires the run's client and keys, pass or fail.
+  test.afterEach(async ({ page, request }, testInfo) => {
+    if (testInfo.status !== testInfo.expectedStatus) {
+      await scrubCredentials(page).catch(() => undefined);
+      await maskedScreenshot(page, testInfo, "failure.png", "failure").catch(() => undefined);
+    }
+    if (runClientName) await retireClient(request, runClientName);
+    runClientName = undefined;
   });
 
   test("publish, create a client, issue a key, grant a route and call it", async ({ page, request }, testInfo) => {
@@ -126,6 +149,7 @@ test.describe("Project API endpoints through the UI", () => {
     const { ruleId } = await seed(request);
     const slug = `e2e-tanks-${Date.now().toString(36)}`;
     const clientName = `E2E remote farm ${Date.now().toString(36)}`;
+    runClientName = clientName;
 
     // Open the Automation Project editor and its Endpoints view.
     await page.goto(`/tab/${TAB_SLUG}`);

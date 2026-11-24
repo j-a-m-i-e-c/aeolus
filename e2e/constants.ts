@@ -1,16 +1,17 @@
 // e2e/constants.ts — Shared endpoints and fixed credentials for the e2e suite.
 //
-// The suite assumes a FRESH backend (empty DB) so the first-run setup journey
-// can create the admin. In CI this is guaranteed by starting the stack with
-// clean volumes (`docker compose down -v && docker compose up`).
+// The suite runs only against a disposable stack (e2e/docker-compose.e2e.yml,
+// `make e2e-up`), whose backend carries AEOLUS_E2E=true; global-setup.ts refuses
+// anything else. A fresh volume lets auth.setup.ts walk the first-run journey.
+// The defaults are that stack's ports, not the everyday stack's 3000/3001.
 
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const BASE_URL = process.env.E2E_BASE_URL || "http://localhost:3000";
+export const BASE_URL = process.env.E2E_BASE_URL || "http://localhost:3100";
 
 /** Backend origin — the browser calls this directly (see frontend/src/lib/env.ts). */
-export const API_URL = process.env.E2E_API_URL || "http://localhost:3001";
+export const API_URL = process.env.E2E_API_URL || "http://localhost:3011";
 
 /** Admin account created by the first-run setup journey and reused thereafter. */
 export const ADMIN = {

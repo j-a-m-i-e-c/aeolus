@@ -198,7 +198,7 @@ keeping its own id, payload and timestamp — not synthesised bucket averages.
 | `GET` | `/api/system/version` | Local build information, without any network request |
 | `POST` | `/api/system/version/check` | Admin-only; compares the installed version against the latest published release |
 | `GET`, `PUT` | `/api/system/retention` | Admin-only; read or change execution log retention only (`null` keeps execution logs forever; command evidence never expires). A `PUT` applies at once |
-| `GET` | `/api/health` | Service health |
+| `GET` | `/api/health` | Service health. Includes `"e2e": true` only when the backend runs with `AEOLUS_E2E=true` (the disposable E2E stack) |
 | `GET` | `/api/metrics/summary` | Dashboard metrics summary |
 | `GET`, `PUT` | `/api/layout` | Read or replace dashboard layout |
 

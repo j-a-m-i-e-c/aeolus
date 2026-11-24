@@ -6,10 +6,9 @@
 // replacing the first client's work.
 
 import { test, expect, type BrowserContext, type Page, type APIRequestContext } from "@playwright/test";
-import { API_URL, STORAGE_STATE } from "./constants";
+import { API_URL, BASE_URL, STORAGE_STATE } from "./constants";
 import { adminAuth, ensureAdmin, layoutRevision, projectRevision, withIfMatch } from "./helpers";
 
-const BASE_URL = process.env.E2E_BASE_URL || "http://localhost:3000";
 const TAB_ID = "tab-e2e-concurrency";
 const TAB_NAME = "E2E Concurrency";
 const TAB_SLUG = "e2e-concurrency";

@@ -37,7 +37,18 @@ Frontend Vitest tests cover stores, utilities and practical component behaviour.
 
 ### End-to-end tests
 
-Playwright starts against the Docker Compose stack and exercises first-run setup, authentication and user-visible workflows in a real browser.
+Playwright runs against the disposable E2E stack (`e2e/docker-compose.e2e.yml`) and exercises first-run setup, authentication and user-visible workflows in a real browser.
+
+#### Disposable stack only
+
+The specs are destructive: they replace the whole dashboard layout, delete test automations by name and create API clients and keys. So the suite never runs against an everyday installation:
+
+- the E2E stack has its own Compose project (`aeolus-e2e`), volume and ports (SPA on 3100, API on 3011), which are also the suite's defaults;
+- its backend sets `AEOLUS_E2E=true`, which adds `"e2e": true` to `/api/health`. The marker comes only from the environment; the base `docker-compose.yml` never passes it;
+- `e2e/global-setup.ts` refuses to run unless the backend at `E2E_API_URL` reports the marker and the SPA at `E2E_BASE_URL` sends its API calls to that same backend;
+- the Project API spec revokes its keys and disables its client when it ends, pass or fail.
+
+To run against dev servers instead of Docker, start the backend with `AEOLUS_E2E=true` and a throwaway `DB_PATH`, and set `E2E_BASE_URL` and `E2E_API_URL`.
 
 #### API keys in E2E artifacts
 
@@ -146,15 +157,18 @@ cd frontend
 npm test
 npm run test:coverage
 
-# End-to-end tests against a running stack
+# End-to-end tests against the disposable E2E stack (start it with make e2e-up)
 cd ..
 npm run test:e2e
 
 # Full local typecheck, lint and unit test gate
 make verify
 
-# Fresh Docker stack followed by end-to-end tests
+# Recreate the disposable E2E stack from an empty volume, then run end-to-end tests
 make e2e-fresh
+
+# Stop the disposable E2E stack and delete its volume
+make e2e-down
 ```
 
 ## CI
@@ -176,7 +190,7 @@ After the normal checks pass, CI builds backend and frontend Docker images.
 
 When `main` has changed in the previous 24 hours, the daily workflow:
 
-1. builds and starts Docker Compose;
+1. builds and starts the disposable E2E stack;
 2. installs Chromium;
 3. runs Playwright;
 4. scans `test-results/` and `playwright-report/` for API keys, failing the job on a finding;

@@ -76,6 +76,13 @@ export interface Config {
     /** Requests one client may have running at once. Default 2, 1–8. */
     concurrentPerClient: number;
   };
+  /**
+   * AEOLUS_E2E=true labels this installation as disposable, for the Playwright
+   * suite's guard (e2e/global-setup.ts), which refuses any backend without it before
+   * replacing the dashboard layout. It changes no behaviour and is read only from
+   * the environment, never from the API or the database. Default false.
+   */
+  e2eDisposable: boolean;
   publicDemo: {
     /** Master switch. Default false. */
     enabled: boolean;
@@ -130,6 +137,7 @@ export const config: Config = {
     requestsPerMinute: boundedInt(process.env.EXPOSED_API_REQUESTS_PER_MINUTE, 60, 1, 600),
     concurrentPerClient: boundedInt(process.env.EXPOSED_API_CONCURRENT_PER_CLIENT, 2, 1, 8),
   },
+  e2eDisposable: process.env.AEOLUS_E2E === "true",
   publicDemo: {
     enabled: process.env.AEOLUS_PUBLIC_DEMO === "true",
     sessionMinutes: parseInt(process.env.DEMO_SESSION_MINUTES || "120", 10),

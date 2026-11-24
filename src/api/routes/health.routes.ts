@@ -10,7 +10,9 @@ export function createHealthRoutes(
   mqttService: MqttService,
   registry: DeviceRegistry,
   engine: AutomationEngine,
-  startTime: number
+  startTime: number,
+  /** From AEOLUS_E2E only; adds `e2e: true` so the E2E suite can recognise a disposable install. */
+  options: { e2eDisposable?: boolean } = {},
 ): Router {
   const router = Router();
 
@@ -23,6 +25,7 @@ export function createHealthRoutes(
       executionGate: engine.gateStats,
       uptime: Math.floor((Date.now() - startTime) / 1000),
       timestamp: new Date().toISOString(),
+      ...(options.e2eDisposable ? { e2e: true as const } : {}),
     };
     res.json(status);
   });

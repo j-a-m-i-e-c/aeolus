@@ -479,7 +479,10 @@ async function main(): Promise<void> {
     ),
   );
   app.use("/api/state", createStateRoutes(registry, permissionResolver));
-  app.use("/api/health", createHealthRoutes(mqttService, registry, engine, startTime));
+  if (config.e2eDisposable) {
+    logger.warn("AEOLUS_E2E=true: /api/health marks this installation as disposable, so the E2E suite may replace its layout and data. Never set it on a real installation.");
+  }
+  app.use("/api/health", createHealthRoutes(mqttService, registry, engine, startTime, { e2eDisposable: config.e2eDisposable }));
   const mqttPublishPolicy = {
     userNamespacePrefix: config.mqttPublish.userNamespacePrefix,
     // Derive the reserved prefix from the ack filter (strip the trailing "/#").

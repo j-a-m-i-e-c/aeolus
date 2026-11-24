@@ -110,6 +110,18 @@ test("every E2E screenshot goes through the masked helper", () => {
   assert.match(calls[0], /mask: masks/);
 });
 
+test("only e2e/constants.ts chooses the stack, so the global-setup guard covers every spec", () => {
+  // A spec with its own URL default could drive an installation the guard never checked.
+  const e2e = path.join(ROOT, "e2e");
+  const offenders = readdirSync(e2e)
+    .filter((name) => name.endsWith(".ts") && name !== "constants.ts")
+    .filter((name) => /process\.env\.E2E_(BASE|API)_URL|https?:\/\/(localhost|127\.0\.0\.1)/.test(readFileSync(path.join(e2e, name), "utf8")));
+  assert.deepEqual(offenders, [], "import BASE_URL and API_URL from e2e/constants.ts");
+  const config = readFileSync(path.join(ROOT, "playwright.config.ts"), "utf8");
+  assert.match(config, /import \{ BASE_URL, STORAGE_STATE \} from "\.\/e2e\/constants"/);
+  assert.match(config, /globalSetup: "\.\/e2e\/global-setup\.ts"/);
+});
+
 test("the key-handling spec records no trace or video and never types the key with fill", () => {
   const spec = readFileSync(path.join(ROOT, "e2e", "project-endpoints.spec.ts"), "utf8");
   assert.match(spec, /^test\.use\(\{ trace: "off", video: "off", screenshot: "off" \}\);$/m);

@@ -1,20 +1,18 @@
 // playwright.config.ts — End-to-end tests against the real Docker Compose stack.
 //
 // These tests drive the actual wiring (auth, cookies, WebSocket, the seed) by
-// hitting the running frontend at http://localhost:3000, which in turn talks to
-// the backend at http://localhost:3001. The stack is expected to already be up
-// (via `docker compose up`); global-setup.ts waits for both to be reachable
-// before any spec runs. Run locally with `make e2e` (stack up) or `make
-// e2e-fresh` (clean first-run state); CI runs it in the `e2e` job.
+// hitting the disposable E2E stack (e2e/docker-compose.e2e.yml): the frontend at
+// http://localhost:3100 and the backend at http://localhost:3011. The suite is
+// destructive, so global-setup.ts refuses a backend that does not report the
+// AEOLUS_E2E marker, or an SPA that calls a different backend. Run locally with
+// `make e2e-fresh` (new stack, then the suite) or `make e2e` (stack already up);
+// CI runs it in the `e2e` job.
 //
 // Deliberately NOT part of the vitest coverage run — vitest's root is `src/`,
 // so nothing here is collected as a unit test or counted toward coverage.
 
 import { defineConfig, devices } from "@playwright/test";
-import { STORAGE_STATE } from "./e2e/constants";
-
-/** Where the SPA is served. Override with E2E_BASE_URL in CI if the port moves. */
-const BASE_URL = process.env.E2E_BASE_URL || "http://localhost:3000";
+import { BASE_URL, STORAGE_STATE } from "./e2e/constants";
 
 export default defineConfig({
   testDir: "./e2e",

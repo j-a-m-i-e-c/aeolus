@@ -1,12 +1,18 @@
 # e2e/docker-compose.e2e.yml — disposable stack for the Playwright suite.
 #
-# Why this exists. The base docker-compose.yml runs the backend with
+# This is the only stack the suite runs against. The specs are destructive (they
+# replace the dashboard layout and delete test automations), so the backend here
+# sets AEOLUS_E2E=true and e2e/global-setup.ts refuses any backend that does not
+# report that marker from /api/health. The base stack never sets it. CI and the
+# make targets (`make e2e-up`, `make e2e`, `make e2e-fresh`, `make e2e-down`) use
+# this file.
+#
+# Bridge networking. The base docker-compose.yml runs the backend with
 # `network_mode: host` so it can do Kasa UDP discovery and reach a Hue bridge on
-# the LAN. On Linux that also puts the API on the developer's own localhost, which
-# is what e2e/constants.ts and the CI job assume — so `make e2e` works there. On
-# Docker Desktop (Windows/macOS) "host" is the Linux VM's network namespace, not
-# the developer's machine, so http://localhost:3001 is refused and every spec
-# dies in globalSetup. This file gives those developers the same suite.
+# the LAN. On Docker Desktop (Windows/macOS) "host" is the Linux VM's network
+# namespace, not the developer's machine, so that API is unreachable from the
+# browser. This stack publishes ports from a bridge network instead, which works
+# the same on Linux, Docker Desktop and CI.
 #
 # It is a STANDALONE stack, not an overlay, for the same reason
 # demo/compose/hosted-runtime.yml is: `network_mode` and `networks` are mutually
@@ -18,8 +24,7 @@
 # e2e-admin), and a developer's real stack must not be wiped to run tests.
 #
 #   docker compose --project-directory . -f e2e/docker-compose.e2e.yml up -d --build
-#   $env:E2E_BASE_URL="http://localhost:3100"; $env:E2E_API_URL="http://localhost:3011"
-#   npx playwright test
+#   npx playwright test        # defaults to this stack's ports (e2e/constants.ts)
 #   docker compose --project-directory . -f e2e/docker-compose.e2e.yml down -v
 #
 # Ports. Everything is offset so an ordinary stack keeps running alongside: SPA on
@@ -74,6 +79,9 @@ services:
       DB_PATH: /app/data/aeolus.db
       LOG_LEVEL: ${LOG_LEVEL:-info}
       AEOLUS_PUBLIC_DEMO: ${AEOLUS_PUBLIC_DEMO:-false}
+      # Fixed, not interpolated: this stack is always disposable, and the marker
+      # is what lets the suite run against it (e2e/global-setup.ts).
+      AEOLUS_E2E: "true"
     depends_on:
       mosquitto:
         condition: service_started

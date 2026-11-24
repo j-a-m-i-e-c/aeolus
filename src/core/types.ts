@@ -313,6 +313,8 @@ export interface HealthStatus {
   executionGate: { activeCount: number; queueDepths: Record<string, number> };
   uptime: number;
   timestamp: string;
+  /** Present only when AEOLUS_E2E=true: a disposable installation for E2E tests. */
+  e2e?: true;
 }
 
 /** Standard API error response */

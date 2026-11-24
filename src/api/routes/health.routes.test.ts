@@ -54,5 +54,30 @@ describe("health.routes", () => {
     const res = await request(app, "/api/health");
     expect(res.status).toBe(200);
     expect(res.body.mqtt).toBe("disconnected");
+    expect(res.body).not.toHaveProperty("e2e");
+  });
+
+  it("reports the E2E marker only when the installation is configured as disposable", async () => {
+    const app = express();
+    app.use("/api/health", createHealthRoutes(
+      { isConnected: () => true } as any,
+      { size: 0 } as any,
+      { ruleCount: 0 } as any,
+      Date.now(),
+      { e2eDisposable: true },
+    ));
+    const res = await request(app, "/api/health?e2e=false");
+    expect(res.body.e2e).toBe(true);
+
+    const plain = express();
+    plain.use("/api/health", createHealthRoutes(
+      { isConnected: () => true } as any,
+      { size: 0 } as any,
+      { ruleCount: 0 } as any,
+      Date.now(),
+      { e2eDisposable: false },
+    ));
+    // The marker cannot be requested: a query string does not add it.
+    expect((await request(plain, "/api/health?e2e=true")).body).not.toHaveProperty("e2e");
   });
 });
