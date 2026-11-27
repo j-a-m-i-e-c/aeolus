@@ -106,8 +106,11 @@ describe("Public demo mode (integration)", () => {
     cleanup({ databases: [db] });
   });
 
-  it("trusts exactly one proxy hop in public-demo mode", () => {
-    expect(app.get("trust proxy")).toBe(1);
+  it("trusts exactly one proxy hop in public-demo mode, and only from a private address", () => {
+    const trust = app.get("trust proxy fn") as (address: string, hop: number) => boolean;
+    expect(trust("172.18.0.5", 0)).toBe(true); // the tunnel on the demo bridge network
+    expect(trust("172.18.0.5", 1)).toBe(false); // a second hop
+    expect(trust("203.0.113.9", 0)).toBe(false); // a public peer
   });
 
   // ── Demo session endpoint (Req 2) ──

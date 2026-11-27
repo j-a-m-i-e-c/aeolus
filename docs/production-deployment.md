@@ -202,6 +202,10 @@ Public tunnels should point at the reverse proxy, not only at the frontend conta
 
 For either example, set `TRUST_PROXY_HOPS=1` in the project `.env` and recreate the backend. Caddy supplies the forwarded scheme/client address automatically; the nginx example above sets them explicitly. With exactly one trusted hop, `AUTH_COOKIE_SECURE=auto` sees the original HTTPS scheme and the rate limiter keys requests by the original client IP rather than by the proxy. Leave `TRUST_PROXY_HOPS=0` when clients connect to Aeolus directly.
 
+**Only the proxy may set forwarded headers.** A hop is trusted only when it also comes from an address in `TRUSTED_PROXY_ADDRESSES` (default `loopback`, which covers a Caddy or nginx on the same host, as in both examples). Any other client's `X-Forwarded-For` and `X-Forwarded-Proto` are ignored, so a LAN host that reaches port 3001 directly cannot pose as a different client to the login rate limiter or claim HTTPS. If your proxy runs elsewhere (another host, or a container on a Docker bridge network), set `TRUSTED_PROXY_ADDRESSES` to its address or range, for example `172.18.0.0/16` or `uniquelocal`; until you do, Aeolus logs "Forwarded headers from a peer that is not a trusted proxy were ignored" and treats the proxy as the client.
+
+Also set `BIND_ADDRESS=127.0.0.1` when the proxy is on the same host, so the backend is not reachable directly at all. With the default host networking the backend otherwise listens on every interface.
+
 ---
 
 ## 4. Firewall Rules
@@ -390,6 +394,8 @@ Or run [Uptime Kuma](https://github.com/louislam/uptime-kuma) on the same Pi for
 | `RATE_LIMIT_RPM` | `1000` | `1000` | Max API requests per minute per IP |
 | `CORS_ORIGINS` | _(empty)_ | `https://aeolus.local` | Extra allowed CORS origins (comma-separated); LAN origins are allowed by default |
 | `TRUST_PROXY_HOPS` | `0` | `1` behind one Caddy/nginx proxy | Number of trusted reverse-proxy hops; keep 0 for direct/LAN access |
+| `TRUSTED_PROXY_ADDRESSES` | `loopback` | the proxy's address or range | Where a trusted hop must come from: addresses, CIDR ranges, `loopback`, `linklocal`, `uniquelocal`. Other peers' forwarded headers are ignored |
+| `BIND_ADDRESS` | unset (every interface) | `127.0.0.1` behind a same-host proxy | Interface the backend listens on |
 | `AUTH_COOKIE_SECURE` | `auto` | `auto` behind a correctly trusted HTTPS proxy | Refresh-cookie Secure policy |
 | `STATE_HISTORY_MAX` | `100` | `100` | Max state-history records kept per device |
 | `HISTORY_RECORD_INTERVAL` | `5000` | `5000` | Minimum ms between recorded state-history points (throttle) |

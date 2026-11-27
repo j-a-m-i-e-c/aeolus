@@ -104,6 +104,20 @@ describe("config", () => {
     expect((await import("./config.js")).config.e2eDisposable).toBe(true);
   });
 
+  it("defaults proxy trust to loopback and the bind address to every interface", async () => {
+    delete process.env.TRUSTED_PROXY_ADDRESSES;
+    delete process.env.BIND_ADDRESS;
+    const { config } = await import("./config.js");
+    expect(config.trustedProxyAddresses).toBe("loopback");
+    expect(config.listenHost).toBeUndefined();
+    vi.resetModules();
+    process.env.TRUSTED_PROXY_ADDRESSES = " 10.0.0.0/8 ";
+    process.env.BIND_ADDRESS = "127.0.0.1";
+    const next = (await import("./config.js")).config;
+    expect(next.trustedProxyAddresses).toBe("10.0.0.0/8");
+    expect(next.listenHost).toBe("127.0.0.1");
+  });
+
   it("handles a single MQTT topic without commas", async () => {
     delete process.env.MQTT_BROKER_URL;
     delete process.env.PORT;

@@ -6,6 +6,7 @@ import cookieParser from "cookie-parser";
 import { corsMiddleware } from "../api/middleware/cors-config.js";
 import { requestLogger } from "../api/middleware/request-logger.js";
 import { errorHandler } from "../api/middleware/error-handler.js";
+import { createProxyTrust } from "../api/proxy-trust.js";
 import { authenticate } from "../auth/auth-middleware.js";
 import { metricsMiddleware } from "../metrics/metrics-middleware.js";
 import { createAuthRoutes } from "../api/routes/auth.routes.js";
@@ -71,7 +72,7 @@ export function createTestApp(
   // Mirror production's single-hop proxy trust for the hosted public demo so
   // IP-keyed limiters see the forwarded visitor address instead of the tunnel
   // container. Normal test apps retain Express' default trust-proxy behaviour.
-  if (options?.publicDemo) app.set("trust proxy", 1);
+  if (options?.publicDemo) app.set("trust proxy", createProxyTrust(1, "loopback,uniquelocal").setting);
 
   // ─── Core Middleware ─────────────────────────────────────────────────────
 

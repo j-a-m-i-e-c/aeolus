@@ -37,6 +37,7 @@ import { createDeviceRoutes } from "./api/routes/device.routes.js";
 import { createCommandRoutes } from "./api/routes/command.routes.js";
 import { createStateRoutes } from "./api/routes/state.routes.js";
 import { createHealthRoutes } from "./api/routes/health.routes.js";
+import { createProxyTrust, untrustedForwardingNotice } from "./api/proxy-trust.js";
 import { createMqttRoutes } from "./api/routes/mqtt.routes.js";
 import { createAutomationRoutes, loadUiRules, automationExists } from "./api/routes/automation.routes.js";
 import { createConnectorRoutes } from "./api/routes/connector.routes.js";
@@ -378,10 +379,17 @@ connectorRegistry.register(aeolusRemoteModule);
   // installs default to 0; operators serving Aeolus through one local Caddy/nginx
   // proxy can set TRUST_PROXY_HOPS=1 so secure-cookie detection and per-client
   // rate limiting use the forwarded request metadata safely.
+  // A hop is trusted only if it is within the hop count AND comes from a trusted
+  // address (src/api/proxy-trust.ts), so a client reaching the backend directly can
+  // never set X-Forwarded-For or X-Forwarded-Proto. The hosted demo's tunnel reaches
+  // the backend over its private bridge network, which has no published ports.
   const trustedProxyHops = config.publicDemo.enabled ? 1 : config.trustedProxyHops;
-  if (trustedProxyHops > 0) {
-    app.set("trust proxy", trustedProxyHops);
-  }
+  const proxyTrust = createProxyTrust(
+    trustedProxyHops,
+    config.publicDemo.enabled && !process.env.TRUSTED_PROXY_ADDRESSES ? "loopback,uniquelocal" : config.trustedProxyAddresses,
+  );
+  app.set("trust proxy", proxyTrust.setting);
+  app.use(untrustedForwardingNotice(proxyTrust));
 
   // Prometheus metrics endpoint — BEFORE authenticate (uses its own bearer token auth)
   app.use(createPrometheusMetricsRoute(metricsService));
@@ -638,7 +646,7 @@ connectorRegistry.register(aeolusRemoteModule);
 
   const wsServer = new WsServer(server, registry, eventBus, WS_MAPPINGS, deviceExposureResolver);
 
-  server.listen(config.port, () => {
+  server.listen({ port: config.port, ...(config.listenHost ? { host: config.listenHost } : {}) }, () => {
     logger.info(
       { port: config.port, mqtt: mqttService.isConnected() ? "connected" : "disconnected" },
       `Aeolus running on port ${config.port}`

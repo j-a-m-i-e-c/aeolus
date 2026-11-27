@@ -34,6 +34,14 @@ export interface Config {
   /** Number of trusted reverse-proxy hops in front of Aeolus. 0 disables trust proxy. */
   trustedProxyHops: number;
   /**
+   * Addresses a trusted hop must come from (TRUSTED_PROXY_ADDRESSES): addresses, CIDR
+   * ranges, or loopback/linklocal/uniquelocal. Default `loopback`. A peer outside the
+   * list never has its X-Forwarded-* headers trusted, whatever the hop count.
+   */
+  trustedProxyAddresses: string;
+  /** Interface to listen on (BIND_ADDRESS), e.g. 127.0.0.1 behind a local proxy. Unset: every interface, as before. */
+  listenHost: string | undefined;
+  /**
    * Maximum confirmation timeout the Command_Service can apply to a command
    * (ms). Acts as the inner bound the REST device-action timeout must exceed
    * (Req 3.7). Defaults to {@link DEFAULT_CONFIRM_TIMEOUT_MS}.
@@ -123,6 +131,8 @@ export const config: Config = {
   rateLimitRpm: parseInt(process.env.RATE_LIMIT_RPM || "1000", 10),
   corsOrigins: process.env.CORS_ORIGINS?.split(",").map((s) => s.trim()).filter(Boolean) || [],
   trustedProxyHops: Math.max(0, parseInt(process.env.TRUST_PROXY_HOPS || "0", 10) || 0),
+  trustedProxyAddresses: process.env.TRUSTED_PROXY_ADDRESSES?.trim() || "loopback",
+  listenHost: process.env.BIND_ADDRESS?.trim() || undefined,
   maxConfirmTimeoutMs: parseInt(
     process.env.MAX_CONFIRM_TIMEOUT_MS || String(DEFAULT_CONFIRM_TIMEOUT_MS),
     10,
