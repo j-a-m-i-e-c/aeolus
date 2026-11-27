@@ -1,6 +1,6 @@
 # Project APIs security and release hardening
 
-Status: **H0a, H1 and F5 implemented; H2 and H3 designs awaiting approval.** Baseline `ad5155e`
+Status: **H0a, H1 and F5 implemented and provisionally accepted; H2 (revision 2) and H3 (revision 2) designs awaiting approval.** Baseline `ad5155e`
 (Project APIs Phases 0–5). Branch `security/project-apis-hardening`.
 
 | Commit | Phase | Finding |
@@ -214,163 +214,333 @@ F4, F10 and F12. Planned changes:
 
 **Gates at `601bc7b`:** backend 4,090 tests, 90.8% branches; frontend 1,344 tests, 90.76%; type checks, lint, radar and E2E safety all green.
 
-## H2 design: secrets at rest (awaiting approval)
+## H2 design (revision 2): secrets at rest
+
+Status: the direction is approved (AES-256-GCM, record binding, a versioned envelope, an external keyring). This revision answers the eight review points and is **awaiting approval before implementation**.
 
 **Objective:** a copy of `aeolus.db`, its WAL, or a normal database backup yields no usable application credential and no signing authority.
 
-### What is stored, and what changes
+### What is protected
 
-| Secret | Where now | Needed as | H2 |
+| Secret | Stored now | Needed as | H2 |
 |---|---|---|---|
-| Connector `password` fields: Hue `apiKey`, Aeolus Remote `apiKey`, and any future one | `connectors.config` JSON, plaintext | plaintext, to call the device or peer | **Encrypt** |
-| JWT signing secret (when `JWT_SECRET` is unset, the default) | `system_settings.jwt_secret`, plaintext | plaintext (HMAC) | **Encrypt** |
-| Backend MQTT password | `system_settings.mqtt_backend_password`, plaintext | plaintext, to connect | **Encrypt** |
-| Shared MQTT password | `system_settings.mqtt_shared_password`, plaintext | plaintext, shown to admins | **Encrypt** |
-| User passwords | `users`, bcrypt | verification only | unchanged |
-| Refresh tokens, Project API keys | SHA-256 | verification only | unchanged |
-| MQTT device credentials | `mqtt_credentials` and the broker `password_file`, PBKDF2 (`$7$`) | verification only | unchanged; the broker file holds hashes only |
+| Connector `password` fields: Hue `apiKey`, Aeolus Remote `apiKey`, any future one (Kasa has none) | `connectors.config` JSON, plaintext | plaintext | encrypt |
+| JWT signing secret, when `JWT_SECRET` is unset (the default) | `system_settings.jwt_secret` | plaintext (HMAC) | encrypt |
+| Backend MQTT password | `system_settings.mqtt_backend_password` | plaintext, to connect | encrypt |
+| Shared MQTT password | `system_settings.mqtt_shared_password` | plaintext, shown to admins | encrypt |
+| User passwords (bcrypt); refresh tokens and API keys (SHA-256); MQTT device credentials (PBKDF2 in the database and in the broker `password_file`) | — | verification only | unchanged |
 
-### Root key
+### 1. Keyring: provisioning, permissions, recovery, independent backups
 
-- A **keyring file** outside the database and its volume:
-  - `AEOLUS_KEYRING_FILE` (default `<AEOLUS_SECRETS_DIR>/keyring.json`, where `AEOLUS_SECRETS_DIR` defaults to `/app/secrets` in containers and `./secrets` from source).
-  - Compose mounts a **separate named volume**, `aeolus_secrets`, so the documented database backup (`aeolus.db` from `backend_data`) never includes it.
-  - A Docker secret (`/run/secrets/...`) works through the same variable.
-  - The file is created with mode 0600 in a 0700 directory.
-- **Format:** `{ "version": 1, "installationId": "<uuid>", "keys": [{ "id": "k1", "key": "<base64 256-bit>", "createdAt": …, "status": "active" | "retired" }] }`. Exactly one key is active.
-- **Not supported:** key material directly in an environment variable, because it is visible in `docker inspect` and process listings. Only a file path is accepted.
+- **Location:** `AEOLUS_KEYRING_FILE`, default `<AEOLUS_SECRETS_DIR>/keyring.json`. `AEOLUS_SECRETS_DIR` is `/app/secrets` in containers, on a **separate named volume** `aeolus_secrets`, never inside `backend_data`. A Docker secret works through the same variable. Key material is never accepted directly in an environment variable.
+- **Format:**
 
-### Encryption
+  ```text
+  { version: 1, installationId, keys: [{ id, key (base64, 256-bit), status: "active" | "pending" | "retired", createdAt, activatedAt, retiredAt }] }
+  ```
 
-- **AES-256-GCM** from `node:crypto`, with a random 96-bit nonce per value. The data key is derived from the root key with HKDF-SHA256 per purpose (`info`: `aeolus/connector-secret/v1`, `aeolus/setting-secret/v1`).
-- **AAD** binds each ciphertext to its place: `connector:<instanceId>:<fieldId>` or `setting:<key>`. A ciphertext copied to another record or field does not decrypt.
-- **Versioned text envelope** stored in place of the value: `aeolus-enc:v1:<keyId>:<nonce>:<ciphertext+tag>` (base64url). The prefix lets every read tell an envelope from legacy plaintext.
-- **Where it happens:** `ConnectorStore` encrypts on save and decrypts on load, using the module's schema to find `password` fields. A small `secret-settings` accessor does the same for the three settings keys.
-  - The manager, the `********` mask semantics (`connector-config.ts`) and redaction are unchanged: they see plaintext in memory, as today.
-  - Nothing else reads those columns (audited in H0).
+  Exactly one key is `active`. A `pending` key may decrypt but is never used to encrypt.
+- **Permissions:**
+  - The directory is created 0700 and the file 0600, owned by the backend user.
+  - On POSIX hosts startup **refuses** a keyring that is group- or world-readable, or not owned by the process user (as OpenSSH does for private keys), naming the problem.
+  - On Windows (development only) the check logs a warning instead.
+- **Every write** is atomic: write a temporary file in the same directory, fsync it, rename it over the old one, fsync the directory, keeping `keyring.prev.json`.
+- **Independent backup:**
+  - `aeolus-secrets backup --out <file>` writes the keyring encrypted under a passphrase (scrypt N=2^17, r=8, p=1 → AES-256-GCM), for offline storage: a password manager, a USB key, a separate machine.
+  - `aeolus-secrets restore --in <file>` refuses to overwrite an existing keyring.
+  - `aeolus-secrets verify --db <path> [--keyring <path>]` opens a database **read-only** and confirms every envelope decrypts. Nothing is printed except counts and key ids. It is the recommended check for every backup set.
+  - A keyring backup is needed once at setup and after every rotation; the CLI and the dashboard warn until one is recorded since the last rotation.
 
-### Provisioning, restart and failure
+### 2. Fresh installation vs existing installation whose keyring is missing
 
-- **First start with no keyring and no envelopes in the database:** generate the keyring, encrypt (migration below), and log the keyring *path* and a reminder to back it up separately. Never the key.
-- **Restart:** load the keyring; every envelope's key id must be present.
-- **Keyring missing or unreadable, or a key id absent, while the database holds envelopes:** **the backend refuses to start.** The error names the keyring path and the recovery command. Nothing falls back to plaintext. A partly working start is not offered, because without the JWT secret no session can be verified and without the MQTT password the backend cannot reach an authenticated broker.
-- **Explicit recovery when the key is lost:** `aeolus-secrets recover --discard-undecryptable`, run with `docker compose run --rm backend node dist/cli/aeolus-secrets.js …`. It:
-  - creates a new keyring;
-  - generates a new JWT secret (every user signs in again);
-  - regenerates the backend and shared MQTT passwords and rewrites the broker password file (devices using the shared password must be updated);
-  - marks connectors with lost secrets "credential required", disabled, for an admin to re-enter.
+The database records the binding in `system_settings.secrets_binding` = `{ installationId, keyIds, fingerprint }`, where `fingerprint` is HMAC-SHA256 of a fixed label under each key, not the key.
 
-  It writes an audit entry and never invents a credential.
+| Database | Keyring | Meaning | Action |
+|---|---|---|---|
+| no binding, no envelopes | absent | fresh install, or pre-H2 install | create the keyring (exclusive create, never overwrite), bind, migrate |
+| no binding, no envelopes | present | pre-H2 database (for example restored) with an existing keyring | bind to that keyring, migrate |
+| binding present | present, matching ids and fingerprints | normal | start |
+| binding present | **absent** | an existing installation lost its keyring | **refuse to start**; never generate a replacement |
+| binding present | present but a needed key id is missing or the fingerprint differs | wrong or older keyring | **refuse to start**, listing the missing key ids |
+| envelopes present, binding absent | any | inconsistent (tampered or partial) | **refuse to start** |
 
-### Rotation and compromise
+The keyring is created with an exclusive create (`O_EXCL`), so a race or a bug can never replace an existing file.
 
-- **`aeolus-secrets rotate`:** adds a new active key, re-encrypts every envelope in one database transaction, and marks the old key `retired`.
-  - Retired keys stay in the keyring so older database backups can still be restored.
-  - `aeolus-secrets prune --key k1` removes one explicitly, and refuses while any envelope still uses it.
-- **Suspected keyring compromise:** `rotate --regenerate-derived` also replaces the JWT secret and the MQTT passwords. Connector credentials must be rotated where they were issued (re-pair Hue; rotate the key on the remote Aeolus). The docs and the command output say so.
+### 3. Key retention and retirement
 
-### Migration of existing installations
+- **Rotation** marks the old key `retired` (with `retiredAt`) and never deletes it.
+- **Retention:** `AEOLUS_KEY_RETENTION_DAYS`, default **400**. Pruning is an explicit command, `aeolus-secrets prune`. It refuses to remove a key that is:
+  - younger than the retention period since retirement (unless `--force`);
+  - used by any envelope in the live database.
+- **The documented rule:** a database backup can be restored if a keyring backup contains its key ids. Keep keyring backups at least as long as database backups, and never prune keys younger than your oldest database backup you intend to restore. The default of 400 days covers a 14-day nightly rotation, monthly archives and a yearly backup, with margin.
 
-- **When it runs:** a startup step after the SQL migrations and after the keyring loads. It is idempotent, and is not a numbered SQL migration, because it needs the key.
-- **Order:**
-  1. Take the existing pre-migration database checkpoint.
-  2. Encrypt every plaintext secret in one transaction.
-  3. Run `wal_checkpoint(TRUNCATE)` and `VACUUM`, so no plaintext is left in free pages or the WAL.
-- **Value mapping:** an empty value stays empty, and a value already in envelope form is left alone. A stored `********` (possible only from the pre-Phase-5 bug) is not encrypted. That connector is marked "credential required" rather than keeping the placeholder.
-- **Old backups still contain plaintext.** The release notes and the command output recommend rotating the Remote key and the MQTT passwords after upgrading (a single command), and re-pairing Hue if old backups may have been exposed.
-- **Verification before release:**
-  - Run against a **copy** of a real database containing Hue and Aeolus Remote credentials and MQTT shared-password mode.
-  - Check that every secret decrypts to its original, connectors reconnect, sessions survive (the JWT secret is preserved), and the broker accepts the backend.
-  - Check that the copy and its WAL contain no plaintext (byte scan for each secret).
-  - **Your call:** I would make that copy from your everyday installation with SQLite's online `.backup`, read-only, into a disposable directory. Do you approve, or should I build a representative database on the disposable stack instead?
+### 4. Staged migration that cannot lose a working credential
 
-### Backup and restore
+Encrypted values finally sit in place (the connector JSON field or the setting value) as `aeolus-enc:v1:<keyId>:<nonce>:<ciphertext+tag>`, with AAD `connector:<instanceId>:<fieldId>` or `setting:<key>` under an HKDF-SHA256 subkey per purpose. Migration reaches that state in stages. A stage marker (`system_settings.secrets_migration`) makes each stage resumable.
 
-- A database backup **and** a keyring containing every key id it references are both needed.
-- Back up the keyring **separately and rarely**: offline, a password manager, a USB stick. It changes only on rotation.
-- The docs will state plainly that whoever holds both can decrypt.
-- Restoring a backup older than a rotation needs the retired key, which is why retired keys are kept until pruned.
+| Stage | Action | If interrupted |
+|---|---|---|
+| 0. Preflight | Keyring ready and bound (point 2). An online `.backup` checkpoint of the database to `<data>/checkpoints/pre-secrets-<time>.db`. It contains plaintext; see point 6. | Nothing changed |
+| 1. Shadow | In one transaction, write an envelope for every secret into a side table, `secret_migration(context, envelope)`. Plaintext is untouched and still used. | The transaction is atomic; plaintext still works; rerun |
+| 2. Verify | Decrypt every envelope and compare it with its plaintext (constant-time); any mismatch stops the migration and keeps plaintext | Nothing switched; rerun |
+| 3. Switch | In **one** transaction, replace each plaintext value with its envelope, delete the side rows and set the marker to `encrypted-v1`. Reads use envelopes from then on. | Atomic: either all plaintext (stage 2 state) or all envelopes |
+| 4. Clean | `wal_checkpoint(TRUNCATE)`, `VACUUM`; delete the stage-0 checkpoint after `verify` passes; log a reminder about older backups | Repeatable; already secure in content terms |
 
-### Not protected by H2
+The same stored values are kept through every stage:
+- the JWT secret, so dashboard sessions survive;
+- the MQTT passwords, so the broker `password_file` hashes stay valid and devices keep connecting;
+- the Hue and Remote keys, so the connectors keep working.
 
-- An attacker with the running process, root on the host, or both volumes.
-- Plaintext that is already in pre-H2 backups.
+Kasa has no secrets and is untouched. A stored literal `********` (from the pre-Phase-5 bug) is not migrated as a value: that connector is marked "credential required".
 
-## H3 design: restore detection and machine-access recovery (awaiting approval)
+**Testing order:**
+1. Synthetic databases first: Hue, Kasa and two Remote instances; MQTT open, shared-password and per-device modes; with and without `JWT_SECRET`. Each stage is interrupted by fault injection.
+2. Then the approved real copy (see "Real database copy" below).
 
-**Objective:** a restored or rolled-back database never makes revoked machine access usable again without an explicit admin decision.
+### 5. Externally supplied `JWT_SECRET`
 
-### Mechanism: an access epoch outside the database's rollback domain
+- Behaviour is unchanged: when `JWT_SECRET` is set, it signs and verifies, and the database value is ignored.
+- Migration still encrypts any `jwt_secret` row present, so a later removal of `JWT_SECRET` keeps the same sessions.
+- `JWT_SECRET` is already outside the database; the docs recommend supplying it as a file (Docker secret) rather than in `.env`.
+- Rotating the keyring never changes the JWT secret unless `--regenerate-derived` is used.
 
-- **In the database:** a numbered migration adds `machine_access_state(id = 1, installation_id, epoch, updated_at)`.
-- **Outside it:** `access-state.json` in `AEOLUS_SECRETS_DIR` holds `{ installationId, epoch, updatedAt, mac }`. The MAC is HMAC-SHA256 with an HKDF subkey of the H2 root key (`aeolus/access-state/v1`), which detects corruption and editing. It lives on the separate secrets volume, so a database restore does not roll it back.
-- **Every change that reduces machine access raises the epoch in the same database transaction:** revoking a key, a rotation ending its overlap, revoking a grant, disabling a client, unpublishing, deleting an API, demoting the publishing admin. After the commit, and **before the API responds**, the file is replaced atomically: write a temporary file, fsync, rename, fsync the directory, keeping the previous file as `access-state.prev.json`.
-  - Changes that only add access do not raise it; rolling them back only removes access, which is the safe direction.
-- **A small append-only `access-journal.jsonl`** next to it records each reduction: `{ epoch, at, action, clientId, credential keyId (the public id), apiId, routeId }`. It holds no secrets, and it is evidence a restore cannot erase.
+### 6. Plaintext that can remain after migration
+
+After stage 4, the live database contains no plaintext secret in its pages or WAL as SQLite sees them. That is **not** secure erasure. The bytes can remain in:
+- freed filesystem blocks, the filesystem journal and SSD or SD-card wear-levelled blocks (`VACUUM` rewrites the file but does not overwrite the device);
+- the old WAL's disk blocks after truncation;
+- SQLite temporary files and the OS page cache or swap;
+- the stage-0 checkpoint until it is deleted (deletion is not erasure either);
+- **every pre-H2 backup and any copy of them.**
+
+Stage 3 also sets `PRAGMA secure_delete=ON` for its transaction, which reduces what remains in the database file itself, nothing more.
+
+The documented response is **credential rotation**. After upgrading, `aeolus-secrets rotate-credentials` regenerates the MQTT backend and shared passwords (rewriting the broker file) and, if chosen, the JWT secret (everyone signs in again). It prints what must be rotated elsewhere: rotate each Aeolus Remote key on its publishing installation; re-pair Hue. Old backups should be treated as containing those credentials until they expire.
+
+### 7. Rollback and recovery procedures
+
+- **Failed migration:**
+  - Before stage 3, `aeolus-secrets migrate --abort` drops the side table; plaintext was never touched.
+  - After stage 3, the database is consistent and encrypted.
+  - Running an older Aeolus release needs `aeolus-secrets downgrade --confirm`, which decrypts back to plaintext under an explicit warning, or restoring the stage-0 checkpoint while it exists.
+  - The startup error names both options.
+- **Interrupted key rotation** (`aeolus-secrets rotate`), staged the same way:
+
+  | Stage | Action | If interrupted |
+  |---|---|---|
+  | R1 | Add the new key to the keyring as `pending` (atomic replace) | The old key is still active; the pending key is unused |
+  | R2 | Re-encrypt every envelope under the new key in one database transaction | Atomic: all old-key or all new-key envelopes; both keys are in the keyring, so either state starts |
+  | R3 | Mark the new key `active` and the old `retired` (atomic replace) | On restart, envelopes under a pending key mean R2 finished, so R3 is completed automatically |
+
+  A key is never removed in the same operation that stops using it.
+- **Lost keyring** (point 2 refuses to start): `aeolus-secrets recover --discard-undecryptable`.
+  - It creates a new keyring and binding, generates a new JWT secret, and regenerates the MQTT passwords, rewriting the broker file.
+  - It marks connectors with lost secrets disabled and "credential required".
+  - It writes an audit entry. It never invents or reuses a credential.
+
+### 8. Limits of a keyring on the same host
+
+The keyring is outside the database and its backup, not outside the machine. H2 protects against:
+- a stolen database file, WAL or database backup;
+- a database copied off for support;
+- a backup service that captures `backend_data` only.
+
+It does **not** protect against:
+- root or the backend user on the host, a container escape, or a process-memory dump;
+- a stolen SD card or disk holding both volumes;
+- a full-disk image or VM snapshot;
+- a backup tool configured to capture all Docker volumes.
+
+Operators wanting more can keep the keyring on a separate device and mount it at start (documented), or use a Docker secret from an external store. A TPM or HSM is out of scope.
+
+### Real database copy (approved, after synthetic tests pass)
+
+- **Made with** SQLite's online backup: `.backup` through `better-sqlite3`'s `db.backup()` on a **read-only** connection to the live file. The live database, its volume and the stack are not stopped, migrated or changed.
+- **Destination:** `%LOCALAPPDATA%\aeolus-h2-verify\` (outside the repository and OneDrive), restricted with `icacls` to the current user only.
+- **Running it:** migration and `verify` run through the CLI only. No backend, MQTT client, connector or outbound network is started against the copy.
+- **Output:** counts, key ids and pass or fail, never values.
+- **Cleanup:** when done, the directory is deleted and the deletion recorded here. No existing backup is touched.
+
+### Phases
+
+| Phase | Scope |
+|---|---|
+| H2a | Keyring, envelope crypto, binding table and CLI `init`/`verify`/`backup`/`restore` |
+| H2b | Staged migration and the read and write paths |
+| H2c | Rotation, prune, recover, downgrade and `rotate-credentials`; docs |
+
+Each phase is gated separately.
+
+## H3 design (revision 2): crash-consistent revocation journal
+
+Status: **awaiting approval before implementation.** It depends on H2: the keyring's `installationId` and an HKDF subkey for the journal MAC.
+
+### The failure to model (from the review)
+
+The proposed design was:
+1. Both counters at N.
+2. A revocation commits in SQLite (N+1).
+3. Power fails before the external counter is written.
+4. The database is restored to a backup at N.
+5. The external file also says N.
+
+Startup would then see "equal" and serve the revoked key. **That design is withdrawn.**
+
+### Protocol: write-ahead journal on the secrets volume
+
+`access-journal.jsonl` in `AEOLUS_SECRETS_DIR` is append-only. Each record is one JSON line:
+
+```text
+{ seq, kind: "intent" | "commit" | "abort", op, targets, at, prev, mac }
+```
+
+- `prev` is the previous record's hash, forming a chain.
+- `mac` is HMAC-SHA256 under the H2 subkey `aeolus/access-journal/v1`.
+- Records contain only public ids, never a secret.
+
+The database holds `machine_access_state(installation_id, epoch, suspended, suspended_reason)` (a numbered migration).
+
+Every change that **reduces** machine access runs this sequence under one in-process mutex. One backend and one database is the supported topology.
+
+1. **Intent:** append the intent record `seq = epoch + 1`, then `fsync` the file. If the file was created, also `fsync` the directory.
+2. **Commit:** one SQLite transaction applies the change and sets `epoch = seq`. WAL with `synchronous=FULL` (verified as the effective setting) makes it durable at commit.
+3. **Mark:** append `commit(seq)`, then `fsync`.
+4. **Respond.**
+
+- **If step 2 fails:** append `abort(seq)`, fsync, and report the error.
+- **If step 1 cannot be made durable** (the volume is full, read-only or missing): the operation is refused, **and machine access is suspended** (503, below) until the journal is writable. A credential the admin is trying to revoke must never keep working because the journal could not record it.
+
+**Changes that only add access are not journaled:** a key issued, a client enabled, a grant given or a publish. Rolling them back only removes access. Replay never re-adds anything.
+
+### Journaled operations and their replay
+
+Replay applies an intent to the database idempotently. It is safe on any database state, including one where the targets no longer exist, which is a no-op.
+
+| Operation | Intent targets | Replay |
+|---|---|---|
+| Revoke a key | credentialId, keyId | `revoked_at = coalesce(revoked_at, at)` |
+| Rotate a key (the old key's overlap) | credentialId, newExpiry | `expires_at = min(expires_at, newExpiry)`. If the paired new key was lost (an interrupted rotation), the old one still ends; the admin re-issues. |
+| Revoke a grant (direct, or by a republish with a changed contract) | grantId, clientId, apiId, routeId | revoke that grant |
+| Disable a client | clientId | `status = disabled` |
+| Unpublish | apiId | unpublish; revoke every grant to apiId |
+| Delete an automation with an API | apiId, automationId | as unpublish, and mark the API retired |
+| Demote or delete the publishing admin | userId | the existing withdrawal: unpublish that user's APIs and revoke their grants |
+| Recovery (below) | recoveryId, epoch range | revoke every credential and grant created before the recovery |
 
 ### Startup decision
 
-| Database epoch vs file | Meaning | Result |
+E is the database epoch. J is the highest intent seq in the journal; its status is commit, abort or none.
+
+| State | Meaning | Action | Result |
+|---|---|---|---|
+| E = J, J committed or aborted | normal | — | normal |
+| E = J, J unmarked | crash after the commit, before the mark | append `commit(J)` | normal |
+| E = J − 1, J aborted | the operation failed | — | normal |
+| E = J − 1, J unmarked | crash before or during the commit, **or** a restore to exactly the state before the last operation (identical states) | replay J in one transaction, `epoch = J`, append `commit(J)` | normal (safe replay: the withdrawal the admin asked for is applied) |
+| E < J and any intent in (E, J] is committed, or E < J − 1 | **the database is older than revocations that were committed** | replay every intent in (E, J] in one transaction; set `suspended` | **fail-closed suspension** |
+| E > J | the journal is older than the database (the secrets volume was restored or replaced) | — | **suspension** |
+| journal missing or unreadable, E > 0 | external state lost | — | **suspension** |
+| journal missing, E = 0, binding new (first H3 start) | upgrade to H3 | create the journal at seq 0 | normal (restores of backups taken before H3 are not detectable; documented) |
+| a broken chain or MAC failure before the last line | tampering or corruption | — | **suspension** |
+| only the last line torn (short or unparseable) | crash during an append | discard that line, then decide as above | per row above |
+| `installationId` differs from the keyring and database | a database from another installation, or a clone | — | **suspension** |
+| keyring missing | H2 | refuse to start (H2) | — |
+
+**The review's scenario:**
+- Under this protocol, step 3's power failure happens after the intent N+1 is durable.
+- After the database restore to N, startup sees E = N and J = N+1, unmarked, and replays N+1.
+- The credential is revoked again before any request is served. The old access never becomes valid.
+
+**If the backup is older than N:** the intents between it and N are committed, so the restore is **detected**. Every later withdrawal is replayed **and** machine access is suspended pending recovery.
+
+**Why replay is complete for withdrawals:** every reduction since any epoch is in the journal, in order. Replaying (E, J] on a database at E reproduces every revocation made after that database was saved. Additions made after the backup are absent from it, so the result never grants more than the live system last did.
+
+### Crash-state matrix (one operation)
+
+| Interruption | Durable state afterwards | Next start |
 |---|---|---|
-| equal | normal restart | serve |
-| database ahead | power loss after commit, before the file write | update the file to match; serve |
-| **database behind** | the database is older than the last revocation: restored or rolled back | **machine access suspended** |
-| file missing or unreadable (and `.prev` too), database epoch > 0 | external state lost | **suspended** |
-| `installationId` differs | a database from another installation or a clone | **suspended** |
-| file missing, database epoch 0 | first run of H3 on an existing install | create the file; serve (restores older than this cannot be detected; documented) |
+| Before step 1 completes (a torn last line) | journal ends at J−1 (the torn line is discarded); database at J−1 | normal; the operation did not happen and the admin saw no success |
+| After step 1, before or during step 2 | intent J durable, unmarked; database at J−1 (the transaction rolled back) | safe replay applies J |
+| After step 2, before step 3 | intent J; database at J | mark committed; normal |
+| After step 3, before the response | complete | normal (the admin may retry; revoking again is a no-op) |
+| Step 2 fails, `abort(J)` durable | aborted | normal; the operation did not happen |
+| Step 2 fails, crash before `abort(J)` is durable | intent J unmarked; database at J−1 | safe replay **applies** J. A revocation the admin saw fail may still take effect, never the reverse. |
+| Step 1 refused (journal unwritable) | no intent; database unchanged | suspended until the journal is writable |
+| Crash during replay | the replay transaction rolls back; the journal is unchanged | replay again (idempotent) |
+| Crash during recovery (below) | recovery intent durable, unmarked or uncommitted | the recovery replays to completion; a second attempt finds nothing left; the same `recoveryId` is never applied twice with different effects |
 
-**While suspended:**
-- Every `/api/exposed` request gets one uniform answer, revealing nothing per key. I propose **503** with `Retry-After` and the body "Machine access is suspended pending administrator review". The alternative is **401**, which looks like a revoked key to a remote installation.
-- The rest of Aeolus runs normally: dashboard, MQTT, automations, outbound connectors.
-- The Endpoints view shows the suspension and the recovery page.
+### Restores of SQLite and WAL files
 
-### Explicit recovery (an admin, in the dashboard)
+| Restored | Effect | Outcome |
+|---|---|---|
+| An older `aeolus.db` and its `-wal` (a consistent older state) | E smaller | detected (suspension) or safe replay (one step) |
+| `aeolus.db` without its `-wal` | an older consistent state | same |
+| An older `aeolus.db` with the current `-wal` left behind | SQLite ignores a WAL whose salt does not match | same as the older database |
+| A database from another installation | `installationId` mismatch | suspension |
+| A database from before H3 | no epoch table; the migration creates E = 0 while the journal has J > 0 | E < J with committed intents: suspension |
 
-1. Aeolus lists every client, key and grant that is active in the restored database. Using the journal, it marks each one **revoked after this backup** (with date and action) or not.
-2. For each item the admin chooses **Keep** (reauthorise) or **Revoke**. Items revoked after the backup default to Revoke and cannot be kept without a second confirmation. **Revoke all and start again** is available.
-3. On confirm, in one transaction:
-   - the chosen revocations are applied;
-   - kept items are recorded;
-   - the epoch becomes the file's epoch + 1;
-   - audit entries are written (`access.restore-detected` with both epochs, then one entry per kept or revoked item);
-   - then the file is updated. Suspension ends.
+### Suspension (as decided)
 
-Nothing is regranted silently. A restored grant that the journal shows revoked stays revoked unless the admin confirms keeping it.
+- A missing or invalid key is still 401, and an unknown or ungranted route still 404.
+- A route that is otherwise authorised gets a **fixed 503** (`Retry-After`, "Machine access is suspended pending administrator review"). **No published handler runs.**
+- No response mentions the epoch, the journal or recovery.
+- The dashboard shows a persistent recovery-required warning to admins, and the Endpoints view shows the recovery page.
+- **The Aeolus Remote connector** classifies 503 as `remote-unavailable`: the reading stays as last-known but is **stale**, never fresh. An integration test will drive a real suspended exposed router with a real connector and check `stale: true` and `staleReason: "remote-unavailable"`.
 
-### Interrupted writes, WAL and power loss
+### Recovery: restored credentials are invalidated, not reinstated
 
-- `synchronous` is SQLite's default for WAL (FULL), so a committed revocation is durable before the file write.
-- A crash between the database commit and the file write leaves the database ahead, which is safe.
-- A torn file write cannot happen (rename is atomic); if it did, `.prev` is used.
-- Restoring `aeolus.db` without its `-wal` produces an older database, which is detected. A stale `-wal` from another lineage is ignored by SQLite (salt mismatch), with the same outcome.
-- The restore docs will still say to remove `-wal`/`-shm` before restoring.
-- Migrations do not change the epoch.
-- Key unavailable: H2 refuses to start; the file's MAC cannot be checked without the key.
+Clearing a flag never restores access. Recovery is one journaled operation (intent, then commit), shown to the admin with counts of what it will invalidate.
 
-### Limits, documented
+1. Revoke **every** machine credential and **every** grant present in the restored database. This includes those not revoked after the backup, because the database's history can no longer be trusted.
+2. Record audit entries: `access.restore-detected` (with no epoch values exposed outside the admin audit), then `access.recovery` with counts.
+3. Clear `suspended`.
 
-- A rollback of **both** volumes (a VM or SD-card image, or a full-disk backup restored together) is not detectable. Nothing on the machine can outlive it.
-- The only stronger option is an external monotonic witness (another host, a TPM counter), which is out of scope.
-- Two clones running at once with the same state are not distinguished.
+Clients and published APIs are kept so the admin need not rebuild them, but every client has **no working key and no grant**. The admin must issue new keys and grant routes explicitly, and update each remote installation with its new key.
 
-### Tests (with real database copies, using SQLite's backup API)
+The recovery page lists what was revoked after the backup (from the journal) so the admin understands what happened. Nothing is preselected for re-issue.
 
-- The required scenario end to end against a real copied database:
-  1. Create a client, a key and a grant.
-  2. Back up.
-  3. Revoke the key and the grant.
-  4. Restore the backup.
-  5. The old key gets the suspension response, never the endpoint.
-  6. Run the recovery procedure.
-  7. Only what was deliberately reauthorised works.
-- The same with active, revoked, expired and rotated (overlap) credentials mixed.
-- Normal restart; repeated restarts; a crash injected between commit and file write; a restore without the WAL and with a stale WAL; a missing, corrupt or edited file; a missing key; an `installationId` mismatch; and a migration run.
+### Dashboard sessions and authority (also exposed by a restore)
 
+A restore also brings back:
+- refresh tokens revoked after the backup (logout, sessions ended by an admin);
+- users deleted or demoted after it;
+- **old passwords** changed after it, which matters if the change was made because a password leaked;
+- MQTT device credentials removed after it (the broker `password_file` is regenerated from the database).
+
+Proposed as **H3b**, with the same journal:
+- **Journal these too:** user disabled, deleted or demoted; password changed (the intent carries the new bcrypt hash, a one-way hash, not the password); sessions revoked; MQTT credential removed.
+- **Replay them on any start.**
+- **On a detected restore, also:** revoke every refresh token (everyone signs in again), rotate the JWT signing secret through H2 when it is not externally supplied, and rewrite the broker `password_file` after replay.
+
+Your call: H3b inside H3, or as a following phase. I recommend inside, because the same restore that resurrects a key resurrects a leaked password.
+
+### Filesystem ordering
+
+- **Appends:** `open(O_APPEND)`, write the whole line, `fsync(fd)`. A new file also gets `fsync` on its directory.
+- **Lines are self-delimiting and MACed**, so a torn tail is detectable and discarded. Only the last line may be torn; anything else is corruption.
+- **Journal segments rotate at 1 MiB.** A new segment starts with a `base` record carrying the previous chain hash, created by write-temp, fsync, rename and directory fsync.
+- **Retention:** segments are kept for `AEOLUS_KEY_RETENTION_DAYS` (shared with H2), so any restorable backup can be replayed. A database older than the oldest segment is treated as detected and suspended.
+- **Windows:** directory fsync is not available (development only; documented). Linux is the supported target.
+
+### What cannot be protected
+
+- A rollback of the **whole machine**, or of both volumes together: an SD-card or disk image, a VM snapshot, or restoring the database and the secrets volume from the same backup set. The journal goes back with the database, and no on-host mechanism can tell.
+- Detecting that needs a witness off the host that cannot be rolled back (another installation, a remote service, a TPM monotonic counter), which is out of scope.
+- An attacker with write access to the secrets volume **and** the keyring can forge the journal. (H2's same-host limits apply.)
+- Two clones running at once with copies of the same state.
+- These are documented, with the operational advice: back up the secrets volume separately from the database, and never restore both from the same snapshot unless you intend a full rollback. In that case, run recovery manually: `aeolus-secrets access-recovery --force` performs the same invalidation.
+
+### Tests (to be written with the implementation)
+
+- The required scenario against real copied databases (SQLite backup API), plus the review's power-failure scenario using a fault-injection hook between steps.
+- Every row of the startup table and the crash-state matrix, each operation type in the replay table, and journal faults (torn tail, broken chain, MAC failure, missing file, wrong installation).
+- Duplicate and interrupted recovery; normal restarts in a loop; a migration run.
+- The suspended 503 contract (401 and 404 unchanged, no handler executed), and the Remote connector staying stale.
 ## Phases and approvals after this checkpoint
 
 | Next | Needs |
 |---|---|
-| H2 implementation | Approval of the H2 design, and your answer on making a read-only `.backup` copy of the everyday database for migration verification |
-| H3 implementation | Approval of the H3 design, and the choice between 503 and 401 while suspended |
+| H2a–H2c | Approval of H2 revision 2 (the real-copy test is approved, after synthetic tests) |
+| H3 (and H3b) | Approval of H3 revision 2, and whether H3b is included (503 while suspended is decided) |
 | H4 | Peer CA option for Aeolus Remote (F6), the HTTPS-only test route, `/try` path parameters (F8), metrics auth (F9) |
 | H5, H6 | As planned |
