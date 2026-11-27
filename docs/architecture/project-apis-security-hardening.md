@@ -1,6 +1,6 @@
 # Project APIs security and release hardening
 
-Status: **H0a, H1 and F5 implemented and provisionally accepted; H2 (revision 2) and H3 (revision 2) designs awaiting approval.** Baseline `ad5155e`
+Status: **H0a, H1 and F5 implemented and provisionally accepted; H2 and H3 (revision 2) designs approved for staged implementation; H2a implemented and awaiting review.** Baseline `ad5155e`
 (Project APIs Phases 0–5). Branch `security/project-apis-hardening`.
 
 | Commit | Phase | Finding |
@@ -216,7 +216,7 @@ F4, F10 and F12. Planned changes:
 
 ## H2 design (revision 2): secrets at rest
 
-Status: the direction is approved (AES-256-GCM, record binding, a versioned envelope, an external keyring). This revision answers the eight review points and is **awaiting approval before implementation**.
+Status: the direction is approved (AES-256-GCM, record binding, a versioned envelope, an external keyring). This revision answers the eight review points and is **approved for staged implementation**. H2a is implemented; H2b and H2c are not started.
 
 **Objective:** a copy of `aeolus.db`, its WAL, or a normal database backup yields no usable application credential and no signing authority.
 
@@ -365,7 +365,7 @@ Operators wanting more can keep the keyring on a separate device and mount it at
 
 | Phase | Scope |
 |---|---|
-| H2a | Keyring, envelope crypto, binding table and CLI `init`/`verify`/`backup`/`restore` |
+| H2a | Keyring, envelope crypto, binding table and CLI `init`/`verify`/`backup`/`restore` (implemented; nothing is encrypted with it yet) |
 | H2b | Staged migration and the read and write paths |
 | H2c | Rotation, prune, recover, downgrade and `rotate-credentials`; docs |
 
@@ -373,7 +373,7 @@ Each phase is gated separately.
 
 ## H3 design (revision 2): crash-consistent revocation journal
 
-Status: **awaiting approval before implementation.** It depends on H2: the keyring's `installationId` and an HKDF subkey for the journal MAC.
+Status: **approved for staged implementation (H3a, then H3b) after H2c.** It depends on H2: the keyring's `installationId` and an HKDF subkey for the journal MAC.
 
 ### The failure to model (from the review)
 
@@ -540,7 +540,7 @@ Your call: H3b inside H3, or as a following phase. I recommend inside, because t
 
 | Next | Needs |
 |---|---|
-| H2a–H2c | Approval of H2 revision 2 (the real-copy test is approved, after synthetic tests) |
-| H3 (and H3b) | Approval of H3 revision 2, and whether H3b is included (503 while suspended is decided) |
+| H2b, H2c | Review of H2a (the real-copy test is approved, after synthetic tests) |
+| H3a, then H3b | H2c accepted; each subphase is reviewed before the next |
 | H4 | Peer CA option for Aeolus Remote (F6), the HTTPS-only test route, `/try` path parameters (F8), metrics auth (F9) |
 | H5, H6 | As planned |
