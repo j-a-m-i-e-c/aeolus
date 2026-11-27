@@ -34,6 +34,7 @@ import type {
   CommandFailureReason,
 } from "./command-history-store.js";
 import { requestPublicHttp } from "../security/outbound-http.js";
+import { loggableTarget } from "../log-safety.js";
 
 /**
  * Narrow, read-only view of the active automation execution context
@@ -466,7 +467,7 @@ export class CommandService {
       } catch (err) {
         const message = (err as Error).message;
         this.deps.logger.error(
-          { ruleId: logId, actionType: action.type, target: action.target, error: message },
+          { ruleId: logId, actionType: action.type, target: loggableTarget(action.target), error: message },
           `Action execution failed for rule ${logId}`,
         );
         recordTransition("FAILED", true, { success: false, failureKind: "execution", error: message });
@@ -528,7 +529,7 @@ export class CommandService {
       this.deps.pendingCommandTracker.cancel(correlationId as string);
       const message = (err as Error).message;
       this.deps.logger.error(
-        { ruleId: logId, actionType: action.type, target: action.target, error: message },
+        { ruleId: logId, actionType: action.type, target: loggableTarget(action.target), error: message },
         `Action execution failed for rule ${logId}`,
       );
       recordTransition("FAILED", true, { success: false, failureKind: "execution", error: message });
@@ -762,6 +763,8 @@ export class CommandService {
     observedDeviceId?: string,
     timeoutMs?: number,
   ): void {
+    // Webhook targets are URLs: logged without their query string.
+    target = loggableTarget(target);
     const base: Record<string, unknown> = { ruleId, target, lifecycleState };
     if (error) base.error = error;
     if (lifecycleState === "TIMED_OUT" || lifecycleState === "STATE_MISMATCH") {

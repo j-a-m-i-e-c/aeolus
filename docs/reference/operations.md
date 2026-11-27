@@ -216,6 +216,16 @@ The backend uses pino structured logs.
 
 A bounded in-memory log buffer supplies the dashboard log viewer. Container logs use size and file-count rotation in Docker Compose.
 
+Logs must not contain credentials (`src/log-safety.ts`, tested end to end by `log-safety.integration.test.ts`):
+
+- request bodies are never logged; a body the parser refuses (malformed JSON, too large) is logged as a category, method, path and request id, and the response carries the same request id with a fixed message;
+- errors are logged as type, message, stack and scalar codes only, never the bodies, configs or headers attached to them;
+- fields named like secrets (`password`, `apiKey`, `token`, `secret`, `authorization`, `body`) are censored;
+- request paths, authored HTTP URLs and webhook targets are logged without query strings;
+- a final pass over every line, before stdout and the log buffer, masks Project API keys, JWTs and bearer tokens.
+
+Free-form secrets such as passwords have no recognisable shape, so the last pass cannot catch them; they are kept out by never logging bodies.
+
 ## Metrics
 
 `prom-client` exposes:

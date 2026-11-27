@@ -194,7 +194,7 @@ When `main` has changed in the previous 24 hours, the daily workflow:
 2. installs Chromium;
 3. runs Playwright;
 4. scans `test-results/` and `playwright-report/` for API keys, failing the job on a finding;
-5. on failure, prints backend logs and uploads the report, unless the scan found a key;
+5. on failure, prints backend logs and uploads the report, each only if the credential scan finds no key in them;
 6. tears the stack down.
 
 The workflow can also be triggered manually.

@@ -22,6 +22,7 @@ import type {
 import type { Device, ActionResult, BulkActionResult, ConfirmOptions, EventMetadata } from "../core/types.js";
 import logger from "../logger.js";
 import { requestPublicHttp, resolveOutboundTimeoutMs } from "../security/outbound-http.js";
+import { loggableUrl } from "../log-safety.js";
 
 // isolated-vm is a native addon that requires C++ compilation.
 // On Windows dev machines it may not compile — graceful fallback logs a warning.
@@ -1345,7 +1346,8 @@ export class Sandbox {
         return new runtime.ExternalCopy({ status: response.status, body: response.body }).copyInto();
       } catch (err) {
         logger.warn(
-          { ruleId, method, url, error: (err as Error).message },
+          // Origin and path only: an author may put a token in the query string.
+          { ruleId, method, url: loggableUrl(url), error: (err as Error).message },
           "[sandbox] outbound HTTP request refused or failed",
         );
         return new runtime.ExternalCopy({ status: 0, body: (err as Error).message }).copyInto();

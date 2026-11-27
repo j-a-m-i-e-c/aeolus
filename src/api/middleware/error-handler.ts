@@ -1,6 +1,21 @@
 import type { Request, Response, NextFunction } from "express";
 import { ZodError } from "zod";
 import logger from "../../logger.js";
+import { randomUUID } from "node:crypto";
+import { isBodyParserError } from "../../log-safety.js";
+import { loggablePath } from "./request-logger.js";
+
+/** Fixed messages for body-parser failures; the parser's own message may quote the body. */
+const BODY_ERROR_MESSAGES: Record<string, string> = {
+  "entity.parse.failed": "The request body is not valid JSON",
+  "entity.too.large": "The request body is too large",
+  "entity.verify.failed": "The request body could not be verified",
+  "encoding.unsupported": "The request body encoding is not supported",
+  "charset.unsupported": "The request body character set is not supported",
+  "request.aborted": "The request was aborted",
+  "request.size.invalid": "The request body length does not match its Content-Length",
+  "stream.encoding.set": "The request body could not be read",
+};
 import { config } from "../../config.js";
 
 export class AppError extends Error {
@@ -70,11 +85,24 @@ export function errorHandler(
   res: Response,
   _next: NextFunction,
 ): void {
+  // A body the parser refused (malformed JSON, too large, bad encoding). The parser's
+  // error carries the raw body and its message quotes it, so neither is logged or
+  // returned: only a stable category, the method, the path and a request id.
+  if (isBodyParserError(err)) {
+    const requestId = randomUUID();
+    logger.warn(
+      { requestId, category: err.type, status: err.status, method: _req.method, path: loggablePath(_req) },
+      "Request body refused",
+    );
+    res.status(err.status).json({ error: BODY_ERROR_MESSAGES[err.type] ?? "The request body could not be read", requestId });
+    return;
+  }
+
   // Log at appropriate level based on error type
   if (err instanceof AppError && err.statusCode < 500) {
-    logger.debug({ err, method: _req.method, path: _req.path }, "Request error");
+    logger.debug({ err, method: _req.method, path: loggablePath(_req) }, "Request error");
   } else {
-    logger.error({ err, method: _req.method, path: _req.path }, "Request error");
+    logger.error({ err, method: _req.method, path: loggablePath(_req) }, "Request error");
   }
 
   // Handle Zod validation errors

@@ -57,9 +57,19 @@ jobs:
       - name: Run Playwright e2e
         run: npm run test:e2e
 
+      # Logs are written to a file and printed only if the credential scan finds no
+      # API key in them; CI logs are readable by anyone who can see the run.
       - name: Backend logs (on failure)
         if: failure()
-        run: docker compose --project-directory . -f e2e/docker-compose.e2e.yml logs --no-color --tail 200
+        run: |
+          mkdir -p e2e-logs
+          docker compose --project-directory . -f e2e/docker-compose.e2e.yml logs --no-color --tail 200 > e2e-logs/stack.log 2>&1 || true
+          if node scripts/e2e/credential-scan.mjs e2e-logs; then
+            cat e2e-logs/stack.log
+          else
+            echo "Backend logs withheld: the credential scan found an API key in them."
+            exit 1
+          fi
 
       # The Project API spec issues a real key. Playwright's global teardown already
       # scanned test-results/; the HTML report is written after it, so scan both here.

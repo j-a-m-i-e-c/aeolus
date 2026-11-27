@@ -1,5 +1,6 @@
 import type { Request, Response, NextFunction } from "express";
 import logger from "../../logger.js";
+import { maskCredentialSegments } from "../../log-safety.js";
 
 /** Paths that are polled frequently by the dashboard and don't need logging */
 const SILENT_PATHS = [
@@ -27,12 +28,8 @@ export function loggablePath(req: Pick<Request, "originalUrl" | "url">): string 
   return masked.length > MAX_LOGGED_PATH ? masked.slice(0, MAX_LOGGED_PATH) + "…" : masked;
 }
 
-/** Mask an Aeolus API key or a JWT anywhere in a path. Also used for metrics labels. */
-export function maskCredentialSegments(path: string): string {
-  return path
-    .replace(/aeo_[A-Za-z0-9_-]+/g, "aeo_[redacted]")
-    .replace(/eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, "[redacted-jwt]");
-}
+// Mask an Aeolus API key or a JWT anywhere in a path. Also used for metrics labels.
+export { maskCredentialSegments } from "../../log-safety.js";
 
 export function requestLogger(req: Request, res: Response, next: NextFunction): void {
   const path = loggablePath(req);
