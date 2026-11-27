@@ -10,7 +10,15 @@ import {
   handleDelay,
   handleWebhook,
 } from "./command-service.js";
-
+const outbound = vi.hoisted(() => ({
+  requestPublicHttp: vi.fn(),
+  realRequestPublicHttp: undefined as unknown as (...args: unknown[]) => Promise<unknown>,
+}));
+vi.mock("../security/outbound-http.js", async (importOriginal) => {
+  const real = await importOriginal<typeof import("../security/outbound-http.js")>();
+  outbound.realRequestPublicHttp = real.requestPublicHttp as never;
+  return { ...real, requestPublicHttp: outbound.requestPublicHttp };
+});
 function createMockDeps(): CommandServiceDeps {
   return {
     mqttService: {
@@ -356,72 +364,50 @@ describe("handleDelay", () => {
 
 describe("handleWebhook", () => {
   let deps: CommandServiceDeps;
-  const originalFetch = globalThis.fetch;
   const publicUrl = "https://93.184.216.34/hook";
+  const ok = { status: 200, statusText: "OK", headers: new Headers(), body: "" };
 
   beforeEach(() => {
     deps = createMockDeps();
+    outbound.requestPublicHttp.mockReset();
   });
 
-  afterEach(() => {
-    globalThis.fetch = originalFetch;
-  });
-
-  it("sends a bounded POST request by default", async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue(new Response("", { status: 200 }));
+  // The transport itself (redirects, sizes, connection-time address checks) is tested
+  // in security/outbound-http.test.ts; here, what the webhook hands it.
+  it("sends a POST through the public-only request by default", async () => {
+    outbound.requestPublicHttp.mockResolvedValue(ok);
     const action: ActionDescriptor = { type: "webhook", target: publicUrl, params: { body: '{"alert":true}' } };
     await handleWebhook(action, "rule-w1", deps);
-    expect(globalThis.fetch).toHaveBeenCalledWith(
-      new URL(publicUrl),
-      expect.objectContaining({
-        method: "POST",
-        headers: {},
-        body: '{"alert":true}',
-        redirect: "manual",
-        signal: expect.any(AbortSignal),
-      }),
-    );
+    expect(outbound.requestPublicHttp).toHaveBeenCalledWith(publicUrl, { method: "POST", headers: {}, body: '{"alert":true}' });
   });
 
   it("uses specified method and headers", async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue(new Response("", { status: 200 }));
+    outbound.requestPublicHttp.mockResolvedValue(ok);
     const action: ActionDescriptor = {
       type: "webhook",
       target: publicUrl,
-      params: { method: "PUT", headers: { Authorization: "Bearer token" }, body: "data" },
+      params: { method: "put", headers: { Authorization: "Bearer token" }, body: "data" },
     };
     await handleWebhook(action, "rule-w2", deps);
-    expect(globalThis.fetch).toHaveBeenCalledWith(
-      new URL(publicUrl),
-      expect.objectContaining({
-        method: "PUT",
-        headers: { Authorization: "Bearer token" },
-        body: "data",
-        redirect: "manual",
-      }),
-    );
+    expect(outbound.requestPublicHttp).toHaveBeenCalledWith(publicUrl, { method: "PUT", headers: { Authorization: "Bearer token" }, body: "data" });
   });
 
   it("throws when response is not ok", async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue(new Response("", { status: 500, statusText: "Internal Server Error" }));
+    outbound.requestPublicHttp.mockResolvedValue({ ...ok, status: 500, statusText: "Internal Server Error" });
     const action: ActionDescriptor = { type: "webhook", target: publicUrl, params: {} };
-    await expect(handleWebhook(action, "rule-w3", deps)).rejects.toThrow("Webhook returned 500");
+    await expect(handleWebhook(action, "rule-w3", deps)).rejects.toThrow("Webhook returned 500 Internal Server Error");
   });
 
   it("sends undefined body when no body param", async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue(new Response("", { status: 200 }));
+    outbound.requestPublicHttp.mockResolvedValue(ok);
     const action: ActionDescriptor = { type: "webhook", target: publicUrl, params: {} };
     await handleWebhook(action, "rule-w4", deps);
-    expect(globalThis.fetch).toHaveBeenCalledWith(
-      new URL(publicUrl),
-      expect.objectContaining({ method: "POST", headers: {}, body: undefined }),
-    );
+    expect(outbound.requestPublicHttp).toHaveBeenCalledWith(publicUrl, { method: "POST", headers: {}, body: undefined });
   });
 
-  it("rejects private destinations before dispatch", async () => {
-    globalThis.fetch = vi.fn();
+  it("rejects private destinations through the real policy, without connecting", async () => {
+    outbound.requestPublicHttp.mockImplementation(outbound.realRequestPublicHttp);
     const action: ActionDescriptor = { type: "webhook", target: "http://127.0.0.1/admin", params: {} };
-    await expect(handleWebhook(action, "rule-w5", deps)).rejects.toThrow(/not public|private|loopback/i);
-    expect(globalThis.fetch).not.toHaveBeenCalled();
+    await expect(handleWebhook(action, "rule-w5", deps)).rejects.toThrow(/private|loopback|blocked/i);
   });
 });

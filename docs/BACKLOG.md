@@ -177,11 +177,10 @@ Not promotion blockers under the documented mostly-trusted single-site threat
 model, but should remain visible:
 
 - Authored `http.*` and form-rule webhooks now share one bounded public-HTTP(S)
-  policy: literal/private/link-local destinations are rejected, DNS answers are
-  preflighted, redirects are disabled, and request/response sizes and execution
-  time are bounded. A DNS preflight -> connection TOCTOU window remains because
-  Node's `fetch` may resolve the host again when connecting; close that only if a
-  pinned-address transport becomes necessary for the threat model.
+  policy: literal/private/link-local destinations are rejected, every DNS answer is
+  checked at connection time (the preflight-to-connect TOCTOU window was closed in
+  hardening H1, see ADR-0020), redirects are disabled, and request/response sizes
+  and execution time are bounded.
 - Dependency posture is deliberate rather than "green at any cost": `ws` is on
   the safe 8.21.3 line, and `isolated-vm` is on 6.2.0, which carries the fix for
   the GHSA-864f-rcv7-6rh4 sandbox escape. Both are current; the note stays because

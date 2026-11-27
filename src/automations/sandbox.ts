@@ -1321,7 +1321,7 @@ export class Sandbox {
   /**
    * Set HTTP references on the jail. Both authored HTTP and generic webhook
    * actions use the shared public-outbound policy in security/outbound-http.ts:
-   * DNS preflight, public HTTP(S) only, no redirects, timeout and body limits.
+   * public HTTP(S) only, checked at connection time, no redirects, timeout and body limits.
    */
   private async setHttpRefs(jail: IvmGlobal, ruleId: string): Promise<void> {
     const runtime = ivm;

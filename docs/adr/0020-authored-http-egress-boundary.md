@@ -9,11 +9,13 @@ Aeolus must reach private LAN devices through its trusted connector implementati
 
 ## Decision
 
-Use a **shared bounded public-HTTP policy** for authored HTTP and general outbound webhook actions, distinct from deliberately configured trusted connector networking. Parse destinations; permit HTTP(S) only; reject URL-embedded credentials; reject private, loopback, link-local, reserved and other non-public IP destinations. Resolve hostnames and reject them if any preflight DNS answer is non-public. Enforce bounded body sizes, response sizes and timeouts; do not automatically follow redirects. Connectors retain their ability to reach operator-configured LAN hardware because their implementation and configuration path are trusted separately.
+Use a **shared bounded public-HTTP policy** for authored HTTP and general outbound webhook actions, distinct from deliberately configured trusted connector networking. Parse destinations; permit HTTP(S) only; reject URL-embedded credentials; reject private, loopback, link-local, reserved and other non-public IP destinations. Resolve hostnames and reject them if any DNS answer is non-public, at the moment the connection is made. Enforce bounded body sizes, response sizes and timeouts; do not automatically follow redirects. Connectors retain their ability to reach operator-configured LAN hardware because their implementation and configuration path are trusted separately.
 
 Timeouts are bounded per request, not fixed. The default is 10 seconds. Authored code may request a longer or shorter one with `timeoutMs`, which the host clamps to 1–25 seconds (`resolveOutboundTimeoutMs`): the ceiling keeps a single request inside the 30-second completion budget of an automation run, because a request still waiting when the run ends is abandoned with it. Some public services take longer than 10 seconds to answer even a small query, and a fixed limit made them unusable rather than safer. Webhook actions are configured data rather than code and keep the default. A timeout is reported as `Outbound request timed out after N ms` rather than the transport's bare abort message.
 
-Preflight DNS checking is not an absolute guarantee: a fetch implementation may resolve a hostname again between validation and connection (DNS rebinding / TOCTOU). This is explicitly a **best-effort application egress boundary**, not a complete network sandbox. Production deployments needing a hard egress guarantee must additionally enforce it at the network layer or use connection-time pinned resolution.
+**Connection-time enforcement (hardening H1).** The original implementation checked DNS answers before calling `fetch()`, which resolved the name again when it connected, so a rebinding DNS answer could reach a private address (DNS rebinding / TOCTOU; reproduced against the old code). Requests now go through `src/security/guarded-request.ts` on `node:http`/`node:https`. The name is resolved once, inside the `lookup` hook that `net.connect` calls: every answer is checked there and only checked addresses are dialled. IP literals are checked before connecting, and the connected socket's address is checked again. TLS verification is Node's default against the URL host. Each request sets its own dual-stack attempts (2.5 s per address) and connection deadline (5 s, never longer than the request timeout); nothing process-wide changes; sockets are not pooled and environment proxies are not used. The policy is a required argument: authored code and webhooks use the public-only policy, and the Aeolus Remote connector uses its own configured-peer policy through the same core, so neither inherits the other's reach.
+
+This remains an **application egress boundary**, not a network sandbox: it governs what Aeolus's own HTTP clients dial. A deployment that needs a hard guarantee against every process on the host must still enforce egress at the network layer.
 
 ## Alternatives considered
 
@@ -33,6 +35,7 @@ Aeolus supports vetted private-network HTTP grants, untrusted third-party packag
 ## Implementation anchors
 
 - `src/security/outbound-http.ts`
+- `src/security/guarded-request.ts` (connection-time enforcement, shared with the Aeolus Remote connector)
 - `src/security/outbound-http.test.ts`
 - `src/__integration__/sandbox-http-timeout.integration.test.ts` (authored `timeoutMs` across the real isolate boundary)
 - `src/connectors/`

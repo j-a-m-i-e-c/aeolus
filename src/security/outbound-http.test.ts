@@ -1,11 +1,23 @@
-import { describe, expect, it, vi } from "vitest";
+import http from "node:http";
+import net, { type AddressInfo } from "node:net";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { gzipSync } from "node:zlib";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { AddressPolicy } from "./guarded-request.js";
+import { fetchRemote } from "../connectors/aeolus-remote/transport.js";
+import { parseRemoteConfig } from "../connectors/aeolus-remote/config.js";
 import { ACTION_DRAIN_BUDGET_MS } from "../automations/sandbox.js";
 import {
   OUTBOUND_HTTP_MAX_TIMEOUT_MS,
   OUTBOUND_HTTP_MIN_TIMEOUT_MS,
   OUTBOUND_HTTP_TIMEOUT_MS,
   OutboundHttpPolicyError,
+  PUBLIC_ONLY_POLICY,
   isPublicIpAddress,
+  outboundHeaders,
+  requestHttpWithPolicy,
   isPublicIpv4,
   isPublicIpv6,
   requestPublicHttp,
@@ -40,26 +52,6 @@ describe("outbound HTTP policy", () => {
     await expect(validatePublicHttpUrl("https://example.com/hook", lookup)).rejects.toThrow(/resolves to/);
   });
 
-  it("disables redirects and bounds request/response bodies", async () => {
-    const fetchImpl = vi.fn(async (_url: URL | RequestInfo, init?: RequestInit) => {
-      expect(init?.redirect).toBe("manual");
-      return new Response("12345", { status: 200 });
-    }) as unknown as typeof fetch;
-    const lookup = async () => [{ address: "93.184.216.34", family: 4 }];
-
-    await expect(requestPublicHttp("https://example.com", {
-      body: "12345",
-      maxRequestBytes: 4,
-      lookup,
-      fetchImpl,
-    })).rejects.toThrow(/request body exceeds/);
-
-    await expect(requestPublicHttp("https://example.com", {
-      maxResponseBytes: 4,
-      lookup,
-      fetchImpl,
-    })).rejects.toThrow(/response exceeds/);
-  });
 });
 
 // The address classifiers are the load-bearing half of this SSRF boundary, so
@@ -168,95 +160,6 @@ describe("validatePublicHttpUrl", () => {
   });
 });
 
-describe("requestPublicHttp", () => {
-  const publicLookup = async () => [{ address: "93.184.216.34", family: 4 }];
-
-  it("returns the bounded response and defaults to GET", async () => {
-    const fetchImpl = vi.fn(async () => new Response("hello", {
-      status: 201,
-      statusText: "Created",
-      headers: { "x-test": "1" },
-    })) as unknown as typeof fetch;
-
-    const result = await requestPublicHttp("https://example.com", { lookup: publicLookup, fetchImpl });
-
-    expect(result.status).toBe(201);
-    expect(result.statusText).toBe("Created");
-    expect(result.body).toBe("hello");
-    expect(result.headers.get("x-test")).toBe("1");
-    const init = vi.mocked(fetchImpl).mock.calls[0][1];
-    expect(init?.method).toBe("GET");
-  });
-
-  it("forwards an explicit method, headers and body", async () => {
-    const fetchImpl = vi.fn(async () => new Response("{}", { status: 200 })) as unknown as typeof fetch;
-
-    await requestPublicHttp("https://example.com", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: "{}",
-      timeoutMs: 500,
-      lookup: publicLookup,
-      fetchImpl,
-    });
-
-    const init = vi.mocked(fetchImpl).mock.calls[0][1];
-    expect(init?.method).toBe("POST");
-    expect(init?.body).toBe("{}");
-    expect(init?.headers).toEqual({ "content-type": "application/json" });
-  });
-
-  it("returns an empty body for a bodyless response", async () => {
-    const fetchImpl = vi.fn(async () => new Response(null, { status: 204 })) as unknown as typeof fetch;
-    const result = await requestPublicHttp("https://example.com", { lookup: publicLookup, fetchImpl });
-    expect(result.status).toBe(204);
-    expect(result.body).toBe("");
-  });
-
-  it("never issues the request when the URL fails policy", async () => {
-    const fetchImpl = vi.fn() as unknown as typeof fetch;
-    await expect(requestPublicHttp("http://169.254.169.254/latest/meta-data", { fetchImpl }))
-      .rejects.toBeInstanceOf(OutboundHttpPolicyError);
-    expect(fetchImpl).not.toHaveBeenCalled();
-  });
-
-  /** A fetch that never answers until its signal aborts, as a stalled server does. */
-  const stalledFetch = () => vi.fn((_url: unknown, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
-    init?.signal?.addEventListener("abort", () => reject(new DOMException("This operation was aborted", "AbortError")));
-  })) as unknown as typeof fetch;
-
-  it("aborts at the requested timeout and says so", async () => {
-    vi.useFakeTimers();
-    try {
-      const pending = requestPublicHttp("https://example.com", { lookup: publicLookup, fetchImpl: stalledFetch(), timeoutMs: 25_000 });
-      const settled = expect(pending).rejects.toThrow("Outbound request timed out after 25000 ms");
-      // Still waiting just short of the requested limit: the default 10 s no longer applies.
-      await vi.advanceTimersByTimeAsync(24_999);
-      await vi.advanceTimersByTimeAsync(1);
-      await settled;
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("uses the 10 s default when no timeout is given", async () => {
-    vi.useFakeTimers();
-    try {
-      const pending = requestPublicHttp("https://example.com", { lookup: publicLookup, fetchImpl: stalledFetch() });
-      const settled = expect(pending).rejects.toThrow(`Outbound request timed out after ${OUTBOUND_HTTP_TIMEOUT_MS} ms`);
-      await vi.advanceTimersByTimeAsync(OUTBOUND_HTTP_TIMEOUT_MS);
-      await settled;
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("passes other transport failures through unchanged", async () => {
-    const fetchImpl = vi.fn(async () => { throw new TypeError("fetch failed"); }) as unknown as typeof fetch;
-    await expect(requestPublicHttp("https://example.com", { lookup: publicLookup, fetchImpl })).rejects.toThrow("fetch failed");
-  });
-});
-
 describe("resolveOutboundTimeoutMs", () => {
   it("defaults when the author gives nothing usable", () => {
     for (const value of [undefined, null, 0, -5, Number.NaN, Number.POSITIVE_INFINITY, "20000", {}]) {
@@ -278,5 +181,155 @@ describe("resolveOutboundTimeoutMs", () => {
     // A request allowed to outlive the run would be abandoned with it, so the option
     // would promise a wait the platform cannot keep.
     expect(OUTBOUND_HTTP_MAX_TIMEOUT_MS).toBeLessThan(ACTION_DRAIN_BUDGET_MS);
+  });
+});
+
+// ─── requestPublicHttp against real local servers ─────────────────────────────
+
+const servers: net.Server[] = [];
+const sockets = new Set<net.Socket>();
+afterEach(async () => {
+  for (const socket of sockets) socket.destroy();
+  sockets.clear();
+  await Promise.all(servers.splice(0).map((server) => new Promise<void>((resolve) => server.close(() => resolve()))));
+});
+
+async function serve(handler: http.RequestListener): Promise<{ port: number; connections: () => number; requests: http.IncomingMessage[] }> {
+  const requests: http.IncomingMessage[] = [];
+  let connections = 0;
+  const server = http.createServer((req, res) => { requests.push(req); handler(req, res); });
+  server.on("connection", (socket: net.Socket) => { connections += 1; sockets.add(socket); socket.on("close", () => sockets.delete(socket)); });
+  servers.push(server);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+  return { port: (server.address() as AddressInfo).port, connections: () => connections, requests };
+}
+
+/** Test-only: loopback allowed, so the response contract can be checked locally. */
+const LOOPBACK: AddressPolicy = {
+  allowLiteral: (address) => address === "127.0.0.1",
+  allowResolved: (addresses) => addresses.length > 0 && addresses.every((address) => address === "127.0.0.1" || address === "::ffff:127.0.0.1"),
+};
+const toLoopback = async () => [{ address: "127.0.0.1", family: 4 }];
+
+describe("requestPublicHttp destination enforcement", () => {
+  it("never connects to a loopback server, whatever name or answer leads there", async () => {
+    const internal = await serve((_req, res) => res.end("internal-only"));
+    // Rebinding: the only resolution is the one the connection uses, and it is refused.
+    await expect(requestPublicHttp(`http://rebind.example:${internal.port}/`, { lookup: toLoopback }))
+      .rejects.toThrow("Outbound hostname resolves to a private, local, link-local, or reserved address");
+    // Mixed answers, a literal, a mapped literal and the metadata address.
+    const mixed = async () => [{ address: "93.184.216.34", family: 4 }, { address: "127.0.0.1", family: 4 }];
+    await expect(requestPublicHttp(`http://mixed.example:${internal.port}/`, { lookup: mixed })).rejects.toBeInstanceOf(OutboundHttpPolicyError);
+    await expect(requestPublicHttp(`http://127.0.0.1:${internal.port}/`)).rejects.toThrow(/blocked/);
+    await expect(requestPublicHttp(`http://[::ffff:127.0.0.1]:${internal.port}/`)).rejects.toThrow(/blocked/);
+    await expect(requestPublicHttp("http://169.254.169.254/latest/meta-data")).rejects.toThrow(/blocked/);
+    expect(internal.connections()).toBe(0);
+  });
+
+  it("consults DNS once, at connection time", async () => {
+    const lookup = vi.fn(toLoopback);
+    await expect(requestPublicHttp("http://once.example/", { lookup })).rejects.toBeInstanceOf(OutboundHttpPolicyError);
+    expect(lookup).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports DNS failures and empty answers as policy errors", async () => {
+    await expect(requestPublicHttp("http://missing.example/", { lookup: async () => { throw Object.assign(new Error("x"), { code: "ENOTFOUND" }); } }))
+      .rejects.toThrow("DNS lookup failed for outbound host");
+    await expect(requestPublicHttp("http://empty.example/", { lookup: async () => [] })).rejects.toThrow("DNS lookup failed for outbound host");
+  });
+
+  it("is refused for a LAN peer the Aeolus Remote connector may reach", async () => {
+    const peer = await serve((_req, res) => { res.setHeader("Content-Type", "application/json"); res.end("{}"); });
+    await expect(requestPublicHttp(`http://127.0.0.1:${peer.port}/api/exposed/v1/site/x`)).rejects.toThrow(/blocked/);
+    const parsed = parseRemoteConfig({ baseUrl: `http://127.0.0.1:${peer.port}`, endpointPath: "/api/exposed/v1/site/x", apiKey: `aeo_0123456789abcdef_${"A".repeat(43)}`, allowPlaintextHttp: true });
+    if (!parsed.ok) throw new Error(parsed.problems.join());
+    expect(await fetchRemote(parsed.config, new AbortController().signal)).toMatchObject({ kind: "response", status: 200 });
+    expect(peer.connections()).toBe(1);
+  });
+
+  it("exposes only the public-only policy to authored code and webhooks", () => {
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    for (const file of ["../automations/sandbox.ts", "../automations/command-service.ts"]) {
+      const source = readFileSync(path.join(here, file), "utf8");
+      expect(source, file).not.toMatch(/requestHttpWithPolicy|guarded-request|aeolus-remote|CONFIGURED_PEER_POLICY/);
+      expect(source, file).toMatch(/requestPublicHttp\(/);
+    }
+    expect(PUBLIC_ONLY_POLICY.allowResolved([])).toBe(false);
+    expect(PUBLIC_ONLY_POLICY.allowLiteral("192.88.99.1")).toBe(false);
+  });
+});
+
+describe("requestPublicHttp response contract (over loopback, test policy)", () => {
+  it("returns status, statusText, Headers and the decoded body, and defaults to GET", async () => {
+    const server = await serve((_req, res) => { res.writeHead(201, "Created", { "X-Test": "1", "Set-Cookie": ["a=1", "b=2"] }); res.end("hello"); });
+    const result = await requestHttpWithPolicy(`http://local.test:${server.port}/p?q=1`, { lookup: toLoopback }, LOOPBACK);
+    expect(result).toMatchObject({ status: 201, statusText: "Created", body: "hello" });
+    expect(result.headers.get("x-test")).toBe("1");
+    expect(server.requests[0]!.method).toBe("GET");
+    expect(server.requests[0]!.url).toBe("/p?q=1");
+  });
+
+  it("sends method, body and author headers, with fetch's defaults, and drops transport headers", async () => {
+    let body = "";
+    const server = await serve((req, res) => { req.on("data", (c: Buffer) => { body += c.toString(); }); req.on("end", () => res.end("{}")); });
+    await requestHttpWithPolicy(`http://local.test:${server.port}/`, {
+      method: "post",
+      body: "{\"a\":1}",
+      headers: { "X-Api": "v", Host: "evil.example", "Transfer-Encoding": "chunked", "Proxy-Authorization": "x", "Accept-Encoding": "gzip" },
+      lookup: toLoopback,
+    }, LOOPBACK);
+    const req = server.requests[0]!;
+    expect(req.method).toBe("POST");
+    expect(body).toBe("{\"a\":1}");
+    expect(req.headers).toMatchObject({ "x-api": "v", accept: "*/*", "accept-language": "*", "user-agent": "node", "content-type": "text/plain;charset=UTF-8", "accept-encoding": "identity" });
+    expect(req.headers.host).toBe(`local.test:${server.port}`);
+    expect(req.headers["proxy-authorization"]).toBeUndefined();
+    expect(req.headers["content-length"]).toBe("7");
+  });
+
+  it("returns a redirect to the author and never follows it", async () => {
+    const target = await serve((_req, res) => res.end("followed"));
+    const server = await serve((_req, res) => { res.writeHead(302, { Location: `http://127.0.0.1:${target.port}/` }); res.end("moved"); });
+    const result = await requestHttpWithPolicy(`http://local.test:${server.port}/`, { lookup: toLoopback }, LOOPBACK);
+    expect(result.status).toBe(302);
+    expect(result.body).toBe("moved");
+    expect(target.connections()).toBe(0);
+  });
+
+  it("decodes a compressed body a server sends anyway, under the response cap", async () => {
+    const small = await serve((_req, res) => { res.writeHead(200, { "Content-Encoding": "gzip" }); res.end(gzipSync("compressed")); });
+    expect((await requestHttpWithPolicy(`http://local.test:${small.port}/`, { lookup: toLoopback }, LOOPBACK)).body).toBe("compressed");
+    const bomb = await serve((_req, res) => { res.writeHead(200, { "Content-Encoding": "gzip" }); res.end(gzipSync(Buffer.alloc(2_000_000))); });
+    await expect(requestHttpWithPolicy(`http://local.test:${bomb.port}/`, { lookup: toLoopback }, LOOPBACK)).rejects.toThrow("Outbound response exceeds 1048576 bytes");
+    const odd = await serve((_req, res) => { res.writeHead(200, { "Content-Encoding": "compress" }); res.end("x"); });
+    await expect(requestHttpWithPolicy(`http://local.test:${odd.port}/`, { lookup: toLoopback }, LOOPBACK)).rejects.toThrow(/unsupported content encoding/);
+  });
+
+  it("keeps the request and response size limits and their messages", async () => {
+    const server = await serve((_req, res) => res.end("12345"));
+    await expect(requestHttpWithPolicy(`http://local.test:${server.port}/`, { body: "12345", maxRequestBytes: 4, lookup: toLoopback }, LOOPBACK)).rejects.toThrow(/request body exceeds 4 bytes/);
+    await expect(requestHttpWithPolicy(`http://local.test:${server.port}/`, { maxResponseBytes: 4, lookup: toLoopback }, LOOPBACK)).rejects.toThrow("Outbound response exceeds 4 bytes");
+  });
+
+  it("times out a slow server with the same message as before", async () => {
+    const mute = await serve(() => { /* never answers */ });
+    await expect(requestHttpWithPolicy(`http://local.test:${mute.port}/`, { timeoutMs: 300, lookup: toLoopback }, LOOPBACK)).rejects.toThrow("Outbound request timed out after 300 ms");
+  });
+
+  it("reports connection failures without echoing the URL or headers", async () => {
+    const gone = await serve(() => undefined);
+    servers.pop()!.close();
+    for (const socket of sockets) socket.destroy();
+    const secret = "Bearer sentinel-token-not-for-logs";
+    const error = await requestHttpWithPolicy(`http://local.test:${gone.port}/hook?token=sentinel-query`, { headers: { Authorization: secret }, lookup: toLoopback }, LOOPBACK).catch((e: unknown) => e as Error);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe("Outbound request failed: connection refused");
+    expect(`${(error as Error).message}${(error as Error).stack}`.includes("sentinel")).toBe(false);
+  });
+
+  it("filters headers and applies defaults predictably", () => {
+    expect(outboundHeaders({ accept: "application/json", "user-agent": "me", Connection: "close", "proxy-x": "1" }, false))
+      .toEqual({ accept: "application/json", "user-agent": "me", "Accept-Language": "*", "Accept-Encoding": "identity" });
+    expect(outboundHeaders(undefined, true)).toMatchObject({ "Content-Type": "text/plain;charset=UTF-8" });
   });
 });
