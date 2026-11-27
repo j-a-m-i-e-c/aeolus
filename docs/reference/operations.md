@@ -325,6 +325,10 @@ Published Project APIs ([reference](project-apis.md)) are served by the backend 
   recovered from a backup, only their hashes. **Restoring an older backup restores the access
   it recorded**: a key or grant revoked after the backup was taken is valid again. After a
   restore, review the Endpoints view and revoke again anything revoked since.
+- **Keys held by a reading installation.** An installation that reads another with the Aeolus
+  Remote connector stores that key in full in its connector configuration, so its database
+  backups contain a usable key. Protect them, and revoke the key on the publishing
+  installation if a backup may have been exposed.
 - **Rotation and revocation.** Rotate a key from the Endpoints view, choosing the new key's
   expiry and how long the old one overlaps; revoke a key the moment it may have leaked.
   Both take effect on the next request, without a restart.

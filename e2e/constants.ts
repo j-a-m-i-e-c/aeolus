@@ -13,6 +13,18 @@ export const BASE_URL = process.env.E2E_BASE_URL || "http://localhost:3100";
 /** Backend origin — the browser calls this directly (see frontend/src/lib/env.ts). */
 export const API_URL = process.env.E2E_API_URL || "http://localhost:3011";
 
+/**
+ * Installation A for the Aeolus-to-Aeolus walkthrough: the disposable stack's `peer`
+ * service. PEER_URL is how the suite reaches it; PEER_URL_FROM_BACKEND is how the
+ * backend under test (installation B) reaches it on the stack's bridge network.
+ * The spec refuses a peer that does not report the AEOLUS_E2E marker.
+ */
+export const PEER_URL = process.env.E2E_PEER_URL || "http://localhost:3012";
+export const PEER_URL_FROM_BACKEND = process.env.E2E_PEER_URL_FROM_BACKEND || "http://peer:3001";
+/** Containers the walkthrough stops, starts and restarts. Only aeolus-e2e-* names. */
+export const PEER_CONTAINER = "aeolus-e2e-peer";
+export const BACKEND_CONTAINER = "aeolus-e2e-backend";
+
 /** Admin account created by the first-run setup journey and reused thereafter. */
 export const ADMIN = {
   username: "e2e-admin",

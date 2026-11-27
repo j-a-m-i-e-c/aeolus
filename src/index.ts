@@ -17,6 +17,7 @@ import { ConnectorManager } from "./connectors/connector-manager.js";
 import { ConnectorStore } from "./connectors/connector-store.js";
 import * as hueModule from "./connectors/hue/index.js";
 import * as kasaModule from "./connectors/kasa/index.js";
+import * as aeolusRemoteModule from "./connectors/aeolus-remote/index.js";
 import { migrateLegacyHueCredentials } from "./connectors/migrate-legacy-hue.js";
 import { CommandService, handlePublish, handleToggle, handleDeviceAction, handleLog, handleDelay, handleWebhook } from "./automations/command-service.js";
 import { ConditionRegistry } from "./automations/condition-registry.js";
@@ -230,6 +231,7 @@ async function main(): Promise<void> {
 
   connectorRegistry.register(hueModule);
   connectorRegistry.register(kasaModule);
+connectorRegistry.register(aeolusRemoteModule);
 
   migrateLegacyHueCredentials(connectorStore);
 

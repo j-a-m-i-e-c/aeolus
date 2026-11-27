@@ -15,6 +15,8 @@ import type {
   CapabilityDescriptor,
   AcknowledgementCapability,
 } from "./connector.interface.js";
+import { CONNECTOR_POLL_DEFAULT_MS, CONNECTOR_POLL_MAX_MS, CONNECTOR_POLL_MIN_MS } from "./connector.interface.js";
+import { resolveConfigUpdate, resolveNewConfig } from "./connector-config.js";
 import type { ConfirmationTier } from "../automations/command-lifecycle.js";
 import { computeCapabilityCeiling } from "../automations/completion-tier.js";
 import type { ConnectorRegistry } from "./connector-registry.js";
@@ -25,15 +27,38 @@ import type { ConditionRegistry } from "../automations/condition-registry.js";
 import type { MqttService } from "../mqtt/mqtt-service.js";
 import logger from "../logger.js";
 
-/** Default polling interval in milliseconds for device discovery. */
-const DEFAULT_POLL_INTERVAL_MS = 60_000;
+/**
+ * Polling state of one instance. Polls are chained, never overlapping: the next is
+ * scheduled only when the current one settles, so a stalled request cannot pile up
+ * concurrent polls. `abort` is signalled when the instance is disabled or disposed.
+ */
+export interface PollSchedule {
+  timer?: ReturnType<typeof setTimeout>;
+  /** The poll now running, if any. */
+  current?: Promise<void>;
+  /** Run another poll as soon as the current one settles (config changed mid-poll). */
+  again: boolean;
+  stopped: boolean;
+  abort: AbortController;
+}
 
 /** Internal tracking state for a single enabled connector instance. */
 export interface ManagedInstance {
   connector: Connector;
   record: ConnectorRecord;
-  pollingTimer: ReturnType<typeof setInterval>;
+  poll: PollSchedule;
   devices: Set<string>;
+}
+
+/** The delay before an instance's next poll, clamped to the manager's bounds. */
+export function pollDelayMs(connector: Connector): number {
+  const asked = connector.getPollIntervalMs?.();
+  if (asked === undefined || !Number.isFinite(asked)) return CONNECTOR_POLL_DEFAULT_MS;
+  return Math.min(CONNECTOR_POLL_MAX_MS, Math.max(CONNECTOR_POLL_MIN_MS, Math.round(asked)));
+}
+
+function newPollSchedule(): PollSchedule {
+  return { again: false, stopped: false, abort: new AbortController() };
 }
 
 /**
@@ -157,9 +182,12 @@ export class ConnectorManager {
       throw new Error(`Connector type '${connectorType}' not found in registry`);
     }
 
-    const connector = mod.createConnector(config);
+    // Refuses the password-mask placeholder and any invalid config before anything runs.
+    config = resolveNewConfig(config, mod);
     const instanceId = crypto.randomUUID();
+    const connector = mod.createConnector(config, { instanceId });
     const now = Date.now();
+    const poll = newPollSchedule();
 
     const record: ConnectorRecord = {
       id: instanceId,
@@ -183,7 +211,7 @@ export class ConnectorManager {
     // Discover devices (only if connected)
     const devices = new Set<string>();
     try {
-      const discovered = await connector.discoverDevices();
+      const discovered = await connector.discoverDevices(poll.abort.signal);
       for (const device of discovered) {
         this.emitDeviceEvent(device, instanceId);
         devices.add(device.id);
@@ -201,10 +229,9 @@ export class ConnectorManager {
     // Persist to store
     this.store.save(record);
 
-    // Start polling
-    const pollingTimer = this.startPolling(instanceId, connector, devices, connectorType);
-
-    this.instances.set(instanceId, { connector, record, pollingTimer, devices });
+    const instance: ManagedInstance = { connector, record, poll, devices };
+    this.instances.set(instanceId, instance);
+    this.schedulePoll(instanceId, instance, pollDelayMs(connector));
 
     logger.info(
       { connectorType, instanceId, deviceCount: devices.size },
@@ -224,8 +251,9 @@ export class ConnectorManager {
       throw new Error(`Connector instance '${instanceId}' not found`);
     }
 
-    // Stop polling
-    clearInterval(instance.pollingTimer);
+    // Stop polling and cancel a poll still in flight, before its result can
+    // re-register a device this disable is about to remove.
+    this.stopPolling(instance);
 
     // Tear down contributed handlers only if this is the last instance of the type
     const mod = this.registry.getModule(instance.record.connectorType);
@@ -284,14 +312,28 @@ export class ConnectorManager {
       throw new Error(`Connector instance '${instanceId}' not found`);
     }
 
-    instance.connector.onConfigUpdate(config);
+    const mod = this.registry.getModule(instance.record.connectorType);
+    if (!mod) {
+      throw new Error(`Connector type '${instance.record.connectorType}' not found in registry`);
+    }
 
-    // Update the record and persist
-    instance.record.config = { ...instance.record.config, ...config };
+    // Resolve the mask to the stored secret and validate. Nothing is applied or
+    // persisted unless this and the connector's own update both succeed.
+    const resolved = resolveConfigUpdate(instance.record.config, config, mod);
+    instance.connector.onConfigUpdate(resolved);
+
+    instance.record.config = resolved;
     instance.record.updatedAt = Date.now();
     this.store.save(instance.record);
 
-    logger.info({ instanceId }, "Connector config updated");
+    // Poll promptly with the new config: now, or straight after a poll in flight.
+    if (instance.poll.current) {
+      instance.poll.again = true;
+    } else {
+      this.schedulePoll(instanceId, instance, 0);
+    }
+
+    logger.info({ instanceId, fields: Object.keys(config) }, "Connector config updated");
   }
 
   /**
@@ -313,17 +355,13 @@ export class ConnectorManager {
       return;
     }
 
-    try {
-      const discovered = await instance.connector.discoverDevices();
-      for (const device of discovered) {
-        this.emitDeviceEvent(device, instanceId);
-        instance.devices.add(device.id);
-      }
-    } catch (err) {
-      logger.error(
-        { instanceId, error: (err as Error).message },
-        "discoverDevices() failed during retry",
-      );
+    // Through the scheduler, so a retry cannot run alongside a scheduled poll.
+    if (instance.poll.current) {
+      instance.poll.again = true;
+      await instance.poll.current;
+    } else {
+      if (instance.poll.timer) clearTimeout(instance.poll.timer);
+      await this.runPoll(instanceId, instance);
     }
 
     logger.info({ instanceId }, "Connector retry completed");
@@ -487,8 +525,9 @@ export class ConnectorManager {
         continue;
       }
 
-      const connector = mod.createConnector(record.config);
+      const connector = mod.createConnector(record.config, { instanceId: record.id });
       const devices = new Set<string>();
+      const poll = newPollSchedule();
 
       // Attempt connection
       try {
@@ -502,7 +541,7 @@ export class ConnectorManager {
 
       // Discover devices
       try {
-        const discovered = await connector.discoverDevices();
+        const discovered = await connector.discoverDevices(poll.abort.signal);
         for (const device of discovered) {
           this.emitDeviceEvent(device, record.id);
           devices.add(device.id);
@@ -517,9 +556,9 @@ export class ConnectorManager {
       // Register contributed handlers (once per type, ref-counted across instances)
       this.registerContributions(record.connectorType, mod);
 
-      const pollingTimer = this.startPolling(record.id, connector, devices, record.connectorType);
-
-      this.instances.set(record.id, { connector, record, pollingTimer, devices });
+      const instance: ManagedInstance = { connector, record, poll, devices };
+      this.instances.set(record.id, instance);
+      this.schedulePoll(record.id, instance, pollDelayMs(connector));
 
       logger.info(
         { connectorType: record.connectorType, instanceId: record.id, deviceCount: devices.size },
@@ -533,7 +572,7 @@ export class ConnectorManager {
    */
   async disposeAll(): Promise<void> {
     for (const [instanceId, instance] of this.instances) {
-      clearInterval(instance.pollingTimer);
+      this.stopPolling(instance);
 
       try {
         await instance.connector.disconnect();
@@ -558,18 +597,39 @@ export class ConnectorManager {
     logger.info("All connectors disposed");
   }
 
+  /** Schedule the instance's next poll after `delayMs`, replacing any pending one. */
+  private schedulePoll(instanceId: string, instance: ManagedInstance, delayMs: number): void {
+    const { poll } = instance;
+    if (poll.stopped) return;
+    if (poll.timer) clearTimeout(poll.timer);
+    poll.timer = setTimeout(() => {
+      poll.timer = undefined;
+      void this.runPoll(instanceId, instance);
+    }, delayMs);
+  }
+
+  /** Stop scheduling, and abort a poll in flight where the connector supports it. */
+  private stopPolling(instance: ManagedInstance): void {
+    instance.poll.stopped = true;
+    if (instance.poll.timer) clearTimeout(instance.poll.timer);
+    instance.poll.timer = undefined;
+    instance.poll.abort.abort();
+  }
+
   /**
-   * Start a polling interval for a connector that periodically calls discoverDevices.
+   * One poll. Only one runs per instance at a time; when it settles the next is
+   * scheduled with the connector's current delay. A poll that settles after the
+   * instance was stopped reports nothing, so it cannot resurrect removed devices.
    */
-  private startPolling(
-    instanceId: string,
-    connector: Connector,
-    devices: Set<string>,
-    connectorType: string,
-  ): ReturnType<typeof setInterval> {
-    return setInterval(async () => {
+  private runPoll(instanceId: string, instance: ManagedInstance): Promise<void> {
+    const { poll, connector, devices } = instance;
+    if (poll.stopped) return Promise.resolve();
+    if (poll.current) return poll.current;
+    const connectorType = instance.record.connectorType;
+    const run = (async () => {
       try {
-        const discovered = await connector.discoverDevices();
+        const discovered = await connector.discoverDevices(poll.abort.signal);
+        if (poll.stopped) return;
         // Sync the device set — replace with current poll results, not just accumulate.
         // This ensures the device count reflects reality, not a high-water mark.
         if (discovered.length > 0) {
@@ -584,13 +644,22 @@ export class ConnectorManager {
         // Emit successful poll event for metrics (regardless of device count)
         this.eventBus.emit(CONNECTOR_POLL, { connectorType, instanceId, devicesDiscovered: discovered.length });
       } catch (err) {
+        if (poll.stopped) return;
         logger.error(
           { instanceId, error: (err as Error).message },
           "discoverDevices() failed during poll",
         );
         this.eventBus.emit(CONNECTOR_ERROR, { connectorType, instanceId, error: (err as Error).message });
       }
-    }, DEFAULT_POLL_INTERVAL_MS);
+    })().finally(() => {
+      poll.current = undefined;
+      if (poll.stopped) return;
+      const delay = poll.again ? 0 : pollDelayMs(connector);
+      poll.again = false;
+      this.schedulePoll(instanceId, instance, delay);
+    });
+    poll.current = run;
+    return run;
   }
 
   /**
@@ -612,6 +681,7 @@ export class ConnectorManager {
       deviceType: device.type,
       state: device.state,
       topic: `connector/${device.integration}/${device.id}`,
+      name: device.name,
       timestamp: device.lastSeen || Date.now(),
       integration: device.integration,
       capabilities: device.capabilities,

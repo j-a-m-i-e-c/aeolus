@@ -229,7 +229,7 @@ The `ConnectorManager` drives the lifecycle in this order:
 │  connect()  ──── throws? ──→  health = "disconnected"   │
 │       │                       (user can retry)          │
 │       ▼                                                 │
-│  discoverDevices()  ←──── polling loop (every 60s) ───┐ │
+│  discoverDevices()  ←──── polling loop (default 60s) ─┐ │
 │       │                                               │ │
 │       ▼                                               │ │
 │  execute(action)  ←── routed by device.integration    │ │
@@ -249,13 +249,22 @@ The `ConnectorManager` drives the lifecycle in this order:
 |--------|-----------|------------|
 | `connect()` | Once on enable or restore | Initialize SDK, authenticate, verify reachability. Throw on failure. |
 | `disconnect()` | On disable or shutdown | Close connections, stop listeners. |
-| `discoverDevices()` | After connect, then every poll cycle | Query external system, return `Device[]` with `integration` matching your `metadata.id`. |
+| `discoverDevices(signal?)` | After connect, then every poll cycle | Query external system, return `Device[]` with `integration` matching your `metadata.id`. Never called twice at once for one instance. Pass `signal` to network calls: it is aborted when the instance is disabled. |
+| `getPollIntervalMs()` (optional) | After every poll and config change | Delay before the next poll. Clamped to 5 s – 1 h; without it the manager polls every 60 s. |
 | `execute(action)` | When user triggers a device action | Route the action to the correct device. Throw if device unknown or action fails. |
-| `getHealthStatus()` | On API status requests | Return `{ status, lastSeen, errorMessage? }`. Return a copy, not a reference. |
-| `onConfigUpdate(config)` | On `PATCH /api/connectors/:id` | Apply new config without full reconnect where possible. |
+| `getHealthStatus()` | On API status requests | Return `{ status, lastSeen, errorMessage?, warnings? }`. `warnings` are standing configuration warnings shown on the card. Return a copy, not a reference. |
+| `onConfigUpdate(config)` | On `PATCH /api/connectors/:id` | Receives the complete resolved config (stored values merged, any password mask replaced by the stored secret). Throw to refuse it: nothing is persisted. |
 | `dispose()` | After disconnect, on permanent disable | Clear caches, timers, event listeners, allocated memory. |
 | `getSetupSteps()` | Dashboard renders wizard | Return `SetupStepDescriptor[]` defining the flow. Only needed when `requiresSetup: true`. |
 | `executeSetupStep(stepId, params)` | User advances wizard | Run step logic, return `SetupStepResult`. Set `complete: true` on the final step. |
+
+### Configuration and secrets
+
+- `createConnector(config, { instanceId })` receives the stable instance id; use it for device ids that must survive restarts and stay distinct across instances.
+- An optional `validateConfig(config)` export returns problems (never containing a secret). The manager runs it, after the required-field check, before an instance is enabled and before an update is applied or persisted; any problem is a 400.
+- `password` fields are returned as `********` by every connector API response. When an edit posts `********` back for a `password` field that has a stored secret, the stored secret is kept. The mask is refused for a new instance and when no secret is stored, so it can never be saved in place of a credential. Post a new value to replace a secret, or `""` to clear an optional one.
+- Set `metadata.multiInstance: true` when the dashboard should allow several instances (one per remote installation, for example).
+- Connector config is stored as JSON in SQLite, credentials included; encryption at rest is a separate decision. Never log config values.
 
 ---
 

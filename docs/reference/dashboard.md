@@ -19,7 +19,7 @@ The System area shows:
 
 ### Connectors
 
-The Connectors area lists available and configured connector instances. It provides setup flows, status, retry, configuration and integration-specific actions such as Hue light search.
+The Connectors area lists available and configured connector instances. It provides setup flows, status, retry, configuration editing and integration-specific actions such as Hue light search. A stored secret is shown only as `********`; leaving it unchanged keeps it. Standing warnings (such as plain HTTP for Aeolus Remote) and the reason for a refused configuration are shown on the card. Aeolus Remote may have several instances, one per remote route.
 
 ### Data
 

@@ -28,7 +28,7 @@
 #   docker compose --project-directory . -f e2e/docker-compose.e2e.yml down -v
 #
 # Ports. Everything is offset so an ordinary stack keeps running alongside: SPA on
-# 3100, API on 3011. Note that a base stack's host-mode backend still occupies
+# 3100, API on 3011, and the second installation (peer) on 3012. Note that a base stack's host-mode backend still occupies
 # 3001 *inside the Docker VM* even on Docker Desktop where it is unreachable from
 # the developer's machine, so binding 3001 here fails with "address already in
 # use". The SPA would default to http://<hostname>:3001, so VITE_API_URL and
@@ -94,6 +94,50 @@ services:
       start_period: 10s
       retries: 10
 
+  # Installation A for the Aeolus-to-Aeolus walkthrough (e2e/remote-connector.spec.ts):
+  # a second, independent Aeolus with its own broker, volume and port, also marked
+  # disposable. The backend above is installation B and reaches this one at
+  # http://peer:3001 on the bridge network; the suite reaches it at localhost:3012.
+  # The spec stops and starts this container to simulate an outage.
+  peer-mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: aeolus-e2e-peer-mosquitto
+    volumes:
+      - ./demo/config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    networks:
+      - e2e
+
+  peer:
+    # Same build as the backend (cached), so either can be started first.
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: aeolus-e2e-app:local
+    container_name: aeolus-e2e-peer
+    networks:
+      - e2e
+    ports:
+      - "3012:3001"
+    environment:
+      NODE_ENV: production
+      PORT: "3001"
+      MQTT_BROKER_URL: mqtt://peer-mosquitto:1883
+      MQTT_TOPICS: "#"
+      DB_PATH: /app/data/aeolus.db
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      AEOLUS_E2E: "true"
+    depends_on:
+      peer-mosquitto:
+        condition: service_started
+    volumes:
+      - e2e_peer_data:/app/data
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3001/api/health"]
+      interval: 5s
+      timeout: 5s
+      start_period: 10s
+      retries: 10
+
   frontend:
     build:
       context: ./frontend
@@ -123,6 +167,8 @@ services:
 volumes:
   # Isolated from the base stack's backend_data, so `down -v` here is always safe.
   e2e_data:
+  # Installation A's own database, equally disposable.
+  e2e_peer_data:
 
 networks:
   e2e:

@@ -100,6 +100,13 @@ Machine clients of published Project APIs use API keys, not JWTs
   does not store, log, audit or return it.
 - **Public demo.** A public-demo server answers `403` to every management route, for every
   session including a real admin's, and `404` to everything under `/api/exposed`.
+- **Held by another installation.** The Aeolus Remote connector on installation B stores the
+  full key it was given in its connector configuration, in B's SQLite database, so B's
+  database and its backups must be protected like the key itself. It is shown as `********`
+  in every API response and the dashboard; posting the mask back keeps it, and it never
+  appears in device state, health, logs or exports. B sends it only in the `Authorization`
+  header to the configured origin, follows no redirect, and with plain HTTP only after an
+  explicit trusted-LAN opt-in. Use expiring keys, and revoke on A if B's data may be exposed.
 
 ## Credentials in URLs
 

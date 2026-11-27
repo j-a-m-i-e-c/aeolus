@@ -533,43 +533,86 @@ artifact contains a key (see "API keys in E2E artifacts" in `docs/TESTING.md`).
 **Phase 4 is not:** the Aeolus-to-Aeolus connector (Phase 5), POST or command endpoints,
 federation or a new authentication system.
 
-## Phase 5: Aeolus-to-Aeolus connector
+## Phase 5: Aeolus-to-Aeolus connector (implemented, awaiting review)
 
-- A bundled connector, `src/connectors/aeolus-remote/`, registered in `src/index.ts`. Each
-  instance has:
-  - a base URL
-  - an API key (a `password` field)
-  - the endpoint path
-  - a poll interval within bounds
-  - a maximum response size
-  - an explicit **Allow plaintext HTTP on a trusted LAN** flag
-- **Transport** (its own; ADR-0020's authored-HTTP policy is untouched)
-  - Only the configured host, so private and VPN addresses are allowed for that host alone.
-  - HTTPS by default. HTTP only with the flag, which shows a warning in the UI and in the
-    log once per connection.
-  - An HTTPS URL is never downgraded, and there are no cross-origin redirects (at most two
-    same-origin ones).
-  - Response size cap, total timeout, and an explicit per-request connection-attempt
-    timeout.
-- **Device:** one read-only device per instance whose state is `{ data, sourceTime,
-  fetchedAt, stale, httpStatus, error }`. It is always returned, so a failed poll marks
-  the data stale instead of leaving it looking current. Health follows the last fetch.
-- **The dual-stack connection issue is investigated on its own:** reproduce Node's 250 ms
-  per-address attempt limit against long-round-trip dual-stack hosts in the backend's
-  `fetch` and `https.request` paths. Fix it with a per-request option rather than a
-  process-wide default, and decide separately whether `requestPublicHttp` needs the same
-  fix.
-- **Secrets:** check that the connector key never appears in logs, exports or responses,
-  including a fix for the generic edit form posting the `********` mask back over a stored
-  secret. Encryption at rest is a separate ADR.
-- **Demonstration** on a Pi and a PC on the same LAN, designed so two Pis also work:
-  1. A publishes a `GET /conditions/summary` endpoint from Northern Rivers.
-  2. B stores a key granted to that route only.
-  3. B renders the remote data with its source time.
-  4. Disconnect them: both keep working locally, and B's reading turns visibly stale.
-  5. Revoke the key: B fails closed.
-  6. Rotate the key: it survives a connector restart.
+The goal: installation B reads one published, granted route of installation A, with honest
+freshness, safe credentials and recovery from outages. Read-only observation only; not
+federation (no remote commands, events, peer discovery or shared users). The follow-on
+federation work is specified separately and builds on this connector rather than replacing it.
 
+**Delivered**
+- **`src/connectors/aeolus-remote/`**, registered in `src/index.ts`. One instance per remote
+  route; several may be enabled. Configuration, transport, observation fields and status
+  mapping are documented in [connectors reference](../reference/connectors.md#aeolus-remote).
+  - Own transport: configured origin only; **no redirects at all** (any 3xx is an error and
+    `Location` is never read); TLS verification always on, against the configured host;
+    every DNS answer checked in the connection's own `lookup` hook (no gap between check and
+    dial); per-request `autoSelectFamily` with 2.5 s per address, a 5 s connection deadline
+    including TLS, a 10 s request deadline; no compression; byte cap declared and streamed.
+  - Observation: `sourceTime` only from a configured payload field; the HTTP `Date` header is
+    kept apart as `responseDate`; `fetchedAt` is when B validated the response; staleness from
+    source age, a source clock more than two minutes ahead, a required-but-missing source time,
+    or a failed poll.
+  - Fail closed on 401, 403, 404, other 4xx, 3xx and refused addresses: `data` is cleared and
+    the last reading is kept only in `lastKnown`. Outages (5xx, 429, network, DNS, TLS,
+    invalid or oversized body) keep the data, marked stale. The device id never changes.
+  - Backoff: up to four intervals (at most 15 min); 429 waits for `Retry-After` (at most 15 min).
+- **Connector framework** (generic, used by every connector):
+  - Per-instance poll interval (`getPollIntervalMs()`, clamped 5 s – 1 h; 60 s default kept).
+    Polls of one instance never overlap; disable aborts a poll in flight
+    (`discoverDevices(signal)`) and discards its late result; a config change polls promptly;
+    retry goes through the same guard.
+  - `connector-config.ts`: one redaction rule; the `********` mask keeps a stored secret only
+    for `password` fields that have one, and is refused otherwise; the connector's update hook
+    receives the resolved config; validation (`validateConfig`) and the hook both run before
+    anything is persisted; a refused config is a 400 that never echoes a secret.
+  - `createConnector(config, { instanceId })`, `metadata.multiInstance`, and
+    `health.warnings` for standing configuration warnings.
+- **Dashboard** (Connectors page): edit an active connector's configuration (an untouched
+  secret is posted back as the mask), standing warnings on the card, the backend's reason for
+  a refused enable or edit, and several instances of a multi-instance type.
+- **E2E**: the disposable stack gains a second installation (`peer`, port 3012, own broker and
+  volume, also marked disposable). `e2e/remote-connector.spec.ts` publishes on A, grants one
+  route, configures B in its dashboard, checks the source time, stops A (stale, data kept),
+  starts it (recovered, same device), rotates the key and replaces it in B's edit form,
+  restarts B and revokes the old key (still reading), revokes the new key (fails closed), and
+  checks B's MQTT ingestion, command history and that the device takes no actions.
+
+**Departures**
+1. **Zero redirects**, not "at most two same-origin". Approved: simpler, and the exposed API
+   never redirects.
+2. **The HTTP `Date` header is not the source time.** Approved change: it describes the
+   response, not the measurement, so it is `responseDate`, and `sourceTimeBasis` is `payload`
+   or `unavailable`.
+3. **Refusals clear `data`** and keep the last reading as `lastKnown` (approved refinement).
+   404 is reported without claiming revocation; 403 points at HTTPS enforcement.
+4. **The observation is not persisted.** After a restart B starts from "no reading yet" until
+   its first poll succeeds, so nothing restored is presented as fresh. (The federation
+   specification suggests keeping source timestamps across restarts; that is F1 work.)
+5. **Small generic additions** beyond the plan: `validateConfig`, `ConnectorContext`,
+   `multiInstance`, `health.warnings`, the edit form, and connector device names now reach the
+   registry (`emitDeviceEvent` passes `name`; before, new connector devices were named from
+   their id).
+6. **The E2E uses a small test project**, not Northern Rivers, and the walkthrough order puts
+   rotation before the final revocation (a revoked key cannot be rotated).
+7. **Dual-stack:** the connector sets the attempt timeout per request and a test checks the
+   process default is untouched. I did not reproduce the 250 ms failure against a distant
+   dual-stack host here; that needs the Pi. **Authored HTTP (`requestPublicHttp`) is
+   unchanged** and very likely has the same 250 ms exposure on a dual-stack host with no IPv6
+   route; fixing it is a separate, small change to ADR-0020's client.
+
+**Tests**
+
+| Requested | Where |
+|---|---|
+| Polling bounds, no overlap under a stalled poll, abort on disable, late result discarded, prompt poll after a change, retry guard | `connector-manager.polling.test.ts` |
+| Mask kept only for stored `password` fields; refused at enable and with no stored secret; resolved value to the hook; nothing persisted on refusal | `connector-config.test.ts`, `connector-manager.polling.test.ts`, `connector.routes.test.ts` |
+| Configuration rules, address policy (metadata, link-local, loopback, rebinding answers) | `aeolus-remote/config.test.ts` |
+| No redirect followed, key never sent on; byte caps; no inflation; request and connection deadlines (incl. TLS); refused connection; untrusted certificate; loopback-resolving name refused before connecting; abort; dropped body; per-request options | `aeolus-remote/transport.test.ts` (real local servers) |
+| Source time: valid forms, invalid, missing, not configured, old reading, normal clock difference, far-future clock; fail closed vs keep stale for every status; recovery; backoff and `Retry-After` | `aeolus-remote/observation.test.ts` |
+| Stable device per instance, read-only, no key in state/health/logs, health follows last fetch, config change discards an in-flight result, plain-HTTP warning once per origin | `aeolus-remote/connector.test.ts` |
+| Edit form posts the mask, warnings shown, refusal reasons shown, multi-instance enable | `ConnectorsPage.test.tsx` |
+| The two-installation walkthrough | `e2e/remote-connector.spec.ts` |
 ## Phase 6 (separate approval)
 
 POST and device-command endpoints, with request schemas, `command` grants, idempotency
@@ -602,7 +645,10 @@ billing and Kong integration.
 | A one-time key kept by the dashboard (storage, drafts, console, HTTP caches) | Phase 4 (component state only; `no-store`; tests) |
 | An admin misled about what is served, or about what unpublishing or republishing removes | Phase 4 (snapshot shown apart from source; route changes; confirmations) |
 | Managing APIs on the public demo | Phase 2 (demo sessions refused), Phase 4 (refused on a demo server to every session) |
-| SSRF through the outbound connector | Phase 5 (configured host only, redirect rules) |
+| SSRF through the outbound connector; the key sent elsewhere | Phase 5 (configured origin only, no redirects, every DNS answer checked at dial time, metadata/link-local always refused) |
+| Withdrawn access still treated as a live reading | Phase 5 (401/403/404 clear `data`; last reading only in `lastKnown`) |
+| An old reading presented as current | Phase 5 (source time from the payload only; stale on source age or clock anomaly) |
+| The mask saved over a credential | Phase 5 (`connector-config.ts`) |
 
 ## Release validation
 
@@ -619,3 +665,24 @@ missing implementation.
    RSS by about 0.5 MB per 1,000 requests, matching bare `isolated-vm`. Check the Pi soak
    numbers. If it matters there, the remedy is operational (watching RSS), not a change to
    isolation.
+4. **The Aeolus-to-Aeolus demonstration on a Pi and a PC** on the same LAN (and two Pis if
+   available), with the Northern Rivers project publishing `GET /conditions/summary`. Record
+   poll latency, stale-detection delay and recovery time, and the connection behaviour on the
+   Pi's real dual-stack network. Repeat over HTTPS through a reverse proxy.
+
+## Remaining public-release risks
+
+An assessment at the end of Phase 5. None blocks the LAN/VPN deployment Aeolus supports;
+each needs a decision or a measurement before Project APIs are promoted more widely.
+
+| Risk | Status and exposure | What would close it |
+|---|---|---|
+| Pi measurements outstanding | Latency, CPU and memory are measured on the PC only; the Pi is the reference device | Release validation items 1–4 |
+| API keys in SQLite | A Project API key is stored on A as a SHA-256 hash only. On B, the Aeolus Remote connector stores the full key in the connector config JSON, like the Hue key; anyone who can read B's database or a backup of it can use the key until it is revoked | The separate encryption-at-rest ADR; until then, protect the data volume and backups, and use expiring keys |
+| In-memory limits | Rate and concurrency limits reset on restart and are per process; one backend and one database is the only supported topology | Documented; a distributed limiter only if multi-process deployment is ever supported |
+| Backup restore resurrects access | Restoring A from a backup taken before a revocation brings back that key, grant or client | Documented in operations (re-check clients after a restore); an "access epoch" that a restore cannot roll back would close it properly |
+| HTTPS-only servers cannot use the test request | With `EXPOSED_API_REQUIRE_HTTPS=true`, the Endpoints view's test request reports 403, because the server calls itself over plain loopback | Test properly configured HTTPS deployments without weakening the policy (future work) |
+| Native memory growth | About 0.5 MB RSS per 1,000 concurrent requests on the PC, matching bare `isolated-vm` | The Pi soak; operational monitoring if it matters there |
+| Plain HTTP on a LAN | Allowed only by explicit opt-in on both sides, with warnings, but a key on the wire works for anyone who captures it until revoked | Operator choice; HTTPS through a reverse proxy is documented |
+| Authored HTTP dual-stack timeout | `requestPublicHttp` likely keeps Node's 250 ms per-address attempt limit | Apply the per-request option there too (Phase 5 departure 7) |
+| No observation persistence on B | After a restart, B shows no reading until its first successful poll | Accepted: honest; federation F1 may persist provenance |

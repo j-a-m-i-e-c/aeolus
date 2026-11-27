@@ -2,6 +2,7 @@
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import express from "express";
+import { ConnectorConfigError } from "../../connectors/connector-config.js";
 import { createConnectorRoutes } from "./connector.routes.js";
 import { errorHandler } from "../middleware/error-handler.js";
 import type { ConnectorManager } from "../../connectors/connector-manager.js";
@@ -250,6 +251,38 @@ describe("connector.routes", () => {
       });
       expect(res.status).toBe(200);
       expect(mockManager.updateConfig).toHaveBeenCalledWith("inst-1", { timeout: 10000 });
+    });
+
+    it("reports a refused config as 400 with its problems", async () => {
+      mockManager.updateConfig.mockRejectedValueOnce(new ConnectorConfigError(["apiKey: no secret is stored"]));
+      const res = await request(app, "PATCH", "/api/connectors/inst-1", { config: { apiKey: "********" } });
+      expect(res.status).toBe(400);
+      expect((res.body as any).error).toContain("apiKey: no secret is stored");
+    });
+
+    it("refuses a config that is not an object", async () => {
+      const res = await request(app, "PATCH", "/api/connectors/inst-1", { config: ["x"] });
+      expect(res.status).toBe(400);
+      expect(mockManager.updateConfig).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("POST /api/connectors config errors", () => {
+    it("reports a module's refusal as 400, and a non-object config too", async () => {
+      mockRegistry.getModule.mockReturnValue(makeModule("hue"));
+      mockManager.enable.mockRejectedValueOnce(new ConnectorConfigError(["baseUrl must use https or http"]));
+      const res = await request(app, "POST", "/api/connectors", { connector_type: "hue", config: { host: "h", apiKey: "k" } });
+      expect(res.status).toBe(400);
+      expect((res.body as any).error).toContain("baseUrl must use https or http");
+      const bad = await request(app, "POST", "/api/connectors", { connector_type: "hue", config: "x" });
+      expect(bad.status).toBe(400);
+    });
+
+    it("still reports other failures as server errors", async () => {
+      mockRegistry.getModule.mockReturnValue(makeModule("hue"));
+      mockManager.enable.mockRejectedValueOnce(new Error("disk full"));
+      const res = await request(app, "POST", "/api/connectors", { connector_type: "hue", config: { host: "h", apiKey: "k" } });
+      expect(res.status).toBe(500);
     });
   });
 

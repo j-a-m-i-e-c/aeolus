@@ -54,6 +54,12 @@ export interface ConnectorMetadata {
    * @example true for Hue (button-press pairing), false for Kasa (auto-discovery)
    */
   requiresSetup: boolean;
+
+  /**
+   * Whether the dashboard may enable more than one instance of this type, for
+   * example one per remote installation. Default false: one instance per type.
+   */
+  multiInstance?: boolean;
 }
 
 /**
@@ -159,6 +165,13 @@ export interface ConnectorHealthStatus {
    * @example "Bridge unreachable at 192.168.1.100"
    */
   errorMessage?: string;
+
+  /**
+   * Standing configuration warnings the dashboard shows on the connector card
+   * whatever the connection state, e.g. that a credential crosses the network
+   * unencrypted. Never contains a secret.
+   */
+  warnings?: string[];
 }
 
 /**
@@ -314,9 +327,22 @@ export interface Connector {
    * into the DeviceRegistry with their `integration` field set to this
    * connector's `metadata.id`.
    *
+   * The manager never runs two calls for the same instance at once, and aborts
+   * `signal` when the instance is disabled or disposed. A connector that does
+   * network I/O should pass it on so a stalled request is cancelled.
+   *
    * @returns An array of discovered devices in normalised Aeolus format.
    */
-  discoverDevices(): Promise<Device[]>;
+  discoverDevices(signal?: AbortSignal): Promise<Device[]>;
+
+  /**
+   * Delay in milliseconds before the next poll, asked after every poll and after
+   * a configuration change. Lets a connector use its configured interval or back
+   * off after failures. The manager clamps it to
+   * [{@link CONNECTOR_POLL_MIN_MS}, {@link CONNECTOR_POLL_MAX_MS}]. When absent,
+   * the manager polls every 60 seconds.
+   */
+  getPollIntervalMs?(): number;
 
   /**
    * Execute a control action on a device managed by this connector.
@@ -350,7 +376,9 @@ export interface Connector {
    * require reconnection, the connector may throw and the manager will
    * handle the reconnect flow.
    *
-   * @param config - The updated configuration object.
+   * @param config - The complete resolved configuration: the stored config with
+   *   the update merged in and any password-mask placeholder replaced by the
+   *   stored secret. If this throws, the update is not persisted.
    */
   onConfigUpdate(config: Record<string, unknown>): void;
 
@@ -471,6 +499,18 @@ export interface ConnectorActionContribution {
   physical: boolean;
 }
 
+/** Facts about the managed instance a connector is created for. */
+export interface ConnectorContext {
+  /** Stable instance UUID, the `connectors` row id. Use it for stable device ids. */
+  instanceId: string;
+}
+
+/** Shortest and longest delay the manager allows between polls of one instance. */
+export const CONNECTOR_POLL_MIN_MS = 5_000;
+export const CONNECTOR_POLL_MAX_MS = 3_600_000;
+/** Poll interval for connectors that do not implement `getPollIntervalMs()`. */
+export const CONNECTOR_POLL_DEFAULT_MS = 60_000;
+
 export interface ConnectorModule {
   /** Static metadata describing this connector type. */
   metadata: ConnectorMetadata;
@@ -488,7 +528,14 @@ export interface ConnectorModule {
    * @param config - Configuration object with keys matching `configSchema` field ids.
    * @returns A new {@link Connector} instance ready to be connected.
    */
-  createConnector: (config: Record<string, unknown>) => Connector;
+  createConnector: (config: Record<string, unknown>, context?: ConnectorContext) => Connector;
+
+  /**
+   * Optional configuration check, run before an instance is enabled and before an
+   * update is applied or persisted. Returns human-readable problems (never
+   * containing a secret value); any problem rejects the request with 400.
+   */
+  validateConfig?: (config: Record<string, unknown>) => string[];
 
   /**
    * Optional code snippets for the automation script editor.

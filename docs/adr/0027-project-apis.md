@@ -1,6 +1,6 @@
 # ADR-0027: Project APIs — published, read-only HTTP endpoints for Automation Projects
 
-- **Status:** Accepted for Phases 0 to 3 (published, read-only GET endpoints with clients, keys and grants, and the Phase 3 boundary, resilience and performance validation). Phase 4 (the Endpoints view, OpenAPI and documentation) is implemented and awaiting review. Raspberry Pi measurements are an outstanding release-validation item; script caching stays disabled until they exist
+- **Status:** Accepted for Phases 0 to 3 (published, read-only GET endpoints with clients, keys and grants, and the Phase 3 boundary, resilience and performance validation). Phase 4 (the Endpoints view, OpenAPI and documentation) is accepted. Phase 5 (the read-only Aeolus Remote connector) is implemented and awaiting review. Raspberry Pi measurements are an outstanding release-validation item; script caching stays disabled until they exist
 - **Date:** 2026-11-19
 - **Plan:** [Project APIs implementation plan](../architecture/project-apis-plan.md)
 
@@ -312,7 +312,8 @@ the server. Limits reset when the backend restarts and are not distributed guara
   calling side, with a conspicuous warning that the key crosses the network unencrypted. A
   stolen key works until it is revoked, however it is stored. The Aeolus-to-Aeolus connector
   (Phase 5) defaults to HTTPS, never downgrades HTTPS to HTTP, never disables certificate
-  verification, and follows no cross-origin redirect.
+  verification, and follows no redirect at all: any 3xx is an error and the key is never
+  sent to a `Location` (see the [connectors reference](../reference/connectors.md#aeolus-remote)).
 - **Optional server-side enforcement: `EXPOSED_API_REQUIRE_HTTPS`** (off by default for
   LAN use). When on, a request is served only if Express establishes that the transport is
   HTTPS (`req.secure`), and is refused otherwise.

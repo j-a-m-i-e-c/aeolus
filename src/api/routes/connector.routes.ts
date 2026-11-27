@@ -7,6 +7,17 @@ import { BadRequestError, NotFoundError } from "../middleware/error-handler.js";
 import { asyncHandler } from "../middleware/async-handler.js";
 import { requireAdmin } from "../../auth/auth-middleware.js";
 import logger from "../../logger.js";
+import { ConnectorConfigError, missingRequiredFields, redactConfig } from "../../connectors/connector-config.js";
+
+/** A refused config is the caller's error (400), with the problems listed. */
+async function withConfigErrors<T>(work: () => Promise<T>): Promise<T> {
+  try {
+    return await work();
+  } catch (error) {
+    if (error instanceof ConnectorConfigError) throw new BadRequestError(error.message);
+    throw error;
+  }
+}
 
 /**
  * Create Express router for all connector endpoints.
@@ -48,15 +59,18 @@ export function createConnectorRoutes(
       throw new NotFoundError(`Connector type '${connector_type}' not found`);
     }
 
-    // Validate required config fields against the configSchema
-    const missingFields = getMissingRequiredFields(config ?? {}, mod.configSchema);
-    if (missingFields.length > 0) {
-      throw new BadRequestError(
-        `Missing required fields: ${missingFields.join(", ")}`,
-      );
+    if (config !== undefined && (typeof config !== "object" || config === null || Array.isArray(config))) {
+      throw new BadRequestError("config must be an object");
     }
 
-    const instanceId = await connectorManager.enable(connector_type, config ?? {});
+    const missingFields = getMissingRequiredFields(config ?? {}, mod.configSchema);
+    if (missingFields.length > 0) {
+      throw new BadRequestError(`Missing required fields: ${missingFields.join(", ")}`);
+    }
+
+    // The module's own checks and refusal of the password-mask placeholder happen
+    // in the manager before anything is persisted.
+    const instanceId = await withConfigErrors(() => connectorManager.enable(connector_type, config ?? {}));
     logger.info({ connector_type, instanceId }, "Connector enabled via API");
     res.json({ success: true, id: instanceId });
   }));
@@ -65,8 +79,12 @@ export function createConnectorRoutes(
   router.patch("/:id", requireAdmin, asyncHandler(async (req, res) => {
     const id = req.params.id as string;
     const { config } = req.body;
+    if (config !== undefined && (typeof config !== "object" || config === null || Array.isArray(config))) {
+      throw new BadRequestError("config must be an object");
+    }
 
-    await connectorManager.updateConfig(id, config ?? {});
+    // A password field posted as the mask keeps its stored secret (connector-config.ts).
+    await withConfigErrors(() => connectorManager.updateConfig(id, config ?? {}));
     res.json({ success: true });
   }));
 
@@ -169,41 +187,18 @@ export function createConnectorRoutes(
   return router;
 }
 
-/**
- * Redact password fields in a connector's config based on its configSchema.
- * Fields with type "password" have their values replaced with "********".
- */
+/** Password fields replaced with the mask, as every response must show them. */
 function redactPasswords(
   config: Record<string, unknown>,
   mod: ReturnType<ConnectorRegistry["getModule"]>,
 ): Record<string, unknown> {
-  if (!mod) return { ...config };
-
-  const passwordFieldIds = new Set(
-    mod.configSchema
-      .filter((field) => field.type === "password")
-      .map((field) => field.id),
-  );
-
-  if (passwordFieldIds.size === 0) return { ...config };
-
-  const redacted: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(config)) {
-    redacted[key] = passwordFieldIds.has(key) ? "********" : value;
-  }
-  return redacted;
+  return redactConfig(config, mod);
 }
 
-/**
- * Check which required fields from the configSchema are missing in the provided config.
- * Returns an array of missing field ids.
- */
+/** Required fields from the configSchema that are missing in the provided config. */
 function getMissingRequiredFields(
   config: Record<string, unknown>,
   configSchema: import("../../connectors/connector.interface.js").ConnectorConfigSchema,
 ): string[] {
-  return configSchema
-    .filter((field) => field.required)
-    .filter((field) => config[field.id] === undefined || config[field.id] === null || config[field.id] === "")
-    .map((field) => field.id);
+  return missingRequiredFields(config, configSchema);
 }

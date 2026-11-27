@@ -272,3 +272,60 @@ describe("ConnectorsPage — SetupWizard", () => {
     expect(api.retryConnector).toHaveBeenCalledWith("new-1");
   });
 });
+
+describe("ConnectorsPage — editing, warnings and multiple instances", () => {
+  const REMOTE_TYPE = {
+    metadata: { id: "aeolus-remote", displayName: "Aeolus Remote", icon: "network", description: "Remote installation", supportedDeviceTypes: ["sensor"], requiresSetup: false, multiInstance: true },
+    configSchema: [
+      { id: "baseUrl", label: "Remote installation URL", type: "text", required: true },
+      { id: "apiKey", label: "API key", type: "password", required: true },
+      { id: "pollIntervalSeconds", label: "Poll interval (seconds)", type: "number", required: false, default: 60 },
+    ],
+  };
+  const REMOTE = {
+    id: "c-remote", connectorType: "aeolus-remote", displayName: "Aeolus Remote", icon: "network",
+    config: { baseUrl: "http://192.168.1.20:3001", apiKey: "********", pollIntervalSeconds: 60 },
+    health: { status: "connected", lastSeen: 1_000_000, warnings: ["Plain HTTP: the API key crosses the network unencrypted."] },
+    deviceCount: 1, enabled: true,
+  };
+
+  beforeEach(() => {
+    api.fetchAvailableConnectors.mockResolvedValue([...AVAILABLE, REMOTE_TYPE]);
+    api.fetchEnabledConnectors.mockResolvedValue([REMOTE]);
+  });
+
+  it("shows a standing warning on the card", async () => {
+    render(<ConnectorsPage />);
+    expect(await screen.findByText(/crosses the network unencrypted/)).toBeInTheDocument();
+  });
+
+  it("edits a configuration and posts an untouched secret back as the mask", async () => {
+    render(<ConnectorsPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Edit configuration" }));
+    expect(screen.getByText(/A secret is stored and is never shown/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/Poll interval/), { target: { value: "30" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save configuration" }));
+    await waitFor(() => expect(api.patchConnectorConfig).toHaveBeenCalledWith("c-remote", { baseUrl: "http://192.168.1.20:3001", apiKey: "********", pollIntervalSeconds: 30 }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Save configuration" })).not.toBeInTheDocument());
+  });
+
+  it("shows why an edit was refused and keeps the form open", async () => {
+    api.patchConnectorConfig.mockRejectedValueOnce(new Error("staleAfterSeconds must be at least pollIntervalSeconds"));
+    render(<ConnectorsPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Edit configuration" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save configuration" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("staleAfterSeconds must be at least pollIntervalSeconds");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("button", { name: "Save configuration" })).not.toBeInTheDocument();
+  });
+
+  it("lets another instance of a multi-instance type be enabled, and reports a refused enable", async () => {
+    api.enableConnector.mockRejectedValueOnce(new Error("baseUrl must use https or http"));
+    render(<ConnectorsPage />);
+    expect(await screen.findByText("1 active")).toBeInTheDocument();
+    const enableButtons = screen.getAllByRole("button", { name: /^Enable$/ });
+    fireEvent.click(enableButtons[enableButtons.length - 1]!);
+    fireEvent.click(screen.getByRole("button", { name: "Enable Connector" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("baseUrl must use https or http");
+  });
+});

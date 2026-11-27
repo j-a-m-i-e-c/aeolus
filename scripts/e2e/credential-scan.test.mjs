@@ -122,11 +122,20 @@ test("only e2e/constants.ts chooses the stack, so the global-setup guard covers 
   assert.match(config, /globalSetup: "\.\/e2e\/global-setup\.ts"/);
 });
 
-test("the key-handling spec records no trace or video and never types the key with fill", () => {
-  const spec = readFileSync(path.join(ROOT, "e2e", "project-endpoints.spec.ts"), "utf8");
-  assert.match(spec, /^test\.use\(\{ trace: "off", video: "off", screenshot: "off" \}\);$/m);
-  assert.doesNotMatch(spec, /\.fill\(key\)/);
-  assert.doesNotMatch(spec, /toMatch\(\/\^aeo_/);
+test("every key-handling spec records no trace or video and never types a key with fill", () => {
+  // A spec handles keys if it issues one (".../keys") or enters one into the UI.
+  const e2e = path.join(ROOT, "e2e");
+  const handling = readdirSync(e2e)
+    .filter((name) => name.endsWith(".spec.ts"))
+    .filter((name) => /\/keys[`"/]|enterSecret\(/.test(readFileSync(path.join(e2e, name), "utf8")));
+  assert.deepEqual(handling.sort(), ["project-endpoints.spec.ts", "remote-connector.spec.ts"]);
+  for (const name of handling) {
+    const spec = readFileSync(path.join(e2e, name), "utf8");
+    assert.match(spec, /^test\.use\(\{ trace: "off", video: "off", screenshot: "off" \}\);$/m, name);
+    assert.doesNotMatch(spec, /\.fill\((key|firstKey|rotated\.key|[a-z]+\.key)\)/i, name);
+    assert.doesNotMatch(spec, /toMatch\(\/\^aeo_/, name);
+    assert.match(spec, /scrubCredentials\(page\)/, name);
+  }
   const config = readFileSync(path.join(ROOT, "playwright.config.ts"), "utf8");
   assert.match(config, /globalTeardown: "\.\/e2e\/global-teardown\.ts"/);
 });

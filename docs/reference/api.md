@@ -113,8 +113,8 @@ clamped to a maximum of 200. Completed commands and their evidence are retained 
 |---|---|---|
 | `GET` | `/api/connectors/available` | List bundled connector types |
 | `GET` | `/api/connectors` | List configured instances |
-| `POST` | `/api/connectors` | Create or enable an instance |
-| `PATCH` | `/api/connectors/:id` | Update configuration or enabled state |
+| `POST` | `/api/connectors` | Create or enable an instance; the config is validated first (`400` with the problems) |
+| `PATCH` | `/api/connectors/:id` | Update configuration. A `password` field posted as `********` keeps its stored secret (refused when none is stored); an invalid config is `400` and nothing is saved |
 | `DELETE` | `/api/connectors/:id` | Delete an instance |
 | `GET` | `/api/connectors/:id/status` | Connector health |
 | `POST` | `/api/connectors/:id/retry` | Retry connection |

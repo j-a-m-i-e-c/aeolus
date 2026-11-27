@@ -39,6 +39,8 @@ interface ConnectorType {
     description: string;
     supportedDeviceTypes: string[];
     requiresSetup: boolean;
+    /** More than one instance may be enabled, e.g. one per remote installation. */
+    multiInstance?: boolean;
   };
   configSchema: ConfigField[];
 }
@@ -49,7 +51,7 @@ interface EnabledConnector {
   displayName: string;
   icon: string;
   config: Record<string, unknown>;
-  health: { status: "connected" | "degraded" | "disconnected"; lastSeen: number; errorMessage?: string };
+  health: { status: "connected" | "degraded" | "disconnected"; lastSeen: number; errorMessage?: string; warnings?: string[] };
   deviceCount: number;
   enabled: boolean;
 }
@@ -59,6 +61,13 @@ interface SetupStep {
   title: string;
   description: string;
   fields?: ConfigField[];
+}
+
+/** What the API shows instead of a stored secret. Posting it back keeps the secret. */
+const PASSWORD_MASK = "********";
+
+function errorText(error: unknown): string {
+  return error instanceof Error && error.message ? error.message : "The request failed";
 }
 
 // ---------------------------------------------------------------------------
@@ -154,6 +163,9 @@ function ConfigForm({
             />
           )}
 
+          {field.type === "password" && values[field.id] === PASSWORD_MASK && (
+            <p className="text-[10px] text-[#9AA6B2] mt-0.5">A secret is stored and is never shown. Leave this unchanged to keep it, or replace it with a new value.</p>
+          )}
           {field.helpText && (
             <p className="text-[10px] text-[#6B7785] mt-0.5">{field.helpText}</p>
           )}
@@ -492,6 +504,12 @@ export function ConnectorsPage() {
   const [setupSteps, setSetupSteps] = useState<SetupStep[]>([]);
 
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [enableError, setEnableError] = useState<string | null>(null);
+
+  // Editing an enabled instance's configuration
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editValues, setEditValues] = useState<Record<string, unknown>>({});
+  const [editError, setEditError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -535,6 +553,7 @@ export function ConnectorsPage() {
     }
     setConfiguringType(connType.metadata.id);
     setConfigValues(defaults);
+    setEnableError(null);
   };
 
   const handleEnableWithSetup = async (connectorTypeId: string) => {
@@ -578,9 +597,32 @@ export function ConnectorsPage() {
 
       setConfiguringType(null);
       setConfigValues({});
+      setEnableError(null);
       await refresh();
-    } catch (_err) {
-      // Error is shown via the API client
+    } catch (err) {
+      // The backend lists what is wrong (never echoing a secret).
+      setEnableError(errorText(err));
+    }
+    setActionLoading(null);
+  };
+
+  const startEditing = (conn: EnabledConnector) => {
+    setEditingId(conn.id);
+    setEditValues({ ...conn.config });
+    setEditError(null);
+  };
+
+  const handleSaveEdit = async (id: string) => {
+    setActionLoading(id);
+    try {
+      // Unchanged secrets go back as the mask, which the backend resolves to the stored value.
+      await patchConnectorConfig(id, editValues);
+      setEditingId(null);
+      setEditValues({});
+      setEditError(null);
+      await refresh();
+    } catch (err) {
+      setEditError(errorText(err));
     }
     setActionLoading(null);
   };
@@ -724,8 +766,45 @@ export function ConnectorsPage() {
                   <p className="text-[10px] text-[#EF4444] bg-[#EF4444]/10 px-2 py-1 rounded">{conn.health.errorMessage}</p>
                 )}
 
+                {conn.health.warnings?.map((warning) => (
+                  <p key={warning} role="status" className="text-[10px] text-amber-200 bg-amber-500/10 border border-amber-500/30 px-2 py-1 rounded">{warning}</p>
+                ))}
+
+                {editingId === conn.id && (() => {
+                  const schema = available.find((a) => a.metadata.id === conn.connectorType)?.configSchema ?? [];
+                  return (
+                    <div className="space-y-3 pt-2 border-t border-[#2A3441]">
+                      <ConfigForm schema={schema} values={editValues} onChange={setEditValues} />
+                      {editError && <p role="alert" className="text-[10px] text-[#EF4444] bg-[#EF4444]/10 px-2 py-1 rounded">{editError}</p>}
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => handleSaveEdit(conn.id)}
+                          disabled={actionLoading === conn.id}
+                          className="px-3 py-1.5 text-xs font-medium rounded-lg bg-primary/20 text-primary border border-primary/30 hover:bg-primary/30 transition-colors disabled:opacity-50"
+                        >
+                          Save configuration
+                        </button>
+                        <button
+                          onClick={() => { setEditingId(null); setEditError(null); }}
+                          className="px-3 py-1.5 text-xs font-medium rounded-lg bg-elevated text-[#9AA6B2] border border-[#2A3441]"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 {!readOnly && (
                   <div className="flex gap-2">
+                    {editingId !== conn.id && (
+                      <button
+                        onClick={() => startEditing(conn)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-elevated text-[#9AA6B2] border border-[#2A3441] hover:text-[#E6EDF3] transition-colors"
+                      >
+                        Edit configuration
+                      </button>
+                    )}
                     {conn.health.status === "disconnected" && (
                       <button
                         onClick={() => handleRetry(conn.id)}
@@ -757,7 +836,9 @@ export function ConnectorsPage() {
         <h2 className="text-xs font-semibold text-[#9AA6B2] uppercase tracking-wider">Available Connectors</h2>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {available.map((connType) => {
-            const isEnabled = enabledTypes.has(connType.metadata.id);
+            // A multi-instance type stays enableable; the others show "Active" once enabled.
+            const isEnabled = enabledTypes.has(connType.metadata.id) && !connType.metadata.multiInstance;
+            const activeCount = enabled.filter((e) => e.connectorType === connType.metadata.id).length;
             const isConfiguring = configuringType === connType.metadata.id;
 
             // Check if this is a requiresSetup connector with incomplete setup (ghost record)
@@ -823,6 +904,9 @@ export function ConnectorsPage() {
                 </div>
 
                 <div className="flex flex-wrap gap-2">
+                  {connType.metadata.multiInstance && activeCount > 0 && (
+                    <span className="text-[10px] px-2 py-1 rounded-md bg-[#22C55E]/15 text-[#22C55E]">{activeCount} active</span>
+                  )}
                   {connType.metadata.supportedDeviceTypes.map((dt) => (
                     <span key={dt} className="text-[10px] px-2 py-1 rounded-md bg-elevated text-[#6B7785] capitalize">{dt}</span>
                   ))}
@@ -840,6 +924,8 @@ export function ConnectorsPage() {
                       {connType.configSchema.length > 0 && (
                         <ConfigForm schema={connType.configSchema} values={configValues} onChange={setConfigValues} />
                       )}
+
+                      {enableError && <p role="alert" className="text-[10px] text-[#EF4444] bg-[#EF4444]/10 px-2 py-1 rounded">{enableError}</p>}
 
                       {readOnly && connType.metadata.requiresSetup && (
                         <div className="rounded-lg border border-[#31506A] bg-[#0D1822] p-3 space-y-3">
