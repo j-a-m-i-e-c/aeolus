@@ -1,6 +1,6 @@
 # Project APIs security and release hardening
 
-Status: **H0a, H1 and F5 implemented and provisionally accepted; H2 and H3 (revision 2) designs approved for staged implementation; H2a implemented and awaiting review.** Baseline `ad5155e`
+Status: **H0a, H1 and F5 implemented and provisionally accepted; H2 and H3 (revision 2) designs approved for staged implementation; H2a accepted; H2b implemented and awaiting review.** Baseline `ad5155e`
 (Project APIs Phases 0–5). Branch `security/project-apis-hardening`.
 
 | Commit | Phase | Finding |
@@ -216,7 +216,7 @@ F4, F10 and F12. Planned changes:
 
 ## H2 design (revision 2): secrets at rest
 
-Status: the direction is approved (AES-256-GCM, record binding, a versioned envelope, an external keyring). This revision answers the eight review points and is **approved for staged implementation**. H2a is implemented; H2b and H2c are not started.
+Status: the direction is approved (AES-256-GCM, record binding, a versioned envelope, an external keyring). This revision answers the eight review points and is **approved for staged implementation**. H2a is accepted, H2b is implemented (see "H2b as built"), H2c is not started.
 
 **Objective:** a copy of `aeolus.db`, its WAL, or a normal database backup yields no usable application credential and no signing authority.
 
@@ -365,12 +365,67 @@ Operators wanting more can keep the keyring on a separate device and mount it at
 
 | Phase | Scope |
 |---|---|
-| H2a | Keyring, envelope crypto, binding table and CLI `init`/`verify`/`backup`/`restore` (implemented; nothing is encrypted with it yet) |
-| H2b | Staged migration and the read and write paths |
+| H2a | Keyring, envelope crypto, binding table and CLI `init`/`verify`/`backup`/`restore` (accepted) |
+| H2b | Staged migration and the read and write paths (implemented; awaiting review) |
 | H2c | Rotation, prune, recover, downgrade and `rotate-credentials`; docs |
 
 Each phase is gated separately.
 
+### H2b as built
+
+Status: **implemented, awaiting review.** Code: `src/secrets/` (`secret-store.ts`, `locations.ts`, `migration.ts`, `startup.ts`, `bootstrap.ts`), `src/connectors/bundled.ts`, the CLI's `migrate`, `adopt` and stricter `verify`. Operator documentation: [Secrets at rest](../reference/operations.md#secrets-at-rest).
+
+**Read and write paths.** One codec (`secret-store.ts`) is installed at startup after the migration. Every read and write of a secret location goes through it: `ConnectorStore` seals each schema `password` field on save and opens it on load; the JWT secret, the backend MQTT password and the shared MQTT password use `readSecretSetting`/`writeSecretSetting`. Without a codec, every secret read and write throws. A plaintext value in a secret location throws, naming the location. Records in memory hold plaintext, so the `********` contract (`connector-config.ts`) is unchanged.
+
+**First boot and restore (point 2, refined).** The keyring records `boundAt` once a database has committed its binding. Writes go keyring (exclusive, unbound) → binding commit → `boundAt` (atomic replace), so a crash between any two resumes. A database without a binding meeting a keyring with `boundAt` is refused, with `aeolus-secrets adopt --db <path>` as the explicit step; only an unbound keyring is bound silently. If both the binding and the keyring are lost, the database is indistinguishable from a pre-H2 one; it holds only plaintext, so creating a keyring loses nothing.
+
+**Migration algorithm (point 4, as built).**
+
+| Stage | Action | A crash here leaves |
+|---|---|---|
+| 0 | `VACUUM INTO <secrets dir>/pre-secrets-<time>.db` (0600) | all plaintext; no marker |
+| 1 | one transaction: side table `secret_migration` gets an envelope per plaintext location; marker `shadow` | all plaintext; the restart rebuilds the side table |
+| 2 | every staged envelope decrypts to its plaintext (constant time), and the side table covers exactly the plaintext locations | all plaintext |
+| 3 | `secure_delete=ON`; one transaction: plaintext re-read and compared with what was verified, each value replaced by its envelope, literal placeholders cleared to `""`, side table dropped, marker `encrypted` | all plaintext (rolled back) or all envelopes |
+| 4 | no plaintext left; every value decrypts to the checkpoint's value; checkpoint deleted; `VACUUM`; `cleanedAt`; `wal_checkpoint(TRUNCATE)` (a busy WAL leaves `cleanedAt` unset to retry) | all envelopes; the restart re-verifies against the checkpoint if it still exists and finishes |
+
+With the marker `encrypted`, every envelope must decrypt and plaintext is refused unless the operator runs `aeolus-secrets migrate --db <path> --reencrypt-plaintext`.
+
+**Departures from revision 2, each deliberate:**
+- The stage-0 checkpoint is in the secrets directory, not `<data>/checkpoints`: database backups copy the data directory, and the secrets directory already holds the keys that open everything.
+- The side table is created and dropped by the migration, not by a numbered schema migration: a schema migration would make the migration runner write a plaintext `aeolus.db.pre-migration.*.bak` beside the database on every upgrade, and the table never outlives the switch.
+- Stage 4 compares with the checkpoint, so a run resumed after a crash also proves no value changed.
+- The keyring must be writable by the backend (the binding record now, rotation in H2c). The earlier "for example a Docker secret" note was removed.
+
+**Tests.**
+- `bootstrap.test.ts` covers the six first-boot cases: new, legacy upgrade, normal restart, restored database without a binding (refused, then `adopt`), missing, corrupt or mismatched keyring, and both keyring/binding crash points.
+- `migration.test.ts` uses synthetic databases at schema 1, 13, 19 and current. They cover every MQTT mode, with and without a database JWT secret, Hue, Kasa, two Remote instances (one key with non-ASCII characters) and the placeholder bug. Tests interrupt at all ten boundaries, tamper with the side table, change a secret between verify and switch, and use a checkpoint that no longer matches. They also cover plaintext after encryption, a modified envelope, envelopes swapped between Remote instances, a different keyring and a malformed marker. A byte scan proves no plaintext remains in the database or WAL files.
+- `secrets-migration-crash.integration.test.ts` kills a child process with SIGKILL at eight boundaries, including both keyring/binding points, then checks the state and the restart.
+- `migration.runtime.test.ts` checks the services after migration. JWTs signed before the upgrade verify. An external `JWT_SECRET` stays authoritative. In shared and per-device modes, the MQTT password-file hashes verify the original passwords. Hue and Remote keys load, Kasa is byte-identical, and the mask contract holds. Restarts cause no churn. Connector edits, shared-password rotation, backend credential regeneration and JWT generation all write envelopes, with no plaintext in the files. A missing or foreign keyring fails closed.
+- The CLI tests cover `migrate`, `adopt`, `--reencrypt-plaintext` and `verify` reporting plaintext, and check that no output contains a value. The E2E remote spec checks, inside B's container, that the stored secrets are envelopes and that no API key appears in B's database files.
+
+**Real database copy (2026-11-27).**
+- An online `db.backup()` was taken on a read-only connection inside the running `aeolus-backend` container, to the container's `/tmp`. It was copied to `%LOCALAPPDATA%\aeolus-h2-verify\` (restricted to the current user with `icacls`), and the container copy was deleted. The live `/app/data` listing (sizes and times) was identical before and after. No backend, MQTT client, connector or network was started against a copy.
+- The copy is schema 18 with MQTT open, no connectors, and two plaintext secrets: `jwt_secret` and `mqtt_backend_password`.
+- CLI `migrate` on a writable clone, with the read-only reference kept beside it: `migrated`, 2 settings. `verify` gave OK, 2 decrypted, 0 plaintext. Reference comparison: 2 of 2 decrypt equal to the reference, all 26 tables' non-secret content unchanged, `integrity_check` ok, 0 foreign-key violations, 0 occurrences of either value in the migrated files (2 in the reference), no checkpoint left. A second `migrate` reported `already-encrypted` and left the file hash unchanged.
+- A second clone went through the startup order: schema migrations 18 → 22, which wrote a plaintext `.pre-migration` checkpoint that the secrets migration then listed, then `startSecrets`: create keyring, migrated, 2 of 2 equal, restart `ready/already-encrypted`, 0 plaintext in the database files.
+- With a different keyring, `verify` failed (different installation, 2 cannot decrypt). With the keyring missing, `migrate` refused and created none.
+- Cleanup: the directory (21 files) was deleted the same day, and the container's `/tmp` was checked empty. No existing backup was touched.
+
+**Plaintext that remains (point 6).**
+- Every database backup, snapshot or image made before the upgrade.
+- On the everyday installation, the two schema checkpoints already in its data volume (`aeolus.db.pre-migration.2026-08-24…bak`, `…2026-09-10…bak`). The upgrade from schema 18 adds a third. The first start lists them and deletes none.
+- `hue-credentials.json.migrated` where the legacy Hue import ran.
+- The deleted stage-0 checkpoint, and old pages in freed filesystem blocks, journal, flash wear-levelling, page cache and swap. `VACUUM` and WAL truncation rewrite the files; they do not erase the device.
+- The backend MQTT password in old copies stops working at the next start, which regenerates it (existing behaviour). The JWT secret in old copies stays valid until it is rotated. That rotation is H2c's `rotate-credentials`.
+
+**Operational changes.**
+- The first start after the upgrade encrypts in place and logs counts.
+- Back up the keyring (H2a) before relying on database backups.
+- Restoring a pre-encryption backup over a bound installation needs `adopt`.
+- Running an older release against an encrypted database is unsupported until H2c's `downgrade`.
+- The demo golden must be recreated after deploying H2b.
+- Bundled connectors are listed in `src/connectors/bundled.ts`.
 ## H3 design (revision 2): crash-consistent revocation journal
 
 Status: **approved for staged implementation (H3a, then H3b) after H2c.** It depends on H2: the keyring's `installationId` and an HKDF subkey for the journal MAC.
@@ -540,7 +595,7 @@ Your call: H3b inside H3, or as a following phase. I recommend inside, because t
 
 | Next | Needs |
 |---|---|
-| H2b, H2c | Review of H2a (the real-copy test is approved, after synthetic tests) |
+| H2c | Review of H2b |
 | H3a, then H3b | H2c accepted; each subphase is reviewed before the next |
 | H4 | Peer CA option for Aeolus Remote (F6), the HTTPS-only test route, `/try` path parameters (F8), metrics auth (F9) |
 | H5, H6 | As planned |

@@ -5,6 +5,13 @@ import Database from "better-sqlite3";
 import type { Database as DatabaseType } from "better-sqlite3";
 import { ConnectorStore } from "./connector-store.js";
 import type { ConnectorRecord } from "./connector.interface.js";
+import { BUNDLED_CONNECTOR_MODULES, secretFieldLookup } from "./bundled.js";
+import { createSecretCodec, installSecretCodec, secretCodec } from "../secrets/secret-store.js";
+import { generateKeyring } from "../secrets/keyring.js";
+
+const lookup = secretFieldLookup(BUNDLED_CONNECTOR_MODULES);
+const storedConfig = (db: DatabaseType, id: string) =>
+  JSON.parse((db.prepare("SELECT config FROM connectors WHERE id = ?").get(id) as { config: string }).config) as Record<string, unknown>;
 
 // Mock logger
 vi.mock("../logger.js", () => ({
@@ -44,7 +51,7 @@ describe("ConnectorStore", () => {
         updated_at INTEGER NOT NULL
       );
     `);
-    store = new ConnectorStore(db);
+    store = new ConnectorStore(db, lookup);
   });
 
   afterEach(() => {
@@ -111,6 +118,68 @@ describe("ConnectorStore", () => {
   it("should return empty arrays when table is empty", () => {
     expect(store.loadAll()).toEqual([]);
     expect(store.loadEnabled()).toEqual([]);
+  });
+
+  it("stores password fields encrypted and other fields as they are (H2b)", () => {
+    store.save(makeRecord());
+    const stored = storedConfig(db, "test-id-1");
+    expect(stored.bridgeIp).toBe("192.168.1.100");
+    expect(stored.apiKey).toMatch(/^aeolus-enc:v1:/);
+    expect(JSON.stringify(stored)).not.toContain("abc123");
+    // A new nonce on every save, so equal secrets never produce equal ciphertexts.
+    store.save(makeRecord());
+    expect(storedConfig(db, "test-id-1").apiKey).not.toBe(stored.apiKey);
+    expect(store.loadAll()[0]!.config.apiKey).toBe("abc123");
+  });
+
+  it("leaves empty secrets and connectors without secret fields unchanged", () => {
+    store.save(makeRecord({ id: "kasa-1", connectorType: "kasa", config: { pollInterval: 30 } }));
+    store.save(makeRecord({ id: "hue-empty", config: { bridgeIp: "10.0.0.2", apiKey: "" } }));
+    expect(storedConfig(db, "kasa-1")).toEqual({ pollInterval: 30 });
+    expect(storedConfig(db, "hue-empty")).toEqual({ bridgeIp: "10.0.0.2", apiKey: "" });
+  });
+
+  it("seals a posted value that merely looks like an envelope, so it is never trusted as one", () => {
+    const foreign = secretCodec().sealConnectorField("other-instance", "apiKey", "stolen");
+    store.save(makeRecord({ config: { bridgeIp: "10.0.0.2", apiKey: foreign } }));
+    expect(storedConfig(db, "test-id-1").apiKey).not.toBe(foreign);
+    expect(store.loadAll()[0]!.config.apiKey).toBe(foreign);
+  });
+
+  it("refuses a plaintext secret field on load: no plaintext fallback", () => {
+    db.prepare("INSERT INTO connectors (id, connector_type, enabled, config, created_at, updated_at) VALUES (?, ?, 1, ?, 1, 1)")
+      .run("plain", "hue", JSON.stringify({ bridgeIp: "10.0.0.2", apiKey: "plaintext-key" }));
+    expect(() => store.loadAll()).toThrow(/Connector plain field apiKey holds an unencrypted value/);
+  });
+
+  it("refuses an envelope moved from another connector (record swap)", () => {
+    store.save(makeRecord({ id: "a" }));
+    const moved = storedConfig(db, "a").apiKey as string;
+    db.prepare("INSERT INTO connectors (id, connector_type, enabled, config, created_at, updated_at) VALUES (?, ?, 1, ?, 1, 1)")
+      .run("b", "hue", JSON.stringify({ bridgeIp: "10.0.0.2", apiKey: moved }));
+    expect(() => store.loadEnabled()).toThrow(/Connector b field apiKey cannot be decrypted/);
+  });
+
+  it("refuses to load with a different keyring, and to save or load with none", () => {
+    store.save(makeRecord());
+    const original = secretCodec();
+    try {
+      installSecretCodec(createSecretCodec(generateKeyring()));
+      expect(() => store.loadAll()).toThrow(/cannot be decrypted/);
+      installSecretCodec(null);
+      expect(() => store.loadAll()).toThrow(/keyring has not been loaded/);
+      expect(() => store.save(makeRecord())).toThrow(/keyring has not been loaded/);
+    } finally {
+      installSecretCodec(original);
+    }
+  });
+
+  it("refuses to save a connector whose type is not registered (its secret fields are unknown)", () => {
+    expect(() => store.save(makeRecord({ connectorType: "unknown-type" }))).toThrow(/not registered/);
+    // An unregistered type already stored is loaded as stored; no connector can run it.
+    db.prepare("INSERT INTO connectors (id, connector_type, enabled, config, created_at, updated_at) VALUES (?, ?, 1, ?, 1, 1)")
+      .run("old", "retired-type", JSON.stringify({ token: "x" }));
+    expect(store.loadAll().find((r) => r.id === "old")!.config).toEqual({ token: "x" });
   });
 
   it("should skip records with malformed JSON config", () => {

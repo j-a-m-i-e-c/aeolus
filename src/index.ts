@@ -15,9 +15,7 @@ import { AutomationEngine } from "./automations/automation-engine.js";
 import { ConnectorRegistry } from "./connectors/connector-registry.js";
 import { ConnectorManager } from "./connectors/connector-manager.js";
 import { ConnectorStore } from "./connectors/connector-store.js";
-import * as hueModule from "./connectors/hue/index.js";
-import * as kasaModule from "./connectors/kasa/index.js";
-import * as aeolusRemoteModule from "./connectors/aeolus-remote/index.js";
+import { BUNDLED_CONNECTOR_MODULES, secretFieldLookup } from "./connectors/bundled.js";
 import { migrateLegacyHueCredentials } from "./connectors/migrate-legacy-hue.js";
 import { CommandService, handlePublish, handleToggle, handleDeviceAction, handleLog, handleDelay, handleWebhook } from "./automations/command-service.js";
 import { ConditionRegistry } from "./automations/condition-registry.js";
@@ -38,7 +36,8 @@ import { createCommandRoutes } from "./api/routes/command.routes.js";
 import { createStateRoutes } from "./api/routes/state.routes.js";
 import { createHealthRoutes } from "./api/routes/health.routes.js";
 import { createProxyTrust, untrustedForwardingNotice } from "./api/proxy-trust.js";
-import { bootstrapSecrets, SecretsUnavailableError } from "./secrets/bootstrap.js";
+import { SecretsUnavailableError } from "./secrets/errors.js";
+import { startSecrets } from "./secrets/startup.js";
 import { createMqttRoutes } from "./api/routes/mqtt.routes.js";
 import { createAutomationRoutes, loadUiRules, automationExists } from "./api/routes/automation.routes.js";
 import { createConnectorRoutes } from "./api/routes/connector.routes.js";
@@ -96,18 +95,38 @@ async function main(): Promise<void> {
   // 1. Database
   const db = getDatabase();
 
-  // 1b. Keyring (H2a): find it, or create one only for a database that has never had one.
-  // A database bound to a missing or different keyring must not start (fail closed).
+  // 1b. Keyring and stored secrets (H2): find the keyring, or create one only for a
+  // database that has never had one; encrypt any plaintext secrets; then every secret
+  // read and write goes through the keyring. A database bound to a missing or different
+  // keyring, or holding plaintext after encryption, must not start (fail closed).
+  const connectorSecretFields = secretFieldLookup(BUNDLED_CONNECTOR_MODULES);
   try {
-    const secrets = bootstrapSecrets(db, config.dbPath);
+    const secrets = startSecrets(db, config.dbPath, connectorSecretFields);
     logger.info(
       { keyring: secrets.paths.keyringFile, installationId: secrets.keyring.installationId, keys: secrets.keyring.keys.map((key) => key.id), outcome: secrets.outcome },
       secrets.outcome === "create-keyring-and-bind"
         ? "Created a new keyring for this installation. Back it up separately from the database: aeolus-secrets backup"
         : "Keyring loaded",
     );
+    const { migration } = secrets;
+    if (migration.outcome === "migrated") {
+      logger.warn(
+        { settings: migration.encrypted.settings, connectorFields: migration.encrypted.connectorFields, cleaned: migration.cleaned },
+        "Encrypted the stored secrets. Older database backups, snapshots and copies still hold them in plaintext; see docs/reference/operations.md (Secrets at rest)",
+      );
+      if (migration.plaintextCopies.length > 0) {
+        logger.warn({ files: migration.plaintextCopies }, "These older copies beside the database predate encryption and may hold plaintext secrets. They were not deleted");
+      }
+    }
+    if (migration.clearedPlaceholders.length > 0) {
+      logger.warn({ locations: migration.clearedPlaceholders }, "A connector stored the placeholder ******** instead of its secret; it was cleared. Enter the secret again in the dashboard");
+    }
+    if (!migration.cleaned) logger.warn("The post-encryption VACUUM and WAL truncation did not complete; it is retried at the next start");
+    if (migration.unknownConnectorTypes > 0) {
+      logger.warn({ count: migration.unknownConnectorTypes }, "Connector instances of unregistered types were not examined for secrets");
+    }
   } catch (error) {
-    if (error instanceof SecretsUnavailableError) logger.fatal({ error: error.message }, "Refusing to start: the keyring is unavailable");
+    if (error instanceof SecretsUnavailableError) logger.fatal({ error: error.message }, "Refusing to start: stored secrets are unavailable");
     throw error;
   }
 
@@ -242,13 +261,11 @@ async function main(): Promise<void> {
   }
 
   // 4. Connector Framework (needed before CommandService)
-  const connectorStore = new ConnectorStore(db);
+  const connectorStore = new ConnectorStore(db, connectorSecretFields);
   const connectorRegistry = new ConnectorRegistry();
   const connectorManager = new ConnectorManager(connectorRegistry, connectorStore, registry, eventBus);
 
-  connectorRegistry.register(hueModule);
-  connectorRegistry.register(kasaModule);
-connectorRegistry.register(aeolusRemoteModule);
+  for (const mod of BUNDLED_CONNECTOR_MODULES) connectorRegistry.register(mod);
 
   migrateLegacyHueCredentials(connectorStore);
 

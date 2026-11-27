@@ -49,6 +49,7 @@ vi.mock("../auth/mqtt-credential-service.js", () => ({
 }));
 
 import { getDatabase } from "../db/database.js";
+import { writeSecretSetting } from "../secrets/secret-store.js";
 import { MqttProvisioningService, type SecurityLevel } from "./mqtt-provisioning-service.js";
 import { BadRequestError, ConflictError } from "../api/middleware/error-handler.js";
 import type { MosquittoConfigWriter } from "./mosquitto-config-writer.js";
@@ -399,11 +400,8 @@ describe("Feature: mqtt-device-provisioning — MqttProvisioningService Property
               "INSERT OR REPLACE INTO system_settings (key, value) VALUES (?, ?)",
             )
             .run("mqtt_shared_username", "aeolus-shared");
-          testDb
-            .prepare(
-              "INSERT OR REPLACE INTO system_settings (key, value) VALUES (?, ?)",
-            )
-            .run("mqtt_shared_password", "test-password-123");
+          // Stored as the backend stores it: encrypted (H2b).
+          writeSecretSetting(testDb, "mqtt_shared_password", "test-password-123");
         }
 
         // Clear mocks before initialize

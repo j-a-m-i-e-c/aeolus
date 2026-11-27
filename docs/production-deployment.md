@@ -31,7 +31,7 @@ For the full auth model — token flow, group permissions, user management API, 
 
 ### JWT secret
 
-By default Aeolus generates a random 256-bit signing key on first run and stores it in the database. To pin it across rebuilds (recommended if you ever restore to a different machine), set `JWT_SECRET`. Changing the secret invalidates all existing sessions.
+By default Aeolus generates a random 256-bit signing key on first run and stores it in the database, encrypted under the keyring. To pin it across rebuilds (recommended if you ever restore to a different machine), set `JWT_SECRET`. Changing the secret invalidates all existing sessions.
 
 ---
 
@@ -292,6 +292,8 @@ docker compose cp backend:/app/secrets/keyring-backup.json ./keyring-backup.json
 ```
 
 The command prompts for the passphrase; it is never passed as an argument. To check that a database backup and a keyring belong together without starting anything: `aeolus-secrets verify --db <backup.db>`. To recreate a lost keyring: `aeolus-secrets restore --in keyring-backup.json`.
+
+The stored credentials (connector API keys, the JWT secret, the MQTT passwords) are encrypted under the keyring, so a database backup is restorable only together with a keyring backup holding its keys, and a database backup alone does not reveal them. Backups made **before** the upgrade that encrypted them still hold them in plaintext: protect or expire those, and treat their credentials as exposed if one leaks. Restoring such a backup onto an installation whose keyring is already in use is refused until you confirm it with `aeolus-secrets adopt`. Details, recovery steps and what encryption does not erase: [Secrets at rest](reference/operations.md#secrets-at-rest).
 
 ### Automated nightly backup
 

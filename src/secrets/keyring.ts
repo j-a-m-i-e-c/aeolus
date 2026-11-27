@@ -6,7 +6,13 @@
 //
 //   { "format": "aeolus-keyring", "version": 1, "installationId": "<uuid>",
 //     "keys": [{ "id", "key" (base64, 32 bytes), "status": "active" | "pending" | "retired",
-//                "createdAt", "activatedAt", "retiredAt" }] }
+//                "createdAt", "activatedAt", "retiredAt" }],
+//     "boundAt": <time> }
+//
+// `boundAt` is set once a database has committed its binding to this keyring. It is
+// the external record that this keyring already belongs to a database, so a restored
+// database that lacks the binding (for example a backup from before H2) is refused
+// instead of being bound silently as if it were a new installation.
 //
 // Exactly one key is active. A pending key may decrypt (an interrupted rotation) but
 // never encrypts. Retired keys stay so older backups remain decryptable.
@@ -39,6 +45,8 @@ export interface Keyring {
   version: 1;
   installationId: string;
   keys: KeyringKey[];
+  /** When a database first committed its binding to this keyring. Absent until then. */
+  boundAt?: number;
 }
 
 export class KeyringError extends Error {
@@ -98,6 +106,7 @@ export function validateKeyring(value: unknown): Keyring {
     if (key.status === "retired" && key.retiredAt === null) bad(`retired key ${String(key.id)} has no retiredAt`);
   }
   if (active !== 1) bad(`${active} active keys (exactly one is required)`);
+  if (ring.boundAt !== undefined && !isTime(ring.boundAt)) bad("boundAt");
   return value as Keyring;
 }
 

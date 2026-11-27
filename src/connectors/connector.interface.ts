@@ -87,7 +87,7 @@ export interface ConfigFieldDescriptor {
    * Input type that determines how the field is rendered in the dashboard.
    * - `"text"` — standard text input
    * - `"number"` — numeric input with optional min/max
-   * - `"password"` — masked input, value is redacted in API responses
+   * - `"password"` — masked input, value is redacted in API responses and encrypted at rest
    * - `"boolean"` — toggle switch
    * - `"select"` — dropdown, requires the `options` array
    */

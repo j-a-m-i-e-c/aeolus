@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import jwt from "jsonwebtoken";
 import Database from "better-sqlite3";
 import { initSchema } from "../db/database.js";
+import { readSecretSetting, writeSecretSetting } from "../secrets/secret-store.js";
 
 let testDb: InstanceType<typeof Database>;
 
@@ -56,22 +57,36 @@ describe("Token Service", () => {
       expect(secret).toBeTruthy();
       expect(secret.length).toBeGreaterThan(0);
 
-      // Verify it was stored in the database
+      // Stored encrypted, never in plaintext (H2b), and it decrypts to the same secret.
       const row = testDb
         .prepare("SELECT value FROM system_settings WHERE key = ?")
         .get("jwt_secret") as { value: string } | undefined;
       expect(row).toBeDefined();
-      expect(row!.value).toBe(secret);
+      expect(row!.value).toMatch(/^aeolus-enc:v1:/);
+      expect(row!.value).not.toContain(secret);
+      expect(readSecretSetting(testDb, "jwt_secret")).toBe(secret);
     });
 
     it("should load existing secret from database", () => {
-      // Pre-store a secret
+      writeSecretSetting(testDb, "jwt_secret", "stored-db-secret");
+
+      const secret = getSecret();
+      expect(secret).toBe("stored-db-secret");
+    });
+
+    it("refuses a plaintext secret in the database instead of signing with it", () => {
       testDb
         .prepare("INSERT INTO system_settings (key, value) VALUES (?, ?)")
         .run("jwt_secret", "stored-db-secret");
 
-      const secret = getSecret();
-      expect(secret).toBe("stored-db-secret");
+      expect(() => getSecret()).toThrow(/unencrypted value/);
+    });
+
+    it("keeps an existing JWT_SECRET authoritative over an encrypted database secret", () => {
+      writeSecretSetting(testDb, "jwt_secret", "database-secret");
+      process.env.JWT_SECRET = "external-secret";
+      expect(getSecret()).toBe("external-secret");
+      expect(readSecretSetting(testDb, "jwt_secret")).toBe("database-secret");
     });
   });
 

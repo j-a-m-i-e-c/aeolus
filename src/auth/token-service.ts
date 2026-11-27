@@ -5,6 +5,7 @@
 import crypto from "node:crypto";
 import jwt from "jsonwebtoken";
 import { getDatabase } from "../db/database.js";
+import { insertSecretSettingIfAbsent, readSecretSetting } from "../secrets/secret-store.js";
 import logger from "../logger.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -63,21 +64,21 @@ export function getSecret(): string {
     return cachedSecret;
   }
 
-  // 2. Check database
+  // 2. Check database (stored encrypted; see src/secrets/secret-store.ts)
   const db = getDatabase();
-  const row = db.prepare("SELECT value FROM system_settings WHERE key = ?").get("jwt_secret") as
-    | { value: string }
-    | undefined;
+  const stored = readSecretSetting(db, "jwt_secret");
 
-  if (row) {
-    cachedSecret = row.value;
+  if (stored !== null) {
+    cachedSecret = stored;
     logger.info("Loaded JWT secret from database");
     return cachedSecret;
   }
 
-  // 3. Generate new 256-bit key and store it
+  // 3. Generate new 256-bit key and store it, encrypted
   const newSecret = crypto.randomBytes(32).toString("base64url");
-  db.prepare("INSERT INTO system_settings (key, value) VALUES (?, ?)").run("jwt_secret", newSecret);
+  if (!insertSecretSettingIfAbsent(db, "jwt_secret", newSecret)) {
+    throw new Error("A JWT secret was stored concurrently; refusing to sign with a different one");
+  }
   cachedSecret = newSecret;
   logger.info("Generated and stored new JWT secret in database");
   return cachedSecret;

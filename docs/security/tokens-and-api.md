@@ -42,8 +42,10 @@ The frontend renews access tokens roughly every 13 minutes. Network failures and
 Resolution order:
 
 1. `JWT_SECRET` environment variable;
-2. persisted `jwt_secret` in `system_settings`;
-3. generate and persist a new 256-bit secret.
+2. persisted `jwt_secret` in `system_settings`, encrypted under the keyring;
+3. generate and persist (encrypted) a new 256-bit secret.
+
+When `JWT_SECRET` is set, a stored `jwt_secret` is still kept encrypted, so removing the variable later keeps the same sessions.
 
 Changing the secret invalidates existing access tokens. Refresh tokens remain in the database, but refresh requires the current user and then produces tokens signed by the current secret.
 
@@ -101,8 +103,9 @@ Machine clients of published Project APIs use API keys, not JWTs
 - **Public demo.** A public-demo server answers `403` to every management route, for every
   session including a real admin's, and `404` to everything under `/api/exposed`.
 - **Held by another installation.** The Aeolus Remote connector on installation B stores the
-  full key it was given in its connector configuration, in B's SQLite database, so B's
-  database and its backups must be protected like the key itself. It is shown as `********`
+  full key it was given in its connector configuration, encrypted under B's keyring, so B's
+  database backups alone do not yield it; B's keyring and any database backup made before
+  B encrypted its secrets must be protected like the key itself. It is shown as `********`
   in every API response and the dashboard; posting the mask back keeps it, and it never
   appears in device state, health, logs or exports. B sends it only in the `Authorization`
   header to the configured origin, follows no redirect, and with plain HTTP only after an
@@ -110,7 +113,7 @@ Machine clients of published Project APIs use API keys, not JWTs
 
 ## Keyring
 
-Stored secrets are protected by root keys in a keyring file outside the database (hardening H2; see the operations reference). The keyring is created once, exclusively (an existing keyring is never replaced), with mode 0600 in a 0700 directory, and startup refuses a keyring other users can read or a directory others can write (POSIX). The database records which keyring it is bound to by installation id and per-key fingerprint (an HMAC under each key, never the key), so a missing or different keyring is refused rather than replaced. Values are sealed with AES-256-GCM under per-purpose HKDF-SHA256 subkeys, a random nonce each, with the storage location (`connector:<instance>:<field>`, `setting:<key>`) as authenticated data, so a ciphertext copied to another record does not decrypt. Keyring backups are sealed under a passphrase with scrypt (N = 2^17, r = 8, p = 1, random 16-byte salt) and AES-256-GCM over an authenticated header.
+Stored secrets are protected by root keys in a keyring file outside the database (hardening H2; see the operations reference). The keyring is created once, exclusively (an existing keyring is never replaced), with mode 0600 in a 0700 directory, and startup refuses a keyring other users can read or a directory others can write (POSIX). The database records which keyring it is bound to by installation id and per-key fingerprint (an HMAC under each key, never the key), so a missing or different keyring is refused rather than replaced. Values are sealed with AES-256-GCM under per-purpose HKDF-SHA256 subkeys, a random nonce each, with the storage location (`connector:<instance>:<field>`, `setting:<key>`) as authenticated data, so a ciphertext copied to another record does not decrypt. The sealed values are every connector `password` field (the Hue and Aeolus Remote API keys), the database JWT secret and both MQTT passwords; once a database is encrypted, a plaintext value in one of those places is refused, never used. Password, refresh-token, API-key and MQTT device hashes are unchanged. Keyring backups are sealed under a passphrase with scrypt (N = 2^17, r = 8, p = 1, random 16-byte salt) and AES-256-GCM over an authenticated header.
 
 The keyring protects against theft of the database or its backups, not against someone with the host, both volumes, or the running process.
 

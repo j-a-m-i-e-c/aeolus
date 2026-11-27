@@ -4,6 +4,7 @@
 
 import crypto from "node:crypto";
 import { getDatabase } from "../db/database.js";
+import { isSecretSetting, readSecretSetting, writeSecretSetting } from "../secrets/secret-store.js";
 import {
   getPasswordFilePath,
   writePasswordFile,
@@ -462,6 +463,8 @@ export class MqttProvisioningService {
    */
   private readSetting(key: string): string | null {
     const db = getDatabase();
+    // The MQTT passwords are stored encrypted (src/secrets/secret-store.ts).
+    if (isSecretSetting(key)) return readSecretSetting(db, key);
     const row = db.prepare("SELECT value FROM system_settings WHERE key = ?").get(key) as
       | { value: string }
       | undefined;
@@ -469,10 +472,15 @@ export class MqttProvisioningService {
   }
 
   /**
-   * Write a setting to the system_settings table (upsert).
+   * Write a setting to the system_settings table (upsert). Secret settings are
+   * encrypted; nothing writes a password in plaintext.
    */
   private writeSetting(key: string, value: string): void {
     const db = getDatabase();
+    if (isSecretSetting(key)) {
+      writeSecretSetting(db, key, value);
+      return;
+    }
     db.prepare(
       "INSERT INTO system_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
     ).run(key, value);

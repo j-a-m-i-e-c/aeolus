@@ -19,7 +19,7 @@ It may also export:
 - condition factories;
 - an action catalog.
 
-Bundled production connectors are imported and registered in `src/index.ts`. `ConnectorRegistry.discoverFromDirectory()` is available for development and testing, but adding a folder alone does not place a connector in the production bundle.
+Bundled production connectors are listed in `src/connectors/bundled.ts`, which `src/index.ts` registers and the offline `aeolus-secrets` CLI reads to know which fields are secrets. `ConnectorRegistry.discoverFromDirectory()` is available for development and testing, but adding a folder alone does not place a connector in the production bundle.
 
 ## Runtime lifecycle
 
@@ -47,7 +47,7 @@ disconnect and dispose
 
 Polls are chained per instance, never concurrent: the next is scheduled only when the current one settles, at the delay the connector asks for (`getPollIntervalMs()`, clamped to 5 s – 1 h) or every 60 s. Disabling an instance cancels its timer and aborts a poll in flight, and a result that arrives afterwards is discarded. A configuration change triggers a prompt poll.
 
-Configuration is validated before anything is persisted: required fields, then the module's `validateConfig`. Password fields are redacted to `********` in every response; posting the mask back keeps the stored secret, and the mask is refused where no secret is stored (see the developer guide).
+Configuration is validated before anything is persisted: required fields, then the module's `validateConfig`. Password fields are encrypted at rest ([Secrets at rest](operations.md#secrets-at-rest)) and redacted to `********` in every response; posting the mask back keeps the stored secret, and the mask is refused where no secret is stored (see the developer guide).
 
 ## Device ownership
 

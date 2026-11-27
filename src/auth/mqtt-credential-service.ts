@@ -16,6 +16,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { getDatabase } from "../db/database.js";
+import { readSecretSetting, writeSecretSetting } from "../secrets/secret-store.js";
 import { NotFoundError, ConflictError } from "../api/middleware/error-handler.js";
 import { buildPasswordLine, hashMosquittoPassword } from "../mqtt/mosquitto-password-hash.js";
 import { MosquittoReloader } from "../mqtt/mosquitto-reloader.js";
@@ -26,8 +27,8 @@ const PASSWORD_BYTES = 24;
 export const BACKEND_DEVICE_NAME = "aeolus-backend";
 export const BACKEND_USERNAME = "aeolus-backend";
 
-/** system_settings key holding the backend broker password (plaintext). */
-export const SETTING_BACKEND_PASSWORD = "mqtt_backend_password";
+/** system_settings key holding the backend broker password (encrypted at rest). */
+export const SETTING_BACKEND_PASSWORD = "mqtt_backend_password" as const;
 
 export interface MqttCredential {
   id: string;
@@ -74,19 +75,13 @@ export function getPasswordFilePath(): string {
 
 // ─── Settings helpers ──────────────────────────────────────────────────────
 
-function readSetting(key: string): string | null {
-  const db = getDatabase();
-  const row = db.prepare("SELECT value FROM system_settings WHERE key = ?").get(key) as
-    | { value: string }
-    | undefined;
-  return row?.value ?? null;
+// The backend password is stored encrypted (src/secrets/secret-store.ts).
+function readSetting(key: typeof SETTING_BACKEND_PASSWORD): string | null {
+  return readSecretSetting(getDatabase(), key);
 }
 
-function writeSetting(key: string, value: string): void {
-  const db = getDatabase();
-  db.prepare(
-    "INSERT INTO system_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-  ).run(key, value);
+function writeSetting(key: typeof SETTING_BACKEND_PASSWORD, value: string): void {
+  writeSecretSetting(getDatabase(), key, value);
 }
 
 // ─── Password file writing ─────────────────────────────────────────────────
@@ -231,7 +226,7 @@ export function deleteCredential(id: string): void {
  * Ensure the backend's own MQTT credential exists.
  *
  * Generates a fresh password, stores its `$7$` hash on the backend row and the
- * plaintext in system_settings (the single source used both to write the
+ * password, encrypted, in system_settings (the single source used both to write the
  * password file and to connect the backend to the broker), and returns the
  * plaintext so the caller can connect.
  */

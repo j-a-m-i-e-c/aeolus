@@ -10,6 +10,7 @@ import { initSchema } from "../db/database.js";
 import { bindingFor, writeBinding } from "../secrets/binding.js";
 import { connectorContext, sealSecret, settingContext } from "../secrets/envelope.js";
 import { activeKey, createKeyringExclusive, generateKeyring, loadKeyring } from "../secrets/keyring.js";
+import { buildSyntheticDatabase } from "../__test-helpers__/secrets-fixtures.js";
 import { runCli, type CliIo } from "./aeolus-secrets.js";
 
 const PASS = "a long enough backup passphrase";
@@ -152,6 +153,83 @@ describe("aeolus-secrets", () => {
 
     it("refuses a database file that does not exist", async () => {
       expect(await runCli(["verify", "--db", path.join(root, "absent.db")], io())).toBe(1);
+    });
+
+    it("fails a database that holds plaintext after encryption, naming the location only", async () => {
+      await runCli(["init"], io());
+      const file = database(true);
+      const db = new Database(file);
+      db.prepare("INSERT INTO system_settings (key, value) VALUES ('secrets_migration', ?)").run(JSON.stringify({ version: 1, state: "encrypted", keyId: "k", updatedAt: 1, cleanedAt: 1 }));
+      db.prepare("INSERT INTO system_settings (key, value) VALUES ('mqtt_shared_password', 'plain-shared')").run();
+      db.close();
+      expect(await runCli(["verify", "--db", file], io())).toBe(1);
+      expect(lines).toContain("plaintext secrets: 1 (setting mqtt_shared_password)");
+      expect(everything().includes("plain-shared")).toBe(false);
+    });
+  });
+
+  describe("migrate and adopt", () => {
+    const dbFile = () => path.join(root, "data", "aeolus.db");
+    function legacyDatabase(): Map<string, string> {
+      fs.mkdirSync(path.dirname(dbFile()), { recursive: true });
+      const { db, fixture } = buildSyntheticDatabase(dbFile());
+      db.close();
+      return fixture.secrets;
+    }
+
+    it("migrates a pre-H2 database offline: creates and binds the keyring, encrypts, and prints no value", async () => {
+      const secrets = legacyDatabase();
+      expect(await runCli(["migrate", "--db", dbFile()], io())).toBe(0);
+      expect(lines).toContain("outcome: migrated");
+      expect(lines).toContain(`encrypted now: 3 setting(s), 3 connector field(s); envelopes verified: ${secrets.size}`);
+      expect(lines.some((line) => /Back the new keyring up now/.test(line))).toBe(true);
+      for (const value of secrets.values()) expect(everything().includes(value)).toBe(false);
+      lines = [];
+      expect(await runCli(["verify", "--db", dbFile()], io())).toBe(0);
+      expect(lines).toContain(`decrypted: ${secrets.size}, failed: 0`);
+      expect(lines).toContain("plaintext secrets: 0");
+      lines = [];
+      expect(await runCli(["migrate", "--db", dbFile()], io())).toBe(0);
+      expect(lines).toContain("outcome: already-encrypted");
+    });
+
+    it("uses an explicit --keyring, with the checkpoint beside it", async () => {
+      legacyDatabase();
+      const ring = path.join(root, "elsewhere", "ring.json");
+      expect(await runCli(["migrate", "--db", dbFile(), "--keyring", ring], io())).toBe(0);
+      expect(loadKeyring(ring).boundAt).toEqual(expect.any(Number));
+      expect(fs.existsSync(keyring())).toBe(false);
+      expect(fs.readdirSync(path.dirname(ring)).filter((name) => name.startsWith("pre-secrets-"))).toEqual([]);
+    });
+
+    it("refuses plaintext found after encryption unless --reencrypt-plaintext is given", async () => {
+      legacyDatabase();
+      await runCli(["migrate", "--db", dbFile()], io());
+      const db = new Database(dbFile());
+      db.prepare("UPDATE system_settings SET value = 'restored-plain' WHERE key = 'mqtt_backend_password'").run();
+      db.close();
+      expect(await runCli(["migrate", "--db", dbFile()], io())).toBe(1);
+      expect(errors.join()).toMatch(/--reencrypt-plaintext/);
+      expect(everything().includes("restored-plain")).toBe(false);
+      expect(await runCli(["migrate", "--db", dbFile(), "--reencrypt-plaintext"], io())).toBe(0);
+      expect(lines).toContain("encrypted now: 1 setting(s), 0 connector field(s); envelopes verified: 6");
+    });
+
+    it("adopt binds a restored database without a binding, which startup and migrate otherwise refuse", async () => {
+      legacyDatabase();
+      await runCli(["migrate", "--db", dbFile()], io());
+      // A restored backup from before H2: plaintext, no binding.
+      fs.rmSync(dbFile());
+      for (const suffix of ["-wal", "-shm"]) fs.rmSync(`${dbFile()}${suffix}`, { force: true });
+      legacyDatabase();
+      expect(await runCli(["migrate", "--db", dbFile()], io())).toBe(1);
+      expect(errors.join()).toMatch(/records no binding.*aeolus-secrets adopt/s);
+      expect(await runCli(["adopt", "--db", dbFile()], io())).toBe(0);
+      expect(await runCli(["migrate", "--db", dbFile()], io())).toBe(0);
+      expect(lines).toContain("outcome: migrated");
+      expect(await runCli(["adopt", "--db", dbFile()], io())).toBe(1);
+      expect(await runCli(["adopt"], io())).toBe(2);
+      expect(await runCli(["migrate"], io())).toBe(2);
     });
   });
 });

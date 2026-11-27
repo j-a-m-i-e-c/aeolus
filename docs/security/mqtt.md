@@ -66,7 +66,7 @@ Confinement is enforced only at this HTTP endpoint; internal publishers are unaf
 
 Aeolus hashes device passwords into Mosquitto's native sha512-pbkdf2 (`$7$`) format using Node's built-in `crypto.pbkdf2`. No external binary or Docker socket is required. A generated Per-Device password is returned once; its `$7$` hash is stored in SQLite and written to the broker password file.
 
-The Shared Password is intentionally recoverable in the admin dashboard so an operator can provision additional devices. It is stored in Aeolus settings and should be treated as a site secret.
+The Shared Password is intentionally recoverable in the admin dashboard so an operator can provision additional devices. It is stored in Aeolus settings, encrypted under the keyring like the backend's own broker password ([Secrets at rest](../reference/operations.md#secrets-at-rest)), and should be treated as a site secret.
 
 ### Shared-volume wiring
 

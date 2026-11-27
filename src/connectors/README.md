@@ -1,6 +1,6 @@
 # Connector Developer Guide
 
-Build connectors to integrate external device ecosystems into Aeolus. A connector bridges a third-party protocol such as Hue, Kasa, Zigbee or Z-Wave into the Aeolus device model. Connector devices appear in the Device Grid and can be targeted by automations. A bundled connector must be imported and registered in `src/index.ts`; the connector contract itself does not require changes to the registry or manager. For connector-specific controls such as colour pickers or energy statistics, you can optionally add a frontend pane component.
+Build connectors to integrate external device ecosystems into Aeolus. A connector bridges a third-party protocol such as Hue, Kasa, Zigbee or Z-Wave into the Aeolus device model. Connector devices appear in the Device Grid and can be targeted by automations. A bundled connector must be added to `BUNDLED_CONNECTOR_MODULES` in `src/connectors/bundled.ts` (registered by `src/index.ts`); the connector contract itself does not require changes to the registry or manager. For connector-specific controls such as colour pickers or energy statistics, you can optionally add a frontend pane component.
 
 ## Quick Start
 
@@ -10,7 +10,7 @@ cp -r src/connectors/_template src/connectors/my-connector
 
 # 2. Edit the metadata and config schema in index.ts
 # 3. Implement the Connector interface in connector.ts
-# 4. Import the module and call connectorRegistry.register(...) in src/index.ts
+# 4. Add the module to BUNDLED_CONNECTOR_MODULES in src/connectors/bundled.ts
 # 5. Restart Aeolus
 ```
 
@@ -99,7 +99,7 @@ export const configSchema: ConnectorConfigSchema = [
 |-------|------|-------------|
 | `id` | `string` | Config key — becomes a key in the `config` object passed to `createConnector()`. |
 | `label` | `string` | Form label shown to the user. |
-| `type` | `"text" \| "number" \| "password" \| "boolean" \| "select"` | Input type. `"password"` fields are redacted in API responses. |
+| `type` | `"text" \| "number" \| "password" \| "boolean" \| "select"` | Input type. `"password"` fields are redacted in API responses and encrypted at rest; declare every secret as one. |
 | `required` | `boolean` | If `true`, the REST API rejects enable requests missing this field (400). |
 | `default` | `string \| number \| boolean` | Applied when the user doesn't provide a value. |
 | `placeholder` | `string` | Placeholder text inside the input. |
@@ -457,7 +457,7 @@ Key points:
 Before shipping your connector:
 
 **Backend (required):**
-- [ ] The connector module is imported and registered in `src/index.ts`
+- [ ] The connector module is in `BUNDLED_CONNECTOR_MODULES` (`src/connectors/bundled.ts`)
 - [ ] `index.ts` exports `metadata`, `configSchema`, and `createConnector`
 - [ ] `index.ts` exports `snippets` array with logic snippets (device actions, conditions) and UI snippets (component controls, status displays)
 - [ ] If needed, `index.ts` exports `actionHandlers` only for advanced connector-specific `CommandService` action types, with an explicit `physical` classification

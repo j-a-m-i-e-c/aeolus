@@ -1,8 +1,14 @@
 // src/connectors/connector-store.ts — SQLite persistence layer for connector records
+//
+// Secret fields (the schema's `password` fields) are encrypted on every save and
+// decrypted on every load (H2b, src/secrets/secret-store.ts). Records in memory hold
+// plaintext; the database never does. A plaintext value found in a secret field, or
+// an envelope that does not decrypt, stops the load: there is no plaintext fallback.
 
 import type { Database as DatabaseType } from "better-sqlite3";
 import type { ConnectorRecord } from "./connector.interface.js";
 import { safeJsonParse } from "../core/safe-json.js";
+import { openConnectorConfig, sealConnectorConfig, type SecretFieldLookup } from "../secrets/secret-store.js";
 
 interface ConnectorRow {
   id: string;
@@ -20,7 +26,11 @@ interface ConnectorRow {
  * Writes go to disk automatically via WAL — no manual persist needed.
  */
 export class ConnectorStore {
-  constructor(private readonly db: DatabaseType) {}
+  constructor(
+    private readonly db: DatabaseType,
+    /** Which config fields of a connector type are secrets. */
+    private readonly secretFields: SecretFieldLookup,
+  ) {}
 
   /** Save or update a connector record. */
   save(record: ConnectorRecord): void {
@@ -31,7 +41,7 @@ export class ConnectorStore {
       record.id,
       record.connectorType,
       record.enabled ? 1 : 0,
-      JSON.stringify(record.config),
+      JSON.stringify(sealConnectorConfig(record.id, record.connectorType, record.config, this.secretFields)),
       record.createdAt,
       record.updatedAt,
     );
@@ -79,7 +89,7 @@ export class ConnectorStore {
         id: row.id,
         connectorType: row.connector_type,
         enabled: row.enabled === 1,
-        config,
+        config: openConnectorConfig(row.id, row.connector_type, config, this.secretFields),
         createdAt: row.created_at,
         updatedAt: row.updated_at,
       });

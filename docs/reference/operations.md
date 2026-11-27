@@ -28,7 +28,7 @@ The backend uses host networking in Docker so it can reach LAN products and perf
 | `TRUSTED_PROXY_ADDRESSES` | `loopback` | Addresses a trusted hop must come from (addresses, CIDR ranges, `loopback`, `linklocal`, `uniquelocal`). A peer outside the list cannot set `X-Forwarded-For`/`-Proto`, whatever the hop count. Invalid values stop startup |
 | `BIND_ADDRESS` | unset | Interface the backend listens on; `127.0.0.1` behind a same-host proxy |
 | `AEOLUS_SECRETS_DIR` | `secrets` beside the database directory (`/app/secrets` in containers) | Where the keyring lives. Must not be inside the database directory; startup refuses that |
-| `AEOLUS_KEYRING_FILE` | `<AEOLUS_SECRETS_DIR>/keyring.json` | The keyring file, for example a Docker secret |
+| `AEOLUS_KEYRING_FILE` | `<AEOLUS_SECRETS_DIR>/keyring.json` | The keyring file. It must be writable by the backend; see [Secrets at rest](#secrets-at-rest) |
 | `EXPOSED_API_REQUIRE_HTTPS` | `false` | Serve published Project APIs only when Express establishes HTTPS: direct TLS, or `X-Forwarded-Proto` from a hop trusted by `TRUST_PROXY_HOPS` |
 | `EXPOSED_API_REQUESTS_PER_MINUTE` | `60` | Project API requests per key and per client per minute (1–600). In memory: resets on restart |
 | `EXPOSED_API_CONCURRENT_PER_CLIENT` | `2` | Project API requests one client may have running at once (1–8) |
@@ -201,6 +201,8 @@ from an operator machine is:
 
 Reset remains a presentation-quality mechanism, not a security boundary.
 
+The golden database is bound to the demo's keyring (`AEOLUS_DEMO_SECRETS_DIR`), which a reset keeps. A golden created before the upgrade that encrypts stored secrets has no binding, and the backend refuses to start on it once the keyring is bound ([Secrets at rest](#secrets-at-rest)). After deploying that upgrade, recreate the golden with `seed-and-create-golden.sh` before the next reset.
+
 ### GitHub release workflow
 
 `.github/workflows/deploy-demo.yml` no longer SSHes to the VM. A manually
@@ -311,10 +313,55 @@ Before changing a production installation:
 4. check health, logs and connector status;
 5. verify the important physical paths.
 
-The migration runner creates its own pre-migration database checkpoint, but this does not replace an off-host deployment backup.
+The migration runner creates its own pre-migration database checkpoint, but this does not replace an off-host deployment backup. Back up the keyring as well as the database ([Secrets at rest](#secrets-at-rest)).
 
 See [Production deployment](../production-deployment.md).
 
+## Secrets at rest
+
+The backend encrypts the credentials it stores (hardening H2): every connector `password` field (the Hue and Aeolus Remote API keys), the database JWT secret (used when `JWT_SECRET` is unset) and the backend and shared MQTT passwords. User passwords, refresh tokens, Project API keys and MQTT device passwords are stored only as hashes and are unchanged. The cryptography is described in [Tokens and API keys](../security/tokens-and-api.md#keyring).
+
+**The keyring.** The root keys live in a keyring file in `AEOLUS_SECRETS_DIR`, on its own volume (`aeolus_secrets` in Compose), never in the database volume. The backend must be able to write it: it records its first binding there, and key rotation updates it. On the first start of a database that has no keyring binding and when no keyring exists, a keyring is created and the database is bound to it. From then on the database **will not start without that keyring**, and a replacement is never generated. Back it up with `aeolus-secrets backup` (passphrase-protected) and keep the backup off the host: see [Production deployment](../production-deployment.md#the-keyring-back-it-up-separately).
+
+**The first start after upgrading** encrypts the existing secrets before any service reads them, keeping their values, so dashboard sessions, MQTT devices and connectors carry on unchanged:
+
+1. A checkpoint copy of the database is written to `AEOLUS_SECRETS_DIR/pre-secrets-<time>.db` (private, outside the database directory). It holds the old plaintext.
+2. Every secret is encrypted into a staging table and decrypted again to check it; plaintext is untouched.
+3. One transaction replaces every value with its encrypted form and marks the database encrypted. A crash leaves either all plaintext (the next start repeats the migration) or all encrypted.
+4. Every value is compared with the checkpoint, the checkpoint is deleted, and the database is compacted (`VACUUM`, WAL truncation).
+
+The log reports what was encrypted, never a value. A connector that held the literal `********` instead of its key (an old bug) has the field cleared and asks for the key again.
+
+**When startup refuses.** Each refusal names the cause and the command; nothing is changed.
+
+| Cause | What to do |
+|---|---|
+| The keyring is missing | Restore it: `aeolus-secrets restore --in <keyring-backup>` |
+| The keyring belongs to another installation, or lacks a key the database needs | Restore this installation's keyring backup (one that holds the named key ids) |
+| The keyring is readable by other users (POSIX) | `chmod 600` the file and `chmod 700` its directory |
+| The keyring has been bound before, but this database has no binding: an older backup from before encryption, restored over a bound installation, or a different database | If it is the database you intend to run: `aeolus-secrets adopt --db <path>`, then start (its secrets are then encrypted) |
+| The database is encrypted, but a secret location holds plaintext: a deliberate restore or edit, or an older release has run against it | If deliberate: `aeolus-secrets migrate --db <path> --reencrypt-plaintext`. Plaintext is never accepted automatically |
+| An encrypted value fails to decrypt (modified, moved to another record, or a different key) | Restore the matching keyring, or a database backup that belongs to it |
+
+Run these commands with the backend stopped. In Compose:
+
+```bash
+docker compose stop backend
+docker compose run --rm --no-deps backend node dist/cli/aeolus-secrets.js verify --db /app/data/aeolus.db
+docker compose start backend
+```
+
+`verify` opens the database read-only and prints counts, locations and key ids, never a value. `migrate --db <path>` runs the same migration as startup, offline.
+
+**Older releases.** A release before H2 cannot read encrypted values. Going back means restoring a database backup made before the upgrade, with the older release; an explicit decrypting downgrade command is planned (hardening H2c).
+
+**Plaintext that encryption does not remove.** Encryption protects the live database and backups made after it. It does not erase earlier copies of the old values:
+
+- database backups, volume snapshots and VM images made before the upgrade;
+- `aeolus.db.pre-migration.*.bak` checkpoints beside the database from earlier schema migrations, and `hue-credentials.json.migrated` from the legacy Hue import (the first start lists any it finds; it does not delete them);
+- the deleted stage-1 checkpoint and the old database and WAL pages: `VACUUM` and WAL truncation rewrite the files, but freed filesystem blocks, the filesystem journal, SSD and SD-card wear-levelled blocks, the page cache and swap can keep the old bytes. Deletion is not secure erasure.
+
+Treat those copies as holding the credentials until they expire. To make them worthless, rotate the credentials: regenerate the shared MQTT password from the dashboard (the backend's own broker password is regenerated at every start), rotate each Aeolus Remote key on its publishing installation, and re-pair Hue. A command that also rotates the JWT secret is planned (hardening H2c).
 ## Project APIs in operation
 
 Published Project APIs ([reference](project-apis.md)) are served by the backend port at
@@ -334,16 +381,16 @@ Published Project APIs ([reference](project-apis.md)) are served by the backend 
   }
   ```
 
-- **The keyring.** The backend keeps a keyring of root encryption keys in `AEOLUS_SECRETS_DIR`, on its own volume (`aeolus_secrets` in Compose), never in the database volume. On the first start of a database with no keyring binding, a keyring is created and the database is bound to it. From then on the database **will not start without that keyring**: a missing, unreadable, world-readable or different keyring stops startup with an explanation, and a replacement is never generated. Back the keyring up separately from the database with `aeolus-secrets backup` (passphrase-protected; in a container: `docker compose run --rm --no-deps backend node dist/cli/aeolus-secrets.js backup --out /app/secrets/keyring-backup.json`, then copy it off the host), and check a database against a keyring with `aeolus-secrets verify --db <path>`. `aeolus-secrets restore --in <file>` recreates a missing keyring; it never replaces one. (Hardening H2a: the keyring exists and is enforced; encrypting stored secrets under it follows in H2b.)
 - **Backups.** Publications, snapshots, clients, key hashes, grants and the audit log are all
   in the SQLite database, so the normal database backup covers them. Keys cannot be
   recovered from a backup, only their hashes. **Restoring an older backup restores the access
   it recorded**: a key or grant revoked after the backup was taken is valid again. After a
   restore, review the Endpoints view and revoke again anything revoked since.
 - **Keys held by a reading installation.** An installation that reads another with the Aeolus
-  Remote connector stores that key in full in its connector configuration, so its database
-  backups contain a usable key. Protect them, and revoke the key on the publishing
-  installation if a backup may have been exposed.
+  Remote connector stores that key in its connector configuration, encrypted under its
+  keyring ([Secrets at rest](#secrets-at-rest)). Its database backups contain a usable key only
+  together with its keyring, or if made before it encrypted its secrets. Revoke the key on the
+  publishing installation if either may have been exposed.
 - **Rotation and revocation.** Rotate a key from the Endpoints view, choosing the new key's
   expiry and how long the old one overlaps; revoke a key the moment it may have leaked.
   Both take effect on the next request, without a restart.

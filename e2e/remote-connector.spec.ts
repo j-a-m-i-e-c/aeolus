@@ -82,6 +82,28 @@ function docker(action: "stop" | "start" | "restart", container: string): void {
   execFileSync("docker", [action, container], { stdio: "pipe", timeout: 60_000 });
 }
 
+/**
+ * B's stored secrets, inspected inside its container (H2b). Prints only counts: how many
+ * secret settings and Remote key fields are envelopes or plaintext, and how many API-key
+ * shaped strings the database files contain. No value leaves the container.
+ */
+function storedSecretsOnB(): { envelopes: number; plaintext: number; keyShapedInFiles: number } {
+  const script = `
+    const Database = require("better-sqlite3"); const fs = require("fs");
+    const db = new Database("/app/data/aeolus.db", { readonly: true });
+    let envelopes = 0, plaintext = 0;
+    const count = (v) => { if (typeof v !== "string" || v === "") return; if (v.startsWith("aeolus-enc:v1:")) envelopes++; else plaintext++; };
+    for (const r of db.prepare("SELECT value FROM system_settings WHERE key IN ('jwt_secret','mqtt_backend_password','mqtt_shared_password')").all()) count(r.value);
+    for (const r of db.prepare("SELECT config FROM connectors WHERE connector_type = 'aeolus-remote'").all()) count(JSON.parse(r.config).apiKey);
+    db.close();
+    let keyShapedInFiles = 0;
+    for (const f of ["/app/data/aeolus.db", "/app/data/aeolus.db-wal"]) {
+      if (fs.existsSync(f)) keyShapedInFiles += (fs.readFileSync(f).toString("latin1").match(/aeo_[0-9a-f]{16}_[A-Za-z0-9_-]{43}/g) || []).length;
+    }
+    process.stdout.write(JSON.stringify({ envelopes, plaintext, keyShapedInFiles }));`;
+  return JSON.parse(execFileSync("docker", ["exec", "-w", "/app", BACKEND_CONTAINER, "node", "-e", script], { encoding: "utf8", timeout: 60_000 })) as { envelopes: number; plaintext: number; keyShapedInFiles: number };
+}
+
 function dockerAvailable(): boolean {
   try {
     execFileSync("docker", ["inspect", PEER_CONTAINER], { stdio: "pipe", timeout: 15_000 });
@@ -263,6 +285,11 @@ test.describe("Aeolus-to-Aeolus remote connector", () => {
 
     docker("restart", BACKEND_CONTAINER);
     await waitHealthy(API_URL);
+    // At rest on B, the key and the other secrets are envelopes; no key appears in the database files.
+    const atRest = storedSecretsOnB();
+    expect(atRest.plaintext, "no plaintext secret in B's database").toBe(0);
+    expect(atRest.envelopes, "B's JWT secret, MQTT password and Remote key are encrypted").toBeGreaterThanOrEqual(2);
+    expect(atRest.keyShapedInFiles, "no API key in B's database files").toBe(0);
     const revokedOld = await back.api.post(`/api/project-apis/clients/${client.id}/keys/${firstIssue.credential.id}/revoke`, { headers: back.auth });
     expect(revokedOld.ok(), `revoking the old key failed: ${revokedOld.status()}`).toBe(true);
     const restartedAt = Date.now();

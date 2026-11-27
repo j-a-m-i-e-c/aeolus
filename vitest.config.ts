@@ -10,6 +10,7 @@ export default defineConfig({
       "__integration__/**/*.integration.test.ts",
     ],
     testTimeout: 5000,
+    setupFiles: ["__test-helpers__/secrets-test-setup.ts"],
     coverage: {
       provider: "v8",
       reporter: ["text", "html", "clover"],
