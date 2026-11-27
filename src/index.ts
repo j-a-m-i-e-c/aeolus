@@ -38,6 +38,7 @@ import { createCommandRoutes } from "./api/routes/command.routes.js";
 import { createStateRoutes } from "./api/routes/state.routes.js";
 import { createHealthRoutes } from "./api/routes/health.routes.js";
 import { createProxyTrust, untrustedForwardingNotice } from "./api/proxy-trust.js";
+import { bootstrapSecrets, SecretsUnavailableError } from "./secrets/bootstrap.js";
 import { createMqttRoutes } from "./api/routes/mqtt.routes.js";
 import { createAutomationRoutes, loadUiRules, automationExists } from "./api/routes/automation.routes.js";
 import { createConnectorRoutes } from "./api/routes/connector.routes.js";
@@ -94,6 +95,21 @@ async function main(): Promise<void> {
 
   // 1. Database
   const db = getDatabase();
+
+  // 1b. Keyring (H2a): find it, or create one only for a database that has never had one.
+  // A database bound to a missing or different keyring must not start (fail closed).
+  try {
+    const secrets = bootstrapSecrets(db, config.dbPath);
+    logger.info(
+      { keyring: secrets.paths.keyringFile, installationId: secrets.keyring.installationId, keys: secrets.keyring.keys.map((key) => key.id), outcome: secrets.outcome },
+      secrets.outcome === "create-keyring-and-bind"
+        ? "Created a new keyring for this installation. Back it up separately from the database: aeolus-secrets backup"
+        : "Keyring loaded",
+    );
+  } catch (error) {
+    if (error instanceof SecretsUnavailableError) logger.fatal({ error: error.message }, "Refusing to start: the keyring is unavailable");
+    throw error;
+  }
 
   // 2. Device Registry
   const registry = new DeviceRegistry(db, eventBus);

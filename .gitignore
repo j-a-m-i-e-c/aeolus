@@ -46,3 +46,6 @@ docker-compose.override.yml
 *.tfstate.*
 *.tfplan
 demo/infrastructure/terraform/terraform.tfvars
+
+# Local keyring (H2): never commit; back it up separately from the database
+/secrets/

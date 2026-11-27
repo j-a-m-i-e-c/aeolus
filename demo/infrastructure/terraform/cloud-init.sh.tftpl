@@ -18,11 +18,12 @@ systemctl enable --now docker
 if id "${demo_user}" >/dev/null 2>&1; then
   usermod -aG docker "${demo_user}"
 fi
-mkdir -p "${demo_root}/app" "${demo_root}/data" "${demo_root}/golden"
+mkdir -p "${demo_root}/app" "${demo_root}/data" "${demo_root}/golden" "${demo_root}/secrets"
 if id "${demo_user}" >/dev/null 2>&1; then
   chown -R "${demo_user}:${demo_user}" "${demo_root}"
 fi
 chmod 0750 "${demo_root}" "${demo_root}/data" "${demo_root}/golden"
+chmod 0700 "${demo_root}/secrets"
 timedatectl set-timezone Australia/Sydney || true
 printf 'bootstrap_complete=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "${demo_root}/.bootstrap-complete"
 chmod 0644 "${demo_root}/.bootstrap-complete"

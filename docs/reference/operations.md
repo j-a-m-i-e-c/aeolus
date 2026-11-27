@@ -27,6 +27,8 @@ The backend uses host networking in Docker so it can reach LAN products and perf
 | `TRUST_PROXY_HOPS` | `0` | Trusted reverse-proxy hops; `1` behind exactly one local HTTPS proxy |
 | `TRUSTED_PROXY_ADDRESSES` | `loopback` | Addresses a trusted hop must come from (addresses, CIDR ranges, `loopback`, `linklocal`, `uniquelocal`). A peer outside the list cannot set `X-Forwarded-For`/`-Proto`, whatever the hop count. Invalid values stop startup |
 | `BIND_ADDRESS` | unset | Interface the backend listens on; `127.0.0.1` behind a same-host proxy |
+| `AEOLUS_SECRETS_DIR` | `secrets` beside the database directory (`/app/secrets` in containers) | Where the keyring lives. Must not be inside the database directory; startup refuses that |
+| `AEOLUS_KEYRING_FILE` | `<AEOLUS_SECRETS_DIR>/keyring.json` | The keyring file, for example a Docker secret |
 | `EXPOSED_API_REQUIRE_HTTPS` | `false` | Serve published Project APIs only when Express establishes HTTPS: direct TLS, or `X-Forwarded-Proto` from a hop trusted by `TRUST_PROXY_HOPS` |
 | `EXPOSED_API_REQUESTS_PER_MINUTE` | `60` | Project API requests per key and per client per minute (1–600). In memory: resets on restart |
 | `EXPOSED_API_CONCURRENT_PER_CLIENT` | `2` | Project API requests one client may have running at once (1–8) |
@@ -332,6 +334,7 @@ Published Project APIs ([reference](project-apis.md)) are served by the backend 
   }
   ```
 
+- **The keyring.** The backend keeps a keyring of root encryption keys in `AEOLUS_SECRETS_DIR`, on its own volume (`aeolus_secrets` in Compose), never in the database volume. On the first start of a database with no keyring binding, a keyring is created and the database is bound to it. From then on the database **will not start without that keyring**: a missing, unreadable, world-readable or different keyring stops startup with an explanation, and a replacement is never generated. Back the keyring up separately from the database with `aeolus-secrets backup` (passphrase-protected; in a container: `docker compose run --rm --no-deps backend node dist/cli/aeolus-secrets.js backup --out /app/secrets/keyring-backup.json`, then copy it off the host), and check a database against a keyring with `aeolus-secrets verify --db <path>`. `aeolus-secrets restore --in <file>` recreates a missing keyring; it never replaces one. (Hardening H2a: the keyring exists and is enforced; encrypting stored secrets under it follows in H2b.)
 - **Backups.** Publications, snapshots, clients, key hashes, grants and the audit log are all
   in the SQLite database, so the normal database backup covers them. Keys cannot be
   recovered from a backup, only their hashes. **Restoring an older backup restores the access

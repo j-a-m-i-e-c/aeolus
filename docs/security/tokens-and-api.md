@@ -108,6 +108,12 @@ Machine clients of published Project APIs use API keys, not JWTs
   header to the configured origin, follows no redirect, and with plain HTTP only after an
   explicit trusted-LAN opt-in. Use expiring keys, and revoke on A if B's data may be exposed.
 
+## Keyring
+
+Stored secrets are protected by root keys in a keyring file outside the database (hardening H2; see the operations reference). The keyring is created once, exclusively (an existing keyring is never replaced), with mode 0600 in a 0700 directory, and startup refuses a keyring other users can read or a directory others can write (POSIX). The database records which keyring it is bound to by installation id and per-key fingerprint (an HMAC under each key, never the key), so a missing or different keyring is refused rather than replaced. Values are sealed with AES-256-GCM under per-purpose HKDF-SHA256 subkeys, a random nonce each, with the storage location (`connector:<instance>:<field>`, `setting:<key>`) as authenticated data, so a ciphertext copied to another record does not decrypt. Keyring backups are sealed under a passphrase with scrypt (N = 2^17, r = 8, p = 1, random 16-byte salt) and AES-256-GCM over an authenticated header.
+
+The keyring protects against theft of the database or its backups, not against someone with the host, both volumes, or the running process.
+
 ## Credentials in URLs
 
 Credentials go in the `Authorization` header, or, for the refresh token, its httpOnly cookie. They never go in a URL. A URL ends up in browser history, proxy and server logs, and `Referer` headers whether the request succeeds or not.

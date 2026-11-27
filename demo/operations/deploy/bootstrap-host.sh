@@ -32,11 +32,12 @@ if id "$DEMO_USER" >/dev/null 2>&1; then
   usermod -aG docker "$DEMO_USER"
 fi
 
-mkdir -p "$DEMO_ROOT/app" "$DEMO_ROOT/data" "$DEMO_ROOT/golden"
+mkdir -p "$DEMO_ROOT/app" "$DEMO_ROOT/data" "$DEMO_ROOT/golden" "$DEMO_ROOT/secrets"
 if id "$DEMO_USER" >/dev/null 2>&1; then
   chown -R "$DEMO_USER:$DEMO_USER" "$DEMO_ROOT"
 fi
 chmod 0750 "$DEMO_ROOT" "$DEMO_ROOT/data" "$DEMO_ROOT/golden"
+chmod 0700 "$DEMO_ROOT/secrets"
 
 timedatectl set-timezone Australia/Sydney || true
 printf 'bootstrap_complete=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$DEMO_ROOT/.bootstrap-complete"

@@ -164,6 +164,9 @@ services:
         condition: service_started
     volumes:
       - backend_data:/app/data
+      # The keyring (H2). A separate volume, so backing up backend_data never
+      # includes it; back it up separately with `aeolus-secrets backup`.
+      - aeolus_secrets:/app/secrets
       - mosquitto_config:/mosquitto/config
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3001/api/health"]
@@ -219,6 +222,7 @@ services:
       - backend
 
 volumes:
+  aeolus_secrets:
   mosquitto_config:
   mosquitto_data:
   mosquitto_log:

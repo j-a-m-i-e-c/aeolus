@@ -282,6 +282,17 @@ sudo sqlite3 "$DB_PATH" \
   ".backup '$HOME/backups/aeolus/aeolus-$(date +%Y%m%d-%H%M%S).db'"
 ```
 
+### The keyring: back it up separately
+
+The backend's keyring of encryption keys lives on its own volume (`aeolus_secrets`), not in the database volume, so the database backups above do not include it, by design. A database bound to a keyring will not start without it. Make a passphrase-protected keyring backup once after the first start, and again whenever the keys are rotated, and keep it away from this host and away from the database backups (a password manager, a USB key):
+
+```bash
+docker compose run --rm --no-deps backend node dist/cli/aeolus-secrets.js backup --out /app/secrets/keyring-backup.json
+docker compose cp backend:/app/secrets/keyring-backup.json ./keyring-backup.json   # then move it off the host
+```
+
+The command prompts for the passphrase; it is never passed as an argument. To check that a database backup and a keyring belong together without starting anything: `aeolus-secrets verify --db <backup.db>`. To recreate a lost keyring: `aeolus-secrets restore --in keyring-backup.json`.
+
 ### Automated nightly backup
 
 Create `~/scripts/backup-aeolus.sh`:

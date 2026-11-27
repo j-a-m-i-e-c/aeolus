@@ -45,7 +45,7 @@ COPY src/automations/ui-types.d.ts ./dist/automations/ui-types.d.ts
 # Optional radar collector sidecar uses the same deployed image and runtime deps.
 COPY scripts/radar/ ./scripts/radar/
 
-RUN mkdir -p /app/data && chown -R aeolus:aeolus /app
+RUN mkdir -p /app/data /app/secrets && chown -R aeolus:aeolus /app && chmod 0700 /app/secrets
 
 COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh

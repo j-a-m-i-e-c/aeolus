@@ -30,6 +30,16 @@ if [ "$(id -u)" = "0" ]; then
     chown -R "$APP_USER:$APP_USER" "$DATA_DIR"
   fi
 
+  # The keyring directory (H2): a separate volume from the data directory so a
+  # database backup never contains it. Private to the app user.
+  SECRETS_DIR="${AEOLUS_SECRETS_DIR:-$(dirname "$DATA_DIR")/secrets}"
+  mkdir -p "$SECRETS_DIR"
+  if [ "$(stat -c '%U' "$SECRETS_DIR")" != "$APP_USER" ]; then
+    echo "aeolus-entrypoint: fixing ownership of $SECRETS_DIR -> $APP_USER" >&2
+    chown -R "$APP_USER:$APP_USER" "$SECRETS_DIR"
+  fi
+  chmod 0700 "$SECRETS_DIR"
+
   # Fix the shared Mosquitto runtime-config volume if it exists and is mounted.
   # The backend writes password_file and mosquitto.conf here for provisioning.
   # This must be runtime storage, never the tracked source directory.

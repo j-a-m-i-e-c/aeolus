@@ -101,6 +101,8 @@ services:
       # ACTIVE database directory ONLY. The immutable golden snapshot is never
       # mounted here, so the running app cannot modify it (requirements §18, §13).
       - ${AEOLUS_DEMO_DATA_DIR:-./demo-data}:/app/data
+      # The keyring (H2), outside the data directory the nightly reset replaces.
+      - ${AEOLUS_DEMO_SECRETS_DIR:-./demo-secrets}:/app/secrets
     mem_limit: 768m
     cpus: 1.5
     healthcheck:

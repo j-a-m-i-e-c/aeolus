@@ -193,7 +193,11 @@ fi
 runtime_uid="$(id -u)"
 runtime_gid="$(id -g)"
 
-grep -v -E '^(AEOLUS_APP_IMAGE|AEOLUS_FRONTEND_IMAGE|DEMO_PUBLIC_ORIGIN|DEMO_PUBLIC_WS_URL|CLOUDFLARE_TUNNEL_TOKEN|AEOLUS_DEMO_DATA_DIR|AEOLUS_DEMO_GOLDEN_DB|AEOLUS_RUNTIME_UID|AEOLUS_RUNTIME_GID)=' "$env_file" > "$tmp" || true
+# The keyring directory (H2): private, outside the data directory and the golden.
+mkdir -p "${DEMO_ROOT}/secrets"
+chmod 0700 "${DEMO_ROOT}/secrets"
+
+grep -v -E '^(AEOLUS_APP_IMAGE|AEOLUS_FRONTEND_IMAGE|DEMO_PUBLIC_ORIGIN|DEMO_PUBLIC_WS_URL|CLOUDFLARE_TUNNEL_TOKEN|AEOLUS_DEMO_DATA_DIR|AEOLUS_DEMO_SECRETS_DIR|AEOLUS_DEMO_GOLDEN_DB|AEOLUS_RUNTIME_UID|AEOLUS_RUNTIME_GID)=' "$env_file" > "$tmp" || true
 {
   printf 'AEOLUS_APP_IMAGE=%s\n' "$app_image"
   printf 'AEOLUS_FRONTEND_IMAGE=%s\n' "$frontend_image"
@@ -201,6 +205,7 @@ grep -v -E '^(AEOLUS_APP_IMAGE|AEOLUS_FRONTEND_IMAGE|DEMO_PUBLIC_ORIGIN|DEMO_PUB
   printf 'DEMO_PUBLIC_WS_URL=%s\n' "$ws_url"
   printf 'CLOUDFLARE_TUNNEL_TOKEN=%s\n' "$tunnel_token"
   printf 'AEOLUS_DEMO_DATA_DIR=%s/data\n' "$DEMO_ROOT"
+  printf 'AEOLUS_DEMO_SECRETS_DIR=%s/secrets\n' "$DEMO_ROOT"
   printf 'AEOLUS_DEMO_GOLDEN_DB=%s/golden/aeolus-demo.db\n' "$DEMO_ROOT"
   printf 'AEOLUS_RUNTIME_UID=%s\n' "$runtime_uid"
   printf 'AEOLUS_RUNTIME_GID=%s\n' "$runtime_gid"
